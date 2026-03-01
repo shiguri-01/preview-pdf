@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crossterm::event::KeyCode;
 
-use crate::app::{AppState, PaletteRequest};
+use crate::app::{AppState, PaletteRequest, SearchUiState};
 use crate::backend::PdfBackend;
 use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
@@ -80,6 +80,7 @@ impl SearchState {
             self.generation = search_engine.cancel(pdf.path())?;
             self.query.clear();
             self.clear_results();
+            self.sync_ui_state(app);
             app.status.message = "search query is empty".to_string();
             return Ok(CommandOutcome::Noop);
         }
@@ -96,6 +97,7 @@ impl SearchState {
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
+        self.sync_ui_state(app);
 
         app.status.message = format!("search started ({})", self.matcher.id());
         Ok(CommandOutcome::Applied)
@@ -107,6 +109,23 @@ impl SearchState {
 
     pub fn prev_hit(&mut self, app: &mut AppState) -> CommandOutcome {
         self.move_hit(app, false)
+    }
+
+    pub fn cancel(
+        &mut self,
+        app: &mut AppState,
+        pdf: &dyn PdfBackend,
+        search_engine: &mut SearchEngine,
+    ) -> AppResult<bool> {
+        if self.query.is_empty() {
+            return Ok(false);
+        }
+
+        self.generation = search_engine.cancel(pdf.path())?;
+        self.query.clear();
+        self.clear_results();
+        self.sync_ui_state(app);
+        Ok(true)
     }
 
     pub fn on_input(&mut self, event: AppInputEvent, app: &mut AppState) -> InputHookResult {
@@ -130,6 +149,11 @@ impl SearchState {
     pub fn on_background(&mut self, app: &mut AppState, search_engine: &mut SearchEngine) -> bool {
         let events = search_engine.drain_events();
         if events.is_empty() {
+            return false;
+        }
+        // If search is inactive (e.g. canceled), drain pending worker events without
+        // changing state/message. This avoids "search complete (0 hits)" flash after cancel.
+        if self.query.is_empty() {
             return false;
         }
 
@@ -179,6 +203,9 @@ impl SearchState {
                 }
             }
         }
+        if changed {
+            self.sync_ui_state(app);
+        }
         changed
     }
 
@@ -188,6 +215,18 @@ impl SearchState {
 
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    pub fn status_bar_segment(&self) -> Option<String> {
+        if self.query.is_empty() {
+            return None;
+        }
+
+        if let Some(current_hit) = self.current_hit {
+            return Some(format!("SEARCH {}/{}", current_hit + 1, self.hits_found));
+        }
+
+        Some(format!("SEARCH {} hits", self.hits_found))
     }
 
     fn move_hit(&mut self, app: &mut AppState, forward: bool) -> CommandOutcome {
@@ -203,6 +242,7 @@ impl SearchState {
             } else {
                 "no search hits available".to_string()
             };
+            self.sync_ui_state(app);
             return CommandOutcome::Noop;
         }
 
@@ -226,6 +266,7 @@ impl SearchState {
             self.hits.len(),
             app.current_page + 1
         );
+        self.sync_ui_state(app);
         CommandOutcome::Applied
     }
 
@@ -237,6 +278,17 @@ impl SearchState {
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
+    }
+
+    fn sync_ui_state(&self, app: &mut AppState) {
+        app.search_ui = SearchUiState {
+            active: !self.query.is_empty(),
+            in_progress: self.in_progress,
+            scanned_pages: self.scanned_pages,
+            total_pages: self.total_pages,
+            hits_found: self.hits_found,
+            current_hit: self.current_hit,
+        };
     }
 }
 
@@ -281,13 +333,62 @@ fn remove_whitespace(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::{Path, PathBuf};
+
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use crate::app::AppState;
+    use crate::backend::{PdfBackend, RgbaFrame};
+    use crate::command::{CommandOutcome, SearchMatcherKind};
+    use crate::search::engine::SearchEngine;
 
     use super::SearchState;
     use crate::extension::{AppInputEvent, InputHookResult};
     use crate::palette::PaletteKind;
+
+    struct StubPdf {
+        path: PathBuf,
+        page_count: usize,
+    }
+
+    impl StubPdf {
+        fn new(page_count: usize) -> Self {
+            Self {
+                path: PathBuf::from("stub.pdf"),
+                page_count,
+            }
+        }
+    }
+
+    impl PdfBackend for StubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            9
+        }
+
+        fn page_count(&self) -> usize {
+            self.page_count
+        }
+
+        fn page_dimensions(&self, _page: usize) -> crate::error::AppResult<(f32, f32)> {
+            Ok((612.0, 792.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> crate::error::AppResult<RgbaFrame> {
+            Ok(RgbaFrame {
+                width: 1,
+                height: 1,
+                pixels: vec![0, 0, 0, 0].into(),
+            })
+        }
+
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(String::new())
+        }
+    }
 
     #[test]
     fn slash_key_opens_search_palette() {
@@ -315,5 +416,143 @@ mod tests {
             &mut app,
         );
         assert_eq!(result, InputHookResult::Ignored);
+    }
+
+    #[test]
+    fn submit_search_marks_search_ui_active() {
+        let mut state = SearchState::default();
+        let mut app = AppState::default();
+        let pdf = StubPdf::new(5);
+        let mut engine = SearchEngine::new();
+
+        let outcome = state
+            .submit(
+                &mut app,
+                &pdf,
+                &mut engine,
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit should succeed");
+
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert!(app.search_ui.active);
+        assert!(app.search_ui.in_progress);
+        assert_eq!(app.search_ui.total_pages, 5);
+        assert_eq!(
+            state.status_bar_segment(),
+            Some("SEARCH 0 hits".to_string())
+        );
+    }
+
+    #[test]
+    fn submit_empty_query_clears_search_ui() {
+        let mut state = SearchState::default();
+        let mut app = AppState::default();
+        let pdf = StubPdf::new(2);
+        let mut engine = SearchEngine::new();
+
+        state
+            .submit(
+                &mut app,
+                &pdf,
+                &mut engine,
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit should succeed");
+        assert!(app.search_ui.active);
+
+        let outcome = state
+            .submit(
+                &mut app,
+                &pdf,
+                &mut engine,
+                "   ".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("empty submit should succeed");
+
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert!(!app.search_ui.active);
+        assert!(!app.search_ui.in_progress);
+        assert_eq!(state.status_bar_segment(), None);
+    }
+
+    #[test]
+    fn cancel_clears_active_search_state() {
+        let mut state = SearchState::default();
+        let mut app = AppState::default();
+        let pdf = StubPdf::new(2);
+        let mut engine = SearchEngine::new();
+
+        state
+            .submit(
+                &mut app,
+                &pdf,
+                &mut engine,
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit should succeed");
+        assert!(app.search_ui.active);
+
+        let canceled = state
+            .cancel(&mut app, &pdf, &mut engine)
+            .expect("cancel should succeed");
+        assert!(canceled);
+        assert!(!app.search_ui.active);
+        assert_eq!(state.status_bar_segment(), None);
+    }
+
+    #[test]
+    fn status_bar_segment_only_shows_position_after_hit_selection() {
+        let state = SearchState {
+            query: "needle".to_string(),
+            hits_found: 3,
+            current_hit: None,
+            ..SearchState::default()
+        };
+        assert_eq!(
+            state.status_bar_segment(),
+            Some("SEARCH 3 hits".to_string())
+        );
+
+        let state = SearchState {
+            query: "needle".to_string(),
+            hits_found: 3,
+            current_hit: Some(1),
+            ..SearchState::default()
+        };
+        assert_eq!(state.status_bar_segment(), Some("SEARCH 2/3".to_string()));
+    }
+
+    #[test]
+    fn on_background_ignores_synthetic_events_after_cancel() {
+        let mut state = SearchState::default();
+        let mut app = AppState::default();
+        let pdf = StubPdf::new(2);
+        let mut engine = SearchEngine::new();
+
+        state
+            .submit(
+                &mut app,
+                &pdf,
+                &mut engine,
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit should succeed");
+        app.status.message = "search canceled".to_string();
+        state
+            .cancel(&mut app, &pdf, &mut engine)
+            .expect("cancel should succeed");
+
+        for _ in 0..20 {
+            let changed = state.on_background(&mut app, &mut engine);
+            assert!(!changed);
+            assert_eq!(app.status.message, "search canceled");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 }

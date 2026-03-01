@@ -7,7 +7,7 @@ This document defines extension contracts and runtime behavior in `pvf`.
 - Extensions are internal modules.
 - Extension dispatch is static and typed.
 - Extension state is stored as concrete fields in `ExtensionHost`.
-- Extension hooks are explicit: input, event, background.
+- Extension hooks are explicit: input, event, background, status bar segment.
 
 ## Extension contract
 
@@ -28,6 +28,8 @@ pub trait Extension {
     fn handle_event(state: &mut Self::State, event: &AppEvent, app: &mut AppState);
 
     fn on_background(state: &mut Self::State, app: &mut AppState) -> bool;
+
+    fn status_bar_segment(state: &Self::State, app: &AppState) -> Option<String>;
 }
 ```
 
@@ -63,6 +65,10 @@ Dispatch order is fixed:
   - Host polls extension background hooks.
   - Search results are drained through host-owned `SearchEngine`.
 
+- Status bar flow:
+  - UI asks `ExtensionHost::status_bar_segments()`.
+  - Host aggregates non-empty segments from registered extensions.
+
 ## Built-in extensions
 
 ### Search (`src/search/`)
@@ -79,6 +85,7 @@ Behavior:
 - submits async search jobs
 - moves to next/previous hit
 - consumes background search events (`Snapshot`, `Completed`, `Failed`)
+- contributes compact search progress/hit info to status bar when active
 
 ### History (`src/history/`)
 

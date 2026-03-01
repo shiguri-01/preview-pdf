@@ -22,6 +22,17 @@ pub struct StatusState {
     pub last_action_id: Option<ActionId>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchUiState {
+    pub active: bool,
+    pub in_progress: bool,
+    pub scanned_pages: usize,
+    pub total_pages: usize,
+    pub hits_found: usize,
+    /// 0-based index into current result set.
+    pub current_hit: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheHandle {
     pub name: &'static str,
@@ -42,6 +53,7 @@ pub struct AppState {
     pub debug_status_visible: bool,
     pub mode: Mode,
     pub status: StatusState,
+    pub search_ui: SearchUiState,
     pub caches: CacheRefs,
 }
 
@@ -55,6 +67,7 @@ impl Default for AppState {
             debug_status_visible: false,
             mode: Mode::Normal,
             status: StatusState::default(),
+            search_ui: SearchUiState::default(),
             caches: CacheRefs::default(),
         }
     }

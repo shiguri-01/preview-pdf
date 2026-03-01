@@ -25,4 +25,9 @@ pub trait Extension {
         let _ = (state, app);
         false
     }
+
+    fn status_bar_segment(state: &Self::State, app: &AppState) -> Option<String> {
+        let _ = (state, app);
+        None
+    }
 }

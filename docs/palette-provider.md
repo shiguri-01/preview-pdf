@@ -89,6 +89,8 @@ This document defines the palette provider contract in `pvf`.
   4. Otherwise reopen preserving input.
 - `Tab` may autocomplete from selected candidate.
 - If input includes whitespace (argument phase), candidate list is hidden.
+- Candidate visibility may depend on runtime app state.
+  - `next-search-hit` / `prev-search-hit` are shown only while search is active.
 
 ## Search palette (`PaletteKind::Search`)
 

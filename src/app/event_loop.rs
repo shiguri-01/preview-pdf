@@ -279,6 +279,11 @@ impl App {
 
         if runtime.ui_actor.needs_redraw() {
             let palette_view = self.interaction.palette_view();
+            let status_bar_segments = self
+                .interaction
+                .extensions
+                .host
+                .status_bar_segments(&self.state);
             self.render.render_frame(
                 &mut self.state,
                 &self.config,
@@ -286,6 +291,7 @@ impl App {
                 pdf,
                 RenderFramePlan {
                     palette_view,
+                    status_bar_segments,
                     page_count: runtime.page_count,
                     generation: runtime.render_actor.generation(),
                 },

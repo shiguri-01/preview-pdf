@@ -79,11 +79,16 @@ pub fn dispatch(
         Command::Cancel => {
             if app.mode == Mode::Palette {
                 palette_requests.push_back(PaletteRequest::Close);
+                app.status.last_action_id = Some(ActionId::Cancel);
+                app.status.message = "canceled current mode".to_string();
+            } else if extension_host.cancel_search(app, pdf)? {
+                app.status.last_action_id = Some(ActionId::Cancel);
+                app.status.message = "search canceled".to_string();
             } else {
                 app.mode = Mode::Normal;
+                app.status.last_action_id = Some(ActionId::Cancel);
+                app.status.message = "canceled current mode".to_string();
             }
-            app.status.last_action_id = Some(ActionId::Cancel);
-            app.status.message = "canceled current mode".to_string();
             Ok(CommandOutcome::Applied)
         }
         Command::Quit => {
@@ -162,7 +167,7 @@ mod tests {
 
     use crate::app::AppState;
     use crate::backend::{PdfBackend, RgbaFrame};
-    use crate::command::{ActionId, Command, CommandOutcome};
+    use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
     use crate::extension::{AppEvent, ExtensionHost, NavReason};
 
     use super::dispatch;
@@ -273,5 +278,37 @@ mod tests {
                 outcome: CommandOutcome::Applied
             }
         ));
+    }
+
+    #[test]
+    fn dispatch_cancel_clears_active_search() {
+        let mut app = AppState::default();
+        let mut pdf = StubPdf::new(3);
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        host.submit_search(
+            &mut app,
+            &pdf,
+            "needle".to_string(),
+            SearchMatcherKind::ContainsInsensitive,
+        )
+        .expect("submit-search should succeed");
+        assert!(app.search_ui.active);
+
+        let result = dispatch(
+            &mut app,
+            Command::Cancel,
+            &mut pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(result.emitted_events.len(), 1);
+        assert!(!app.search_ui.active);
+        assert_eq!(app.status.message, "search canceled");
+        assert!(palette_requests.is_empty());
     }
 }

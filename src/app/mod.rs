@@ -18,4 +18,6 @@ mod tests;
 
 pub use core::App;
 pub use runtime::RenderRuntime;
-pub use state::{AppState, CacheHandle, CacheRefs, Mode, PaletteRequest, StatusState};
+pub use state::{
+    AppState, CacheHandle, CacheRefs, Mode, PaletteRequest, SearchUiState, StatusState,
+};

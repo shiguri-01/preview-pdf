@@ -28,6 +28,7 @@ impl PaletteProvider for CommandPaletteProvider {
 
         let candidates = all_command_specs()
             .into_iter()
+            .filter(|spec| can_show_command_spec(spec.id, ctx))
             .map(|spec| PaletteCandidate {
                 id: spec.id.to_string(),
                 label: spec.id.to_string(),
@@ -189,4 +190,85 @@ fn first_token(input: &str) -> &str {
 
 fn find_spec(id: &str) -> Option<crate::command::CommandSpec> {
     all_command_specs().into_iter().find(|spec| spec.id == id)
+}
+
+fn can_show_command_spec(id: &str, ctx: &PaletteContext<'_>) -> bool {
+    if is_search_navigation_command(id) {
+        return ctx.app.search_ui.active;
+    }
+    true
+}
+
+fn is_search_navigation_command(id: &str) -> bool {
+    matches!(id, "next-search-hit" | "prev-search-hit")
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::AppState;
+    use crate::palette::{PaletteContext, PaletteKind, PaletteProvider};
+
+    use super::CommandPaletteProvider;
+
+    #[test]
+    fn list_hides_search_hit_navigation_when_search_is_inactive() {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let ctx = PaletteContext {
+            app: &app,
+            kind: PaletteKind::Command,
+            input: "",
+            seed: None,
+        };
+
+        let list = provider.list(&ctx).expect("list should be built");
+        assert!(
+            !list
+                .iter()
+                .any(|candidate| candidate.id == "next-search-hit")
+        );
+        assert!(
+            !list
+                .iter()
+                .any(|candidate| candidate.id == "prev-search-hit")
+        );
+    }
+
+    #[test]
+    fn list_shows_search_hit_navigation_when_search_is_active() {
+        let provider = CommandPaletteProvider;
+        let mut app = AppState::default();
+        app.search_ui.active = true;
+        let ctx = PaletteContext {
+            app: &app,
+            kind: PaletteKind::Command,
+            input: "",
+            seed: None,
+        };
+
+        let list = provider.list(&ctx).expect("list should be built");
+        assert!(
+            list.iter()
+                .any(|candidate| candidate.id == "next-search-hit")
+        );
+        assert!(
+            list.iter()
+                .any(|candidate| candidate.id == "prev-search-hit")
+        );
+    }
+
+    #[test]
+    fn argument_phase_still_hides_candidates() {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let ctx = PaletteContext {
+            app: &app,
+            kind: PaletteKind::Command,
+            input: "goto-page ",
+            seed: None,
+        };
+
+        let list = provider.list(&ctx).expect("list should be built");
+        assert!(list.is_empty());
+    }
 }

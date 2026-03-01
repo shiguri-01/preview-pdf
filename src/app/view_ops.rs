@@ -16,6 +16,7 @@ use super::terminal_session::TerminalSurface;
 
 pub(super) struct RenderFramePlan {
     pub(super) palette_view: Option<PaletteView>,
+    pub(super) status_bar_segments: Vec<String>,
     pub(super) page_count: usize,
     pub(super) generation: u64,
 }
@@ -84,6 +85,7 @@ impl RenderSubsystem {
     ) -> AppResult<()> {
         let RenderFramePlan {
             palette_view,
+            status_bar_segments,
             page_count,
             generation,
         } = plan;
@@ -117,6 +119,7 @@ impl RenderSubsystem {
                 &self.runtime.perf_stats,
                 presenter_caps.backend_name,
                 presenter_runtime.graphics_protocol,
+                &status_bar_segments,
             );
 
             let viewport = Viewport {

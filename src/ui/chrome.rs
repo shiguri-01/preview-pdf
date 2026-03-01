@@ -17,19 +17,9 @@ pub fn draw_chrome(
     perf: &PerfStats,
     presenter_backend: &str,
     graphics_protocol: Option<&str>,
+    extension_status_segments: &[String],
 ) {
-    let mode = match app.mode {
-        Mode::Normal => "NORMAL",
-        Mode::Palette => "PALETTE",
-    };
-
-    let page_total = page_count.max(1);
-    let page_now = app.current_page.saturating_add(1).min(page_total);
-
-    let status_text = format!(
-        "{} | page {}/{} | zoom {:.2}x | {}",
-        file_name, page_now, page_total, app.zoom, mode
-    );
+    let status_text = build_status_text(app, file_name, page_count, extension_status_segments);
 
     let status = Paragraph::new(status_text.clone())
         .style(Style::default())
@@ -75,4 +65,67 @@ pub fn draw_chrome(
     }
 
     frame.render_widget(status, layout.status);
+}
+
+fn build_status_text(
+    app: &AppState,
+    file_name: &str,
+    page_count: usize,
+    extension_status_segments: &[String],
+) -> String {
+    let mode = match app.mode {
+        Mode::Normal => "NORMAL",
+        Mode::Palette => "PALETTE",
+    };
+
+    let page_total = page_count.max(1);
+    let page_now = app.current_page.saturating_add(1).min(page_total);
+
+    let mut status_text = format!(
+        "{} | page {}/{} | zoom {:.2}x | {}",
+        file_name, page_now, page_total, app.zoom, mode
+    );
+    for segment in extension_status_segments {
+        if segment.is_empty() {
+            continue;
+        }
+        status_text.push_str(" | ");
+        status_text.push_str(segment);
+    }
+    status_text
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::{AppState, Mode};
+
+    use super::build_status_text;
+
+    #[test]
+    fn build_status_text_includes_mode_and_page() {
+        let app = AppState {
+            current_page: 2,
+            zoom: 1.5,
+            mode: Mode::Normal,
+            ..AppState::default()
+        };
+
+        let text = build_status_text(&app, "sample.pdf", 10, &[]);
+        assert_eq!(text, "sample.pdf | page 3/10 | zoom 1.50x | NORMAL");
+    }
+
+    #[test]
+    fn build_status_text_appends_extension_segments() {
+        let app = AppState::default();
+        let text = build_status_text(
+            &app,
+            "sample.pdf",
+            5,
+            &[String::from("SEARCH 12 hits"), String::new()],
+        );
+        assert_eq!(
+            text,
+            "sample.pdf | page 1/5 | zoom 1.00x | NORMAL | SEARCH 12 hits"
+        );
+    }
 }

@@ -30,6 +30,8 @@ Rules:
   - full-text substring search
   - case-sensitive and case-insensitive matcher modes
   - asynchronous scanning with progress updates
+  - compact search status segment in chrome/status bar while active
+  - `Esc` in normal mode cancels active search state
 
 - History:
   - back/forward navigation history

@@ -38,4 +38,8 @@ impl Extension for SearchExtension {
     fn handle_event(state: &mut Self::State, event: &AppEvent, app: &mut AppState) {
         let _ = (state, event, app);
     }
+
+    fn status_bar_segment(state: &Self::State, _app: &AppState) -> Option<String> {
+        state.status_bar_segment()
+    }
 }

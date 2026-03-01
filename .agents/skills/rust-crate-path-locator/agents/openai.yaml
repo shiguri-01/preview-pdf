@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust Crate Path Locator"
+  short_description: "Locate crate source/docs paths safely"
+  default_prompt: "Use $rust-crate-path-locator to find where I should read a Rust crate's local source and docs URL."

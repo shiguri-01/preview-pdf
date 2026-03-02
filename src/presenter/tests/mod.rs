@@ -487,12 +487,12 @@ fn encode_queue_cancels_stale_prefetch_generation() {
 fn l2_cached_mut_does_not_touch_lru_order() {
     let mut cache = TerminalFrameCache::default();
     for page in 0..L2_MAX_ENTRIES {
-        cache.insert(l2_key(page), frame(), 1);
+        let _ = cache.insert(l2_key(page), frame(), 1, false);
     }
 
     let oldest = l2_key(0);
     assert!(cache.cached_mut(&oldest).is_some());
-    cache.insert(l2_key(L2_MAX_ENTRIES), frame(), 1);
+    let _ = cache.insert(l2_key(L2_MAX_ENTRIES), frame(), 1, false);
 
     assert!(cache.entries.peek(&oldest).is_none());
     assert!(cache.entries.peek(&l2_key(1)).is_some());
@@ -502,9 +502,9 @@ fn l2_cached_mut_does_not_touch_lru_order() {
 fn l2_insert_at_capacity_keeps_memory_accounting_consistent() {
     let mut cache = TerminalFrameCache::default();
     for page in 0..L2_MAX_ENTRIES {
-        cache.insert(l2_key(page), frame(), 16);
+        let _ = cache.insert(l2_key(page), frame(), 16, false);
     }
-    cache.insert(l2_key(L2_MAX_ENTRIES), frame(), 20);
+    let _ = cache.insert(l2_key(L2_MAX_ENTRIES), frame(), 20, false);
 
     let expected = (L2_MAX_ENTRIES - 1) * 16 + 20;
     assert_eq!(cache.len(), L2_MAX_ENTRIES);
@@ -516,13 +516,40 @@ fn l2_insert_keeps_pending_frame_buffer_shared() {
     let mut cache = TerminalFrameCache::default();
     let key = l2_key(0);
     let source = frame();
-    cache.insert(key, source.clone(), source.byte_len());
+    let _ = cache.insert(key, source.clone(), source.byte_len(), false);
 
     let stored_pixels = match cache.cached_mut(&key).map(|entry| &entry.state) {
         Some(TerminalFrameState::PendingFrame(frame)) => &frame.pixels,
         _ => panic!("expected pending frame"),
     };
     assert!(Arc::ptr_eq(&source.pixels, stored_pixels));
+}
+
+#[test]
+fn l2_oversize_insert_without_override_preserves_existing_entries() {
+    let mut cache = TerminalFrameCache::new(8, 32);
+    let kept = l2_key(0);
+    let oversize = l2_key(1);
+    let _ = cache.insert(kept, frame(), 16, false);
+
+    let inserted = cache.insert(oversize, frame(), 64, false);
+    assert!(!inserted);
+    assert!(cache.cached_mut(&kept).is_some());
+    assert!(cache.cached_mut(&oversize).is_none());
+}
+
+#[test]
+fn l2_oversize_insert_with_override_keeps_single_entry() {
+    let mut cache = TerminalFrameCache::new(8, 32);
+    let kept = l2_key(0);
+    let oversize = l2_key(1);
+    let _ = cache.insert(kept, frame(), 16, false);
+
+    let inserted = cache.insert(oversize, frame(), 64, true);
+    assert!(inserted);
+    assert!(cache.cached_mut(&kept).is_none());
+    assert!(cache.cached_mut(&oversize).is_some());
+    assert_eq!(cache.len(), 1);
 }
 
 #[test]

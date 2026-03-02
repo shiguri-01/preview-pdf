@@ -75,11 +75,21 @@ impl RenderedPageCache {
         self.get(key).cloned()
     }
 
-    pub fn insert(&mut self, key: RenderedPageKey, frame: RgbaFrame) {
+    pub fn insert(
+        &mut self,
+        key: RenderedPageKey,
+        frame: RgbaFrame,
+        allow_single_oversize: bool,
+    ) -> bool {
         let frame_bytes = frame.byte_len();
         if frame_bytes > self.memory_budget_bytes {
+            if !allow_single_oversize {
+                return false;
+            }
             self.clear();
-            return;
+            self.memory_bytes = frame_bytes;
+            self.entries.put(key, frame);
+            return true;
         }
 
         if let Some(prev) = self.entries.pop(&key) {
@@ -102,6 +112,7 @@ impl RenderedPageCache {
             self.counters.evictions += 1;
         }
         self.evict_while_needed();
+        true
     }
 
     pub fn remove_doc(&mut self, doc_id: u64) {
@@ -167,6 +178,9 @@ impl RenderedPageCache {
     fn evict_while_needed(&mut self) {
         while self.entries.len() > self.max_entries || self.memory_bytes > self.memory_budget_bytes
         {
+            if self.entries.len() == 1 {
+                break;
+            }
             let Some((_key, frame)) = self.entries.pop_lru() else {
                 break;
             };
@@ -195,7 +209,7 @@ mod tests {
     fn cache_tracks_hit_rate() {
         let mut cache = RenderedPageCache::new(4, 1024 * 1024);
         let key = RenderedPageKey::new(10, 1, 1.0);
-        cache.insert(key, frame(10, 10));
+        let _ = cache.insert(key, frame(10, 10), false);
 
         assert!(cache.get(&key).is_some());
         assert!(cache.get(&RenderedPageKey::new(10, 2, 1.0)).is_none());
@@ -209,8 +223,8 @@ mod tests {
     #[test]
     fn cache_evicts_when_over_budget() {
         let mut cache = RenderedPageCache::new(2, 10_000);
-        cache.insert(RenderedPageKey::new(1, 1, 1.0), frame(40, 40));
-        cache.insert(RenderedPageKey::new(1, 2, 1.0), frame(40, 40));
+        let _ = cache.insert(RenderedPageKey::new(1, 1, 1.0), frame(40, 40), false);
+        let _ = cache.insert(RenderedPageKey::new(1, 2, 1.0), frame(40, 40), false);
 
         assert!(cache.len() < 2);
         assert!(cache.memory_bytes() <= 10_000);
@@ -220,9 +234,9 @@ mod tests {
     fn cache_reinsert_updates_memory_without_double_counting() {
         let mut cache = RenderedPageCache::new(4, 1024 * 1024);
         let key = RenderedPageKey::new(1, 0, 1.0);
-        cache.insert(key, frame(8, 8));
+        let _ = cache.insert(key, frame(8, 8), false);
         let first_bytes = cache.memory_bytes();
-        cache.insert(key, frame(10, 10));
+        let _ = cache.insert(key, frame(10, 10), false);
 
         assert_eq!(cache.len(), 1);
         assert!(cache.memory_bytes() > first_bytes);
@@ -235,9 +249,9 @@ mod tests {
         let a = RenderedPageKey::new(10, 0, 1.0);
         let b = RenderedPageKey::new(10, 1, 1.0);
         let c = RenderedPageKey::new(11, 0, 1.0);
-        cache.insert(a, frame(6, 6));
-        cache.insert(b, frame(6, 6));
-        cache.insert(c, frame(6, 6));
+        let _ = cache.insert(a, frame(6, 6), false);
+        let _ = cache.insert(b, frame(6, 6), false);
+        let _ = cache.insert(c, frame(6, 6), false);
         let before = cache.memory_bytes();
 
         cache.remove_doc(10);
@@ -252,9 +266,9 @@ mod tests {
     #[test]
     fn insert_at_capacity_keeps_memory_accounting_consistent() {
         let mut cache = RenderedPageCache::new(2, 1024 * 1024);
-        cache.insert(RenderedPageKey::new(1, 0, 1.0), frame(4, 4));
-        cache.insert(RenderedPageKey::new(1, 1, 1.0), frame(5, 5));
-        cache.insert(RenderedPageKey::new(1, 2, 1.0), frame(6, 6));
+        let _ = cache.insert(RenderedPageKey::new(1, 0, 1.0), frame(4, 4), false);
+        let _ = cache.insert(RenderedPageKey::new(1, 1, 1.0), frame(5, 5), false);
+        let _ = cache.insert(RenderedPageKey::new(1, 2, 1.0), frame(6, 6), false);
 
         let expected = frame(5, 5).byte_len() + frame(6, 6).byte_len();
         assert_eq!(cache.len(), 2);
@@ -266,12 +280,40 @@ mod tests {
         let mut cache = RenderedPageCache::new(2, 1024 * 1024);
         let key = RenderedPageKey::new(1, 0, 1.0);
         let stored = frame(4, 4);
-        cache.insert(key, stored.clone());
+        let _ = cache.insert(key, stored.clone(), false);
 
         let cloned = cache
             .get_cloned(&key)
             .expect("cached frame should be available");
 
         assert!(std::sync::Arc::ptr_eq(&stored.pixels, &cloned.pixels));
+    }
+
+    #[test]
+    fn oversize_insert_without_override_does_not_clear_existing_entries() {
+        let mut cache = RenderedPageCache::new(4, 100);
+        let kept = RenderedPageKey::new(1, 0, 1.0);
+        let oversize = RenderedPageKey::new(1, 1, 1.0);
+        let _ = cache.insert(kept, frame(4, 4), false);
+
+        let inserted = cache.insert(oversize, frame(8, 8), false);
+        assert!(!inserted);
+        assert!(cache.contains(&kept));
+        assert!(!cache.contains(&oversize));
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn oversize_insert_with_override_keeps_single_entry() {
+        let mut cache = RenderedPageCache::new(4, 100);
+        let kept = RenderedPageKey::new(1, 0, 1.0);
+        let oversize = RenderedPageKey::new(1, 1, 1.0);
+        let _ = cache.insert(kept, frame(4, 4), false);
+
+        let inserted = cache.insert(oversize, frame(8, 8), true);
+        assert!(inserted);
+        assert!(!cache.contains(&kept));
+        assert!(cache.contains(&oversize));
+        assert_eq!(cache.len(), 1);
     }
 }

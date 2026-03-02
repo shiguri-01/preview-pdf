@@ -16,8 +16,8 @@ use crate::render::cache::RenderedPageKey;
 use crate::render::prefetch::PrefetchClass;
 
 use super::encode::{
-    ENCODE_RESIZE_FILTER, EncodeWorkerRequest, EncodeWorkerResult, EncodeWorkerRuntime,
-    send_encode_request, spawn_encode_worker,
+    ENCODE_RESIZE_FILTER, EncodeWorkerEvent, EncodeWorkerRequest, EncodeWorkerResult,
+    EncodeWorkerRuntime, send_encode_request, spawn_encode_worker,
 };
 use super::image_ops::fit_downscale_dimensions;
 use super::l2_cache::{
@@ -106,7 +106,8 @@ impl RatatuiImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
-    ) -> AppResult<TerminalFrameKey> {
+        allow_single_oversize: bool,
+    ) -> AppResult<Option<TerminalFrameKey>> {
         let key = TerminalFrameKey {
             rendered_page: cache_key,
             viewport,
@@ -114,15 +115,24 @@ impl RatatuiImagePresenter {
         };
 
         if self.state.l2_cache.lookup_mut(&key).is_none() {
-            self.state
-                .l2_cache
-                .insert(key, frame.clone(), frame.byte_len());
+            let inserted = self.state.l2_cache.insert(
+                key,
+                frame.clone(),
+                frame.byte_len(),
+                allow_single_oversize,
+            );
+            if !inserted {
+                self.state
+                    .perf_stats
+                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                return Ok(None);
+            }
         }
 
         self.state
             .perf_stats
             .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-        Ok(key)
+        Ok(Some(key))
     }
 
     fn drain_encode_results(&mut self) -> bool {
@@ -131,26 +141,39 @@ impl RatatuiImagePresenter {
 
         loop {
             match self.encode.result_rx.try_recv() {
-                Ok(done) => {
-                    let Some(entry) = self.state.l2_cache.cached_mut(&done.key) else {
-                        continue;
-                    };
+                Ok(done) => match done.event {
+                    EncodeWorkerEvent::Completed {
+                        key,
+                        protocol,
+                        elapsed,
+                        succeeded,
+                    } => {
+                        let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
+                            continue;
+                        };
 
-                    if done.succeeded {
-                        if let Some(protocol) = done.protocol {
-                            entry.state = TerminalFrameState::Ready(Box::new(protocol));
+                        if succeeded {
+                            if let Some(protocol) = protocol {
+                                entry.state = TerminalFrameState::Ready(protocol);
+                            } else {
+                                entry.state = TerminalFrameState::Failed;
+                            }
+                            self.state.perf_stats.record_convert(elapsed);
                         } else {
                             entry.state = TerminalFrameState::Failed;
                         }
-                        self.state.perf_stats.record_convert(done.elapsed);
-                    } else {
-                        entry.state = TerminalFrameState::Failed;
-                    }
 
-                    if Some(done.key) == current_key {
-                        changed = true;
+                        if Some(key) == current_key {
+                            changed = true;
+                        }
                     }
-                }
+                    EncodeWorkerEvent::CanceledStale { key } => {
+                        let removed = self.state.l2_cache.remove(&key);
+                        if removed && Some(key) == current_key {
+                            changed = true;
+                        }
+                    }
+                },
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => break,
             }
@@ -230,7 +253,10 @@ impl ImagePresenter for RatatuiImagePresenter {
         generation: u64,
     ) -> AppResult<()> {
         self.drain_encode_results();
-        let key = self.ensure_frame_entry(cache_key, frame, viewport, pan)?;
+        let Some(key) = self.ensure_frame_entry(cache_key, frame, viewport, pan, true)? else {
+            self.state.current_key = None;
+            return Ok(());
+        };
         self.state.current_key = Some(key);
         self.state.current_generation = generation;
         Ok(())
@@ -246,7 +272,9 @@ impl ImagePresenter for RatatuiImagePresenter {
         generation: u64,
     ) -> AppResult<()> {
         self.drain_encode_results();
-        let key = self.ensure_frame_entry(cache_key, frame, viewport, pan)?;
+        let Some(key) = self.ensure_frame_entry(cache_key, frame, viewport, pan, false)? else {
+            return Ok(());
+        };
 
         let viewport_area = Rect::new(
             viewport.x,

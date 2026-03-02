@@ -216,6 +216,7 @@ fn prefetch_encode_from_cache_invokes_presenter() {
             height: 2,
             pixels: vec![255; 16].into(),
         },
+        false,
     );
     let viewport = Viewport {
         x: 0,

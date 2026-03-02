@@ -194,9 +194,10 @@ impl RenderRuntime {
         key: RenderedPageKey,
         frame: RgbaFrame,
         elapsed: Duration,
+        allow_single_oversize: bool,
     ) {
         self.perf_stats.record_render(elapsed);
-        self.l1_cache.insert(key, frame);
+        let _ = self.l1_cache.insert(key, frame, allow_single_oversize);
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
     }
 
@@ -232,7 +233,10 @@ impl RenderRuntime {
         let render_start = Instant::now();
         let frame = doc.render_page(task.page, task.scale)?;
         self.perf_stats.record_render(render_start.elapsed());
-        self.l1_cache.insert(key, frame.clone());
+        let allow_single_oversize = task.priority == RenderPriority::CriticalCurrent;
+        let _ = self
+            .l1_cache
+            .insert(key, frame.clone(), allow_single_oversize);
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
         Ok(frame)
     }

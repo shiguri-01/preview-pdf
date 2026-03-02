@@ -3,6 +3,8 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::palette::PaletteView;
 
@@ -64,18 +66,9 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
         ])
         .split(inner);
 
-    // 1. Input line
-    let input_line = Line::from(vec![
-        Span::raw(" "),
-        Span::styled("> ", Style::default().fg(Color::White)),
-        Span::raw(&view.input),
-    ]);
+    // 1. Input line (software caret to avoid terminal cursor ghosting/flicker)
+    let input_line = build_palette_input_line(&view.input, view.cursor, chunks[0].width as usize);
     frame.render_widget(Paragraph::new(input_line), chunks[0]);
-    let cursor_x = chunks[0]
-        .x
-        .saturating_add(3)
-        .saturating_add((view.cursor as u16).min(chunks[0].width.saturating_sub(3)));
-    frame.set_cursor_position((cursor_x, chunks[0].y));
 
     // 2. Separator
     let sep_style = Style::default().fg(Color::DarkGray);
@@ -157,4 +150,197 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
     }
 
     frame.render_widget(Paragraph::new(lines), list_area);
+}
+
+fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> Line<'static> {
+    let prefix_spans = vec![
+        Span::raw(" ".to_string()),
+        Span::styled("> ".to_string(), Style::default().fg(Color::White)),
+    ];
+    let prefix_width = 3;
+    let max_text_width = width.saturating_sub(prefix_width);
+
+    if max_text_width == 0 {
+        return Line::from(prefix_spans);
+    }
+
+    #[derive(Clone)]
+    struct Glyph {
+        symbol: String,
+        start: usize,
+        end: usize,
+        width: usize,
+    }
+
+    let mut glyphs = Vec::new();
+    let mut total_width = 0usize;
+    for grapheme in input.graphemes(true) {
+        let cell_width = UnicodeWidthStr::width(grapheme);
+        let start = total_width;
+        total_width = total_width.saturating_add(cell_width);
+        glyphs.push(Glyph {
+            symbol: grapheme.to_string(),
+            start,
+            end: total_width,
+            width: cell_width,
+        });
+    }
+    let cursor = cursor.min(total_width);
+
+    let mut start_col = if cursor >= max_text_width {
+        cursor.saturating_sub(max_text_width.saturating_sub(1))
+    } else {
+        0
+    };
+    if let Some(glyph) = glyphs
+        .iter()
+        .find(|glyph| glyph.start < start_col && start_col < glyph.end)
+    {
+        start_col = glyph.start;
+    }
+    let end_col = start_col.saturating_add(max_text_width);
+
+    let caret_glyph = if cursor < total_width {
+        glyphs
+            .iter()
+            .position(|glyph| glyph.start <= cursor && cursor < glyph.end)
+    } else {
+        None
+    };
+
+    let mut spans = prefix_spans;
+    let mut consumed = 0usize;
+    for (idx, glyph) in glyphs.iter().enumerate() {
+        if glyph.end <= start_col {
+            continue;
+        }
+        if glyph.start >= end_col || glyph.end > end_col {
+            break;
+        }
+        let style = if Some(idx) == caret_glyph {
+            Style::default().reversed()
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(glyph.symbol.clone(), style));
+        consumed = consumed.saturating_add(glyph.width);
+    }
+
+    if cursor == total_width {
+        let caret_rel = cursor
+            .saturating_sub(start_col)
+            .min(max_text_width.saturating_sub(1));
+        if consumed < caret_rel {
+            spans.push(Span::raw(" ".repeat(caret_rel - consumed)));
+            consumed = caret_rel;
+        }
+        if consumed < max_text_width {
+            spans.push(Span::styled(" ".to_string(), Style::default().reversed()));
+            consumed = consumed.saturating_add(1);
+        }
+    }
+
+    if consumed < max_text_width {
+        spans.push(Span::raw(" ".repeat(max_text_width - consumed)));
+    }
+    Line::from(spans)
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::style::Modifier;
+
+    use crate::palette::{PaletteItemView, PaletteKind, PaletteView};
+
+    use super::{build_palette_input_line, draw_palette_overlay};
+
+    fn test_view(input: &str, cursor: usize) -> PaletteView {
+        PaletteView {
+            title: "Command".to_string(),
+            kind: PaletteKind::Command,
+            input: input.to_string(),
+            cursor,
+            assistive_text: None,
+            items: vec![PaletteItemView {
+                label: "open".to_string(),
+                detail: None,
+                selected: true,
+            }],
+            selected_idx: 0,
+        }
+    }
+
+    #[test]
+    fn palette_overlay_highlights_caret_on_character() {
+        let line = build_palette_input_line("abc", 1, 12);
+        assert_eq!(line.spans[3].content.as_ref(), "b");
+        assert!(
+            line.spans[3]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn palette_overlay_highlights_trailing_space_at_end_cursor() {
+        let line = build_palette_input_line("abc", 3, 12);
+        assert_eq!(line.spans[5].content.as_ref(), " ");
+        assert!(
+            line.spans[5]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn palette_overlay_handles_multibyte_input_without_panic() {
+        let backend = TestBackend::new(30, 10);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| {
+                draw_palette_overlay(frame, Rect::new(0, 0, 30, 10), &test_view("あい", 1));
+            })
+            .expect("draw should pass");
+    }
+
+    #[test]
+    fn palette_overlay_highlights_next_wide_char_at_boundary_cursor() {
+        let line = build_palette_input_line("あい", 2, 12);
+        assert_eq!(line.spans[3].content.as_ref(), "い");
+        assert!(
+            line.spans[3]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn palette_overlay_keeps_combining_sequence() {
+        let line = build_palette_input_line("e\u{301}", 0, 12);
+        assert_eq!(line.spans[2].content.as_ref(), "e\u{301}");
+        assert!(
+            line.spans[2]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn palette_overlay_keeps_zwj_emoji_sequence() {
+        let line = build_palette_input_line("👩\u{200d}💻", 0, 12);
+        assert_eq!(line.spans[2].content.as_ref(), "👩\u{200d}💻");
+        assert!(
+            line.spans[2]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
 }

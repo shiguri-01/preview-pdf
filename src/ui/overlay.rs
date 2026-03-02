@@ -64,18 +64,9 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
         ])
         .split(inner);
 
-    // 1. Input line
-    let input_line = Line::from(vec![
-        Span::raw(" "),
-        Span::styled("> ", Style::default().fg(Color::White)),
-        Span::raw(&view.input),
-    ]);
+    // 1. Input line (software caret to avoid terminal cursor ghosting/flicker)
+    let input_line = build_palette_input_line(&view.input, view.cursor, chunks[0].width as usize);
     frame.render_widget(Paragraph::new(input_line), chunks[0]);
-    let cursor_x = chunks[0]
-        .x
-        .saturating_add(3)
-        .saturating_add((view.cursor as u16).min(chunks[0].width.saturating_sub(3)));
-    frame.set_cursor_position((cursor_x, chunks[0].y));
 
     // 2. Separator
     let sep_style = Style::default().fg(Color::DarkGray);
@@ -157,4 +148,113 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
     }
 
     frame.render_widget(Paragraph::new(lines), list_area);
+}
+
+fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> Line<'static> {
+    let prefix_spans = vec![
+        Span::raw(" ".to_string()),
+        Span::styled("> ".to_string(), Style::default().fg(Color::White)),
+    ];
+    let prefix_width = 3;
+    let max_text_width = width.saturating_sub(prefix_width);
+
+    let chars: Vec<char> = input.chars().collect();
+    let char_count = chars.len();
+    let cursor = cursor.min(char_count);
+
+    let mut start = 0usize;
+    if max_text_width > 0 {
+        if cursor >= max_text_width {
+            start = cursor.saturating_sub(max_text_width.saturating_sub(1));
+        }
+        if start > char_count {
+            start = char_count;
+        }
+    } else {
+        start = char_count;
+    }
+
+    let text_width = max_text_width.max(1);
+    let end = (start + text_width).min(char_count);
+    let mut visible: Vec<char> = chars[start..end].to_vec();
+    if visible.len() < text_width {
+        visible.extend(std::iter::repeat_n(' ', text_width - visible.len()));
+    }
+
+    let caret_idx = cursor
+        .saturating_sub(start)
+        .min(text_width.saturating_sub(1));
+
+    let mut spans = prefix_spans;
+    for (idx, ch) in visible.into_iter().enumerate() {
+        if idx == caret_idx {
+            spans.push(Span::styled(ch.to_string(), Style::default().reversed()));
+        } else {
+            spans.push(Span::raw(ch.to_string()));
+        }
+    }
+    Line::from(spans)
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::style::Modifier;
+
+    use crate::palette::{PaletteItemView, PaletteKind, PaletteView};
+
+    use super::{build_palette_input_line, draw_palette_overlay};
+
+    fn test_view(input: &str, cursor: usize) -> PaletteView {
+        PaletteView {
+            title: "Command".to_string(),
+            kind: PaletteKind::Command,
+            input: input.to_string(),
+            cursor,
+            assistive_text: None,
+            items: vec![PaletteItemView {
+                label: "open".to_string(),
+                detail: None,
+                selected: true,
+            }],
+            selected_idx: 0,
+        }
+    }
+
+    #[test]
+    fn palette_overlay_highlights_caret_on_character() {
+        let line = build_palette_input_line("abc", 1, 12);
+        assert_eq!(line.spans[3].content.as_ref(), "b");
+        assert!(
+            line.spans[3]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn palette_overlay_highlights_trailing_space_at_end_cursor() {
+        let line = build_palette_input_line("abc", 3, 12);
+        assert_eq!(line.spans[5].content.as_ref(), " ");
+        assert!(
+            line.spans[5]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn palette_overlay_handles_multibyte_input_without_panic() {
+        let backend = TestBackend::new(30, 10);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| {
+                draw_palette_overlay(frame, Rect::new(0, 0, 30, 10), &test_view("あい", 1));
+            })
+            .expect("draw should pass");
+    }
 }

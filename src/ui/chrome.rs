@@ -113,7 +113,9 @@ fn build_status_text(
                 let filename_budget = max_width - with_filename_fixed;
                 if filename_budget > 0 {
                     let filename = elide_middle_by_width(file_name, filename_budget);
-                    return format!("{base}{sep}{filename}{sep}{ext_text}");
+                    if !filename.is_empty() {
+                        return format!("{base}{sep}{filename}{sep}{ext_text}");
+                    }
                 }
             }
             return format!("{base}{sep}{ext_text}");
@@ -124,7 +126,10 @@ fn build_status_text(
     if fixed_with_filename < max_width {
         let filename_budget = max_width - fixed_with_filename;
         let filename = elide_middle_by_width(file_name, filename_budget);
-        return format!("{base}{sep}{filename}");
+        if !filename.is_empty() {
+            return format!("{base}{sep}{filename}");
+        }
+        return base;
     }
 
     truncate_right_by_width(&base, max_width)
@@ -292,5 +297,20 @@ mod tests {
         assert_eq!(display_width(&text9), display_width(&text10));
         assert!(text9.starts_with("p.   9/120 | Zoom 1.00x"));
         assert!(text10.starts_with("p.  10/120 | Zoom 1.00x"));
+    }
+
+    #[test]
+    fn build_status_text_skips_empty_elided_filename_segment() {
+        let app = AppState::default();
+        let expected = "p. 1/7 | Zoom 1.00x | SEARCH 10/100";
+        let target_width = display_width(expected) + display_width(" | ") + 1;
+        let text = build_status_text(
+            &app,
+            "漢字.pdf",
+            7,
+            &[String::from("SEARCH 10/100")],
+            target_width,
+        );
+        assert_eq!(text, expected);
     }
 }

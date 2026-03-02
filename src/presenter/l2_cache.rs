@@ -78,10 +78,43 @@ impl TerminalFrameCache {
         self.entries.peek_mut(key)
     }
 
-    pub(crate) fn insert(&mut self, key: TerminalFrameKey, frame: RgbaFrame, approx_bytes: usize) {
+    pub(crate) fn insert(
+        &mut self,
+        key: TerminalFrameKey,
+        frame: RgbaFrame,
+        approx_bytes: usize,
+        allow_single_oversize: bool,
+    ) -> bool {
         if approx_bytes > self.memory_budget_bytes {
+            if !allow_single_oversize {
+                return false;
+            }
+
             self.clear();
-            return;
+            self.memory_bytes = approx_bytes;
+            self.entries.put(
+                key,
+                TerminalFrameEntry {
+                    state: TerminalFrameState::PendingFrame(frame),
+                    approx_bytes,
+                },
+            );
+            return true;
+        }
+
+        // Preserve single-entry oversize recovery for current page:
+        // while a lone oversize entry is resident, reject unrelated
+        // non-oversize inserts (typically prefetch) that would evict it.
+        if !allow_single_oversize
+            && self.memory_bytes > self.memory_budget_bytes
+            && self.entries.len() == 1
+            && self.entries.peek(&key).is_none()
+            && self
+                .entries
+                .peek_lru()
+                .is_some_and(|(_cached_key, entry)| entry.approx_bytes > self.memory_budget_bytes)
+        {
+            return false;
         }
 
         if let Some(prev) = self.entries.pop(&key) {
@@ -109,6 +142,7 @@ impl TerminalFrameCache {
             self.memory_bytes = self.memory_bytes.saturating_sub(evicted_bytes);
         }
         self.evict_while_needed();
+        true
     }
 
     pub(crate) fn hit_rate(&self) -> f64 {
@@ -147,9 +181,20 @@ impl TerminalFrameCache {
         self.memory_bytes = 0;
     }
 
+    pub(crate) fn remove(&mut self, key: &TerminalFrameKey) -> bool {
+        let Some(entry) = self.entries.pop(key) else {
+            return false;
+        };
+        self.memory_bytes = self.memory_bytes.saturating_sub(entry.approx_bytes);
+        true
+    }
+
     fn evict_while_needed(&mut self) {
         while self.entries.len() > self.max_entries || self.memory_bytes > self.memory_budget_bytes
         {
+            if self.entries.len() == 1 {
+                break;
+            }
             let Some((_key, entry)) = self.entries.pop_lru() else {
                 break;
             };

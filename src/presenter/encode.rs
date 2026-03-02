@@ -38,10 +38,19 @@ pub(crate) struct EncodeWorkerTask {
 }
 
 pub(crate) struct EncodeWorkerResult {
-    pub(crate) key: TerminalFrameKey,
-    pub(crate) protocol: Option<StatefulProtocol>,
-    pub(crate) elapsed: std::time::Duration,
-    pub(crate) succeeded: bool,
+    pub(crate) event: EncodeWorkerEvent,
+}
+
+pub(crate) enum EncodeWorkerEvent {
+    Completed {
+        key: TerminalFrameKey,
+        protocol: Option<Box<StatefulProtocol>>,
+        elapsed: std::time::Duration,
+        succeeded: bool,
+    },
+    CanceledStale {
+        key: TerminalFrameKey,
+    },
 }
 
 pub(crate) struct EncodeWorkerRuntime {
@@ -101,6 +110,7 @@ pub(crate) fn spawn_encode_worker(
     (request_tx, result_rx, worker)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn enqueue_encode_request(
     request: EncodeWorkerRequest,
     queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
@@ -114,7 +124,68 @@ pub(crate) fn enqueue_encode_request(
             class,
             generation,
         } => {
-            let _ = queue.cancel_stale_prefetch(generation);
+            let _ = cancel_stale_prefetch_with_keys(queue, generation);
+            if class == PrefetchClass::CriticalCurrent && queue.contains_key(&key) {
+                let _ = queue.retain(|_, meta| meta.key != key);
+            }
+
+            let task = EncodeWorkerTask {
+                key,
+                picker,
+                frame,
+                area,
+            };
+            let meta = QueueTaskMeta {
+                key,
+                class,
+                generation,
+            };
+            let _ = queue.push(task, meta);
+            true
+        }
+        EncodeWorkerRequest::Shutdown => false,
+    }
+}
+
+fn cancel_stale_prefetch_with_keys(
+    queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
+    generation: u64,
+) -> Vec<TerminalFrameKey> {
+    let mut removed = Vec::new();
+    let _ = queue.retain(|_, meta| {
+        let keep = meta.generation >= generation
+            || matches!(
+                meta.class,
+                PrefetchClass::CriticalCurrent | PrefetchClass::GuardReverse
+            );
+        if !keep {
+            removed.push(meta.key);
+        }
+        keep
+    });
+    removed
+}
+
+fn enqueue_with_notifications(
+    request: EncodeWorkerRequest,
+    queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
+    result_tx: &UnboundedSender<EncodeWorkerResult>,
+) -> bool {
+    match request {
+        EncodeWorkerRequest::Encode {
+            key,
+            picker,
+            frame,
+            area,
+            class,
+            generation,
+        } => {
+            let canceled = cancel_stale_prefetch_with_keys(queue, generation);
+            for canceled_key in canceled {
+                let _ = result_tx.send(EncodeWorkerResult {
+                    event: EncodeWorkerEvent::CanceledStale { key: canceled_key },
+                });
+            }
             if class == PrefetchClass::CriticalCurrent && queue.contains_key(&key) {
                 let _ = queue.retain(|_, meta| meta.key != key);
             }
@@ -155,7 +226,7 @@ fn encode_worker_main(
                 Some(request) => request,
                 None => break,
             };
-            if !enqueue_encode_request(request, &mut queue) {
+            if !enqueue_with_notifications(request, &mut queue, &result_tx) {
                 break;
             }
         }
@@ -163,7 +234,7 @@ fn encode_worker_main(
         loop {
             match request_rx.try_recv() {
                 Ok(request) => {
-                    if !enqueue_encode_request(request, &mut queue) {
+                    if !enqueue_with_notifications(request, &mut queue, &result_tx) {
                         return;
                     }
                 }
@@ -181,10 +252,12 @@ fn encode_worker_main(
             Ok(frame) => frame,
             Err(_) => {
                 let _ = result_tx.send(EncodeWorkerResult {
-                    key: task.key,
-                    protocol: None,
-                    elapsed: started.elapsed(),
-                    succeeded: false,
+                    event: EncodeWorkerEvent::Completed {
+                        key: task.key,
+                        protocol: None,
+                        elapsed: started.elapsed(),
+                        succeeded: false,
+                    },
                 });
                 continue;
             }
@@ -193,10 +266,12 @@ fn encode_worker_main(
             Ok(protocol) => protocol,
             Err(_) => {
                 let _ = result_tx.send(EncodeWorkerResult {
-                    key: task.key,
-                    protocol: None,
-                    elapsed: started.elapsed(),
-                    succeeded: false,
+                    event: EncodeWorkerEvent::Completed {
+                        key: task.key,
+                        protocol: None,
+                        elapsed: started.elapsed(),
+                        succeeded: false,
+                    },
                 });
                 continue;
             }
@@ -208,10 +283,99 @@ fn encode_worker_main(
             .unwrap_or(true);
 
         let _ = result_tx.send(EncodeWorkerResult {
-            key: task.key,
-            protocol: if succeeded { Some(protocol) } else { None },
-            elapsed: started.elapsed(),
-            succeeded,
+            event: EncodeWorkerEvent::Completed {
+                key: task.key,
+                protocol: if succeeded {
+                    Some(Box::new(protocol))
+                } else {
+                    None
+                },
+                elapsed: started.elapsed(),
+                succeeded,
+            },
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+    use ratatui_image::picker::Picker;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    use crate::backend::RgbaFrame;
+    use crate::presenter::l2_cache::TerminalFrameKey;
+    use crate::presenter::{PanOffset, Viewport};
+    use crate::render::cache::RenderedPageKey;
+    use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig};
+
+    use super::{
+        EncodeWorkerEvent, EncodeWorkerRequest, EncodeWorkerTask, enqueue_encode_request,
+        enqueue_with_notifications,
+    };
+
+    fn frame() -> RgbaFrame {
+        RgbaFrame {
+            width: 4,
+            height: 4,
+            pixels: vec![0xaa; 4 * 4 * 4].into(),
+        }
+    }
+
+    fn key(page: usize) -> TerminalFrameKey {
+        TerminalFrameKey {
+            rendered_page: RenderedPageKey::new(1, page, 1.0),
+            viewport: Viewport {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 6,
+            },
+            pan: PanOffset::default(),
+        }
+    }
+
+    #[test]
+    fn enqueue_with_notifications_emits_canceled_stale_events() {
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
+            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let picker = Picker::halfblocks();
+        let stale_key = key(1);
+        let fresh_key = key(2);
+        let area = Rect::new(0, 0, 10, 6);
+
+        assert!(enqueue_encode_request(
+            EncodeWorkerRequest::Encode {
+                key: stale_key,
+                picker: picker.clone(),
+                frame: frame(),
+                area,
+                class: PrefetchClass::DirectionalLead,
+                generation: 1,
+            },
+            &mut queue
+        ));
+
+        let (tx, mut rx) = unbounded_channel();
+        assert!(enqueue_with_notifications(
+            EncodeWorkerRequest::Encode {
+                key: fresh_key,
+                picker,
+                frame: frame(),
+                area,
+                class: PrefetchClass::CriticalCurrent,
+                generation: 2,
+            },
+            &mut queue,
+            &tx
+        ));
+
+        let event = rx
+            .try_recv()
+            .expect("canceled-stale event should be emitted");
+        assert!(matches!(
+            event.event,
+            EncodeWorkerEvent::CanceledStale { key } if key == stale_key
+        ));
     }
 }

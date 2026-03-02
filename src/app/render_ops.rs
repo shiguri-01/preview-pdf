@@ -66,8 +66,12 @@ impl RenderSubsystem {
                         state.status.message = format!("encode prefetch error: {err}");
                     }
                 }
-                self.runtime
-                    .ingest_rendered_frame(completed.key, frame, completed.elapsed);
+                self.runtime.ingest_rendered_frame(
+                    completed.key,
+                    frame,
+                    completed.elapsed,
+                    completed.priority == RenderPriority::CriticalCurrent,
+                );
                 completed.key == current_key
             }
             Err(err) => {

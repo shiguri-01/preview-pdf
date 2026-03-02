@@ -92,6 +92,21 @@ impl RenderedPageCache {
             return true;
         }
 
+        // Keep the single-entry oversize recovery path stable:
+        // reject unrelated non-oversize inserts while a lone oversize
+        // frame is intentionally resident.
+        if !allow_single_oversize
+            && self.memory_bytes > self.memory_budget_bytes
+            && self.entries.len() == 1
+            && self.entries.peek(&key).is_none()
+            && self
+                .entries
+                .peek_lru()
+                .is_some_and(|(_cached_key, cached)| cached.byte_len() > self.memory_budget_bytes)
+        {
+            return false;
+        }
+
         if let Some(prev) = self.entries.pop(&key) {
             self.memory_bytes = self.memory_bytes.saturating_sub(prev.byte_len());
         }
@@ -315,5 +330,22 @@ mod tests {
         assert!(!cache.contains(&kept));
         assert!(cache.contains(&oversize));
         assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn non_oversize_insert_does_not_evict_single_oversize_entry() {
+        let mut cache = RenderedPageCache::new(4, 100);
+        let oversize = RenderedPageKey::new(1, 1, 1.0);
+        let prefetch = RenderedPageKey::new(1, 2, 1.0);
+
+        assert!(cache.insert(oversize, frame(8, 8), true));
+        assert_eq!(cache.len(), 1);
+        assert!(cache.contains(&oversize));
+
+        let inserted_prefetch = cache.insert(prefetch, frame(4, 4), false);
+        assert!(!inserted_prefetch);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.contains(&oversize));
+        assert!(!cache.contains(&prefetch));
     }
 }

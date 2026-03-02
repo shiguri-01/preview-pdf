@@ -553,6 +553,23 @@ fn l2_oversize_insert_with_override_keeps_single_entry() {
 }
 
 #[test]
+fn l2_non_oversize_insert_does_not_evict_single_oversize_entry() {
+    let mut cache = TerminalFrameCache::new(8, 32);
+    let oversize = l2_key(1);
+    let prefetch = l2_key(2);
+
+    assert!(cache.insert(oversize, frame(), 64, true));
+    assert_eq!(cache.len(), 1);
+    assert!(cache.cached_mut(&oversize).is_some());
+
+    let inserted_prefetch = cache.insert(prefetch, frame(), 16, false);
+    assert!(!inserted_prefetch);
+    assert_eq!(cache.len(), 1);
+    assert!(cache.cached_mut(&oversize).is_some());
+    assert!(cache.cached_mut(&prefetch).is_none());
+}
+
+#[test]
 fn fit_downscale_dimensions_returns_none_when_source_fits() {
     let dims = fit_downscale_dimensions(640, 480, 1280, 720);
     assert_eq!(dims, None);

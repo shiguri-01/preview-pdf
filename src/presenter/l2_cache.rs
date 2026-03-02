@@ -102,6 +102,21 @@ impl TerminalFrameCache {
             return true;
         }
 
+        // Preserve single-entry oversize recovery for current page:
+        // while a lone oversize entry is resident, reject unrelated
+        // non-oversize inserts (typically prefetch) that would evict it.
+        if !allow_single_oversize
+            && self.memory_bytes > self.memory_budget_bytes
+            && self.entries.len() == 1
+            && self.entries.peek(&key).is_none()
+            && self
+                .entries
+                .peek_lru()
+                .is_some_and(|(_cached_key, entry)| entry.approx_bytes > self.memory_budget_bytes)
+        {
+            return false;
+        }
+
         if let Some(prev) = self.entries.pop(&key) {
             self.memory_bytes = self.memory_bytes.saturating_sub(prev.approx_bytes);
         }

@@ -3,6 +3,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use unicode_width::UnicodeWidthChar;
 
 use crate::palette::PaletteView;
 
@@ -158,40 +159,93 @@ fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> Line<'s
     let prefix_width = 3;
     let max_text_width = width.saturating_sub(prefix_width);
 
-    let chars: Vec<char> = input.chars().collect();
-    let char_count = chars.len();
-    let cursor = cursor.min(char_count);
+    if max_text_width == 0 {
+        return Line::from(prefix_spans);
+    }
 
-    let mut start = 0usize;
-    if max_text_width > 0 {
-        if cursor >= max_text_width {
-            start = cursor.saturating_sub(max_text_width.saturating_sub(1));
+    #[derive(Clone)]
+    struct Glyph {
+        symbol: String,
+        start: usize,
+        end: usize,
+        width: usize,
+    }
+
+    let mut glyphs = Vec::new();
+    let mut total_width = 0usize;
+    for ch in input.chars() {
+        let Some(cell_width) = UnicodeWidthChar::width(ch) else {
+            continue;
+        };
+        if cell_width == 0 {
+            continue;
         }
-        if start > char_count {
-            start = char_count;
-        }
+        let start = total_width;
+        total_width = total_width.saturating_add(cell_width);
+        glyphs.push(Glyph {
+            symbol: ch.to_string(),
+            start,
+            end: total_width,
+            width: cell_width,
+        });
+    }
+    let cursor = cursor.min(total_width);
+
+    let mut start_col = if cursor >= max_text_width {
+        cursor.saturating_sub(max_text_width.saturating_sub(1))
     } else {
-        start = char_count;
+        0
+    };
+    if let Some(glyph) = glyphs
+        .iter()
+        .find(|glyph| glyph.start < start_col && start_col < glyph.end)
+    {
+        start_col = glyph.start;
     }
+    let end_col = start_col.saturating_add(max_text_width);
 
-    let text_width = max_text_width.max(1);
-    let end = (start + text_width).min(char_count);
-    let mut visible: Vec<char> = chars[start..end].to_vec();
-    if visible.len() < text_width {
-        visible.extend(std::iter::repeat_n(' ', text_width - visible.len()));
-    }
-
-    let caret_idx = cursor
-        .saturating_sub(start)
-        .min(text_width.saturating_sub(1));
+    let caret_glyph = if cursor < total_width {
+        glyphs
+            .iter()
+            .position(|glyph| glyph.start <= cursor && cursor < glyph.end)
+    } else {
+        None
+    };
 
     let mut spans = prefix_spans;
-    for (idx, ch) in visible.into_iter().enumerate() {
-        if idx == caret_idx {
-            spans.push(Span::styled(ch.to_string(), Style::default().reversed()));
-        } else {
-            spans.push(Span::raw(ch.to_string()));
+    let mut consumed = 0usize;
+    for (idx, glyph) in glyphs.iter().enumerate() {
+        if glyph.end <= start_col {
+            continue;
         }
+        if glyph.start >= end_col || glyph.end > end_col {
+            break;
+        }
+        let style = if Some(idx) == caret_glyph {
+            Style::default().reversed()
+        } else {
+            Style::default()
+        };
+        spans.push(Span::styled(glyph.symbol.clone(), style));
+        consumed = consumed.saturating_add(glyph.width);
+    }
+
+    if cursor == total_width {
+        let caret_rel = cursor
+            .saturating_sub(start_col)
+            .min(max_text_width.saturating_sub(1));
+        if consumed < caret_rel {
+            spans.push(Span::raw(" ".repeat(caret_rel - consumed)));
+            consumed = caret_rel;
+        }
+        if consumed < max_text_width {
+            spans.push(Span::styled(" ".to_string(), Style::default().reversed()));
+            consumed = consumed.saturating_add(1);
+        }
+    }
+
+    if consumed < max_text_width {
+        spans.push(Span::raw(" ".repeat(max_text_width - consumed)));
     }
     Line::from(spans)
 }
@@ -256,5 +310,17 @@ mod tests {
                 draw_palette_overlay(frame, Rect::new(0, 0, 30, 10), &test_view("あい", 1));
             })
             .expect("draw should pass");
+    }
+
+    #[test]
+    fn palette_overlay_highlights_next_wide_char_at_boundary_cursor() {
+        let line = build_palette_input_line("あい", 2, 12);
+        assert_eq!(line.spans[3].content.as_ref(), "い");
+        assert!(
+            line.spans[3]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
     }
 }

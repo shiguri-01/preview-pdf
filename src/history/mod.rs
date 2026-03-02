@@ -2,7 +2,9 @@ pub mod palette;
 pub mod state;
 
 use crate::app::AppState;
-use crate::extension::{AppEvent, AppInputEvent, Extension, InputHookResult};
+use crate::event::AppEvent;
+use crate::extension::Extension;
+use crate::input::{AppInputEvent, InputHookResult};
 pub use palette::HistoryPaletteProvider;
 pub use state::HistoryState;
 

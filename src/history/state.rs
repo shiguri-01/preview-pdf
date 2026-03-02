@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::app::{AppState, PaletteRequest};
 use crate::command::{ActionId, CommandOutcome};
 use crate::error::{AppError, AppResult};
-use crate::extension::{AppEvent, NavReason};
+use crate::event::{AppEvent, NavReason};
 use crate::palette::PaletteKind;
 
 const HISTORY_CAPACITY: usize = 64;

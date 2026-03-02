@@ -1,7 +1,6 @@
 use crate::app::AppState;
-
-use super::events::AppEvent;
-use super::input::{AppInputEvent, InputHookResult};
+use crate::event::AppEvent;
+use crate::input::{AppInputEvent, InputHookResult};
 
 pub trait Extension {
     type State: Send;

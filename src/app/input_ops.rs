@@ -3,8 +3,9 @@ use crossterm::event::KeyEvent;
 use crate::backend::PdfBackend;
 use crate::command::{ActionId, Command, CommandDispatchResult, dispatch, drain_background_events};
 use crate::error::AppResult;
-use crate::extension::{AppEvent, AppInputEvent, InputHookResult};
+use crate::event::AppEvent;
 use crate::input::keymap::{KeymapPreset, map_key_to_command_with_preset};
+use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::PaletteKeyResult;
 use crate::palette::{PalettePostAction, PaletteSubmitEffect, PaletteView};
 

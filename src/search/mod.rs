@@ -3,7 +3,9 @@ pub mod palette;
 pub mod state;
 
 use crate::app::AppState;
-use crate::extension::{AppEvent, AppInputEvent, Extension, InputHookResult};
+use crate::event::AppEvent;
+use crate::extension::Extension;
+use crate::input::{AppInputEvent, InputHookResult};
 use engine::SearchEngine;
 pub use palette::SearchPaletteProvider;
 pub use state::SearchState;

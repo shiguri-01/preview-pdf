@@ -7,7 +7,7 @@ use crate::app::{AppState, PaletteRequest, SearchUiState};
 use crate::backend::PdfBackend;
 use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
-use crate::extension::{AppInputEvent, InputHookResult};
+use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::PaletteKind;
 
 use super::engine::{SearchEngine, SearchEvent, SearchMatcher};
@@ -343,7 +343,7 @@ mod tests {
     use crate::search::engine::SearchEngine;
 
     use super::SearchState;
-    use crate::extension::{AppInputEvent, InputHookResult};
+    use crate::input::{AppInputEvent, InputHookResult};
     use crate::palette::PaletteKind;
 
     struct StubPdf {

@@ -3,7 +3,8 @@ use std::collections::VecDeque;
 use crate::app::{AppState, Mode, PaletteRequest};
 use crate::backend::PdfBackend;
 use crate::error::AppResult;
-use crate::extension::{AppEvent, ExtensionHost, NavReason};
+use crate::event::{AppEvent, NavReason};
+use crate::extension::ExtensionHost;
 
 use super::core::{
     first_page, goto_page, last_page, next_page, prev_page, set_debug_status_visible, set_zoom,
@@ -168,7 +169,8 @@ mod tests {
     use crate::app::AppState;
     use crate::backend::{PdfBackend, RgbaFrame};
     use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
-    use crate::extension::{AppEvent, ExtensionHost, NavReason};
+    use crate::event::{AppEvent, NavReason};
+    use crate::extension::ExtensionHost;
 
     use super::dispatch;
 

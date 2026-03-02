@@ -4,12 +4,12 @@ use crate::app::{AppState, PaletteRequest};
 use crate::backend::PdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
+use crate::event::AppEvent;
 use crate::history::{HistoryExtension, HistoryState};
+use crate::input::{AppInputEvent, InputHookResult};
 use crate::search::engine::SearchEngine;
 use crate::search::{SearchExtension, SearchState};
 
-use super::events::AppEvent;
-use super::input::{AppInputEvent, InputHookResult};
 use super::traits::Extension;
 
 pub struct ExtensionHost {

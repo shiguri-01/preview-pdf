@@ -3,7 +3,8 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::palette::PaletteView;
 
@@ -173,17 +174,12 @@ fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> Line<'s
 
     let mut glyphs = Vec::new();
     let mut total_width = 0usize;
-    for ch in input.chars() {
-        let Some(cell_width) = UnicodeWidthChar::width(ch) else {
-            continue;
-        };
-        if cell_width == 0 {
-            continue;
-        }
+    for grapheme in input.graphemes(true) {
+        let cell_width = UnicodeWidthStr::width(grapheme);
         let start = total_width;
         total_width = total_width.saturating_add(cell_width);
         glyphs.push(Glyph {
-            symbol: ch.to_string(),
+            symbol: grapheme.to_string(),
             start,
             end: total_width,
             width: cell_width,
@@ -318,6 +314,30 @@ mod tests {
         assert_eq!(line.spans[3].content.as_ref(), "い");
         assert!(
             line.spans[3]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn palette_overlay_keeps_combining_sequence() {
+        let line = build_palette_input_line("e\u{301}", 0, 12);
+        assert_eq!(line.spans[2].content.as_ref(), "e\u{301}");
+        assert!(
+            line.spans[2]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn palette_overlay_keeps_zwj_emoji_sequence() {
+        let line = build_palette_input_line("👩\u{200d}💻", 0, 12);
+        assert_eq!(line.spans[2].content.as_ref(), "👩\u{200d}💻");
+        assert!(
+            line.spans[2]
                 .style
                 .add_modifier
                 .contains(Modifier::REVERSED)

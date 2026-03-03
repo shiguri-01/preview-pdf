@@ -18,6 +18,7 @@ pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, page: usize) {
     let popup_width = area.width.min(34);
     let popup_height = area.height.min(5);
     let popup = centered_rect(area, popup_width, popup_height);
+    frame.render_widget(Clear, popup);
 
     let block = Block::default()
         .title("Loading")

@@ -4,4 +4,4 @@ mod overlay;
 
 pub use chrome::draw_chrome;
 pub use layout::{UiLayout, split_layout};
-pub use overlay::{draw_loading_overlay, draw_palette_overlay};
+pub use overlay::{draw_error_overlay, draw_loading_overlay, draw_palette_overlay};

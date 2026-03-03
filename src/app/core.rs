@@ -12,6 +12,7 @@ use super::state::{AppState, CacheHandle, PaletteRequest};
 pub struct RenderSubsystem {
     pub presenter: Box<dyn ImagePresenter>,
     pub runtime: RenderRuntime,
+    pub viewer_has_image: bool,
 }
 
 #[derive(Default)]
@@ -68,6 +69,7 @@ impl App {
             render: RenderSubsystem {
                 presenter,
                 runtime: RenderRuntime::from_cache_config(&config.cache),
+                viewer_has_image: false,
             },
             interaction: InteractionSubsystem::default(),
             config,

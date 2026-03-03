@@ -63,6 +63,10 @@ impl RenderActor {
         self.nav.intent().generation
     }
 
+    pub(crate) fn nav_streak(&self) -> usize {
+        self.nav.intent().streak
+    }
+
     pub(crate) fn mark_prefetch_due(&mut self) {
         self.prefetch_due = true;
     }

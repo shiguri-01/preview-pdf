@@ -25,7 +25,10 @@ use super::l2_cache::{
     TerminalFrameState,
 };
 use super::terminal_cell::{picker_with_resolved_cell_size, protocol_type_label};
-use super::traits::{ImagePresenter, PanOffset, PresenterCaps, PresenterRuntimeInfo, Viewport};
+use super::traits::{
+    ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
+    PresenterRenderOutcome, PresenterRuntimeInfo, Viewport,
+};
 
 pub(crate) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
 
@@ -40,6 +43,7 @@ pub(crate) struct PresenterState {
     pub(crate) l2_cache: TerminalFrameCache,
     pub(crate) perf_stats: PerfStats,
     pub(crate) current_key: Option<TerminalFrameKey>,
+    pub(crate) last_ready_key: Option<TerminalFrameKey>,
     pub(crate) current_generation: u64,
 }
 
@@ -77,6 +81,7 @@ impl RatatuiImagePresenter {
                 l2_cache: TerminalFrameCache::new(l2_max_entries, l2_memory_budget_bytes),
                 perf_stats: PerfStats::default(),
                 current_key: None,
+                last_ready_key: None,
                 current_generation: 0,
             },
             encode: EncodeChannel {
@@ -169,6 +174,9 @@ impl RatatuiImagePresenter {
                     }
                     EncodeWorkerEvent::CanceledStale { key } => {
                         let removed = self.state.l2_cache.remove(&key);
+                        if removed && Some(key) == self.state.last_ready_key {
+                            self.state.last_ready_key = None;
+                        }
                         if removed && Some(key) == current_key {
                             changed = true;
                         }
@@ -212,6 +220,81 @@ impl RatatuiImagePresenter {
         }
         Ok(())
     }
+
+    fn try_draw_ready_key(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        key: TerminalFrameKey,
+    ) -> AppResult<bool> {
+        let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
+            if Some(key) == self.state.last_ready_key {
+                self.state.last_ready_key = None;
+            }
+            return Ok(false);
+        };
+        let state = std::mem::replace(&mut entry.state, TerminalFrameState::Encoding);
+        match state {
+            TerminalFrameState::Ready(mut protocol) => {
+                let blit_start = std::time::Instant::now();
+                let target_size = protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
+                let render_area = center_rect_within(area, target_size.width, target_size.height);
+                if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
+                    entry.state = TerminalFrameState::Failed;
+                    self.state
+                        .perf_stats
+                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                    return Err(err);
+                }
+                self.state.perf_stats.record_blit(blit_start.elapsed());
+                entry.state = TerminalFrameState::Ready(protocol);
+                self.state.last_ready_key = Some(key);
+                self.state
+                    .perf_stats
+                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                Ok(true)
+            }
+            TerminalFrameState::PendingFrame(frame) => {
+                entry.state = TerminalFrameState::PendingFrame(frame);
+                self.state
+                    .perf_stats
+                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                Ok(false)
+            }
+            TerminalFrameState::Encoding => {
+                entry.state = TerminalFrameState::Encoding;
+                self.state
+                    .perf_stats
+                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                Ok(false)
+            }
+            TerminalFrameState::Failed => {
+                entry.state = TerminalFrameState::Failed;
+                if Some(key) == self.state.last_ready_key {
+                    self.state.last_ready_key = None;
+                }
+                self.state
+                    .perf_stats
+                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                Ok(false)
+            }
+        }
+    }
+
+    fn try_draw_stale_fallback(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        current_key: Option<TerminalFrameKey>,
+    ) -> AppResult<bool> {
+        let Some(last_key) = self.state.last_ready_key else {
+            return Ok(false);
+        };
+        if Some(last_key) == current_key {
+            return Ok(false);
+        }
+        self.try_draw_ready_key(frame, area, last_key)
+    }
 }
 
 impl ImagePresenter for RatatuiImagePresenter {
@@ -227,6 +310,7 @@ impl ImagePresenter for RatatuiImagePresenter {
             self.config.picker = picker_with_resolved_cell_size(picker, protocol_type);
             self.state.l2_cache.clear();
             self.state.current_key = None;
+            self.state.last_ready_key = None;
             self.state.current_generation = 0;
         }
 
@@ -334,85 +418,133 @@ impl ImagePresenter for RatatuiImagePresenter {
         Ok(())
     }
 
-    fn render(&mut self, frame: &mut Frame<'_>, area: Rect) -> AppResult<bool> {
+    fn render(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        options: PresenterRenderOptions,
+    ) -> AppResult<PresenterRenderOutcome> {
         self.drain_encode_results();
 
         if area.width == 0 || area.height == 0 {
-            return Ok(false);
+            return Ok(PresenterRenderOutcome {
+                drew_image: false,
+                feedback: PresenterFeedback::Pending,
+                used_stale_fallback: false,
+            });
         }
 
         let Some(key) = self.state.current_key else {
-            return Ok(false);
+            let drew_image = if options.allow_stale_fallback {
+                self.try_draw_stale_fallback(frame, area, None)?
+            } else {
+                false
+            };
+            return Ok(PresenterRenderOutcome {
+                drew_image,
+                feedback: PresenterFeedback::Pending,
+                used_stale_fallback: drew_image,
+            });
         };
         let font_size = self.config.picker.font_size();
         let request_tx = self.encode.request_tx.clone();
-        let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
-            return Ok(false);
-        };
+        if self.state.l2_cache.cached_mut(&key).is_none() {
+            self.state
+                .perf_stats
+                .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+            let drew_image = if options.allow_stale_fallback {
+                self.try_draw_stale_fallback(frame, area, Some(key))?
+            } else {
+                false
+            };
+            return Ok(PresenterRenderOutcome {
+                drew_image,
+                feedback: PresenterFeedback::Pending,
+                used_stale_fallback: drew_image,
+            });
+        }
 
-        let state = std::mem::replace(&mut entry.state, TerminalFrameState::Encoding);
-        match state {
-            TerminalFrameState::Ready(mut protocol) => {
-                let blit_start = std::time::Instant::now();
-                let target_size = protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
-                let render_area = center_rect_within(area, target_size.width, target_size.height);
-                if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
-                    entry.state = TerminalFrameState::Failed;
-                    self.state
-                        .perf_stats
-                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                    return Err(err);
-                }
-                self.state.perf_stats.record_blit(blit_start.elapsed());
-                entry.state = TerminalFrameState::Ready(protocol);
-                self.state
-                    .perf_stats
-                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                Ok(true)
-            }
-            TerminalFrameState::PendingFrame(frame) => {
-                let encode_area = centered_fit_area(frame.width, frame.height, font_size, area);
-                let request = EncodeWorkerRequest::Encode {
-                    key,
-                    picker: self.config.picker.clone(),
-                    frame,
-                    area: encode_area,
-                    class: PrefetchClass::CriticalCurrent,
-                    generation: self.state.current_generation,
-                };
-
-                match send_encode_request(&request_tx, request) {
-                    Ok(()) => {
-                        entry.state = TerminalFrameState::Encoding;
-                        self.state
-                            .perf_stats
-                            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                        Ok(false)
-                    }
-                    Err(EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown) => {
+        let feedback = {
+            let entry = self
+                .state
+                .l2_cache
+                .cached_mut(&key)
+                .expect("current key existence checked above");
+            let state = std::mem::replace(&mut entry.state, TerminalFrameState::Encoding);
+            match state {
+                TerminalFrameState::Ready(mut protocol) => {
+                    let blit_start = std::time::Instant::now();
+                    // Ensure stale cells are removed when a fresh current frame is smaller
+                    // than the previously drawn content.
+                    frame.render_widget(Clear, area);
+                    let target_size =
+                        protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
+                    let render_area =
+                        center_rect_within(area, target_size.width, target_size.height);
+                    if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
                         entry.state = TerminalFrameState::Failed;
                         self.state
                             .perf_stats
                             .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                        Err(AppError::unsupported(ENCODE_FAILURE_MESSAGE))
+                        return Err(err);
+                    }
+                    self.state.perf_stats.record_blit(blit_start.elapsed());
+                    entry.state = TerminalFrameState::Ready(protocol);
+                    self.state.last_ready_key = Some(key);
+                    self.state
+                        .perf_stats
+                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                    return Ok(PresenterRenderOutcome {
+                        drew_image: true,
+                        feedback: PresenterFeedback::None,
+                        used_stale_fallback: false,
+                    });
+                }
+                TerminalFrameState::PendingFrame(frame) => {
+                    let encode_area = centered_fit_area(frame.width, frame.height, font_size, area);
+                    let request = EncodeWorkerRequest::Encode {
+                        key,
+                        picker: self.config.picker.clone(),
+                        frame,
+                        area: encode_area,
+                        class: PrefetchClass::CriticalCurrent,
+                        generation: self.state.current_generation,
+                    };
+
+                    match send_encode_request(&request_tx, request) {
+                        Ok(()) => {
+                            entry.state = TerminalFrameState::Encoding;
+                            PresenterFeedback::Pending
+                        }
+                        Err(EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown) => {
+                            entry.state = TerminalFrameState::Failed;
+                            PresenterFeedback::Failed
+                        }
                     }
                 }
+                TerminalFrameState::Encoding => {
+                    entry.state = TerminalFrameState::Encoding;
+                    PresenterFeedback::Pending
+                }
+                TerminalFrameState::Failed => {
+                    entry.state = TerminalFrameState::Failed;
+                    PresenterFeedback::Failed
+                }
             }
-            TerminalFrameState::Encoding => {
-                entry.state = TerminalFrameState::Encoding;
-                self.state
-                    .perf_stats
-                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                Ok(false)
-            }
-            TerminalFrameState::Failed => {
-                entry.state = TerminalFrameState::Failed;
-                self.state
-                    .perf_stats
-                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                Err(AppError::unsupported(ENCODE_FAILURE_MESSAGE))
-            }
-        }
+        };
+        self.state
+            .perf_stats
+            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+        let drew_image = if options.allow_stale_fallback {
+            self.try_draw_stale_fallback(frame, area, Some(key))?
+        } else {
+            false
+        };
+        Ok(PresenterRenderOutcome {
+            drew_image,
+            feedback,
+            used_stale_fallback: drew_image,
+        })
     }
 
     fn capabilities(&self) -> PresenterCaps {

@@ -43,6 +43,26 @@ pub struct PresenterRuntimeInfo {
     pub graphics_protocol: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PresenterFeedback {
+    #[default]
+    None,
+    Pending,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PresenterRenderOptions {
+    pub allow_stale_fallback: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PresenterRenderOutcome {
+    pub drew_image: bool,
+    pub feedback: PresenterFeedback,
+    pub used_stale_fallback: bool,
+}
+
 pub trait ImagePresenter {
     fn initialize_terminal(&mut self) -> AppResult<()> {
         Ok(())
@@ -78,7 +98,12 @@ pub trait ImagePresenter {
         Ok(())
     }
 
-    fn render(&mut self, frame: &mut Frame<'_>, area: Rect) -> AppResult<bool>;
+    fn render(
+        &mut self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        options: PresenterRenderOptions,
+    ) -> AppResult<PresenterRenderOutcome>;
     fn capabilities(&self) -> PresenterCaps;
 
     fn has_pending_work(&self) -> bool {

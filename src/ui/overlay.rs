@@ -18,6 +18,7 @@ pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, page: usize) {
     let popup_width = area.width.min(34);
     let popup_height = area.height.min(5);
     let popup = centered_rect(area, popup_width, popup_height);
+    frame.render_widget(Clear, popup);
 
     let block = Block::default()
         .title("Loading")
@@ -34,6 +35,34 @@ pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, page: usize) {
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::White));
     frame.render_widget(message, inner);
+}
+
+pub fn draw_error_overlay(frame: &mut Frame<'_>, area: Rect, message: &str) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let popup_width = area.width.min(52);
+    let popup_height = area.height.min(6);
+    let popup = centered_rect(area, popup_width, popup_height);
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title("Render Error")
+        .borders(Borders::ALL)
+        .style(Style::default().fg(Color::Red));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let text = truncate_to_width(message, inner.width as usize);
+    let paragraph = Paragraph::new(text)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::White));
+    frame.render_widget(paragraph, inner);
 }
 
 pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteView) {
@@ -150,6 +179,23 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
     }
 
     frame.render_widget(Paragraph::new(lines), list_area);
+}
+
+fn truncate_to_width(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut width = 0usize;
+    for grapheme in text.graphemes(true) {
+        let w = UnicodeWidthStr::width(grapheme);
+        if width.saturating_add(w) > max_width {
+            break;
+        }
+        out.push_str(grapheme);
+        width = width.saturating_add(w);
+    }
+    out
 }
 
 fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> Line<'static> {

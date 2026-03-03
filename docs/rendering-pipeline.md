@@ -115,13 +115,24 @@ insert -> PendingFrame -> Encoding -> Ready | Failed
 
 ## 8. Presenter draw path (`presenter/ratatui.rs`)
 
-`ImagePresenter::render(...) -> AppResult<bool>` contract:
-- Returns `true` when a ready terminal frame was drawn.
-- Returns `false` when frame is still pending/encoding (caller may show loading UI).
+`ImagePresenter::render(...) -> AppResult<PresenterRenderOutcome>` contract:
+- `drew_image=true` means a terminal frame was drawn (current or stale fallback).
+- `feedback` conveys overlay intent:
+  - `None`: current image is ready.
+  - `Pending`: current image is still preparing/encoding.
+  - `Failed`: current image failed to prepare/encode.
+- `used_stale_fallback=true` means the presenter drew a previous ready frame.
 
 Protocol handling:
 - Presenter resolves terminal image protocol through picker/capability flow.
 - Draw path renders protocol image into ratatui frame region.
+
+UI contract:
+- A frame must never end with "Clear only".
+- Viewer output for each frame must include one of:
+  - image content,
+  - loading overlay,
+  - error overlay.
 
 ## Observable performance signals (`perf.rs`)
 

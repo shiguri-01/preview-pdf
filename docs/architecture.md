@@ -100,7 +100,7 @@ This document defines the current architecture of `pvf`.
 - `src/ui/`
   - `layout.rs`: region geometry.
   - `chrome.rs`: status/debug bars.
-  - `overlay.rs`: loading/palette overlays.
+  - `overlay.rs`: loading/error/palette overlays.
 
 ## Structural constraints
 

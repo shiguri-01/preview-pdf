@@ -294,6 +294,7 @@ impl App {
                     status_bar_segments,
                     page_count: runtime.page_count,
                     generation: runtime.render_actor.generation(),
+                    nav_streak: runtime.render_actor.nav_streak(),
                 },
             )?;
             runtime.ui_actor.clear_redraw();

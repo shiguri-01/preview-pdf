@@ -7,7 +7,6 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 
 use crate::backend::RgbaFrame;
-use crate::error::AppError;
 use crate::render::cache::RenderedPageKey;
 use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig};
 
@@ -17,7 +16,9 @@ use super::image_ops::fit_downscale_dimensions;
 use super::l2_cache::{L2_MAX_ENTRIES, TerminalFrameCache, TerminalFrameKey, TerminalFrameState};
 use super::ratatui::RatatuiImagePresenter;
 use super::terminal_cell::cell_size_from_window_metrics;
-use super::traits::{ImagePresenter, PanOffset, PresenterKind, Viewport};
+use super::traits::{
+    ImagePresenter, PanOffset, PresenterFeedback, PresenterKind, PresenterRenderOptions, Viewport,
+};
 
 fn frame() -> RgbaFrame {
     RgbaFrame {
@@ -38,6 +39,25 @@ fn l2_key(page: usize) -> TerminalFrameKey {
         },
         pan: PanOffset::default(),
     }
+}
+
+fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while presenter.state.last_ready_key.is_none() && Instant::now() < deadline {
+        terminal
+            .draw(|frame| {
+                let _ = presenter.render(frame, area, PresenterRenderOptions::default());
+            })
+            .expect("draw should pass");
+        let _ = presenter.drain_background_events();
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        presenter.state.last_ready_key.is_some(),
+        "presenter should have a ready frame for fallback"
+    );
 }
 
 #[test]
@@ -150,7 +170,11 @@ fn presenter_renders_after_prepare() {
         terminal
             .draw(|frame| {
                 let _ = presenter
-                    .render(frame, Rect::new(1, 1, 12, 7))
+                    .render(
+                        frame,
+                        Rect::new(1, 1, 12, 7),
+                        PresenterRenderOptions::default(),
+                    )
                     .expect("render should pass");
             })
             .expect("draw should pass");
@@ -277,7 +301,7 @@ fn presenter_has_pending_work_tracks_encode_progress() {
 }
 
 #[test]
-fn render_returns_error_for_failed_current_entry() {
+fn render_pending_uses_stale_fallback_when_allowed() {
     let mut presenter = RatatuiImagePresenter::new();
     let viewport = Viewport {
         x: 0,
@@ -285,16 +309,136 @@ fn render_returns_error_for_failed_current_entry() {
         width: 12,
         height: 7,
     };
-    let rendered_page = RenderedPageKey::new(9, 2, 1.0);
+    let area = Rect::new(1, 1, 12, 7);
     presenter
-        .prepare(rendered_page, &frame(), viewport, PanOffset::default(), 0)
-        .expect("prepare should pass");
-    let key = TerminalFrameKey {
-        rendered_page,
-        viewport,
-        pan: PanOffset::default(),
+        .prepare(
+            RenderedPageKey::new(9, 1, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            1,
+        )
+        .expect("first prepare should pass");
+    render_until_ready(&mut presenter, area);
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 2, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            2,
+        )
+        .expect("second prepare should pass");
+
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut result = None;
+    terminal
+        .draw(|frame| {
+            result = Some(presenter.render(
+                frame,
+                area,
+                PresenterRenderOptions {
+                    allow_stale_fallback: true,
+                },
+            ));
+        })
+        .expect("draw should pass");
+
+    let outcome = result
+        .expect("render result should be captured")
+        .expect("render should succeed");
+    assert_eq!(outcome.feedback, PresenterFeedback::Pending);
+    assert!(outcome.drew_image);
+    assert!(outcome.used_stale_fallback);
+}
+
+#[test]
+fn render_pending_does_not_use_stale_fallback_when_disallowed() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
     };
-    presenter.state.current_key = Some(key);
+    let area = Rect::new(1, 1, 12, 7);
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 1, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            1,
+        )
+        .expect("first prepare should pass");
+    render_until_ready(&mut presenter, area);
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 2, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            2,
+        )
+        .expect("second prepare should pass");
+
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut result = None;
+    terminal
+        .draw(|frame| {
+            result = Some(presenter.render(
+                frame,
+                area,
+                PresenterRenderOptions {
+                    allow_stale_fallback: false,
+                },
+            ));
+        })
+        .expect("draw should pass");
+
+    let outcome = result
+        .expect("render result should be captured")
+        .expect("render should succeed");
+    assert_eq!(outcome.feedback, PresenterFeedback::Pending);
+    assert!(!outcome.drew_image);
+    assert!(!outcome.used_stale_fallback);
+}
+
+#[test]
+fn render_returns_failed_feedback_for_failed_current_entry() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let area = Rect::new(1, 1, 12, 7);
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 1, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            1,
+        )
+        .expect("prepare should pass");
+    render_until_ready(&mut presenter, area);
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 2, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            2,
+        )
+        .expect("second prepare should pass");
+    let key = presenter
+        .state
+        .current_key
+        .expect("current key should exist");
     if let Some(entry) = presenter.state.l2_cache.cached_mut(&key) {
         entry.state = TerminalFrameState::Failed;
     }
@@ -304,18 +448,86 @@ fn render_returns_error_for_failed_current_entry() {
     let mut result = None;
     terminal
         .draw(|frame| {
-            result = Some(presenter.render(frame, Rect::new(1, 1, 12, 7)));
+            result = Some(presenter.render(
+                frame,
+                area,
+                PresenterRenderOptions {
+                    allow_stale_fallback: true,
+                },
+            ));
         })
         .expect("draw should pass");
 
-    let err = result
+    let outcome = result
         .expect("render result should be captured")
-        .expect_err("failed entry should surface an error");
-    assert!(matches!(err, AppError::Unsupported(_)));
+        .expect("failed entry should be reported as feedback");
+    assert_eq!(outcome.feedback, PresenterFeedback::Failed);
+    assert!(outcome.drew_image);
+    assert!(outcome.used_stale_fallback);
 }
 
 #[test]
-fn render_surfaces_error_when_encode_worker_is_disconnected() {
+fn render_failed_does_not_use_stale_fallback_when_disallowed() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let area = Rect::new(1, 1, 12, 7);
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 1, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            1,
+        )
+        .expect("prepare should pass");
+    render_until_ready(&mut presenter, area);
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 2, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            2,
+        )
+        .expect("second prepare should pass");
+    let key = presenter
+        .state
+        .current_key
+        .expect("current key should exist");
+    if let Some(entry) = presenter.state.l2_cache.cached_mut(&key) {
+        entry.state = TerminalFrameState::Failed;
+    }
+
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut result = None;
+    terminal
+        .draw(|frame| {
+            result = Some(presenter.render(
+                frame,
+                area,
+                PresenterRenderOptions {
+                    allow_stale_fallback: false,
+                },
+            ));
+        })
+        .expect("draw should pass");
+
+    let outcome = result
+        .expect("render result should be captured")
+        .expect("render should report failed feedback");
+    assert_eq!(outcome.feedback, PresenterFeedback::Failed);
+    assert!(!outcome.drew_image);
+    assert!(!outcome.used_stale_fallback);
+}
+
+#[test]
+fn render_reports_failed_feedback_when_encode_worker_is_disconnected() {
     let mut presenter = RatatuiImagePresenter::new();
     let viewport = Viewport {
         x: 0,
@@ -340,14 +552,19 @@ fn render_surfaces_error_when_encode_worker_is_disconnected() {
     let mut result = None;
     terminal
         .draw(|frame| {
-            result = Some(presenter.render(frame, Rect::new(1, 1, 12, 7)));
+            result = Some(presenter.render(
+                frame,
+                Rect::new(1, 1, 12, 7),
+                PresenterRenderOptions::default(),
+            ));
         })
         .expect("draw should pass");
 
-    let err = result
+    let outcome = result
         .expect("render result should be captured")
-        .expect_err("disconnected worker should surface an error");
-    assert!(matches!(err, AppError::Unsupported(_)));
+        .expect("disconnected worker should be reported as feedback");
+    assert_eq!(outcome.feedback, PresenterFeedback::Failed);
+    assert!(!outcome.drew_image);
     assert!(matches!(
         presenter
             .state

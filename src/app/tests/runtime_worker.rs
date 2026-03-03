@@ -12,7 +12,10 @@ use super::super::runtime::RenderRuntime;
 use crate::backend::{PdfDoc, RgbaFrame};
 use crate::error::AppResult;
 use crate::perf::PerfStats;
-use crate::presenter::{ImagePresenter, PanOffset, PresenterCaps, Viewport};
+use crate::presenter::{
+    ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
+    PresenterRenderOutcome, Viewport,
+};
 use crate::render::cache::RenderedPageKey;
 use crate::render::prefetch::PrefetchClass;
 use crate::render::scheduler::{NavDirection, NavIntent, RenderPriority, RenderTask};
@@ -41,10 +44,19 @@ impl ImagePresenter for TestPresenter {
         Ok(())
     }
 
-    fn render(&mut self, _frame: &mut ratatui::Frame<'_>, _area: Rect) -> AppResult<bool> {
+    fn render(
+        &mut self,
+        _frame: &mut ratatui::Frame<'_>,
+        _area: Rect,
+        _options: PresenterRenderOptions,
+    ) -> AppResult<PresenterRenderOutcome> {
         self.render_calls += 1;
         self.stats.record_blit(Duration::from_millis(2));
-        Ok(true)
+        Ok(PresenterRenderOutcome {
+            drew_image: true,
+            feedback: PresenterFeedback::None,
+            used_stale_fallback: false,
+        })
     }
 
     fn prefetch_encode(
@@ -156,7 +168,11 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
     terminal
         .draw(|frame| {
             presenter
-                .render(frame, Rect::new(0, 0, 80, 24))
+                .render(
+                    frame,
+                    Rect::new(0, 0, 80, 24),
+                    PresenterRenderOptions::default(),
+                )
                 .expect("presenter render should succeed");
         })
         .expect("test terminal draw should succeed");

@@ -128,6 +128,7 @@ mod tests {
         let registry = PaletteRegistry::default();
         let ctx = PaletteContext {
             app: &crate::app::AppState::default(),
+            search_active: false,
             kind: PaletteKind::Command,
             input: "",
             seed: None,

@@ -69,6 +69,10 @@ Dispatch order is fixed:
   - UI asks `ExtensionHost::status_bar_segments()`.
   - Host aggregates non-empty segments from registered extensions.
 
+Search state ownership:
+- Search activity/progress/hits are owned by `SearchState` inside `ExtensionHost`.
+- `AppState` does not mirror search state; consumers query extension-host/search APIs for search activity.
+
 ## Built-in extensions
 
 ### Search (`src/search/`)

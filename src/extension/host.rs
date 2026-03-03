@@ -121,6 +121,10 @@ impl ExtensionHost {
         self.search.matcher()
     }
 
+    pub fn is_search_active(&self) -> bool {
+        !self.search.query().is_empty()
+    }
+
     pub fn status_bar_segments(&self, app: &AppState) -> Vec<String> {
         let mut segments = Vec::new();
         if let Some(segment) = SearchExtension::status_bar_segment(&self.search, app)
@@ -235,12 +239,12 @@ mod tests {
             SearchMatcherKind::ContainsInsensitive,
         )
         .expect("submit-search should succeed");
-        assert!(app.search_ui.active);
+        assert!(host.is_search_active());
 
         let canceled = host
             .cancel_search(&mut app, &pdf)
             .expect("cancel-search should succeed");
         assert!(canceled);
-        assert!(!app.search_ui.active);
+        assert!(!host.is_search_active());
     }
 }

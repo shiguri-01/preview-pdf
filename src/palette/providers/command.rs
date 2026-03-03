@@ -195,7 +195,7 @@ fn find_spec(id: &str) -> Option<crate::command::CommandSpec> {
 
 fn can_show_command_spec(id: &str, ctx: &PaletteContext<'_>) -> bool {
     if is_search_navigation_command(id) {
-        return ctx.app.search_ui.active;
+        return ctx.search_active;
     }
     true
 }
@@ -363,10 +363,10 @@ mod tests {
         search_active: bool,
     ) -> Vec<crate::palette::PaletteCandidate> {
         let provider = CommandPaletteProvider;
-        let mut app = AppState::default();
-        app.search_ui.active = search_active;
+        let app = AppState::default();
         let ctx = PaletteContext {
             app: &app,
+            search_active,
             kind: PaletteKind::Command,
             input,
             seed: None,
@@ -380,6 +380,7 @@ mod tests {
         let app = AppState::default();
         let ctx = PaletteContext {
             app: &app,
+            search_active: false,
             kind: PaletteKind::Command,
             input: "",
             seed: None,
@@ -401,10 +402,10 @@ mod tests {
     #[test]
     fn list_shows_search_hit_navigation_when_search_is_active() {
         let provider = CommandPaletteProvider;
-        let mut app = AppState::default();
-        app.search_ui.active = true;
+        let app = AppState::default();
         let ctx = PaletteContext {
             app: &app,
+            search_active: true,
             kind: PaletteKind::Command,
             input: "",
             seed: None,

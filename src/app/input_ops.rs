@@ -112,9 +112,12 @@ impl InteractionSubsystem {
         state: &mut AppState,
         key: KeyEvent,
     ) -> AppResult<PaletteKeyResult> {
-        self.palette
-            .manager
-            .handle_key(&self.palette.registry, state, key)
+        self.palette.manager.handle_key(
+            &self.palette.registry,
+            state,
+            self.extensions.host.is_search_active(),
+            key,
+        )
     }
 
     pub(crate) fn close_palette_session(&mut self, state: &mut AppState, session_id: u64) -> bool {
@@ -138,11 +141,13 @@ impl InteractionSubsystem {
         while let Some(request) = self.palette.pending_requests.pop_front() {
             match request {
                 PaletteRequest::Open { kind, seed } => {
-                    match self
-                        .palette
-                        .manager
-                        .open(&self.palette.registry, state, kind, seed)
-                    {
+                    match self.palette.manager.open(
+                        &self.palette.registry,
+                        state,
+                        self.extensions.host.is_search_active(),
+                        kind,
+                        seed,
+                    ) {
                         Ok(()) => {
                             state.mode = Mode::Palette;
                             state.status.last_action_id = Some(ActionId::OpenPalette);

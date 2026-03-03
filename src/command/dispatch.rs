@@ -296,7 +296,7 @@ mod tests {
             SearchMatcherKind::ContainsInsensitive,
         )
         .expect("submit-search should succeed");
-        assert!(app.search_ui.active);
+        assert!(host.is_search_active());
 
         let result = dispatch(
             &mut app,
@@ -309,7 +309,7 @@ mod tests {
 
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(result.emitted_events.len(), 1);
-        assert!(!app.search_ui.active);
+        assert!(!host.is_search_active());
         assert_eq!(app.status.message, "search canceled");
         assert!(palette_requests.is_empty());
     }

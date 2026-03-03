@@ -48,6 +48,7 @@ This document defines the current architecture of `pvf`.
   - `engine.rs`: async search worker and job lifecycle.
   - `palette.rs`: search palette provider.
   - `mod.rs`: `SearchExtension` wiring.
+  - Search activity/progress/hits are owned by extension `SearchState` (not mirrored in `AppState`).
 
 - `src/history/`
   - `state.rs`: history stacks and navigation logic.

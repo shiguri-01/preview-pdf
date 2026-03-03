@@ -57,6 +57,7 @@ pub enum PaletteTabEffect {
 
 pub struct PaletteContext<'a> {
     pub app: &'a AppState,
+    pub search_active: bool,
     pub kind: PaletteKind,
     pub input: &'a str,
     pub seed: Option<&'a str>,

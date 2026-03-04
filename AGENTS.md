@@ -19,6 +19,4 @@
 
 ## Commit & Pull Request Guidelines
 - Preferred commit format: `<type>(<scope>): <summary>` where useful (`feat`, `fix`, `refactor`, `docs`, `test`).
-- PRs should include:
-  - clear problem/solution summary
-  - linked issue (if applicable)
+- For GitHub PR creation/view/update tasks, use `pr-workflow` skill.

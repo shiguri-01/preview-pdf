@@ -96,9 +96,14 @@ pub struct SearchState {
     matcher: SearchMatcherKind,
     generation: u64,
     in_progress: bool,
-    scanned_pages: usize,
+    /// Number of scanned pages observed so far while scanning.
+    /// This is progress-oriented and may change before completion.
+    scanned_pages_progress: usize,
     total_pages: usize,
-    hits_found: usize,
+    /// Number of matched pages observed so far while scanning.
+    /// This is progress-oriented and may change before completion.
+    hit_pages_progress: usize,
+    /// Final matched page list (0-based page indexes), available on completion.
     hits: Vec<usize>,
     current_hit: Option<usize>,
     last_error: Option<String>,
@@ -111,9 +116,9 @@ impl Default for SearchState {
             matcher: SearchMatcherKind::ContainsInsensitive,
             generation: 0,
             in_progress: false,
-            scanned_pages: 0,
+            scanned_pages_progress: 0,
             total_pages: 0,
-            hits_found: 0,
+            hit_pages_progress: 0,
             hits: Vec::new(),
             current_hit: None,
             last_error: None,
@@ -168,9 +173,9 @@ impl SearchState {
         self.query = query;
         self.generation = generation;
         self.in_progress = true;
-        self.scanned_pages = 0;
+        self.scanned_pages_progress = 0;
         self.total_pages = pdf.page_count();
-        self.hits_found = 0;
+        self.hit_pages_progress = 0;
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
@@ -237,9 +242,9 @@ impl SearchState {
                     if snapshot.generation != self.generation {
                         continue;
                     }
-                    self.scanned_pages = snapshot.scanned_pages;
+                    self.scanned_pages_progress = snapshot.scanned_pages;
                     self.total_pages = snapshot.total_pages;
-                    self.hits_found = snapshot.hit_pages;
+                    self.hit_pages_progress = snapshot.hit_pages;
                     self.in_progress = true;
                     app.status.last_action_id = Some(ActionId::SearchProgress);
                     app.status.message = format!(
@@ -253,8 +258,9 @@ impl SearchState {
                         continue;
                     }
                     self.in_progress = false;
-                    self.scanned_pages = self.total_pages.max(self.scanned_pages);
-                    self.hits_found = hits.len();
+                    self.scanned_pages_progress =
+                        self.total_pages.max(self.scanned_pages_progress);
+                    self.hit_pages_progress = hits.len();
                     self.current_hit = None;
                     self.hits = hits;
                     app.status.last_action_id = Some(ActionId::SearchComplete);
@@ -305,10 +311,14 @@ impl SearchState {
         }
 
         if let Some(current_hit) = self.current_hit {
-            return Some(format!("SEARCH {}/{}", current_hit + 1, self.hits_found));
+            return Some(format!(
+                "SEARCH {}/{}",
+                current_hit + 1,
+                self.hit_pages_progress
+            ));
         }
 
-        Some(format!("SEARCH {} hits", self.hits_found))
+        Some(format!("SEARCH {} hits", self.hit_pages_progress))
     }
 
     fn move_hit(&mut self, app: &mut AppState, forward: bool) -> CommandOutcome {
@@ -352,9 +362,9 @@ impl SearchState {
 
     fn clear_results(&mut self) {
         self.in_progress = false;
-        self.scanned_pages = 0;
+        self.scanned_pages_progress = 0;
         self.total_pages = 0;
-        self.hits_found = 0;
+        self.hit_pages_progress = 0;
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
@@ -578,7 +588,7 @@ mod tests {
     fn status_bar_segment_only_shows_position_after_hit_selection() {
         let state = SearchState {
             query: "needle".to_string(),
-            hits_found: 3,
+            hit_pages_progress: 3,
             current_hit: None,
             ..SearchState::default()
         };
@@ -589,7 +599,7 @@ mod tests {
 
         let state = SearchState {
             query: "needle".to_string(),
-            hits_found: 3,
+            hit_pages_progress: 3,
             current_hit: Some(1),
             ..SearchState::default()
         };

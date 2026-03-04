@@ -144,6 +144,11 @@ impl RenderSubsystem {
             return;
         }
 
+        debug_assert_eq!(
+            ctx.required_pages.len(),
+            ctx.required_keys.len(),
+            "required_pages and required_keys must have equal lengths"
+        );
         for (idx, page) in ctx.required_pages.into_iter().enumerate() {
             let key = ctx.required_keys[idx];
             if self.runtime.has_cached_frame(&key) || render_worker.has_in_flight(&key) {
@@ -171,10 +176,7 @@ impl RenderSubsystem {
             }
             if !enqueued {
                 state.status.last_action_id = Some(ActionId::RenderQueue);
-                state.status.message = format!(
-                    "render queue busy; retrying page {}",
-                    state.current_page + 1
-                );
+                state.status.message = format!("render queue busy; retrying page {}", page + 1);
                 break;
             }
         }

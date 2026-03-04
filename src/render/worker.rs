@@ -403,3 +403,239 @@ fn render_worker_main(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process;
+    use std::thread;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    use super::RenderWorker;
+    use crate::backend::PdfDoc;
+    use crate::render::cache::RenderedPageKey;
+    use crate::render::scheduler::{RenderPriority, RenderTask};
+
+    #[test]
+    fn current_enqueue_preempts_prefetch_when_worker_is_full() {
+        let file = unique_temp_path("render_worker_preempt_current.pdf");
+        fs::write(&file, build_pdf(&["p1", "p2"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let mut worker = spawn_worker(file.clone(), doc.doc_id(), 1);
+        let old_key = RenderedPageKey::new(doc.doc_id(), 1, 1.0);
+        let current_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
+
+        assert!(worker.enqueue(render_task(&doc, 1, RenderPriority::Background, 1)));
+        let (enqueued, preempted) = worker.enqueue_current_with_preemption(
+            render_task(&doc, 0, RenderPriority::CriticalCurrent, 2),
+            2,
+            &[current_key],
+        );
+        assert!(!enqueued);
+        assert_eq!(preempted, 1);
+        assert!(worker.has_in_flight(&old_key));
+        assert!(!worker.has_in_flight(&current_key));
+
+        let mut completed = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while worker.in_flight_len() > 0 && Instant::now() < deadline {
+            completed.extend(drain_render_results(&mut worker));
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(!completed.contains(&old_key));
+        assert!(worker.enqueue(render_task(&doc, 0, RenderPriority::CriticalCurrent, 2)));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while worker.in_flight_len() > 0 && Instant::now() < deadline {
+            completed.extend(drain_render_results(&mut worker));
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(completed.contains(&current_key));
+        fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    #[test]
+    fn enqueue_current_with_preemption_does_not_exceed_inflight_limit() {
+        let file = unique_temp_path("render_worker_preempt_limit.pdf");
+        fs::write(&file, build_pdf(&["p1", "p2"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let mut worker = spawn_worker(file.clone(), doc.doc_id(), 1);
+        let keep_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
+
+        assert!(worker.enqueue(render_task(&doc, 1, RenderPriority::Background, 1)));
+        for _ in 0..8 {
+            let _ = worker.enqueue_current_with_preemption(
+                render_task(&doc, 0, RenderPriority::CriticalCurrent, 2),
+                2,
+                &[keep_key],
+            );
+            assert_eq!(worker.in_flight_len(), 1);
+        }
+
+        fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    #[test]
+    fn cancel_stale_prefetch_drops_results_for_old_generation_prefetch() {
+        let file = unique_temp_path("render_worker_cancel_stale.pdf");
+        fs::write(&file, build_pdf(&["p1", "p2", "p3", "p4"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let mut worker = spawn_worker(file.clone(), doc.doc_id(), 4);
+        let current_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
+
+        assert!(worker.enqueue(render_task(&doc, 0, RenderPriority::CriticalCurrent, 1)));
+        assert!(worker.enqueue(render_task(&doc, 1, RenderPriority::DirectionalLead, 1)));
+        assert!(worker.enqueue(render_task(&doc, 2, RenderPriority::Background, 1)));
+        assert!(worker.enqueue(render_task(&doc, 3, RenderPriority::GuardReverse, 1)));
+
+        let canceled = worker.cancel_stale_prefetch_except(2, &[current_key]);
+        assert_eq!(canceled, 2);
+
+        let mut completed_keys = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while worker.in_flight_len() > 0 && Instant::now() < deadline {
+            completed_keys.extend(drain_render_results(&mut worker));
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        assert!(completed_keys.contains(&RenderedPageKey::new(doc.doc_id(), 0, 1.0)));
+        assert!(completed_keys.contains(&RenderedPageKey::new(doc.doc_id(), 3, 1.0)));
+        assert!(!completed_keys.contains(&RenderedPageKey::new(doc.doc_id(), 1, 1.0)));
+        assert!(!completed_keys.contains(&RenderedPageKey::new(doc.doc_id(), 2, 1.0)));
+        fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    fn render_task(
+        doc: &PdfDoc,
+        page: usize,
+        priority: RenderPriority,
+        generation: u64,
+    ) -> RenderTask {
+        RenderTask {
+            doc_id: doc.doc_id(),
+            page,
+            scale: 1.0,
+            priority,
+            generation,
+            reason: "test-task",
+        }
+    }
+
+    fn spawn_worker(path: PathBuf, doc_id: u64, worker_threads: usize) -> RenderWorker {
+        RenderWorker::spawn(path, doc_id, worker_threads)
+    }
+
+    fn drain_render_results(worker: &mut RenderWorker) -> Vec<RenderedPageKey> {
+        let mut completed = Vec::new();
+        loop {
+            let Some(event) = worker.try_recv_result_event() else {
+                break;
+            };
+            if let Some(result) = worker.accept_result_event(event) {
+                completed.push(result.key);
+            }
+        }
+        completed
+    }
+
+    fn unique_temp_path(suffix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after unix epoch")
+            .as_nanos();
+
+        let mut path = std::env::temp_dir();
+        path.push(format!("pvf_{suffix}_{}_{}", process::id(), nanos));
+        path
+    }
+
+    fn build_pdf(page_texts: &[&str]) -> Vec<u8> {
+        let page_texts = if page_texts.is_empty() {
+            vec![""]
+        } else {
+            page_texts.to_vec()
+        };
+
+        let page_count = page_texts.len();
+        let page_ids: Vec<usize> = (0..page_count).map(|i| 4 + i * 2).collect();
+
+        let mut objects = Vec::new();
+        objects.push("<< /Type /Catalog /Pages 2 0 R >>".to_string());
+
+        let kids = page_ids
+            .iter()
+            .map(|id| format!("{id} 0 R"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        objects.push(format!(
+            "<< /Type /Pages /Kids [{kids}] /Count {page_count} >>"
+        ));
+        objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string());
+
+        for (index, text) in page_texts.iter().enumerate() {
+            let content_id = 5 + index * 2;
+            let escaped = escape_literal_string(text);
+            let stream = format!("BT /F1 14 Tf 36 260 Td ({escaped}) Tj ET");
+
+            let page_obj = format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>"
+            );
+            let content_obj = format!(
+                "<< /Length {} >>\nstream\n{}\nendstream",
+                stream.len(),
+                stream
+            );
+
+            objects.push(page_obj);
+            objects.push(content_obj);
+        }
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+
+        let mut offsets = Vec::new();
+        offsets.push(0_usize);
+        for (index, object) in objects.iter().enumerate() {
+            let object_id = index + 1;
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{object_id} 0 obj\n{object}\nendobj\n").as_bytes());
+        }
+
+        let xref_start = bytes.len();
+        bytes.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        bytes.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets.iter().skip(1) {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+
+        bytes.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                objects.len() + 1,
+                xref_start
+            )
+            .as_bytes(),
+        );
+
+        bytes
+    }
+
+    fn escape_literal_string(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+
+        for ch in text.chars() {
+            match ch {
+                '\\' => out.push_str("\\\\"),
+                '(' => out.push_str("\\("),
+                ')' => out.push_str("\\)"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                _ => out.push(ch),
+            }
+        }
+
+        out
+    }
+}

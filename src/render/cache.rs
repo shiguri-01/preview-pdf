@@ -354,4 +354,19 @@ mod tests {
         assert!(cache.contains(&oversize));
         assert!(!cache.contains(&prefetch));
     }
+
+    #[test]
+    fn layout_tag_partitions_cache_entries() {
+        let mut cache = RenderedPageCache::new(4, 1024 * 1024);
+        let base = RenderedPageKey::new(7, 2, 1.0);
+        let tagged = RenderedPageKey::with_layout(7, 2, 1.0, 9);
+
+        let _ = cache.insert(base, frame(4, 4), false);
+        let _ = cache.insert(tagged, frame(5, 5), false);
+
+        assert_eq!(base.layout_tag, 0);
+        assert_ne!(base, tagged);
+        assert!(cache.contains(&base));
+        assert!(cache.contains(&tagged));
+    }
 }

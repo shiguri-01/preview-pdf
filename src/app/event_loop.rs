@@ -174,16 +174,14 @@ impl App {
             pdf.doc_id(),
             self.config.render.worker_threads,
         );
-        let tracked_scale = self.compute_current_scale(
-            pdf,
-            self.state.current_page,
-            Self::current_viewport(&session, self.state.debug_status_visible),
-        );
+        let viewport = Self::current_viewport(&session, self.state.debug_status_visible);
+        let visible_pages = self.state.visible_page_slots(page_count);
+        let tracked_scale = self.compute_current_scale(pdf, visible_pages.anchor_page, viewport);
         let mut render_actor =
-            RenderActor::new(self.state.current_page, self.state.zoom, tracked_scale);
+            RenderActor::new(visible_pages.anchor_page, self.state.zoom, tracked_scale);
         self.render.runtime.reset_prefetch(
             pdf,
-            self.state.current_page,
+            visible_pages.anchor_page,
             render_actor.nav_mut().intent(),
             tracked_scale,
         );
@@ -214,12 +212,12 @@ impl App {
         prefetch_pause_after_input: Duration,
     ) -> LoopStep {
         let prefetch_viewport = Self::current_viewport(session, self.state.debug_status_visible);
+        let visible_pages = self.state.visible_page_slots(pdf.page_count());
         let current_scale =
-            self.compute_current_scale(pdf, self.state.current_page, prefetch_viewport);
+            self.compute_current_scale(pdf, visible_pages.anchor_page, prefetch_viewport);
         let base_pan = self.current_pan();
         let enable_crop = self.state.zoom > 1.0;
         let interactive = input_actor.is_interactive(prefetch_pause_after_input);
-        let visible_pages = self.state.visible_page_slots(pdf.page_count());
         let mut required_pages = vec![visible_pages.anchor_page];
         if let Some(trailing_page) = visible_pages.trailing_page {
             required_pages.push(trailing_page);
@@ -389,8 +387,8 @@ impl App {
             WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
                 let viewport =
                     Self::current_viewport(&runtime.session, self.state.debug_status_visible);
-                let scale = self.compute_current_scale(pdf, self.state.current_page, viewport);
                 let visible_pages = self.state.visible_page_slots(pdf.page_count());
+                let scale = self.compute_current_scale(pdf, visible_pages.anchor_page, viewport);
                 let mut current_keys = vec![RenderedPageKey::new(
                     pdf.doc_id(),
                     visible_pages.anchor_page,

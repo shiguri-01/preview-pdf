@@ -13,9 +13,8 @@ pub(crate) fn next_page(app: &mut AppState, page_count: usize) -> AppResult<Comm
 
     if app.current_page.saturating_add(step) >= page_count {
         app.status.message = format!(
-            "already at last page ({}/{})",
-            app.current_page + 1,
-            page_count
+            "already at last page ({})",
+            format_page_location(app, page_count)
         );
         return Ok(CommandOutcome::Noop);
     }

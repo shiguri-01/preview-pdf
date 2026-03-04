@@ -122,6 +122,7 @@ impl HistoryState {
         }
 
         if matches!(reason, NavReason::Step) {
+            self.forward_stack.clear();
             return;
         }
 

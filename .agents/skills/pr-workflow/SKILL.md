@@ -8,7 +8,7 @@ description: Create and review GitHub pull requests with a consistent workflow. 
 1. Before creating a PR, run quality checks in this order:
    - `cargo fmt --check`
    - `cargo test`
-   - `cargo clippy --all-targets --all-features -D warnings`
+   - `cargo clippy --all-targets --all-features -- -D warnings`
 2. If any check fails, do not create the PR until fixed.
 
 ## Create PR

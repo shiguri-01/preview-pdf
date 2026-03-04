@@ -365,7 +365,7 @@ mod tests {
     ) -> Vec<crate::palette::PaletteCandidate> {
         let provider = CommandPaletteProvider;
         let app = AppState::default();
-        let extensions = ExtensionUiSnapshot { search_active };
+        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
         let ctx = PaletteContext {
             app: &app,
             extensions: &extensions,
@@ -406,9 +406,7 @@ mod tests {
     fn list_shows_search_hit_navigation_when_search_is_active() {
         let provider = CommandPaletteProvider;
         let app = AppState::default();
-        let extensions = ExtensionUiSnapshot {
-            search_active: true,
-        };
+        let extensions = ExtensionUiSnapshot::with_search_active(true);
         let ctx = PaletteContext {
             app: &app,
             extensions: &extensions,

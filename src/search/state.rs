@@ -489,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn submit_search_marks_search_ui_active() {
+    fn submit_search_marks_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
         let pdf = StubPdf::new(5);
@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn submit_empty_query_clears_search_ui() {
+    fn submit_empty_query_clears_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
         let pdf = StubPdf::new(2);

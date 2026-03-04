@@ -16,6 +16,12 @@ pub struct ExtensionUiSnapshot {
     pub search_active: bool,
 }
 
+impl ExtensionUiSnapshot {
+    pub fn with_search_active(search_active: bool) -> Self {
+        Self { search_active }
+    }
+}
+
 pub struct ExtensionHost {
     search: SearchRuntime,
     history: HistoryState,

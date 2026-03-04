@@ -1,15 +1,15 @@
 # pvf Rendering Pipeline Specification
 
-This document defines how `pvf` transforms a PDF page into terminal pixels.
+This document defines how `pvf` transforms PDF page content into terminal pixels.
 
 ## End-to-end contract
 
 Pipeline:
 
 1. Open PDF backend document.
-2. Rasterize a page into `RgbaFrame`.
+2. Rasterize visible page(s) into `RgbaFrame`.
 3. Cache rasterized frame in L1 cache.
-4. Crop to viewport/pan window when required.
+4. Compose spread frame (when enabled), then crop to viewport/pan window when required.
 5. Prepare terminal frame entry in L2 cache.
 6. Encode image for terminal protocol in encode worker.
 7. Render ready protocol frame through ratatui draw path.
@@ -26,28 +26,33 @@ fn render_page(&mut self, page: u32, scale: f64) -> AppResult<RgbaFrame>
 
 Requirements:
 - Output pixel format is RGBA (4 bytes/pixel).
-- Cache identity includes `doc_id` (stable hash of file path), page index, and scale.
+- Cache identity includes `doc_id` (stable hash of file path), page index, scale, and layout tag.
+- Render-worker page tasks use layout tag `0` (source page identity).
 
 Text extraction (`extract_text`) provides line-oriented text data for search.
 
 ## 2. L1 rendered-page cache (`render/cache.rs`)
 
-- Cache key: `RenderedPageKey { doc_id, page, scale_milli }`.
+- Cache key: `RenderedPageKey { doc_id, page, scale_milli, layout_tag }`.
 - Cache value: `RgbaFrame`.
 - Cache policy: LRU + memory budget enforcement on insert.
 - Cache counters are tracked for hit/miss/eviction reporting.
 
 `scale_milli` stores scale as integer milli-units for exact key equality.
+`layout_tag` separates single-page and spread presenter identities to prevent L2 key collisions.
 
 ## 3. Viewport crop/pan (`app/frame_ops.rs`)
 
-API:
+APIs:
 
 ```rust
 fn crop_frame_for_viewport(frame, viewport, pan, cell_px) -> RgbaFrame
+fn compose_spread_frame(left, right, gap_px) -> RgbaFrame
 ```
 
 Requirements:
+- In spread mode, two page frames are horizontally composed with a fixed gap.
+- Missing partner page (odd tail page) is represented as a blank slot.
 - When zoomed content exceeds viewport, only the visible region is forwarded.
 - Crop is cell-aligned to avoid sub-cell artifacts.
 - If full frame fits viewport, original frame is forwarded.
@@ -71,7 +76,7 @@ Preemption rule for current-page critical tasks:
 `NavTracker` produces `NavIntent { direction, streak, generation }`.
 
 Scheduler requirements:
-- Always include current page (`CriticalCurrent`).
+- Always include current visible page(s) (`CriticalCurrent` for each).
 - Include one reverse guard page (`GuardReverse`).
 - Include directional lead pages (`DirectionalLead`) with depth based on streak.
 - Fill remaining budget with `Background` tasks.

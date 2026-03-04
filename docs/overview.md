@@ -20,6 +20,13 @@ Rules:
   - next/previous page
   - first/last page
   - direct page jump
+  - in spread layout, next/previous move by 2 pages
+
+- Page layout:
+  - `single` (default)
+  - `spread` (2-page side-by-side: 1-2, 3-4, ...)
+  - spread direction: `ltr` / `rtl` (display order only)
+  - runtime switch via command: `set-page-layout <single|spread> [ltr|rtl]`
 
 - Zoom and viewport:
   - zoom in/out with bounded scale

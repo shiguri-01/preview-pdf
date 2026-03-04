@@ -12,7 +12,8 @@ use crate::render::scheduler::{
     build_prefetch_plan_with_policy,
 };
 
-use super::frame_ops::prepare_presenter_frame;
+use super::frame_ops::{compose_spread_frame, prepare_presenter_frame};
+use super::state::VisiblePageSlots;
 
 #[derive(Debug, Default)]
 pub struct RenderRuntime {
@@ -152,6 +153,66 @@ impl RenderRuntime {
         };
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
         Ok(prepared)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_prepare_spread_from_cache(
+        &mut self,
+        doc: &dyn PdfBackend,
+        presenter: &mut dyn ImagePresenter,
+        viewport: Viewport,
+        slots: VisiblePageSlots,
+        presenter_key: RenderedPageKey,
+        scale: f32,
+        pan: &mut PanOffset,
+        cell_px: Option<(u16, u16)>,
+        enable_crop: bool,
+        generation: u64,
+        gap_px: u32,
+    ) -> AppResult<bool> {
+        let anchor_key = RenderedPageKey::new(doc.doc_id(), slots.anchor_page, scale);
+        let Some(anchor_frame) = self.l1_cache.get_cloned(&anchor_key) else {
+            self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
+            return Ok(false);
+        };
+
+        let trailing_frame = match slots.trailing_page {
+            Some(page) => {
+                let trailing_key = RenderedPageKey::new(doc.doc_id(), page, scale);
+                let frame = self.l1_cache.get_cloned(&trailing_key);
+                self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
+                let Some(frame) = frame else {
+                    return Ok(false);
+                };
+                Some(frame)
+            }
+            None => {
+                self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
+                None
+            }
+        };
+
+        let left_frame = match slots.left_page {
+            Some(page) if page == slots.anchor_page => Some(&anchor_frame),
+            Some(_) => trailing_frame.as_ref(),
+            None => None,
+        };
+        let right_frame = match slots.right_page {
+            Some(page) if page == slots.anchor_page => Some(&anchor_frame),
+            Some(_) => trailing_frame.as_ref(),
+            None => None,
+        };
+        let spread_frame = compose_spread_frame(left_frame, right_frame, gap_px);
+        let (frame, pan_for_presenter) =
+            prepare_presenter_frame(&spread_frame, viewport, pan, cell_px, enable_crop);
+        presenter.prepare(
+            presenter_key,
+            &frame,
+            viewport,
+            pan_for_presenter,
+            generation,
+        )?;
+        Ok(true)
     }
 
     #[allow(clippy::too_many_arguments)]

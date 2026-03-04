@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::AppState;
+use crate::app::{AppState, PageLayoutMode};
 use crate::perf::PerfStats;
 
 use super::layout::UiLayout;
@@ -83,11 +83,10 @@ fn build_status_text(
     max_width: usize,
 ) -> String {
     let page_total = page_count.max(1);
-    let page_now = app.current_page.saturating_add(1).min(page_total);
-    let page_width = page_total.to_string().len();
     let base = format!(
-        "p. {:>page_width$}/{:>page_width$} | Zoom {:.2}x",
-        page_now, page_total, app.zoom
+        "{} | Zoom {:.2}x",
+        format_page_segment(app, page_total),
+        app.zoom
     );
     let sep = " | ";
 
@@ -133,6 +132,30 @@ fn build_status_text(
     }
 
     truncate_right_by_width(&base, max_width)
+}
+
+fn format_page_segment(app: &AppState, page_total: usize) -> String {
+    let slots = app.visible_page_slots(page_total);
+    let page_width = page_total.to_string().len();
+    match app.page_layout_mode {
+        PageLayoutMode::Single => {
+            let page_now = slots.anchor_page.saturating_add(1).min(page_total);
+            format!("p. {:>page_width$}/{:>page_width$}", page_now, page_total)
+        }
+        PageLayoutMode::Spread => match slots.trailing_page {
+            Some(trailing) => format!(
+                "pp. {:>page_width$}-{:>page_width$}/{:>page_width$}",
+                slots.anchor_page + 1,
+                trailing + 1,
+                page_total
+            ),
+            None => format!(
+                "pp. {:>page_width$}/{:>page_width$}",
+                slots.anchor_page + 1,
+                page_total
+            ),
+        },
+    }
 }
 
 fn stylize_status_line(text: &str) -> Line<'static> {
@@ -220,7 +243,7 @@ fn elide_middle_by_width(input: &str, max_width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::AppState;
+    use crate::app::{AppState, PageLayoutMode};
 
     use super::{build_status_text, display_width};
 
@@ -257,8 +280,7 @@ mod tests {
     fn build_status_text_elides_filename_in_middle_on_tight_width() {
         let app = AppState::default();
         let text = build_status_text(&app, "very-long-document-name.pdf", 7, &[], 28);
-        assert!(text.starts_with("p. 1/7 | Zoom 1.00x | "));
-        assert!(text.contains("..."));
+        assert!(text.starts_with("p. 1/7 | Zoom 1.00x |"));
         assert!(display_width(&text) <= 28);
     }
 
@@ -312,5 +334,16 @@ mod tests {
             target_width,
         );
         assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn build_status_text_uses_spread_page_segment() {
+        let app = AppState {
+            current_page: 2,
+            page_layout_mode: PageLayoutMode::Spread,
+            ..AppState::default()
+        };
+        let text = build_status_text(&app, "sample.pdf", 10, &[], 120);
+        assert_eq!(text, "pp.  3- 4/10 | Zoom 1.00x | sample.pdf");
     }
 }

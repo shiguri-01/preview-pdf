@@ -341,7 +341,8 @@ impl SearchState {
         };
 
         self.current_hit = Some(next_index);
-        app.current_page = self.hits[next_index];
+        let page_count = self.total_pages.max(self.hits[next_index] + 1);
+        app.current_page = app.normalize_page_for_layout(self.hits[next_index], page_count);
         app.status.message = format!(
             "search hit {}/{} (page {})",
             next_index + 1,

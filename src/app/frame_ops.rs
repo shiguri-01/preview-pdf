@@ -81,11 +81,85 @@ pub(crate) fn prefetch_class_for_completed_task(priority: RenderPriority) -> Pre
     }
 }
 
+pub(crate) fn compose_spread_frame(
+    left: Option<&RgbaFrame>,
+    right: Option<&RgbaFrame>,
+    gap_px: u32,
+) -> RgbaFrame {
+    let left_width = left
+        .map(|frame| frame.width)
+        .or_else(|| right.map(|frame| frame.width))
+        .unwrap_or(1);
+    let right_width = right
+        .map(|frame| frame.width)
+        .or_else(|| left.map(|frame| frame.width))
+        .unwrap_or(1);
+    let left_height = left
+        .map(|frame| frame.height)
+        .or_else(|| right.map(|frame| frame.height))
+        .unwrap_or(1);
+    let right_height = right
+        .map(|frame| frame.height)
+        .or_else(|| left.map(|frame| frame.height))
+        .unwrap_or(1);
+
+    let out_width = left_width
+        .saturating_add(gap_px)
+        .saturating_add(right_width)
+        .max(1);
+    let out_height = left_height.max(right_height).max(1);
+    let mut pixels = vec![0_u8; out_width as usize * out_height as usize * 4];
+
+    blit_side(&mut pixels, out_width, out_height, left, 0);
+    blit_side(
+        &mut pixels,
+        out_width,
+        out_height,
+        right,
+        left_width.saturating_add(gap_px),
+    );
+
+    RgbaFrame {
+        width: out_width,
+        height: out_height,
+        pixels: pixels.into(),
+    }
+}
+
+fn blit_side(
+    out_pixels: &mut [u8],
+    out_width: u32,
+    out_height: u32,
+    src: Option<&RgbaFrame>,
+    offset_x: u32,
+) {
+    let Some(src) = src else {
+        return;
+    };
+
+    let copy_width = src.width.min(out_width.saturating_sub(offset_x));
+    let copy_height = src.height.min(out_height);
+    if copy_width == 0 || copy_height == 0 {
+        return;
+    }
+
+    let out_stride = out_width as usize * 4;
+    let src_stride = src.width as usize * 4;
+    let row_bytes = copy_width as usize * 4;
+    for row in 0..copy_height as usize {
+        let out_start = row * out_stride + offset_x as usize * 4;
+        let out_end = out_start + row_bytes;
+        let src_start = row * src_stride;
+        let src_end = src_start + row_bytes;
+        out_pixels[out_start..out_end].copy_from_slice(&src.pixels[src_start..src_end]);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use super::{crop_frame_for_viewport, prepare_presenter_frame};
+    use super::{compose_spread_frame, crop_frame_for_viewport, prepare_presenter_frame};
     use crate::backend::RgbaFrame;
     use crate::presenter::{PanOffset, Viewport};
 
@@ -189,5 +263,42 @@ mod tests {
         assert!(Arc::ptr_eq(&frame.pixels, &prepared.pixels));
         assert_eq!(pan, PanOffset::default());
         assert_eq!(pan_for_presenter, PanOffset::default());
+    }
+
+    #[test]
+    fn compose_spread_frame_places_left_and_right_with_gap() {
+        let left = RgbaFrame {
+            width: 2,
+            height: 1,
+            pixels: vec![1, 0, 0, 255, 2, 0, 0, 255].into(),
+        };
+        let right = RgbaFrame {
+            width: 2,
+            height: 1,
+            pixels: vec![3, 0, 0, 255, 4, 0, 0, 255].into(),
+        };
+
+        let composed = compose_spread_frame(Some(&left), Some(&right), 1);
+        assert_eq!(composed.width, 5);
+        assert_eq!(composed.height, 1);
+        assert_eq!(composed.pixels[0], 1);
+        assert_eq!(composed.pixels[4], 2);
+        assert_eq!(composed.pixels[8], 0);
+        assert_eq!(composed.pixels[12], 3);
+    }
+
+    #[test]
+    fn compose_spread_frame_keeps_blank_slot_for_missing_side() {
+        let page = RgbaFrame {
+            width: 2,
+            height: 1,
+            pixels: vec![9, 0, 0, 255, 8, 0, 0, 255].into(),
+        };
+
+        let composed = compose_spread_frame(None, Some(&page), 1);
+        assert_eq!(composed.width, 5);
+        assert_eq!(composed.height, 1);
+        assert_eq!(composed.pixels[0], 0);
+        assert_eq!(composed.pixels[12], 9);
     }
 }

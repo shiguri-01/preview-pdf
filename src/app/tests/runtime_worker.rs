@@ -315,7 +315,7 @@ fn current_enqueue_preempts_prefetch_when_worker_is_full() {
     let (enqueued, preempted) = worker.enqueue_current_with_preemption(
         render_task(&doc, 0, RenderPriority::CriticalCurrent, 2),
         2,
-        current_key,
+        &[current_key],
     );
     assert!(!enqueued);
     assert_eq!(preempted, 1);
@@ -353,7 +353,7 @@ fn enqueue_current_with_preemption_does_not_exceed_inflight_limit() {
         let _ = worker.enqueue_current_with_preemption(
             render_task(&doc, 0, RenderPriority::CriticalCurrent, 2),
             2,
-            keep_key,
+            &[keep_key],
         );
         assert_eq!(worker.in_flight_len(), 1);
     }
@@ -374,7 +374,7 @@ fn cancel_stale_prefetch_drops_results_for_old_generation_prefetch() {
     assert!(worker.enqueue(render_task(&doc, 2, RenderPriority::Background, 1)));
     assert!(worker.enqueue(render_task(&doc, 3, RenderPriority::GuardReverse, 1)));
 
-    let canceled = worker.cancel_stale_prefetch_except(2, Some(current_key));
+    let canceled = worker.cancel_stale_prefetch_except(2, &[current_key]);
     assert_eq!(canceled, 2);
 
     let mut completed_keys = Vec::new();

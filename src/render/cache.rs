@@ -12,15 +12,21 @@ pub struct RenderedPageKey {
     pub doc_id: u64,
     pub page: usize,
     pub scale_milli: u32,
+    pub layout_tag: u16,
 }
 
 impl RenderedPageKey {
     pub fn new(doc_id: u64, page: usize, scale: f32) -> Self {
+        Self::with_layout(doc_id, page, scale, 0)
+    }
+
+    pub fn with_layout(doc_id: u64, page: usize, scale: f32, layout_tag: u16) -> Self {
         let scale_milli = (scale.max(0.0) * 1000.0).round() as u32;
         Self {
             doc_id,
             page,
             scale_milli,
+            layout_tag,
         }
     }
 }

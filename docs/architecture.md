@@ -9,14 +9,15 @@ This document defines the current architecture of `pvf`.
 - Main-loop message routing uses typed `DomainEvent`.
 - Runtime tuning is configured by `config.toml` with default fallbacks.
 - Error reporting uses typed `AppError` variants with contextual fields.
+- Viewer page layout supports typed `single` / `spread` mode with `ltr` / `rtl` spread direction.
 
 ## Top-level module map
 
 - `src/command/`
-  - `types.rs`: `Command`, matcher kinds, command outcome types.
+  - `types.rs`: `Command`, matcher kinds, layout command argument kinds, command outcome types.
   - `spec.rs`: command catalog for parser/palette.
   - `parse.rs`: command text parser.
-  - `core.rs`: command implementations (navigation/zoom/debug).
+  - `core.rs`: command implementations (navigation/zoom/layout/debug).
   - `dispatch.rs`: typed dispatch entry point returning `CommandDispatchResult`.
   - `ActionId`: stable typed identifier for executed commands.
 
@@ -32,8 +33,9 @@ This document defines the current architecture of `pvf`.
   - `core.rs`: application construction and subsystem ownership.
   - `event_loop.rs`: event-driven orchestration with `tokio::select!`.
   - `actors.rs`: loop-local actor state (`InputActor`, `RenderActor`, `UiActor`).
+  - `state.rs`: app state (current page, layout mode/direction, status, cache refs).
   - `input_ops.rs`: key routing, palette flow, extension background drain, command dispatch wiring.
-  - `render_ops.rs`: render completion ingestion, prefetch dispatch, current-page enqueue.
+  - `render_ops.rs`: render completion ingestion, prefetch dispatch, visible-page enqueue.
   - `view_ops.rs`: viewport/scale helpers and frame draw operations.
   - `event_bus.rs`: input stream pump and loop event sender.
   - `terminal_session.rs`: terminal lifecycle and `TerminalSurface` abstraction.

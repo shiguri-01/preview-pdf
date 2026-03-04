@@ -90,12 +90,12 @@ impl ExtensionHost {
         self.search.prev_hit(app)
     }
 
-    pub fn history_back(&mut self, app: &mut AppState) -> CommandOutcome {
-        self.history.back(app)
+    pub fn history_back(&mut self, app: &mut AppState, page_count: usize) -> CommandOutcome {
+        self.history.back(app, page_count)
     }
 
-    pub fn history_forward(&mut self, app: &mut AppState) -> CommandOutcome {
-        self.history.forward(app)
+    pub fn history_forward(&mut self, app: &mut AppState, page_count: usize) -> CommandOutcome {
+        self.history.forward(app, page_count)
     }
 
     pub fn history_goto(

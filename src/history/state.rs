@@ -22,7 +22,7 @@ pub struct HistoryState {
 }
 
 impl HistoryState {
-    pub fn back(&mut self, app: &mut AppState) -> CommandOutcome {
+    pub fn back(&mut self, app: &mut AppState, page_count: usize) -> CommandOutcome {
         let Some(target) = self.back_stack.pop_back() else {
             app.status.last_action_id = Some(ActionId::HistoryBack);
             app.status.message = "history back is empty".to_string();
@@ -34,13 +34,13 @@ impl HistoryState {
             reason: NavReason::History,
         });
         self.suppress_next_record = true;
-        app.current_page = target.page;
+        app.current_page = app.normalize_page_for_layout(target.page, page_count);
         app.status.last_action_id = Some(ActionId::HistoryBack);
         app.status.message = format!("history back -> page {}", app.current_page + 1);
         CommandOutcome::Applied
     }
 
-    pub fn forward(&mut self, app: &mut AppState) -> CommandOutcome {
+    pub fn forward(&mut self, app: &mut AppState, page_count: usize) -> CommandOutcome {
         let Some(target) = self.forward_stack.pop_back() else {
             app.status.last_action_id = Some(ActionId::HistoryForward);
             app.status.message = "history forward is empty".to_string();
@@ -52,7 +52,7 @@ impl HistoryState {
             reason: NavReason::History,
         });
         self.suppress_next_record = true;
-        app.current_page = target.page;
+        app.current_page = app.normalize_page_for_layout(target.page, page_count);
         app.status.last_action_id = Some(ActionId::HistoryForward);
         app.status.message = format!("history forward -> page {}", app.current_page + 1);
         CommandOutcome::Applied
@@ -73,7 +73,7 @@ impl HistoryState {
             ));
         }
 
-        let target = page - 1;
+        let target = app.normalize_page_for_layout(page - 1, page_count);
         app.status.last_action_id = Some(ActionId::HistoryGoto);
         if app.current_page == target {
             app.status.message = format!("already at page {page}");
@@ -121,14 +121,15 @@ impl HistoryState {
             return;
         }
 
-        let is_jump = from.abs_diff(*to) > 1;
-        if is_jump {
-            self.push_back(HistoryEntry {
-                page: *from,
-                reason: reason.clone(),
-            });
-            self.forward_stack.clear();
+        if matches!(reason, NavReason::Step) {
+            return;
         }
+
+        self.push_back(HistoryEntry {
+            page: *from,
+            reason: reason.clone(),
+        });
+        self.forward_stack.clear();
     }
 
     fn push_back(&mut self, entry: HistoryEntry) {

@@ -42,7 +42,10 @@ struct LoopStep {
     base_pan: PanOffset,
     enable_crop: bool,
     interactive: bool,
-    current_key: RenderedPageKey,
+    visible_pages: super::state::VisiblePageSlots,
+    required_pages: Vec<usize>,
+    required_render_keys: Vec<RenderedPageKey>,
+    presenter_key: RenderedPageKey,
     current_cached: bool,
 }
 
@@ -89,8 +92,9 @@ impl App {
                 &runtime.render_actor,
                 &mut runtime.render_worker,
                 CurrentTaskContext {
-                    current_key: step.current_key,
                     current_scale: step.current_scale,
+                    required_pages: step.required_pages.clone(),
+                    required_keys: step.required_render_keys.clone(),
                     current_cached: step.current_cached,
                 },
             );
@@ -99,7 +103,7 @@ impl App {
                 &mut runtime.render_actor,
                 &mut runtime.render_worker,
                 PrefetchDispatchContext {
-                    current_key: step.current_key,
+                    required_keys: step.required_render_keys.clone(),
                     current_cached: step.current_cached,
                     prefetch_viewport: step.prefetch_viewport,
                     base_pan: step.base_pan,
@@ -108,7 +112,7 @@ impl App {
                     dispatch_budget: self.config.render.prefetch_dispatch_budget_per_tick,
                 },
             );
-            self.update_ui_and_render_frame(&mut runtime, pdf, changed, step.current_cached)?;
+            self.update_ui_and_render_frame(&mut runtime, pdf, changed, &step)?;
 
             let wake_timeout = select_input_poll_timeout(
                 runtime.render_worker.in_flight_len() > 0,
@@ -143,6 +147,7 @@ impl App {
         page_count: usize,
     ) -> AppResult<LoopRuntime> {
         self.state.current_page = self.state.current_page.min(page_count - 1);
+        self.state.normalize_current_page(page_count);
 
         let loop_started_at = Instant::now();
         let pending_redraw_interval =
@@ -214,9 +219,25 @@ impl App {
         let base_pan = self.current_pan();
         let enable_crop = self.state.zoom > 1.0;
         let interactive = input_actor.is_interactive(prefetch_pause_after_input);
-        let current_key =
-            RenderedPageKey::new(pdf.doc_id(), self.state.current_page, current_scale);
-        let current_cached = self.render.runtime.has_cached_frame(&current_key);
+        let visible_pages = self.state.visible_page_slots(pdf.page_count());
+        let mut required_pages = vec![visible_pages.anchor_page];
+        if let Some(trailing_page) = visible_pages.trailing_page {
+            required_pages.push(trailing_page);
+        }
+        let required_render_keys = required_pages
+            .iter()
+            .map(|page| RenderedPageKey::new(pdf.doc_id(), *page, current_scale))
+            .collect::<Vec<_>>();
+        let current_cached = required_render_keys
+            .iter()
+            .all(|key| self.render.runtime.has_cached_frame(key));
+        let presenter_key = RenderedPageKey::with_layout(
+            pdf.doc_id(),
+            visible_pages.anchor_page,
+            current_scale,
+            self.state
+                .presenter_layout_tag(visible_pages.trailing_page.is_some()),
+        );
 
         LoopStep {
             current_scale,
@@ -224,7 +245,10 @@ impl App {
             base_pan,
             enable_crop,
             interactive,
-            current_key,
+            visible_pages,
+            required_pages,
+            required_render_keys,
+            presenter_key,
             current_cached,
         }
     }
@@ -236,6 +260,11 @@ impl App {
         current_scale: f32,
     ) -> bool {
         let mut changed = false;
+        let previous_page = self.state.current_page;
+        self.state.normalize_current_page(pdf.page_count());
+        if self.state.current_page != previous_page {
+            changed = true;
+        }
         if self.interaction.drain_background_events(&mut self.state) {
             changed = true;
         }
@@ -261,12 +290,12 @@ impl App {
         runtime: &mut LoopRuntime,
         pdf: &dyn PdfBackend,
         changed: bool,
-        current_cached: bool,
+        step: &LoopStep,
     ) -> AppResult<()> {
         let render_busy = runtime.render_worker.in_flight_len() > 0;
         let presenter_busy = self.render.presenter.has_pending_work();
         if runtime.ui_actor.should_request_pending_redraw(
-            current_cached,
+            step.current_cached,
             render_busy,
             presenter_busy,
         ) {
@@ -293,12 +322,15 @@ impl App {
                     palette_view,
                     status_bar_segments,
                     page_count: runtime.page_count,
+                    visible_pages: step.visible_pages,
+                    current_scale: step.current_scale,
+                    presenter_key: step.presenter_key,
                     generation: runtime.render_actor.generation(),
                     nav_streak: runtime.render_actor.nav_streak(),
                 },
             )?;
             runtime.ui_actor.clear_redraw();
-            if !current_cached {
+            if !step.current_cached {
                 runtime.ui_actor.on_drawn_non_cached_page();
             }
         }
@@ -358,14 +390,21 @@ impl App {
                 let viewport =
                     Self::current_viewport(&runtime.session, self.state.debug_status_visible);
                 let scale = self.compute_current_scale(pdf, self.state.current_page, viewport);
-                let current_key =
-                    RenderedPageKey::new(pdf.doc_id(), self.state.current_page, scale);
+                let visible_pages = self.state.visible_page_slots(pdf.page_count());
+                let mut current_keys = vec![RenderedPageKey::new(
+                    pdf.doc_id(),
+                    visible_pages.anchor_page,
+                    scale,
+                )];
+                if let Some(trailing_page) = visible_pages.trailing_page {
+                    current_keys.push(RenderedPageKey::new(pdf.doc_id(), trailing_page, scale));
+                }
                 let pan = self.current_pan();
                 let enable_crop = self.state.zoom > 1.0;
                 if self.render.process_render_result(
                     &mut self.state,
                     completed,
-                    current_key,
+                    &current_keys,
                     viewport,
                     pan,
                     enable_crop,

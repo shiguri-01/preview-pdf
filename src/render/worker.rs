@@ -208,7 +208,7 @@ impl RenderWorker {
         &mut self,
         task: RenderTask,
         current_generation: u64,
-        keep_key: RenderedPageKey,
+        keep_keys: &[RenderedPageKey],
     ) -> (bool, usize) {
         let key = RenderedPageKey::new(task.doc_id, task.page, task.scale);
         if self.in_flight.contains_key(&key) {
@@ -216,7 +216,7 @@ impl RenderWorker {
         }
 
         if self.in_flight.len() >= self.worker_threads {
-            let Some(victim_key) = self.select_preemptable_prefetch(current_generation, keep_key)
+            let Some(victim_key) = self.select_preemptable_prefetch(current_generation, keep_keys)
             else {
                 return (false, 0);
             };
@@ -229,12 +229,12 @@ impl RenderWorker {
     fn select_preemptable_prefetch(
         &self,
         current_generation: u64,
-        keep_key: RenderedPageKey,
+        keep_keys: &[RenderedPageKey],
     ) -> Option<RenderedPageKey> {
         self.in_flight
             .iter()
             .filter_map(|(key, entry)| {
-                if *key == keep_key {
+                if keep_keys.contains(key) {
                     return None;
                 }
                 let class_rank = match entry.priority {
@@ -270,12 +270,12 @@ impl RenderWorker {
     pub(crate) fn cancel_stale_prefetch_except(
         &mut self,
         generation: u64,
-        keep_key: Option<RenderedPageKey>,
+        keep_keys: &[RenderedPageKey],
     ) -> usize {
         let mut canceled = 0;
         for (key, entry) in &mut self.in_flight {
             let stale = entry.generation < generation;
-            let should_keep = keep_key.is_some_and(|keep| keep == *key);
+            let should_keep = keep_keys.contains(key);
             let prefetch = matches!(
                 entry.priority,
                 RenderPriority::DirectionalLead | RenderPriority::Background

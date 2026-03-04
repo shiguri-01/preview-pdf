@@ -36,7 +36,7 @@ impl NavTracker {
         self.streak = 0;
     }
 
-    pub(crate) fn on_page_change(&mut self, prev_page: usize, next_page: usize) {
+    pub(crate) fn on_page_change(&mut self, prev_page: usize, next_page: usize, page_step: usize) {
         if prev_page == next_page {
             return;
         }
@@ -48,7 +48,8 @@ impl NavTracker {
         } else {
             NavDirection::Backward
         };
-        let is_jump = next_page.abs_diff(prev_page) > 1;
+        let is_step = next_page.abs_diff(prev_page) == page_step.max(1);
+        let is_jump = !is_step;
 
         if is_jump {
             self.dir = direction;
@@ -79,22 +80,36 @@ mod tests {
         let mut tracker = NavTracker::default();
         assert_eq!(tracker.intent().generation, 0);
 
-        tracker.on_page_change(0, 1);
+        tracker.on_page_change(0, 1, 1);
         let first = tracker.intent();
         assert_eq!(first.generation, 1);
         assert_eq!(first.streak, 1);
         assert_eq!(first.dir, NavDirection::Forward);
 
-        tracker.on_page_change(1, 2);
+        tracker.on_page_change(1, 2, 1);
         let second = tracker.intent();
         assert_eq!(second.generation, 2);
         assert_eq!(second.streak, 2);
         assert_eq!(second.dir, NavDirection::Forward);
 
-        tracker.on_page_change(2, 1);
+        tracker.on_page_change(2, 1, 1);
         let third = tracker.intent();
         assert_eq!(third.generation, 3);
         assert_eq!(third.streak, 1);
         assert_eq!(third.dir, NavDirection::Backward);
+    }
+
+    #[test]
+    fn nav_tracker_treats_two_page_spread_steps_as_continuous() {
+        let mut tracker = NavTracker::default();
+        tracker.on_page_change(0, 2, 2);
+        let first = tracker.intent();
+        assert_eq!(first.streak, 1);
+        assert_eq!(first.dir, NavDirection::Forward);
+
+        tracker.on_page_change(2, 4, 2);
+        let second = tracker.intent();
+        assert_eq!(second.streak, 2);
+        assert_eq!(second.dir, NavDirection::Forward);
     }
 }

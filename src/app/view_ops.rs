@@ -63,7 +63,8 @@ impl App {
         let slots = self
             .state
             .visible_page_slots_for_page(page, pdf.page_count());
-        let (page_width_pt, page_height_pt) = resolve_layout_dimensions(pdf, slots);
+        let (page_width_pt, page_height_pt) =
+            resolve_layout_dimensions(pdf, self.state.page_layout_mode, slots);
         let caps = self.render.presenter.capabilities();
         let max_scale = caps
             .preferred_max_render_scale
@@ -331,12 +332,21 @@ fn draw_viewer_outcome(
     }
 }
 
-fn resolve_layout_dimensions(pdf: &dyn PdfBackend, slots: VisiblePageSlots) -> (f32, f32) {
+fn resolve_layout_dimensions(
+    pdf: &dyn PdfBackend,
+    mode: PageLayoutMode,
+    slots: VisiblePageSlots,
+) -> (f32, f32) {
     let (anchor_width, anchor_height) = pdf
         .page_dimensions(slots.anchor_page)
         .unwrap_or(DEFAULT_PAGE_SIZE_PT);
     match slots.trailing_page {
-        None => (anchor_width, anchor_height),
+        None => match mode {
+            PageLayoutMode::Single => (anchor_width, anchor_height),
+            // Tail spread still composes a blank partner slot, so width should
+            // stay consistent with regular spread composition.
+            PageLayoutMode::Spread => (anchor_width + anchor_width, anchor_height),
+        },
         Some(trailing_page) => {
             let (trailing_width, trailing_height) = pdf
                 .page_dimensions(trailing_page)
@@ -366,8 +376,59 @@ fn format_render_target(slots: VisiblePageSlots, page_count: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ViewerDisplayDecision, decide_viewer_display};
+    use std::path::{Path, PathBuf};
+
+    use super::{ViewerDisplayDecision, decide_viewer_display, resolve_layout_dimensions};
+    use crate::app::{PageLayoutMode, VisiblePageSlots};
+    use crate::backend::{PdfBackend, RgbaFrame};
     use crate::presenter::{PresenterFeedback, PresenterRenderOutcome};
+
+    struct DimPdf {
+        path: PathBuf,
+        dims: Vec<(f32, f32)>,
+    }
+
+    impl DimPdf {
+        fn new(dims: Vec<(f32, f32)>) -> Self {
+            Self {
+                path: PathBuf::from("dims.pdf"),
+                dims,
+            }
+        }
+    }
+
+    impl PdfBackend for DimPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            1
+        }
+
+        fn page_count(&self) -> usize {
+            self.dims.len()
+        }
+
+        fn page_dimensions(&self, page: usize) -> crate::error::AppResult<(f32, f32)> {
+            self.dims
+                .get(page)
+                .copied()
+                .ok_or(crate::error::AppError::invalid_argument("out of range"))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> crate::error::AppResult<RgbaFrame> {
+            Ok(RgbaFrame {
+                width: 1,
+                height: 1,
+                pixels: vec![0_u8; 4].into(),
+            })
+        }
+
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(String::new())
+        }
+    }
 
     #[test]
     fn display_decision_clears_when_no_image_drawn() {
@@ -487,5 +548,36 @@ mod tests {
                 show_error: false,
             }
         );
+    }
+
+    #[test]
+    fn resolve_layout_dimensions_uses_blank_partner_width_for_tail_spread() {
+        let pdf = DimPdf::new(vec![(200.0, 300.0)]);
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let single = resolve_layout_dimensions(&pdf, PageLayoutMode::Single, slots);
+        let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
+
+        assert_eq!(single, (200.0, 300.0));
+        assert_eq!(spread, (400.0, 300.0));
+    }
+
+    #[test]
+    fn resolve_layout_dimensions_uses_both_pages_when_trailing_exists() {
+        let pdf = DimPdf::new(vec![(200.0, 300.0), (180.0, 280.0)]);
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: Some(1),
+            left_page: Some(0),
+            right_page: Some(1),
+        };
+
+        let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
+        assert_eq!(spread, (380.0, 300.0));
     }
 }

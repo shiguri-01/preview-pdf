@@ -1,6 +1,60 @@
 use crate::command::ActionId;
 use crate::palette::PaletteKind;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PageLayoutMode {
+    #[default]
+    Single,
+    Spread,
+}
+
+impl PageLayoutMode {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Spread => "spread",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpreadDirection {
+    #[default]
+    Ltr,
+    Rtl,
+}
+
+impl SpreadDirection {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Ltr => "ltr",
+            Self::Rtl => "rtl",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VisiblePageSlots {
+    pub anchor_page: usize,
+    pub trailing_page: Option<usize>,
+    pub left_page: Option<usize>,
+    pub right_page: Option<usize>,
+}
+
+impl VisiblePageSlots {
+    pub fn existing_pages(self) -> [Option<usize>; 2] {
+        [Some(self.anchor_page), self.trailing_page]
+    }
+
+    pub fn label(self, page_count: usize) -> String {
+        let total = page_count.max(1);
+        match self.trailing_page {
+            Some(trailing) => format!("{}-{}", self.anchor_page + 1, trailing + 1),
+            None => format!("{}/{}", self.anchor_page + 1, total),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,
@@ -36,6 +90,8 @@ pub struct CacheRefs {
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub current_page: usize,
+    pub page_layout_mode: PageLayoutMode,
+    pub spread_direction: SpreadDirection,
     pub zoom: f32,
     pub scroll_x: i32,
     pub scroll_y: i32,
@@ -49,6 +105,8 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             current_page: 0,
+            page_layout_mode: PageLayoutMode::Single,
+            spread_direction: SpreadDirection::Ltr,
             zoom: 1.0,
             scroll_x: 0,
             scroll_y: 0,
@@ -56,6 +114,82 @@ impl Default for AppState {
             mode: Mode::Normal,
             status: StatusState::default(),
             caches: CacheRefs::default(),
+        }
+    }
+}
+
+impl AppState {
+    pub fn page_step(&self) -> usize {
+        match self.page_layout_mode {
+            PageLayoutMode::Single => 1,
+            PageLayoutMode::Spread => 2,
+        }
+    }
+
+    pub fn normalize_page_for_layout(&self, page: usize, page_count: usize) -> usize {
+        if page_count == 0 {
+            return 0;
+        }
+
+        let clamped = page.min(page_count - 1);
+        match self.page_layout_mode {
+            PageLayoutMode::Single => clamped,
+            PageLayoutMode::Spread => clamped.saturating_sub(clamped % 2),
+        }
+    }
+
+    pub fn normalize_current_page(&mut self, page_count: usize) {
+        self.current_page = self.normalize_page_for_layout(self.current_page, page_count);
+    }
+
+    pub fn visible_page_slots(&self, page_count: usize) -> VisiblePageSlots {
+        self.visible_page_slots_for_page(self.current_page, page_count)
+    }
+
+    pub fn visible_page_slots_for_page(&self, page: usize, page_count: usize) -> VisiblePageSlots {
+        if page_count == 0 {
+            return VisiblePageSlots {
+                anchor_page: 0,
+                trailing_page: None,
+                left_page: Some(0),
+                right_page: None,
+            };
+        }
+
+        let anchor_page = self.normalize_page_for_layout(page, page_count);
+        if self.page_layout_mode == PageLayoutMode::Single {
+            return VisiblePageSlots {
+                anchor_page,
+                trailing_page: None,
+                left_page: Some(anchor_page),
+                right_page: None,
+            };
+        }
+
+        let trailing_page = (anchor_page + 1 < page_count).then_some(anchor_page + 1);
+        let (left_page, right_page) = match self.spread_direction {
+            SpreadDirection::Ltr => (Some(anchor_page), trailing_page),
+            SpreadDirection::Rtl => (trailing_page, Some(anchor_page)),
+        };
+        VisiblePageSlots {
+            anchor_page,
+            trailing_page,
+            left_page,
+            right_page,
+        }
+    }
+
+    pub fn presenter_layout_tag(&self, has_trailing_page: bool) -> u16 {
+        match (
+            self.page_layout_mode,
+            self.spread_direction,
+            has_trailing_page,
+        ) {
+            (PageLayoutMode::Single, _, _) => 0,
+            (PageLayoutMode::Spread, SpreadDirection::Ltr, true) => 1,
+            (PageLayoutMode::Spread, SpreadDirection::Rtl, true) => 2,
+            (PageLayoutMode::Spread, SpreadDirection::Ltr, false) => 3,
+            (PageLayoutMode::Spread, SpreadDirection::Rtl, false) => 4,
         }
     }
 }

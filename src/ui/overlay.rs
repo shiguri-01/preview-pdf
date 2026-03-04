@@ -10,7 +10,7 @@ use crate::palette::PaletteView;
 
 use super::layout::centered_rect;
 
-pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, page: usize) {
+pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, label: &str) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -31,7 +31,7 @@ pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, page: usize) {
         return;
     }
 
-    let message = Paragraph::new(format!("Loading... page {}", page))
+    let message = Paragraph::new(format!("Loading... {label}"))
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::White));
     frame.render_widget(message, inner);

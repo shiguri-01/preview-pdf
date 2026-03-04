@@ -23,6 +23,18 @@ const ARGS_SCROLL: [ArgSpec; 2] = [
         required: true,
     },
 ];
+const ARGS_SET_PAGE_LAYOUT: [ArgSpec; 2] = [
+    ArgSpec {
+        name: "mode",
+        kind: ArgKind::String,
+        required: true,
+    },
+    ArgSpec {
+        name: "direction",
+        kind: ArgKind::String,
+        required: false,
+    },
+];
 const ARGS_OPEN_PALETTE: [ArgSpec; 2] = [
     ArgSpec {
         name: "kind",
@@ -53,7 +65,7 @@ const ARGS_HISTORY_GOTO: [ArgSpec; 1] = [ArgSpec {
     required: true,
 }];
 
-const COMMAND_SPECS: [CommandSpec; 24] = [
+const COMMAND_SPECS: [CommandSpec; 25] = [
     CommandSpec {
         id: "next-page",
         title: "Next Page",
@@ -98,6 +110,11 @@ const COMMAND_SPECS: [CommandSpec; 24] = [
         id: "scroll",
         title: "Scroll",
         args: &ARGS_SCROLL,
+    },
+    CommandSpec {
+        id: "set-page-layout",
+        title: "Set Page Layout",
+        args: &ARGS_SET_PAGE_LAYOUT,
     },
     CommandSpec {
         id: "debug-status-show",

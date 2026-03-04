@@ -7,8 +7,8 @@ use crate::event::{AppEvent, NavReason};
 use crate::extension::ExtensionHost;
 
 use super::core::{
-    first_page, goto_page, last_page, next_page, prev_page, set_debug_status_visible, set_zoom,
-    set_zoom_with_id,
+    first_page, goto_page, last_page, next_page, prev_page, set_debug_status_visible,
+    set_page_layout, set_zoom, set_zoom_with_id,
 };
 use super::types::{ActionId, Command, CommandOutcome};
 
@@ -49,6 +49,9 @@ pub fn dispatch(
             app.status.message = format!("scrolled to ({}, {})", app.scroll_x, app.scroll_y);
             Ok(CommandOutcome::Applied)
         }
+        Command::SetPageLayout { mode, direction } => {
+            set_page_layout(app, page_count, mode, direction)
+        }
         Command::DebugStatusShow => set_debug_status_visible(app, true, ActionId::DebugStatusShow),
         Command::DebugStatusHide => set_debug_status_visible(app, false, ActionId::DebugStatusHide),
         Command::DebugStatusToggle => {
@@ -73,8 +76,8 @@ pub fn dispatch(
         }
         Command::NextSearchHit => Ok(extension_host.next_search_hit(app)),
         Command::PrevSearchHit => Ok(extension_host.prev_search_hit(app)),
-        Command::HistoryBack => Ok(extension_host.history_back(app)),
-        Command::HistoryForward => Ok(extension_host.history_forward(app)),
+        Command::HistoryBack => Ok(extension_host.history_back(app, page_count)),
+        Command::HistoryForward => Ok(extension_host.history_forward(app, page_count)),
         Command::HistoryGoto { page } => extension_host.history_goto(app, page_count, page),
         Command::OpenHistory => Ok(extension_host.open_history_palette(app, palette_requests)),
         Command::Cancel => {

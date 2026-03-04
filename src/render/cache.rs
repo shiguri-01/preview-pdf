@@ -12,15 +12,21 @@ pub struct RenderedPageKey {
     pub doc_id: u64,
     pub page: usize,
     pub scale_milli: u32,
+    pub layout_tag: u16,
 }
 
 impl RenderedPageKey {
     pub fn new(doc_id: u64, page: usize, scale: f32) -> Self {
+        Self::with_layout(doc_id, page, scale, 0)
+    }
+
+    pub fn with_layout(doc_id: u64, page: usize, scale: f32, layout_tag: u16) -> Self {
         let scale_milli = (scale.max(0.0) * 1000.0).round() as u32;
         Self {
             doc_id,
             page,
             scale_milli,
+            layout_tag,
         }
     }
 }
@@ -347,5 +353,20 @@ mod tests {
         assert_eq!(cache.len(), 1);
         assert!(cache.contains(&oversize));
         assert!(!cache.contains(&prefetch));
+    }
+
+    #[test]
+    fn layout_tag_partitions_cache_entries() {
+        let mut cache = RenderedPageCache::new(4, 1024 * 1024);
+        let base = RenderedPageKey::new(7, 2, 1.0);
+        let tagged = RenderedPageKey::with_layout(7, 2, 1.0, 9);
+
+        let _ = cache.insert(base, frame(4, 4), false);
+        let _ = cache.insert(tagged, frame(5, 5), false);
+
+        assert_eq!(base.layout_tag, 0);
+        assert_ne!(base, tagged);
+        assert!(cache.contains(&base));
+        assert!(cache.contains(&tagged));
     }
 }

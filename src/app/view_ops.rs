@@ -1,5 +1,6 @@
 use ratatui::widgets::Clear;
 
+use crate::app::PageLayoutMode;
 use crate::backend::PdfBackend;
 use crate::command::ActionId;
 use crate::config::Config;
@@ -8,18 +9,24 @@ use crate::palette::PaletteView;
 use crate::presenter::{
     PanOffset, PresenterFeedback, PresenterRenderOptions, PresenterRenderOutcome, Viewport,
 };
+use crate::render::cache::RenderedPageKey;
 use crate::ui;
 
 use super::constants::DEFAULT_PAGE_SIZE_PT;
 use super::core::{App, RenderSubsystem};
-use super::scale::{compute_render_scale, compute_scale, quantize_scale};
-use super::state::AppState;
+use super::scale::{compute_render_scale, compute_scale, quantize_scale, resolved_cell_size_px};
+use super::state::{AppState, VisiblePageSlots};
 use super::terminal_session::TerminalSurface;
+
+const SPREAD_GAP_CELLS: u16 = 2;
 
 pub(super) struct RenderFramePlan {
     pub(super) palette_view: Option<PaletteView>,
     pub(super) status_bar_segments: Vec<String>,
     pub(super) page_count: usize,
+    pub(super) visible_pages: VisiblePageSlots,
+    pub(super) current_scale: f32,
+    pub(super) presenter_key: RenderedPageKey,
     pub(super) generation: u64,
     pub(super) nav_streak: usize,
 }
@@ -53,8 +60,11 @@ impl App {
             return quantize_scale(self.state.zoom);
         };
 
+        let slots = self
+            .state
+            .visible_page_slots_for_page(page, pdf.page_count());
         let (page_width_pt, page_height_pt) =
-            pdf.page_dimensions(page).unwrap_or(DEFAULT_PAGE_SIZE_PT);
+            resolve_layout_dimensions(pdf, self.state.page_layout_mode, slots);
         let caps = self.render.presenter.capabilities();
         let max_scale = caps
             .preferred_max_render_scale
@@ -81,7 +91,7 @@ impl RenderSubsystem {
     pub(super) fn render_frame(
         &mut self,
         state: &mut AppState,
-        config: &Config,
+        _config: &Config,
         session: &mut impl TerminalSurface,
         pdf: &dyn PdfBackend,
         plan: RenderFramePlan,
@@ -90,6 +100,9 @@ impl RenderSubsystem {
             palette_view,
             status_bar_segments,
             page_count,
+            visible_pages,
+            current_scale,
+            presenter_key,
             generation,
             nav_streak: _nav_streak,
         } = plan;
@@ -102,9 +115,6 @@ impl RenderSubsystem {
             .unwrap_or_else(|| pdf.path().display().to_string());
         let presenter_caps = self.presenter.capabilities();
         let presenter_runtime = self.presenter.runtime_info();
-        let (page_width_pt, page_height_pt) = pdf
-            .page_dimensions(state.current_page)
-            .unwrap_or(DEFAULT_PAGE_SIZE_PT);
         let enable_crop = state.zoom > 1.0;
         let mut pan = PanOffset {
             cells_x: state.scroll_x,
@@ -113,6 +123,13 @@ impl RenderSubsystem {
         let mut render_error: Option<String> = None;
         let mut render_feedback = PresenterFeedback::None;
         let mut viewer_has_image = self.viewer_has_image;
+        let loading_label = format_loading_target(visible_pages);
+        let render_target = format_render_target(visible_pages, page_count);
+        let spread_gap_px = u32::from(
+            resolved_cell_size_px(presenter_caps.cell_px)
+                .0
+                .saturating_mul(SPREAD_GAP_CELLS),
+        );
 
         session.draw(|frame| {
             let layout = ui::split_layout(frame.area(), state.debug_status_visible);
@@ -135,29 +152,35 @@ impl RenderSubsystem {
                 height: layout.viewer_inner.height.max(1),
             };
             let image_area = layout.viewer_inner;
-            let max_scale = presenter_caps
-                .preferred_max_render_scale
-                .clamp(1.0, config.render.max_render_scale);
-            let render_scale = compute_render_scale(
-                viewport,
-                presenter_caps.cell_px,
-                page_width_pt,
-                page_height_pt,
-                max_scale,
-            );
-            let scale = compute_scale(state.zoom, render_scale);
 
-            match self.runtime.try_prepare_current_page_from_cache(
-                pdf,
-                self.presenter.as_mut(),
-                viewport,
-                state.current_page,
-                scale,
-                &mut pan,
-                presenter_caps.cell_px,
-                enable_crop,
-                generation,
-            ) {
+            let prepare_result = match state.page_layout_mode {
+                PageLayoutMode::Single => self.runtime.try_prepare_current_page_from_cache(
+                    pdf,
+                    self.presenter.as_mut(),
+                    viewport,
+                    visible_pages.anchor_page,
+                    current_scale,
+                    &mut pan,
+                    presenter_caps.cell_px,
+                    enable_crop,
+                    generation,
+                ),
+                PageLayoutMode::Spread => self.runtime.try_prepare_spread_from_cache(
+                    pdf,
+                    self.presenter.as_mut(),
+                    viewport,
+                    visible_pages,
+                    presenter_key,
+                    current_scale,
+                    &mut pan,
+                    presenter_caps.cell_px,
+                    enable_crop,
+                    generation,
+                    spread_gap_px,
+                ),
+            };
+
+            match prepare_result {
                 Ok(true) => match self.presenter.render(
                     frame,
                     image_area,
@@ -174,7 +197,7 @@ impl RenderSubsystem {
                             frame,
                             image_area,
                             outcome,
-                            state.current_page + 1,
+                            loading_label.as_str(),
                             None,
                             viewer_has_image,
                         );
@@ -191,7 +214,7 @@ impl RenderSubsystem {
                             frame,
                             image_area,
                             outcome,
-                            state.current_page + 1,
+                            loading_label.as_str(),
                             Some(&message),
                             viewer_has_image,
                         );
@@ -208,7 +231,7 @@ impl RenderSubsystem {
                         frame,
                         image_area,
                         outcome,
-                        state.current_page + 1,
+                        loading_label.as_str(),
                         None,
                         viewer_has_image,
                     );
@@ -225,7 +248,7 @@ impl RenderSubsystem {
                         frame,
                         image_area,
                         outcome,
-                        state.current_page + 1,
+                        loading_label.as_str(),
                         Some(&message),
                         viewer_has_image,
                     );
@@ -246,13 +269,10 @@ impl RenderSubsystem {
             state.status.message = format!("render error: {err}");
         } else if render_feedback == PresenterFeedback::Failed {
             state.status.last_action_id = Some(ActionId::RenderPage);
-            state.status.message = format!(
-                "render error: failed to render page {}",
-                state.current_page + 1
-            );
+            state.status.message = format!("render error: failed to render {render_target}");
         } else if render_feedback == PresenterFeedback::Pending {
             state.status.last_action_id = Some(ActionId::RenderPending);
-            state.status.message = format!("rendering page {}...", state.current_page + 1);
+            state.status.message = format!("rendering {render_target}...");
         }
 
         Ok(())
@@ -293,7 +313,7 @@ fn draw_viewer_outcome(
     frame: &mut ratatui::Frame<'_>,
     image_area: ratatui::layout::Rect,
     outcome: PresenterRenderOutcome,
-    page: usize,
+    loading_label: &str,
     error_message: Option<&str>,
     viewer_has_image: bool,
 ) {
@@ -302,20 +322,113 @@ fn draw_viewer_outcome(
         frame.render_widget(Clear, image_area);
     }
     if decision.show_loading {
-        ui::draw_loading_overlay(frame, image_area, page);
+        ui::draw_loading_overlay(frame, image_area, loading_label);
     }
     if decision.show_error {
         let message = error_message
             .map(ToOwned::to_owned)
-            .unwrap_or_else(|| format!("Failed to render page {page}"));
+            .unwrap_or_else(|| format!("Failed to render {loading_label}"));
         ui::draw_error_overlay(frame, image_area, &message);
+    }
+}
+
+fn resolve_layout_dimensions(
+    pdf: &dyn PdfBackend,
+    mode: PageLayoutMode,
+    slots: VisiblePageSlots,
+) -> (f32, f32) {
+    let (anchor_width, anchor_height) = pdf
+        .page_dimensions(slots.anchor_page)
+        .unwrap_or(DEFAULT_PAGE_SIZE_PT);
+    match slots.trailing_page {
+        None => match mode {
+            PageLayoutMode::Single => (anchor_width, anchor_height),
+            // Tail spread still composes a blank partner slot, so width should
+            // stay consistent with regular spread composition.
+            PageLayoutMode::Spread => (anchor_width + anchor_width, anchor_height),
+        },
+        Some(trailing_page) => {
+            let (trailing_width, trailing_height) = pdf
+                .page_dimensions(trailing_page)
+                .unwrap_or((anchor_width, anchor_height));
+            (
+                anchor_width + trailing_width,
+                anchor_height.max(trailing_height),
+            )
+        }
+    }
+}
+
+fn format_loading_target(slots: VisiblePageSlots) -> String {
+    match slots.trailing_page {
+        Some(trailing) => format!("pages {}-{}", slots.anchor_page + 1, trailing + 1),
+        None => format!("page {}", slots.anchor_page + 1),
+    }
+}
+
+fn format_render_target(slots: VisiblePageSlots, page_count: usize) -> String {
+    let total = page_count.max(1);
+    match slots.trailing_page {
+        Some(trailing) => format!("pages {}-{}/{}", slots.anchor_page + 1, trailing + 1, total),
+        None => format!("page {}/{}", slots.anchor_page + 1, total),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ViewerDisplayDecision, decide_viewer_display};
+    use std::path::{Path, PathBuf};
+
+    use super::{ViewerDisplayDecision, decide_viewer_display, resolve_layout_dimensions};
+    use crate::app::{PageLayoutMode, VisiblePageSlots};
+    use crate::backend::{PdfBackend, RgbaFrame};
     use crate::presenter::{PresenterFeedback, PresenterRenderOutcome};
+
+    struct DimPdf {
+        path: PathBuf,
+        dims: Vec<(f32, f32)>,
+    }
+
+    impl DimPdf {
+        fn new(dims: Vec<(f32, f32)>) -> Self {
+            Self {
+                path: PathBuf::from("dims.pdf"),
+                dims,
+            }
+        }
+    }
+
+    impl PdfBackend for DimPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            1
+        }
+
+        fn page_count(&self) -> usize {
+            self.dims.len()
+        }
+
+        fn page_dimensions(&self, page: usize) -> crate::error::AppResult<(f32, f32)> {
+            self.dims
+                .get(page)
+                .copied()
+                .ok_or(crate::error::AppError::invalid_argument("out of range"))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> crate::error::AppResult<RgbaFrame> {
+            Ok(RgbaFrame {
+                width: 1,
+                height: 1,
+                pixels: vec![0_u8; 4].into(),
+            })
+        }
+
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(String::new())
+        }
+    }
 
     #[test]
     fn display_decision_clears_when_no_image_drawn() {
@@ -435,5 +548,36 @@ mod tests {
                 show_error: false,
             }
         );
+    }
+
+    #[test]
+    fn resolve_layout_dimensions_uses_blank_partner_width_for_tail_spread() {
+        let pdf = DimPdf::new(vec![(200.0, 300.0)]);
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let single = resolve_layout_dimensions(&pdf, PageLayoutMode::Single, slots);
+        let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
+
+        assert_eq!(single, (200.0, 300.0));
+        assert_eq!(spread, (400.0, 300.0));
+    }
+
+    #[test]
+    fn resolve_layout_dimensions_uses_both_pages_when_trailing_exists() {
+        let pdf = DimPdf::new(vec![(200.0, 300.0), (180.0, 280.0)]);
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: Some(1),
+            left_page: Some(0),
+            right_page: Some(1),
+        };
+
+        let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
+        assert_eq!(spread, (380.0, 300.0));
     }
 }

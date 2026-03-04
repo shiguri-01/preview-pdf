@@ -2,7 +2,7 @@ use crate::error::{AppError, AppResult};
 use crate::palette::PaletteKind;
 
 use super::spec::all_command_specs;
-use super::types::{Command, SearchMatcherKind};
+use super::types::{Command, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg};
 
 pub fn parse_command_text(input: &str) -> AppResult<Command> {
     let trimmed = input.trim();
@@ -29,6 +29,7 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         "zoom-in" => parse_no_args(id, args_text, Command::ZoomIn),
         "zoom-out" => parse_no_args(id, args_text, Command::ZoomOut),
         "scroll" => parse_scroll(args_text),
+        "set-page-layout" => parse_set_page_layout(args_text),
         "debug-status-show" => parse_no_args(id, args_text, Command::DebugStatusShow),
         "debug-status-hide" => parse_no_args(id, args_text, Command::DebugStatusHide),
         "debug-status-toggle" => parse_no_args(id, args_text, Command::DebugStatusToggle),
@@ -179,6 +180,37 @@ fn parse_scroll(args_text: &str) -> AppResult<Command> {
     Ok(Command::Scroll { dx, dy })
 }
 
+fn parse_set_page_layout(args_text: &str) -> AppResult<Command> {
+    let mut parts = args_text.split_whitespace();
+    let Some(mode_text) = parts.next() else {
+        return Err(AppError::invalid_argument(
+            "set-page-layout requires at least 1 argument: mode",
+        ));
+    };
+    let mode = PageLayoutModeArg::parse(mode_text)
+        .ok_or(AppError::invalid_argument("unknown page layout mode"))?;
+
+    let direction = match parts.next() {
+        Some(direction_text) => Some(
+            SpreadDirectionArg::parse(direction_text)
+                .ok_or(AppError::invalid_argument("unknown spread direction"))?,
+        ),
+        None => None,
+    };
+    if parts.next().is_some() {
+        return Err(AppError::invalid_argument(
+            "set-page-layout accepts at most 2 arguments",
+        ));
+    }
+    if mode == PageLayoutModeArg::Single && direction.is_some() {
+        return Err(AppError::invalid_argument(
+            "single layout does not accept a spread direction",
+        ));
+    }
+
+    Ok(Command::SetPageLayout { mode, direction })
+}
+
 fn parse_submit_search(args_text: &str) -> AppResult<Command> {
     let trimmed = args_text.trim();
     if trimmed.is_empty() {
@@ -245,7 +277,7 @@ fn split_last_token(input: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::parse_command_text;
-    use crate::command::{Command, SearchMatcherKind};
+    use crate::command::{Command, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg};
     use crate::palette::PaletteKind;
 
     #[test]
@@ -282,6 +314,24 @@ mod tests {
             Command::SubmitSearch {
                 query: "hello".to_string(),
                 matcher: SearchMatcherKind::ContainsSensitive,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_set_page_layout_supports_mode_and_direction() {
+        assert_eq!(
+            parse_command_text("set-page-layout spread").expect("parse should succeed"),
+            Command::SetPageLayout {
+                mode: PageLayoutModeArg::Spread,
+                direction: None,
+            }
+        );
+        assert_eq!(
+            parse_command_text("set-page-layout spread rtl").expect("parse should succeed"),
+            Command::SetPageLayout {
+                mode: PageLayoutModeArg::Spread,
+                direction: Some(SpreadDirectionArg::Rtl),
             }
         );
     }

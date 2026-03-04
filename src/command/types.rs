@@ -23,6 +23,52 @@ impl SearchMatcherKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageLayoutModeArg {
+    Single,
+    Spread,
+}
+
+impl PageLayoutModeArg {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Spread => "spread",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "single" => Some(Self::Single),
+            "spread" => Some(Self::Spread),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpreadDirectionArg {
+    Ltr,
+    Rtl,
+}
+
+impl SpreadDirectionArg {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Ltr => "ltr",
+            Self::Rtl => "rtl",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "ltr" => Some(Self::Ltr),
+            "rtl" => Some(Self::Rtl),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     NextPage,
@@ -40,6 +86,10 @@ pub enum Command {
     Scroll {
         dx: i32,
         dy: i32,
+    },
+    SetPageLayout {
+        mode: PageLayoutModeArg,
+        direction: Option<SpreadDirectionArg>,
     },
     DebugStatusShow,
     DebugStatusHide,
@@ -77,6 +127,7 @@ pub enum ActionId {
     ZoomIn,
     ZoomOut,
     Scroll,
+    SetPageLayout,
     DebugStatusShow,
     DebugStatusHide,
     DebugStatusToggle,
@@ -116,6 +167,7 @@ impl ActionId {
             Self::ZoomIn => "zoom-in",
             Self::ZoomOut => "zoom-out",
             Self::Scroll => "scroll",
+            Self::SetPageLayout => "set-page-layout",
             Self::DebugStatusShow => "debug-status-show",
             Self::DebugStatusHide => "debug-status-hide",
             Self::DebugStatusToggle => "debug-status-toggle",
@@ -157,6 +209,7 @@ impl Command {
             Self::ZoomIn => ActionId::ZoomIn,
             Self::ZoomOut => ActionId::ZoomOut,
             Self::Scroll { .. } => ActionId::Scroll,
+            Self::SetPageLayout { .. } => ActionId::SetPageLayout,
             Self::DebugStatusShow => ActionId::DebugStatusShow,
             Self::DebugStatusHide => ActionId::DebugStatusHide,
             Self::DebugStatusToggle => ActionId::DebugStatusToggle,
@@ -180,7 +233,7 @@ impl Command {
 mod tests {
     use crate::palette::PaletteKind;
 
-    use super::{ActionId, Command, SearchMatcherKind};
+    use super::{ActionId, Command, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg};
 
     #[test]
     fn command_action_id_maps_search_and_history_variants() {
@@ -195,6 +248,14 @@ mod tests {
         );
         assert_eq!(Command::HistoryBack.action_id(), ActionId::HistoryBack);
         assert_eq!(Command::OpenHistory.action_id(), ActionId::History);
+        assert_eq!(
+            Command::SetPageLayout {
+                mode: PageLayoutModeArg::Spread,
+                direction: Some(SpreadDirectionArg::Rtl),
+            }
+            .action_id(),
+            ActionId::SetPageLayout
+        );
         assert_eq!(
             Command::OpenPalette {
                 kind: PaletteKind::Command,

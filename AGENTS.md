@@ -11,7 +11,7 @@
 - `cargo run`: run locally.
 - `cargo test`: run tests.
 - `cargo fmt`: format.
-- `cargo clippy --all-targets --all-features -D warnings`: lint and fail on warnings.
+- `cargo clippy --all-targets --all-features -- -D warnings`: lint and fail on warnings.
 
 ## Testing
 - Default: in-file `#[cfg(test)]` modules

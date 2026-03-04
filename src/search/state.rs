@@ -12,18 +12,10 @@ use crate::palette::PaletteKind;
 
 use super::engine::{SearchEngine, SearchEvent, SearchMatcher};
 
+#[derive(Default)]
 pub struct SearchRuntime {
     state: SearchState,
     engine: SearchEngine,
-}
-
-impl Default for SearchRuntime {
-    fn default() -> Self {
-        Self {
-            state: SearchState::default(),
-            engine: SearchEngine::new(),
-        }
-    }
 }
 
 impl SearchRuntime {
@@ -258,8 +250,7 @@ impl SearchState {
                         continue;
                     }
                     self.in_progress = false;
-                    self.scanned_pages_progress =
-                        self.total_pages.max(self.scanned_pages_progress);
+                    self.scanned_pages_progress = self.total_pages.max(self.scanned_pages_progress);
                     self.hit_pages_progress = hits.len();
                     self.current_hit = None;
                     self.hits = hits;

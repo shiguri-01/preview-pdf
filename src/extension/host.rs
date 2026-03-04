@@ -12,6 +12,11 @@ use crate::search::{SearchExtension, SearchState};
 
 use super::traits::Extension;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ExtensionUiSnapshot {
+    pub search_active: bool,
+}
+
 pub struct ExtensionHost {
     search: SearchState,
     history: HistoryState,
@@ -76,8 +81,8 @@ impl ExtensionHost {
             .submit(app, pdf, &mut self.search_engine, query, matcher)
     }
 
-    pub fn cancel_search(&mut self, app: &mut AppState, pdf: &dyn PdfBackend) -> AppResult<bool> {
-        self.search.cancel(app, pdf, &mut self.search_engine)
+    pub fn cancel_search(&mut self, pdf: &dyn PdfBackend) -> AppResult<bool> {
+        self.search.cancel(pdf, &mut self.search_engine)
     }
 
     pub fn next_search_hit(&mut self, app: &mut AppState) -> CommandOutcome {
@@ -134,6 +139,12 @@ impl ExtensionHost {
             segments.push(segment);
         }
         segments
+    }
+
+    pub fn ui_snapshot(&self) -> ExtensionUiSnapshot {
+        ExtensionUiSnapshot {
+            search_active: self.search.is_active(),
+        }
     }
 }
 
@@ -235,12 +246,12 @@ mod tests {
             SearchMatcherKind::ContainsInsensitive,
         )
         .expect("submit-search should succeed");
-        assert!(app.search_ui.active);
+        assert!(host.ui_snapshot().search_active);
 
         let canceled = host
-            .cancel_search(&mut app, &pdf)
+            .cancel_search(&pdf)
             .expect("cancel-search should succeed");
         assert!(canceled);
-        assert!(!app.search_ui.active);
+        assert!(!host.ui_snapshot().search_active);
     }
 }

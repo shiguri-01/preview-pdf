@@ -8,6 +8,7 @@ This document defines extension contracts and runtime behavior in `pvf`.
 - Extension dispatch is static and typed.
 - Extension state is stored as concrete fields in `ExtensionHost`.
 - Extension hooks are explicit: input, event, background, status bar segment.
+- Extension-owned UI state is exposed to palette providers via a read-only snapshot (`ExtensionUiSnapshot`), not via `AppState`.
 
 ## Extension contract
 
@@ -68,6 +69,10 @@ Dispatch order is fixed:
 - Status bar flow:
   - UI asks `ExtensionHost::status_bar_segments()`.
   - Host aggregates non-empty segments from registered extensions.
+
+- Palette flow:
+  - Palette contexts include `ExtensionUiSnapshot`.
+  - Providers can gate candidates (for example, search navigation commands) using snapshot fields like `search_active`.
 
 ## Built-in extensions
 

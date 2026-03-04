@@ -4,6 +4,7 @@ use tui_input::backend::crossterm::EventHandler;
 
 use crate::app::AppState;
 use crate::error::AppResult;
+use crate::extension::ExtensionUiSnapshot;
 
 use super::kind::PaletteKind;
 use super::matcher::{CandidateMatcher, ContainsMatcher};
@@ -48,6 +49,7 @@ impl PaletteManager {
         &mut self,
         registry: &PaletteRegistry,
         app: &AppState,
+        extensions: &ExtensionUiSnapshot,
         kind: PaletteKind,
         seed: Option<String>,
     ) -> AppResult<()> {
@@ -57,6 +59,7 @@ impl PaletteManager {
 
         let ctx = PaletteContext {
             app,
+            extensions,
             kind,
             input: input.value(),
             seed: seed.as_deref(),
@@ -107,6 +110,7 @@ impl PaletteManager {
         &mut self,
         registry: &PaletteRegistry,
         app: &AppState,
+        extensions: &ExtensionUiSnapshot,
         key: KeyEvent,
     ) -> AppResult<PaletteKeyResult> {
         let Some(session) = self.active.as_mut() else {
@@ -140,6 +144,7 @@ impl PaletteManager {
                 let selected = selected_candidate(session);
                 let ctx = PaletteContext {
                     app,
+                    extensions,
                     kind: session.kind,
                     input: session.input.value(),
                     seed: session.seed.as_deref(),
@@ -153,7 +158,7 @@ impl PaletteManager {
                         session.input = Input::new(value);
                     }
                 }
-                self.rebuild(registry, app)?;
+                self.rebuild(registry, app, extensions)?;
                 return Ok(PaletteKeyResult::Consumed { redraw: true });
             }
             KeyCode::Enter => {
@@ -161,6 +166,7 @@ impl PaletteManager {
                 let provider = registry.get(session.kind);
                 let ctx = PaletteContext {
                     app,
+                    extensions,
                     kind: session.kind,
                     input: session.input.value(),
                     seed: session.seed.as_deref(),
@@ -175,7 +181,7 @@ impl PaletteManager {
         }
 
         session.input.handle_event(&Event::Key(key));
-        self.rebuild(registry, app)?;
+        self.rebuild(registry, app, extensions)?;
         Ok(PaletteKeyResult::Consumed { redraw: true })
     }
 
@@ -202,7 +208,12 @@ impl PaletteManager {
         })
     }
 
-    fn rebuild(&mut self, registry: &PaletteRegistry, app: &AppState) -> AppResult<()> {
+    fn rebuild(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+    ) -> AppResult<()> {
         let Some(existing) = self.active.as_ref() else {
             return Ok(());
         };
@@ -215,6 +226,7 @@ impl PaletteManager {
         let provider = registry.get(kind);
         let ctx = PaletteContext {
             app,
+            extensions,
             kind,
             input: &input_text,
             seed: seed.as_deref(),

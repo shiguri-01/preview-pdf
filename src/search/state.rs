@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crossterm::event::KeyCode;
 
-use crate::app::{AppState, PaletteRequest, SearchUiState};
+use crate::app::{AppState, PaletteRequest};
 use crate::backend::PdfBackend;
 use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
@@ -80,7 +80,6 @@ impl SearchState {
             self.generation = search_engine.cancel(pdf.path())?;
             self.query.clear();
             self.clear_results();
-            self.sync_ui_state(app);
             app.status.message = "search query is empty".to_string();
             return Ok(CommandOutcome::Noop);
         }
@@ -97,8 +96,6 @@ impl SearchState {
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
-        self.sync_ui_state(app);
-
         app.status.message = format!("search started ({})", self.matcher.id());
         Ok(CommandOutcome::Applied)
     }
@@ -113,7 +110,6 @@ impl SearchState {
 
     pub fn cancel(
         &mut self,
-        app: &mut AppState,
         pdf: &dyn PdfBackend,
         search_engine: &mut SearchEngine,
     ) -> AppResult<bool> {
@@ -124,7 +120,6 @@ impl SearchState {
         self.generation = search_engine.cancel(pdf.path())?;
         self.query.clear();
         self.clear_results();
-        self.sync_ui_state(app);
         Ok(true)
     }
 
@@ -203,9 +198,6 @@ impl SearchState {
                 }
             }
         }
-        if changed {
-            self.sync_ui_state(app);
-        }
         changed
     }
 
@@ -215,6 +207,18 @@ impl SearchState {
 
     pub fn query(&self) -> &str {
         &self.query
+    }
+
+    pub fn is_active(&self) -> bool {
+        !self.query.is_empty()
+    }
+
+    pub fn in_progress(&self) -> bool {
+        self.in_progress
+    }
+
+    pub fn total_pages(&self) -> usize {
+        self.total_pages
     }
 
     pub fn status_bar_segment(&self) -> Option<String> {
@@ -242,7 +246,6 @@ impl SearchState {
             } else {
                 "no search hits available".to_string()
             };
-            self.sync_ui_state(app);
             return CommandOutcome::Noop;
         }
 
@@ -266,7 +269,6 @@ impl SearchState {
             self.hits.len(),
             app.current_page + 1
         );
-        self.sync_ui_state(app);
         CommandOutcome::Applied
     }
 
@@ -278,17 +280,6 @@ impl SearchState {
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
-    }
-
-    fn sync_ui_state(&self, app: &mut AppState) {
-        app.search_ui = SearchUiState {
-            active: !self.query.is_empty(),
-            in_progress: self.in_progress,
-            scanned_pages: self.scanned_pages,
-            total_pages: self.total_pages,
-            hits_found: self.hits_found,
-            current_hit: self.current_hit,
-        };
     }
 }
 
@@ -436,9 +427,9 @@ mod tests {
             .expect("submit should succeed");
 
         assert_eq!(outcome, CommandOutcome::Applied);
-        assert!(app.search_ui.active);
-        assert!(app.search_ui.in_progress);
-        assert_eq!(app.search_ui.total_pages, 5);
+        assert!(state.is_active());
+        assert!(state.in_progress());
+        assert_eq!(state.total_pages(), 5);
         assert_eq!(
             state.status_bar_segment(),
             Some("SEARCH 0 hits".to_string())
@@ -461,7 +452,7 @@ mod tests {
                 SearchMatcherKind::ContainsInsensitive,
             )
             .expect("submit should succeed");
-        assert!(app.search_ui.active);
+        assert!(state.is_active());
 
         let outcome = state
             .submit(
@@ -474,8 +465,8 @@ mod tests {
             .expect("empty submit should succeed");
 
         assert_eq!(outcome, CommandOutcome::Noop);
-        assert!(!app.search_ui.active);
-        assert!(!app.search_ui.in_progress);
+        assert!(!state.is_active());
+        assert!(!state.in_progress());
         assert_eq!(state.status_bar_segment(), None);
     }
 
@@ -495,13 +486,13 @@ mod tests {
                 SearchMatcherKind::ContainsInsensitive,
             )
             .expect("submit should succeed");
-        assert!(app.search_ui.active);
+        assert!(state.is_active());
 
         let canceled = state
-            .cancel(&mut app, &pdf, &mut engine)
+            .cancel(&pdf, &mut engine)
             .expect("cancel should succeed");
         assert!(canceled);
-        assert!(!app.search_ui.active);
+        assert!(!state.is_active());
         assert_eq!(state.status_bar_segment(), None);
     }
 
@@ -545,7 +536,7 @@ mod tests {
             .expect("submit should succeed");
         app.status.message = "search canceled".to_string();
         state
-            .cancel(&mut app, &pdf, &mut engine)
+            .cancel(&pdf, &mut engine)
             .expect("cancel should succeed");
 
         for _ in 0..20 {

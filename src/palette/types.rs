@@ -2,6 +2,7 @@ use super::kind::PaletteKind;
 use crate::app::AppState;
 use crate::command::Command;
 use crate::error::AppResult;
+use crate::extension::ExtensionUiSnapshot;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteInputMode {
@@ -57,6 +58,7 @@ pub enum PaletteTabEffect {
 
 pub struct PaletteContext<'a> {
     pub app: &'a AppState,
+    pub extensions: &'a ExtensionUiSnapshot,
     pub kind: PaletteKind,
     pub input: &'a str,
     pub seed: Option<&'a str>,

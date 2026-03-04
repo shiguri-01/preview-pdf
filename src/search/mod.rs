@@ -6,27 +6,22 @@ use crate::app::AppState;
 use crate::event::AppEvent;
 use crate::extension::Extension;
 use crate::input::{AppInputEvent, InputHookResult};
-use engine::SearchEngine;
 pub use palette::SearchPaletteProvider;
-pub use state::SearchState;
+pub use state::{SearchRuntime, SearchState};
 
 pub struct SearchExtension;
 
 impl SearchExtension {
-    pub fn drain_background(
-        state: &mut SearchState,
-        app: &mut AppState,
-        search_engine: &mut SearchEngine,
-    ) -> bool {
-        state.on_background(app, search_engine)
+    pub fn drain_background(state: &mut SearchRuntime, app: &mut AppState) -> bool {
+        state.on_background(app)
     }
 }
 
 impl Extension for SearchExtension {
-    type State = SearchState;
+    type State = SearchRuntime;
 
     fn init_state() -> Self::State {
-        SearchState::default()
+        SearchRuntime::default()
     }
 
     fn handle_input(

@@ -40,9 +40,8 @@ pub trait Extension {
 
 ```rust
 pub struct ExtensionHost {
-    search: SearchState,
+    search: SearchRuntime,
     history: HistoryState,
-    search_engine: SearchEngine,
 }
 ```
 
@@ -64,7 +63,7 @@ Dispatch order is fixed:
 - Background flow:
   - Main loop calls `command::drain_background_events()`.
   - Host polls extension background hooks.
-  - Search results are drained through host-owned `SearchEngine`.
+  - Search results are drained through extension-owned `SearchEngine` (inside `SearchRuntime`).
 
 - Status bar flow:
   - UI asks `ExtensionHost::status_bar_segments()`.

@@ -12,6 +12,84 @@ use crate::palette::PaletteKind;
 
 use super::engine::{SearchEngine, SearchEvent, SearchMatcher};
 
+pub struct SearchRuntime {
+    state: SearchState,
+    engine: SearchEngine,
+}
+
+impl Default for SearchRuntime {
+    fn default() -> Self {
+        Self {
+            state: SearchState::default(),
+            engine: SearchEngine::new(),
+        }
+    }
+}
+
+impl SearchRuntime {
+    pub fn with_engine(engine: SearchEngine) -> Self {
+        Self {
+            state: SearchState::default(),
+            engine,
+        }
+    }
+
+    pub fn open_palette(
+        &mut self,
+        app: &mut AppState,
+        palette_requests: &mut VecDeque<PaletteRequest>,
+    ) -> CommandOutcome {
+        self.state.open_palette(app, palette_requests)
+    }
+
+    pub fn submit(
+        &mut self,
+        app: &mut AppState,
+        pdf: &dyn PdfBackend,
+        query: String,
+        matcher: SearchMatcherKind,
+    ) -> AppResult<CommandOutcome> {
+        self.state
+            .submit(app, pdf, &mut self.engine, query, matcher)
+    }
+
+    pub fn cancel(&mut self, pdf: &dyn PdfBackend) -> AppResult<bool> {
+        self.state.cancel(pdf, &mut self.engine)
+    }
+
+    pub fn next_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+        self.state.next_hit(app)
+    }
+
+    pub fn prev_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+        self.state.prev_hit(app)
+    }
+
+    pub fn on_input(&mut self, event: AppInputEvent, app: &mut AppState) -> InputHookResult {
+        self.state.on_input(event, app)
+    }
+
+    pub fn on_background(&mut self, app: &mut AppState) -> bool {
+        self.state.on_background(app, &mut self.engine)
+    }
+
+    pub fn matcher(&self) -> SearchMatcherKind {
+        self.state.matcher()
+    }
+
+    pub fn query(&self) -> &str {
+        self.state.query()
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.state.is_active()
+    }
+
+    pub fn status_bar_segment(&self) -> Option<String> {
+        self.state.status_bar_segment()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchState {
     query: String,

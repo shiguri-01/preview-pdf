@@ -44,7 +44,7 @@ This document defines the current architecture of `pvf`.
   - `events.rs`, `input.rs`: shared extension event/input types.
 
 - `src/search/`
-  - `state.rs`: search state and background result application.
+  - `state.rs`: search state and background result application (search UI state lives here, not in `AppState`).
   - `engine.rs`: async search worker and job lifecycle.
   - `palette.rs`: search palette provider.
   - `mod.rs`: `SearchExtension` wiring.
@@ -109,4 +109,5 @@ This document defines the current architecture of `pvf`.
   - `InteractionSubsystem` (`ExtensionSubsystem`, `PaletteSubsystem`)
 - Extension dispatch order is fixed in code.
 - Palette providers are resolved via static `match` on `PaletteKind`.
+- Palette providers consume extension-owned UI snapshot data (`ExtensionUiSnapshot`) for extension-specific visibility/state.
 - Render and search workers support backend-loader injection via typed contracts.

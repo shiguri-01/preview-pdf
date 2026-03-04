@@ -119,6 +119,7 @@ impl<'a> PaletteProviderRef<'a> {
 
 #[cfg(test)]
 mod tests {
+    use crate::extension::ExtensionUiSnapshot;
     use crate::palette::{PaletteContext, PaletteKind};
 
     use super::PaletteRegistry;
@@ -126,8 +127,10 @@ mod tests {
     #[test]
     fn get_returns_provider_for_all_palette_kinds() {
         let registry = PaletteRegistry::default();
+        let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
             app: &crate::app::AppState::default(),
+            extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
             seed: None,

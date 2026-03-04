@@ -195,7 +195,7 @@ fn find_spec(id: &str) -> Option<crate::command::CommandSpec> {
 
 fn can_show_command_spec(id: &str, ctx: &PaletteContext<'_>) -> bool {
     if is_search_navigation_command(id) {
-        return ctx.app.search_ui.active;
+        return ctx.extensions.search_active;
     }
     true
 }
@@ -350,6 +350,7 @@ fn is_subsequence(query: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::app::AppState;
+    use crate::extension::ExtensionUiSnapshot;
     use crate::palette::{PaletteContext, PaletteKind, PaletteProvider};
 
     use super::CommandPaletteProvider;
@@ -363,10 +364,11 @@ mod tests {
         search_active: bool,
     ) -> Vec<crate::palette::PaletteCandidate> {
         let provider = CommandPaletteProvider;
-        let mut app = AppState::default();
-        app.search_ui.active = search_active;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
         let ctx = PaletteContext {
             app: &app,
+            extensions: &extensions,
             kind: PaletteKind::Command,
             input,
             seed: None,
@@ -378,8 +380,10 @@ mod tests {
     fn list_hides_search_hit_navigation_when_search_is_inactive() {
         let provider = CommandPaletteProvider;
         let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
             app: &app,
+            extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
             seed: None,
@@ -401,10 +405,11 @@ mod tests {
     #[test]
     fn list_shows_search_hit_navigation_when_search_is_active() {
         let provider = CommandPaletteProvider;
-        let mut app = AppState::default();
-        app.search_ui.active = true;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::with_search_active(true);
         let ctx = PaletteContext {
             app: &app,
+            extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
             seed: None,

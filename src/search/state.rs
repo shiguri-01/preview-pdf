@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crossterm::event::KeyCode;
 
-use crate::app::{AppState, PaletteRequest, SearchUiState};
+use crate::app::{AppState, PaletteRequest};
 use crate::backend::PdfBackend;
 use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
@@ -12,15 +12,90 @@ use crate::palette::PaletteKind;
 
 use super::engine::{SearchEngine, SearchEvent, SearchMatcher};
 
+#[derive(Default)]
+pub struct SearchRuntime {
+    state: SearchState,
+    engine: SearchEngine,
+}
+
+impl SearchRuntime {
+    pub fn with_engine(engine: SearchEngine) -> Self {
+        Self {
+            state: SearchState::default(),
+            engine,
+        }
+    }
+
+    pub fn open_palette(
+        &mut self,
+        app: &mut AppState,
+        palette_requests: &mut VecDeque<PaletteRequest>,
+    ) -> CommandOutcome {
+        self.state.open_palette(app, palette_requests)
+    }
+
+    pub fn submit(
+        &mut self,
+        app: &mut AppState,
+        pdf: &dyn PdfBackend,
+        query: String,
+        matcher: SearchMatcherKind,
+    ) -> AppResult<CommandOutcome> {
+        self.state
+            .submit(app, pdf, &mut self.engine, query, matcher)
+    }
+
+    pub fn cancel(&mut self, pdf: &dyn PdfBackend) -> AppResult<bool> {
+        self.state.cancel(pdf, &mut self.engine)
+    }
+
+    pub fn next_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+        self.state.next_hit(app)
+    }
+
+    pub fn prev_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+        self.state.prev_hit(app)
+    }
+
+    pub fn on_input(&mut self, event: AppInputEvent, app: &mut AppState) -> InputHookResult {
+        self.state.on_input(event, app)
+    }
+
+    pub fn on_background(&mut self, app: &mut AppState) -> bool {
+        self.state.on_background(app, &mut self.engine)
+    }
+
+    pub fn matcher(&self) -> SearchMatcherKind {
+        self.state.matcher()
+    }
+
+    pub fn query(&self) -> &str {
+        self.state.query()
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.state.is_active()
+    }
+
+    pub fn status_bar_segment(&self) -> Option<String> {
+        self.state.status_bar_segment()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SearchState {
     query: String,
     matcher: SearchMatcherKind,
     generation: u64,
     in_progress: bool,
-    scanned_pages: usize,
+    /// Number of scanned pages observed so far while scanning.
+    /// This is progress-oriented and may change before completion.
+    scanned_pages_progress: usize,
     total_pages: usize,
-    hits_found: usize,
+    /// Number of matched pages observed so far while scanning.
+    /// This is progress-oriented and may change before completion.
+    hit_pages_progress: usize,
+    /// Final matched page list (0-based page indexes), available on completion.
     hits: Vec<usize>,
     current_hit: Option<usize>,
     last_error: Option<String>,
@@ -33,9 +108,9 @@ impl Default for SearchState {
             matcher: SearchMatcherKind::ContainsInsensitive,
             generation: 0,
             in_progress: false,
-            scanned_pages: 0,
+            scanned_pages_progress: 0,
             total_pages: 0,
-            hits_found: 0,
+            hit_pages_progress: 0,
             hits: Vec::new(),
             current_hit: None,
             last_error: None,
@@ -80,7 +155,6 @@ impl SearchState {
             self.generation = search_engine.cancel(pdf.path())?;
             self.query.clear();
             self.clear_results();
-            self.sync_ui_state(app);
             app.status.message = "search query is empty".to_string();
             return Ok(CommandOutcome::Noop);
         }
@@ -91,14 +165,12 @@ impl SearchState {
         self.query = query;
         self.generation = generation;
         self.in_progress = true;
-        self.scanned_pages = 0;
+        self.scanned_pages_progress = 0;
         self.total_pages = pdf.page_count();
-        self.hits_found = 0;
+        self.hit_pages_progress = 0;
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
-        self.sync_ui_state(app);
-
         app.status.message = format!("search started ({})", self.matcher.id());
         Ok(CommandOutcome::Applied)
     }
@@ -113,7 +185,6 @@ impl SearchState {
 
     pub fn cancel(
         &mut self,
-        app: &mut AppState,
         pdf: &dyn PdfBackend,
         search_engine: &mut SearchEngine,
     ) -> AppResult<bool> {
@@ -124,7 +195,6 @@ impl SearchState {
         self.generation = search_engine.cancel(pdf.path())?;
         self.query.clear();
         self.clear_results();
-        self.sync_ui_state(app);
         Ok(true)
     }
 
@@ -164,9 +234,9 @@ impl SearchState {
                     if snapshot.generation != self.generation {
                         continue;
                     }
-                    self.scanned_pages = snapshot.scanned_pages;
+                    self.scanned_pages_progress = snapshot.scanned_pages;
                     self.total_pages = snapshot.total_pages;
-                    self.hits_found = snapshot.hit_pages;
+                    self.hit_pages_progress = snapshot.hit_pages;
                     self.in_progress = true;
                     app.status.last_action_id = Some(ActionId::SearchProgress);
                     app.status.message = format!(
@@ -180,8 +250,8 @@ impl SearchState {
                         continue;
                     }
                     self.in_progress = false;
-                    self.scanned_pages = self.total_pages.max(self.scanned_pages);
-                    self.hits_found = hits.len();
+                    self.scanned_pages_progress = self.total_pages.max(self.scanned_pages_progress);
+                    self.hit_pages_progress = hits.len();
                     self.current_hit = None;
                     self.hits = hits;
                     app.status.last_action_id = Some(ActionId::SearchComplete);
@@ -203,9 +273,6 @@ impl SearchState {
                 }
             }
         }
-        if changed {
-            self.sync_ui_state(app);
-        }
         changed
     }
 
@@ -217,16 +284,32 @@ impl SearchState {
         &self.query
     }
 
+    pub fn is_active(&self) -> bool {
+        !self.query.is_empty()
+    }
+
+    pub fn in_progress(&self) -> bool {
+        self.in_progress
+    }
+
+    pub fn total_pages(&self) -> usize {
+        self.total_pages
+    }
+
     pub fn status_bar_segment(&self) -> Option<String> {
         if self.query.is_empty() {
             return None;
         }
 
         if let Some(current_hit) = self.current_hit {
-            return Some(format!("SEARCH {}/{}", current_hit + 1, self.hits_found));
+            return Some(format!(
+                "SEARCH {}/{}",
+                current_hit + 1,
+                self.hit_pages_progress
+            ));
         }
 
-        Some(format!("SEARCH {} hits", self.hits_found))
+        Some(format!("SEARCH {} hits", self.hit_pages_progress))
     }
 
     fn move_hit(&mut self, app: &mut AppState, forward: bool) -> CommandOutcome {
@@ -242,7 +325,6 @@ impl SearchState {
             } else {
                 "no search hits available".to_string()
             };
-            self.sync_ui_state(app);
             return CommandOutcome::Noop;
         }
 
@@ -266,29 +348,17 @@ impl SearchState {
             self.hits.len(),
             app.current_page + 1
         );
-        self.sync_ui_state(app);
         CommandOutcome::Applied
     }
 
     fn clear_results(&mut self) {
         self.in_progress = false;
-        self.scanned_pages = 0;
+        self.scanned_pages_progress = 0;
         self.total_pages = 0;
-        self.hits_found = 0;
+        self.hit_pages_progress = 0;
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
-    }
-
-    fn sync_ui_state(&self, app: &mut AppState) {
-        app.search_ui = SearchUiState {
-            active: !self.query.is_empty(),
-            in_progress: self.in_progress,
-            scanned_pages: self.scanned_pages,
-            total_pages: self.total_pages,
-            hits_found: self.hits_found,
-            current_hit: self.current_hit,
-        };
     }
 }
 
@@ -419,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn submit_search_marks_search_ui_active() {
+    fn submit_search_marks_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
         let pdf = StubPdf::new(5);
@@ -436,9 +506,9 @@ mod tests {
             .expect("submit should succeed");
 
         assert_eq!(outcome, CommandOutcome::Applied);
-        assert!(app.search_ui.active);
-        assert!(app.search_ui.in_progress);
-        assert_eq!(app.search_ui.total_pages, 5);
+        assert!(state.is_active());
+        assert!(state.in_progress());
+        assert_eq!(state.total_pages(), 5);
         assert_eq!(
             state.status_bar_segment(),
             Some("SEARCH 0 hits".to_string())
@@ -446,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn submit_empty_query_clears_search_ui() {
+    fn submit_empty_query_clears_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
         let pdf = StubPdf::new(2);
@@ -461,7 +531,7 @@ mod tests {
                 SearchMatcherKind::ContainsInsensitive,
             )
             .expect("submit should succeed");
-        assert!(app.search_ui.active);
+        assert!(state.is_active());
 
         let outcome = state
             .submit(
@@ -474,8 +544,8 @@ mod tests {
             .expect("empty submit should succeed");
 
         assert_eq!(outcome, CommandOutcome::Noop);
-        assert!(!app.search_ui.active);
-        assert!(!app.search_ui.in_progress);
+        assert!(!state.is_active());
+        assert!(!state.in_progress());
         assert_eq!(state.status_bar_segment(), None);
     }
 
@@ -495,13 +565,13 @@ mod tests {
                 SearchMatcherKind::ContainsInsensitive,
             )
             .expect("submit should succeed");
-        assert!(app.search_ui.active);
+        assert!(state.is_active());
 
         let canceled = state
-            .cancel(&mut app, &pdf, &mut engine)
+            .cancel(&pdf, &mut engine)
             .expect("cancel should succeed");
         assert!(canceled);
-        assert!(!app.search_ui.active);
+        assert!(!state.is_active());
         assert_eq!(state.status_bar_segment(), None);
     }
 
@@ -509,7 +579,7 @@ mod tests {
     fn status_bar_segment_only_shows_position_after_hit_selection() {
         let state = SearchState {
             query: "needle".to_string(),
-            hits_found: 3,
+            hit_pages_progress: 3,
             current_hit: None,
             ..SearchState::default()
         };
@@ -520,7 +590,7 @@ mod tests {
 
         let state = SearchState {
             query: "needle".to_string(),
-            hits_found: 3,
+            hit_pages_progress: 3,
             current_hit: Some(1),
             ..SearchState::default()
         };
@@ -545,7 +615,7 @@ mod tests {
             .expect("submit should succeed");
         app.status.message = "search canceled".to_string();
         state
-            .cancel(&mut app, &pdf, &mut engine)
+            .cancel(&pdf, &mut engine)
             .expect("cancel should succeed");
 
         for _ in 0..20 {

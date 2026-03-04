@@ -82,7 +82,7 @@ pub fn dispatch(
                 palette_requests.push_back(PaletteRequest::Close);
                 app.status.last_action_id = Some(ActionId::Cancel);
                 app.status.message = "canceled current mode".to_string();
-            } else if extension_host.cancel_search(app, pdf)? {
+            } else if extension_host.cancel_search(pdf)? {
                 app.status.last_action_id = Some(ActionId::Cancel);
                 app.status.message = "search canceled".to_string();
             } else {
@@ -296,7 +296,7 @@ mod tests {
             SearchMatcherKind::ContainsInsensitive,
         )
         .expect("submit-search should succeed");
-        assert!(app.search_ui.active);
+        assert!(host.ui_snapshot().search_active);
 
         let result = dispatch(
             &mut app,
@@ -309,7 +309,7 @@ mod tests {
 
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(result.emitted_events.len(), 1);
-        assert!(!app.search_ui.active);
+        assert!(!host.ui_snapshot().search_active);
         assert_eq!(app.status.message, "search canceled");
         assert!(palette_requests.is_empty());
     }

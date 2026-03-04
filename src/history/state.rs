@@ -33,8 +33,9 @@ impl HistoryState {
             page: app.current_page,
             reason: NavReason::History,
         });
-        self.suppress_next_record = true;
-        app.current_page = app.normalize_page_for_layout(target.page, page_count);
+        let normalized_target = app.normalize_page_for_layout(target.page, page_count);
+        self.suppress_next_record = app.current_page != normalized_target;
+        app.current_page = normalized_target;
         app.status.last_action_id = Some(ActionId::HistoryBack);
         app.status.message = format!("history back -> page {}", app.current_page + 1);
         CommandOutcome::Applied
@@ -51,8 +52,9 @@ impl HistoryState {
             page: app.current_page,
             reason: NavReason::History,
         });
-        self.suppress_next_record = true;
-        app.current_page = app.normalize_page_for_layout(target.page, page_count);
+        let normalized_target = app.normalize_page_for_layout(target.page, page_count);
+        self.suppress_next_record = app.current_page != normalized_target;
+        app.current_page = normalized_target;
         app.status.last_action_id = Some(ActionId::HistoryForward);
         app.status.message = format!("history forward -> page {}", app.current_page + 1);
         CommandOutcome::Applied
@@ -178,5 +180,72 @@ fn format_reason(reason: &NavReason) -> String {
         NavReason::Search(query) if query.is_empty() => "Search".to_string(),
         NavReason::Search(query) => format!("Search: {query}"),
         NavReason::History => "History".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HistoryEntry, HistoryState};
+    use crate::app::{AppState, PageLayoutMode};
+    use crate::event::{AppEvent, NavReason};
+
+    #[test]
+    fn back_without_movement_does_not_suppress_next_real_page_change() {
+        let mut state = HistoryState::default();
+        state.back_stack.push_back(HistoryEntry {
+            page: 3,
+            reason: NavReason::History,
+        });
+        let mut app = AppState {
+            current_page: 2,
+            page_layout_mode: PageLayoutMode::Spread,
+            ..AppState::default()
+        };
+
+        let outcome = state.back(&mut app, 8);
+        assert!(matches!(outcome, crate::command::CommandOutcome::Applied));
+        assert_eq!(app.current_page, 2);
+
+        state.on_event(&AppEvent::PageChanged {
+            from: 2,
+            to: 4,
+            reason: NavReason::Jump,
+        });
+
+        assert!(state.forward_stack.is_empty());
+        assert_eq!(state.back_stack.len(), 1);
+        let last = state.back_stack.back().expect("entry should be recorded");
+        assert_eq!(last.page, 2);
+        assert!(matches!(last.reason, NavReason::Jump));
+    }
+
+    #[test]
+    fn forward_without_movement_does_not_suppress_next_real_page_change() {
+        let mut state = HistoryState::default();
+        state.forward_stack.push_back(HistoryEntry {
+            page: 3,
+            reason: NavReason::History,
+        });
+        let mut app = AppState {
+            current_page: 2,
+            page_layout_mode: PageLayoutMode::Spread,
+            ..AppState::default()
+        };
+
+        let outcome = state.forward(&mut app, 8);
+        assert!(matches!(outcome, crate::command::CommandOutcome::Applied));
+        assert_eq!(app.current_page, 2);
+
+        state.on_event(&AppEvent::PageChanged {
+            from: 2,
+            to: 4,
+            reason: NavReason::Jump,
+        });
+
+        assert!(state.forward_stack.is_empty());
+        assert_eq!(state.back_stack.len(), 2);
+        let last = state.back_stack.back().expect("entry should be recorded");
+        assert_eq!(last.page, 2);
+        assert!(matches!(last.reason, NavReason::Jump));
     }
 }

@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::app::{AppState, Mode, PaletteRequest};
 use crate::backend::PdfBackend;
 use crate::error::AppResult;
-use crate::event::{AppEvent, NavReason};
+use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::extension::ExtensionHost;
 
 use super::core::{
@@ -108,6 +108,7 @@ pub fn dispatch(
         previous_page,
         prev_mode,
         &dispatched_command,
+        outcome,
     );
     emitted_events.push(AppEvent::CommandExecuted {
         id: action_id,
@@ -130,14 +131,21 @@ fn collect_transition_events(
     prev_page: usize,
     prev_mode: Mode,
     command: &Command,
+    outcome: CommandOutcome,
 ) -> Vec<AppEvent> {
     let mut events = Vec::new();
-    if app.current_page != prev_page {
-        events.push(AppEvent::PageChanged {
-            from: prev_page,
-            to: app.current_page,
-            reason: derive_nav_reason(command, extension_host),
-        });
+    if let Some(reason) = derive_nav_reason(command, extension_host) {
+        let should_emit = match reason {
+            NavReason::Search { .. } => outcome == CommandOutcome::Applied,
+            _ => app.current_page != prev_page,
+        };
+        if should_emit {
+            events.push(AppEvent::PageChanged {
+                from: prev_page,
+                to: app.current_page,
+                reason,
+            });
+        }
     }
 
     if app.mode != prev_mode {
@@ -149,18 +157,33 @@ fn collect_transition_events(
     events
 }
 
-fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> NavReason {
+fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Option<NavReason> {
     match command {
-        Command::NextPage | Command::PrevPage => NavReason::Step,
-        Command::FirstPage | Command::LastPage | Command::GotoPage { .. } => NavReason::Jump,
-        Command::SubmitSearch { query, .. } => NavReason::Search(query.clone()),
-        Command::NextSearchHit | Command::PrevSearchHit => {
-            NavReason::Search(extension_host.search_query().to_string())
-        }
-        Command::HistoryBack | Command::HistoryForward | Command::HistoryGoto { .. } => {
-            NavReason::History
-        }
-        _ => NavReason::Jump,
+        Command::NextPage | Command::PrevPage => Some(NavReason::Step),
+        Command::FirstPage => Some(NavReason::Goto(GotoKind::FirstPage)),
+        Command::LastPage => Some(NavReason::Goto(GotoKind::LastPage)),
+        Command::GotoPage { .. } => Some(NavReason::Goto(GotoKind::SpecificPage)),
+        Command::SetPageLayout { .. } => Some(NavReason::LayoutNormalize),
+        Command::NextSearchHit | Command::PrevSearchHit => Some(NavReason::Search {
+            query: extension_host.search_query().to_string(),
+        }),
+        Command::HistoryBack => Some(NavReason::History(HistoryOp::Back)),
+        Command::HistoryForward => Some(NavReason::History(HistoryOp::Forward)),
+        Command::HistoryGoto { .. } => Some(NavReason::History(HistoryOp::Goto)),
+        Command::SetZoom { .. }
+        | Command::ZoomIn
+        | Command::ZoomOut
+        | Command::Scroll { .. }
+        | Command::DebugStatusShow
+        | Command::DebugStatusHide
+        | Command::DebugStatusToggle
+        | Command::OpenPalette { .. }
+        | Command::ClosePalette
+        | Command::OpenSearch
+        | Command::SubmitSearch { .. }
+        | Command::OpenHistory
+        | Command::Cancel
+        | Command::Quit => None,
     }
 }
 
@@ -171,11 +194,11 @@ mod tests {
 
     use crate::app::AppState;
     use crate::backend::{PdfBackend, RgbaFrame};
-    use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
+    use crate::command::{ActionId, Command, CommandOutcome, PageLayoutModeArg, SearchMatcherKind};
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
 
-    use super::dispatch;
+    use super::{collect_transition_events, dispatch};
 
     struct StubPdf {
         path: PathBuf,
@@ -315,5 +338,74 @@ mod tests {
         assert!(!host.ui_snapshot().search_active);
         assert_eq!(app.status.message, "search canceled");
         assert!(palette_requests.is_empty());
+    }
+
+    #[test]
+    fn collect_transition_events_emits_search_when_page_is_unchanged() {
+        let mut app = AppState::default();
+        let pdf = StubPdf::new(3);
+        let mut host = ExtensionHost::default();
+        host.submit_search(
+            &mut app,
+            &pdf,
+            "needle".to_string(),
+            SearchMatcherKind::ContainsInsensitive,
+        )
+        .expect("submit-search should succeed");
+
+        let prev_page = app.current_page;
+        let prev_mode = app.mode;
+        let events = collect_transition_events(
+            &mut app,
+            &host,
+            prev_page,
+            prev_mode,
+            &Command::NextSearchHit,
+            CommandOutcome::Applied,
+        );
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            &events[0],
+            AppEvent::PageChanged {
+                from,
+                to,
+                reason: NavReason::Search { query }
+            } if *from == 0 && *to == 0 && query == "needle"
+        ));
+    }
+
+    #[test]
+    fn dispatch_set_page_layout_emits_layout_normalize_when_anchor_changes() {
+        let mut app = AppState {
+            current_page: 3,
+            ..AppState::default()
+        };
+        let mut pdf = StubPdf::new(8);
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetPageLayout {
+                mode: PageLayoutModeArg::Spread,
+                direction: None,
+            },
+            &mut pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(result.emitted_events.len(), 2);
+        assert!(matches!(
+            result.emitted_events[0],
+            AppEvent::PageChanged {
+                from: 3,
+                to: 2,
+                reason: NavReason::LayoutNormalize
+            }
+        ));
     }
 }

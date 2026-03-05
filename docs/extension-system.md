@@ -101,17 +101,25 @@ Behavior:
 - history back/forward/goto
 - opens history palette
 - records navigation from `AppEvent::PageChanged`
+- record policy is reason-based:
+  - records `Goto` and `Search`
+  - does not record `Step`, `History`, `LayoutNormalize`
+  - clears `forward_stack` for non-history transitions
+  - allows same-page (`from == to`) search transitions to be recorded
+  - navigation reason is associated with the destination page (`to`)
+  - origin page (`from`) is stored as a deduplicated usability aid
 
 ## Shared extension event types
 
-`src/extension/events.rs`:
+`src/event.rs`:
 
 ```rust
 enum NavReason {
     Step,
-    Jump,
-    Search(String),
-    History,
+    Goto(GotoKind),
+    Search { query: String },
+    History(HistoryOp),
+    LayoutNormalize,
 }
 
 enum AppEvent {

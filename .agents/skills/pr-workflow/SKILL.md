@@ -26,3 +26,5 @@ description: Create and review GitHub pull requests with a consistent workflow. 
 
 Use `gh pr view <number>` to fetch PR details.
 - `--json fields` and `--jq expression` are available for structured/filtered output.
+- `gh pr view <PR-number> --json=reviews` can fetch review summaries.
+- Inline review comments are not included in `--json=reviews`; fetch them with `gh api "repos/:owner/:repo/pulls/<PR-number>/comments" | jq 'map({file: .path, line: (.line // .original_line), author: .user.login, diff: .diff_hunk, comment: .body})'`.

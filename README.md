@@ -1,18 +1,14 @@
 # pvf
 
-`pvf` is a keyboard-first PDF viewer for the terminal.
-
-## Quick Start
+`pvf` is a PDF viewer for the terminal.
 
 ```bash
-cargo run -- <file.pdf>
+cargo run --release -- <file.pdf>
 ```
-
-`pvf` accepts exactly one PDF path.
 
 ## Features
 
-- Single or spread layout (`ltr` / `rtl`)
+- Single or spread layout
 - Zoom and horizontal pan
 - Full-text search with next/previous hit navigation
 - Page history (back/forward)
@@ -36,9 +32,9 @@ cargo run -- <file.pdf>
 ## Common Commands
 
 - `goto-page <number>`
-- `set-page-layout single`
 - `set-page-layout spread`
 - `search`
+- `history`
 
 ## Configuration (optional)
 

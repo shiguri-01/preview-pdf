@@ -43,6 +43,7 @@ Rules:
 - History:
   - back/forward navigation history
   - jump-to-entry via history palette
+  - reason-based history recording (`Goto`/`Search` only)
 
 - Rendering and performance:
   - parallel render workers

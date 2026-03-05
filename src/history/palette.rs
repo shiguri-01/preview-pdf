@@ -13,7 +13,7 @@ impl PaletteProvider for HistoryPaletteProvider {
     }
 
     fn title(&self, _ctx: &PaletteContext<'_>) -> String {
-        "Jump History".to_string()
+        "Navigation History".to_string()
     }
 
     fn input_mode(&self) -> PaletteInputMode {
@@ -29,17 +29,17 @@ impl PaletteProvider for HistoryPaletteProvider {
             .map(|(i, entry)| {
                 let idx = i + 1;
                 let page_1indexed = entry.page + 1;
+                let reason_tag = if entry.reason.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", entry.reason)
+                };
                 let (label, id) = if entry.is_current {
                     (
-                        format!("{idx:2}  > Page {page_1indexed} (current)"),
+                        format!("{idx:2}  > Page {page_1indexed} (current){reason_tag}"),
                         format!("current-{}", entry.page),
                     )
                 } else {
-                    let reason_tag = if entry.reason.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" [{}]", entry.reason)
-                    };
                     (
                         format!("{idx:2}  Page {page_1indexed}{reason_tag}"),
                         format!("page-{}", entry.page),
@@ -105,6 +105,7 @@ fn parse_seed(seed: &str, fallback_current: usize) -> Vec<SeedEntry> {
     let mut back_entries = Vec::new();
     let mut forward_entries = Vec::new();
     let mut current_page = fallback_current;
+    let mut current_reason = String::new();
 
     let parts: Vec<&str> = seed.split('|').collect();
     for part in &parts {
@@ -114,10 +115,13 @@ fn parse_seed(seed: &str, fallback_current: usize) -> Vec<SeedEntry> {
                     back_entries.push(entry);
                 }
             }
-        } else if let Some(data) = part.strip_prefix("c:")
-            && let Ok(page) = data.parse::<usize>()
-        {
-            current_page = page;
+        } else if let Some(data) = part.strip_prefix("c:") {
+            if let Some(entry) = parse_entry(data) {
+                current_page = entry.page;
+                current_reason = entry.reason;
+            } else if let Ok(page) = data.parse::<usize>() {
+                current_page = page;
+            }
         } else if let Some(data) = part.strip_prefix("f:") {
             for item in data.split(';') {
                 if let Some(entry) = parse_entry(item) {
@@ -132,7 +136,7 @@ fn parse_seed(seed: &str, fallback_current: usize) -> Vec<SeedEntry> {
     entries.append(&mut forward_entries);
     entries.push(SeedEntry {
         page: current_page,
-        reason: String::new(),
+        reason: current_reason,
         is_current: true,
     });
     back_entries.reverse();

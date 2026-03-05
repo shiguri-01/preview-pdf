@@ -11,12 +11,28 @@ use crate::render::worker::RenderWorkerResult;
 pub enum NavReason {
     /// Incremental movement (next-page, prev-page).
     Step,
-    /// Direct jump (first-page, last-page, goto-page).
-    Jump,
+    /// Direct goto-style movement (first-page, last-page, goto-page).
+    Goto(GotoKind),
     /// Search-driven navigation. Carries the query string.
-    Search(String),
+    Search { query: String },
     /// History traversal (history-back, history-forward, history-goto).
-    History,
+    History(HistoryOp),
+    /// Layout-change normalization moved the anchor page.
+    LayoutNormalize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GotoKind {
+    FirstPage,
+    LastPage,
+    SpecificPage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryOp {
+    Back,
+    Forward,
+    Goto,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

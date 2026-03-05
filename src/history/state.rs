@@ -201,8 +201,8 @@ impl HistoryState {
         if let Some(last) = self.back_stack.back_mut()
             && last.page == page
         {
-            if last.reason.is_none() && departed_reason.is_some() {
-                last.reason = departed_reason;
+            if let Some(reason) = departed_reason {
+                last.reason = Some(reason);
             }
             return;
         }
@@ -342,6 +342,36 @@ mod tests {
         assert!(last.reason.is_none());
         assert!(matches!(
             state.current_reason.as_ref(),
+            Some(NavReason::Search { query }) if query == "needle"
+        ));
+    }
+
+    #[test]
+    fn same_page_search_refreshes_reason_on_deduped_page() {
+        let mut state = HistoryState::default();
+
+        state.on_event(&AppEvent::PageChanged {
+            from: 1,
+            to: 3,
+            reason: NavReason::Goto(GotoKind::SpecificPage),
+        });
+        state.on_event(&AppEvent::PageChanged {
+            from: 3,
+            to: 3,
+            reason: NavReason::Search {
+                query: "needle".to_string(),
+            },
+        });
+        state.on_event(&AppEvent::PageChanged {
+            from: 3,
+            to: 8,
+            reason: NavReason::Goto(GotoKind::SpecificPage),
+        });
+
+        let last = state.back_stack.back().expect("deduped page should exist");
+        assert_eq!(last.page, 3);
+        assert!(matches!(
+            last.reason.as_ref(),
             Some(NavReason::Search { query }) if query == "needle"
         ));
     }

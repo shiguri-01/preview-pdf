@@ -92,6 +92,7 @@ impl EncodeWorkerRuntime {
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub(crate) fn send_encode_request(
     request_tx: &Option<UnboundedSender<EncodeWorkerRequest>>,
     request: EncodeWorkerRequest,

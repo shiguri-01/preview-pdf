@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 
 const MAX_LATENCY_SAMPLES: usize = 1024;
@@ -65,7 +64,10 @@ impl LatencySeries {
         }
 
         let mut sorted = self.values_ms.clone();
-        sorted.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+        sorted.sort_by(|left, right| {
+            left.partial_cmp(right)
+                .expect("perf latency samples must be finite")
+        });
         PhaseSummary {
             count,
             latest_ms,

@@ -332,22 +332,19 @@ impl PerfScenarioReport {
             String::new(),
             String::new(),
         ]));
-        rows.push(format!(
-            "{}",
-            csv_row([
-                "meta".to_string(),
-                "pdf_path".to_string(),
-                self.pdf_path.display().to_string(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-            ])
-        ));
+        rows.push(csv_row([
+            "meta".to_string(),
+            "pdf_path".to_string(),
+            self.pdf_path.display().to_string(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ]));
         rows.push(csv_row([
             "meta".to_string(),
             "page_count".to_string(),

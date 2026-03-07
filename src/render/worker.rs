@@ -16,7 +16,11 @@ use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::{RenderPriority, RenderTask};
 
 enum RenderWorkerRequest {
-    Task { task_id: u64, task: RenderTask },
+    Task {
+        task_id: u64,
+        task: RenderTask,
+        enqueued_at: Instant,
+    },
     Shutdown,
 }
 
@@ -52,6 +56,7 @@ pub(crate) struct RenderWorkerResult {
     pub(crate) priority: RenderPriority,
     pub(crate) generation: u64,
     pub(crate) result: AppResult<RgbaFrame>,
+    pub(crate) wait_elapsed: Duration,
     pub(crate) elapsed: Duration,
 }
 
@@ -62,6 +67,7 @@ pub(crate) struct RenderResultEvent {
     pub(crate) priority: RenderPriority,
     pub(crate) generation: u64,
     pub(crate) result: AppResult<RgbaFrame>,
+    pub(crate) wait_elapsed: Duration,
     pub(crate) elapsed: Duration,
 }
 
@@ -179,7 +185,11 @@ impl RenderWorker {
 
         if self
             .request_tx
-            .send(RenderWorkerRequest::Task { task_id, task })
+            .send(RenderWorkerRequest::Task {
+                task_id,
+                task,
+                enqueued_at: Instant::now(),
+            })
             .is_err()
         {
             return false;
@@ -302,6 +312,7 @@ impl RenderWorker {
             priority: result.priority,
             generation: result.generation,
             result: result.result,
+            wait_elapsed: result.wait_elapsed,
             elapsed: result.elapsed,
         })
     }
@@ -369,8 +380,13 @@ fn render_worker_main(
         };
 
         match request {
-            RenderWorkerRequest::Task { task_id, task } => {
+            RenderWorkerRequest::Task {
+                task_id,
+                task,
+                enqueued_at,
+            } => {
                 let key = RenderedPageKey::new(task.doc_id, task.page, task.scale);
+                let wait_elapsed = enqueued_at.elapsed();
                 let started = Instant::now();
                 let result = match &doc {
                     Ok(doc) => {
@@ -394,6 +410,7 @@ fn render_worker_main(
                     priority: task.priority,
                     generation: task.generation,
                     result,
+                    wait_elapsed,
                     elapsed: started.elapsed(),
                 };
 

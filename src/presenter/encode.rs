@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ratatui::layout::Rect;
 use ratatui_image::FilterType;
 use ratatui_image::Resize;
@@ -26,6 +28,7 @@ pub(crate) enum EncodeWorkerRequest {
         area: Rect,
         class: PrefetchClass,
         generation: u64,
+        enqueued_at: Instant,
     },
     Shutdown,
 }
@@ -35,6 +38,7 @@ pub(crate) struct EncodeWorkerTask {
     pub(crate) picker: Picker,
     pub(crate) frame: RgbaFrame,
     pub(crate) area: Rect,
+    pub(crate) enqueued_at: Instant,
 }
 
 pub(crate) struct EncodeWorkerResult {
@@ -45,6 +49,7 @@ pub(crate) enum EncodeWorkerEvent {
     Completed {
         key: TerminalFrameKey,
         protocol: Option<Box<StatefulProtocol>>,
+        wait_elapsed: std::time::Duration,
         elapsed: std::time::Duration,
         succeeded: bool,
     },
@@ -116,14 +121,15 @@ pub(crate) fn enqueue_encode_request(
     queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
 ) -> bool {
     match request {
-        EncodeWorkerRequest::Encode {
-            key,
-            picker,
-            frame,
-            area,
-            class,
-            generation,
-        } => {
+            EncodeWorkerRequest::Encode {
+                key,
+                picker,
+                frame,
+                area,
+                class,
+                generation,
+                enqueued_at,
+            } => {
             let _ = cancel_stale_prefetch_with_keys(queue, generation);
             if class == PrefetchClass::CriticalCurrent && queue.contains_key(&key) {
                 let _ = queue.retain(|_, meta| meta.key != key);
@@ -134,6 +140,7 @@ pub(crate) fn enqueue_encode_request(
                 picker,
                 frame,
                 area,
+                enqueued_at,
             };
             let meta = QueueTaskMeta {
                 key,
@@ -179,6 +186,7 @@ fn enqueue_with_notifications(
             area,
             class,
             generation,
+            enqueued_at,
         } => {
             let canceled = cancel_stale_prefetch_with_keys(queue, generation);
             for canceled_key in canceled {
@@ -195,6 +203,7 @@ fn enqueue_with_notifications(
                 picker,
                 frame,
                 area,
+                enqueued_at,
             };
             let meta = QueueTaskMeta {
                 key,
@@ -247,6 +256,7 @@ fn encode_worker_main(
             continue;
         };
 
+        let wait_elapsed = task.enqueued_at.elapsed();
         let started = std::time::Instant::now();
         let frame = match downscale_frame_for_area(task.frame, task.area, task.picker.font_size()) {
             Ok(frame) => frame,
@@ -255,6 +265,7 @@ fn encode_worker_main(
                     event: EncodeWorkerEvent::Completed {
                         key: task.key,
                         protocol: None,
+                        wait_elapsed,
                         elapsed: started.elapsed(),
                         succeeded: false,
                     },
@@ -269,6 +280,7 @@ fn encode_worker_main(
                     event: EncodeWorkerEvent::Completed {
                         key: task.key,
                         protocol: None,
+                        wait_elapsed,
                         elapsed: started.elapsed(),
                         succeeded: false,
                     },
@@ -290,6 +302,7 @@ fn encode_worker_main(
                 } else {
                     None
                 },
+                wait_elapsed,
                 elapsed: started.elapsed(),
                 succeeded,
             },
@@ -299,6 +312,8 @@ fn encode_worker_main(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use ratatui::layout::Rect;
     use ratatui_image::picker::Picker;
     use tokio::sync::mpsc::unbounded_channel;
@@ -352,6 +367,7 @@ mod tests {
                 area,
                 class: PrefetchClass::DirectionalLead,
                 generation: 1,
+                enqueued_at: Instant::now(),
             },
             &mut queue
         ));
@@ -365,6 +381,7 @@ mod tests {
                 area,
                 class: PrefetchClass::CriticalCurrent,
                 generation: 2,
+                enqueued_at: Instant::now(),
             },
             &mut queue,
             &tx

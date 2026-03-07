@@ -9,6 +9,7 @@ pub mod history;
 pub mod input;
 pub mod palette;
 pub mod perf;
+pub mod perf_report;
 pub mod presenter;
 pub mod render;
 pub mod search;

@@ -73,6 +73,9 @@ impl RenderSubsystem {
                     completed.elapsed,
                     completed.priority == RenderPriority::CriticalCurrent,
                 );
+                self.runtime
+                    .perf_stats
+                    .record_render_wait(completed.wait_elapsed);
                 current_keys.contains(&completed.key)
             }
             Err(err) => {
@@ -180,6 +183,8 @@ impl RenderSubsystem {
                 break;
             }
         }
+        self.runtime
+            .set_queue_depth_with_inflight(render_worker.in_flight_len());
     }
 
     pub(crate) fn dispatch_prefetch_if_due(

@@ -7,6 +7,7 @@ use crate::backend::PdfBackend;
 use crate::command::{ActionId, CommandOutcome};
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
+use crate::perf::RedrawReason;
 use crate::presenter::{PanOffset, Viewport};
 use crate::render::cache::RenderedPageKey;
 use crate::render::worker::RenderWorker;
@@ -297,6 +298,10 @@ impl App {
             render_busy,
             presenter_busy,
         ) {
+            self.render
+                .runtime
+                .perf_stats
+                .record_redraw_request(RedrawReason::Timer);
             runtime.ui_actor.mark_redraw();
         }
 
@@ -327,6 +332,7 @@ impl App {
                     nav_streak: runtime.render_actor.nav_streak(),
                 },
             )?;
+            self.render.runtime.perf_stats.record_frame_draw();
             runtime.ui_actor.clear_redraw();
             if !step.current_cached {
                 runtime.ui_actor.on_drawn_non_cached_page();
@@ -352,6 +358,12 @@ impl App {
                 if input_outcome.quit_requested {
                     Self::terminate_process_now(runtime);
                 }
+                if input_outcome.redraw_requested {
+                    self.render
+                        .runtime
+                        .perf_stats
+                        .record_redraw_request(RedrawReason::Input);
+                }
                 if let Some(command) = input_outcome.command {
                     let _ = runtime.loop_event_tx.send(DomainEvent::Command(command));
                 }
@@ -359,6 +371,10 @@ impl App {
             WaitEvent::Event(DomainEvent::InputError(message)) => {
                 self.state.status.last_action_id = Some(ActionId::Input);
                 self.state.status.message = format!("input error: {message}");
+                self.render
+                    .runtime
+                    .perf_stats
+                    .record_redraw_request(RedrawReason::Input);
                 runtime.ui_actor.mark_redraw();
             }
             WaitEvent::Event(DomainEvent::Command(command)) => {
@@ -369,6 +385,10 @@ impl App {
                     let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
                 }
                 if self.interaction.apply_palette_requests(&mut self.state) {
+                    self.render
+                        .runtime
+                        .perf_stats
+                        .record_redraw_request(RedrawReason::Input);
                     runtime.ui_actor.mark_redraw();
                 }
                 match dispatch.outcome {
@@ -376,12 +396,20 @@ impl App {
                         Self::terminate_process_now(runtime);
                     }
                     CommandOutcome::Applied | CommandOutcome::Noop => {
+                        self.render
+                            .runtime
+                            .perf_stats
+                            .record_redraw_request(RedrawReason::Input);
                         runtime.ui_actor.mark_redraw()
                     }
                 }
             }
             WaitEvent::Event(DomainEvent::App(event)) => {
                 self.interaction.handle_app_event(&mut self.state, &event);
+                self.render
+                    .runtime
+                    .perf_stats
+                    .record_redraw_request(RedrawReason::Input);
                 runtime.ui_actor.mark_redraw();
             }
             WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
@@ -410,6 +438,10 @@ impl App {
                         .input_actor
                         .is_interactive(runtime.prefetch_pause_after_input),
                 ) {
+                    self.render
+                        .runtime
+                        .perf_stats
+                        .record_redraw_request(RedrawReason::Completion);
                     runtime.ui_actor.mark_redraw();
                 }
             }
@@ -417,6 +449,10 @@ impl App {
                 runtime.render_actor.mark_prefetch_due();
             }
             WaitEvent::Event(DomainEvent::RedrawTick) => {
+                self.render
+                    .runtime
+                    .perf_stats
+                    .record_redraw_request(RedrawReason::Timer);
                 runtime.ui_actor.mark_redraw();
             }
             WaitEvent::Event(DomainEvent::Wake) => {}

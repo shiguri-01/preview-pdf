@@ -264,7 +264,7 @@ impl RenderRuntime {
 
     pub fn set_queue_depth_with_inflight(&mut self, inflight: usize) {
         self.perf_stats
-            .set_queue_depth(self.scheduler.len().saturating_add(inflight));
+            .set_queue_state(self.scheduler.len().saturating_add(inflight), inflight);
     }
 
     fn enqueue_prefetch_tasks(&mut self, tasks: Vec<RenderTask>) {
@@ -303,7 +303,7 @@ impl RenderRuntime {
     }
 
     fn sync_queue_depth(&mut self) {
-        self.perf_stats.set_queue_depth(self.scheduler.len());
+        self.perf_stats.set_queue_state(self.scheduler.len(), 0);
     }
 
     pub fn sync_presenter_metrics(&mut self, presenter: &dyn ImagePresenter) {

@@ -611,6 +611,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         area,
         class: PrefetchClass::DirectionalLead,
         generation: 1,
+        enqueued_at: std::time::Instant::now(),
     };
     let low_req_2 = EncodeWorkerRequest::Encode {
         key: low_key_2,
@@ -619,6 +620,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         area,
         class: PrefetchClass::DirectionalLead,
         generation: 1,
+        enqueued_at: std::time::Instant::now(),
     };
     let high_req = EncodeWorkerRequest::Encode {
         key: high_key,
@@ -627,6 +629,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         area,
         class: PrefetchClass::CriticalCurrent,
         generation: 1,
+        enqueued_at: std::time::Instant::now(),
     };
 
     assert!(enqueue_encode_request(low_req_1, &mut queue));
@@ -665,6 +668,7 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         area,
         class: PrefetchClass::DirectionalLead,
         generation: 1,
+        enqueued_at: std::time::Instant::now(),
     };
     let stale_background = EncodeWorkerRequest::Encode {
         key: TerminalFrameKey {
@@ -677,6 +681,7 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         area,
         class: PrefetchClass::Background,
         generation: 1,
+        enqueued_at: std::time::Instant::now(),
     };
     let current = EncodeWorkerRequest::Encode {
         key: TerminalFrameKey {
@@ -689,6 +694,7 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         area,
         class: PrefetchClass::CriticalCurrent,
         generation: 2,
+        enqueued_at: std::time::Instant::now(),
     };
 
     assert!(enqueue_encode_request(stale_prefetch, &mut queue));

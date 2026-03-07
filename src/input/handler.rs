@@ -11,6 +11,7 @@ use crate::app::terminal_session::TerminalSurface;
 pub(crate) struct InputEventOutcome {
     pub(crate) quit_requested: bool,
     pub(crate) command: Option<Command>,
+    pub(crate) redraw_requested: bool,
 }
 
 impl App {
@@ -38,6 +39,7 @@ impl App {
                 Ok(InputEventOutcome {
                     quit_requested: outcome.quit_requested,
                     command: outcome.command,
+                    redraw_requested: outcome.redraw,
                 })
             }
             Event::Resize(_, _) => {
@@ -46,11 +48,13 @@ impl App {
                 Ok(InputEventOutcome {
                     quit_requested: false,
                     command: None,
+                    redraw_requested: true,
                 })
             }
             _ => Ok(InputEventOutcome {
                 quit_requested: false,
                 command: None,
+                redraw_requested: false,
             }),
         }
     }

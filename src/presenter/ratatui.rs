@@ -150,6 +150,7 @@ impl RatatuiImagePresenter {
                     EncodeWorkerEvent::Completed {
                         key,
                         protocol,
+                        wait_elapsed,
                         elapsed,
                         succeeded,
                     } => {
@@ -163,6 +164,7 @@ impl RatatuiImagePresenter {
                             } else {
                                 entry.state = TerminalFrameState::Failed;
                             }
+                            self.state.perf_stats.record_encode_wait(wait_elapsed);
                             self.state.perf_stats.record_convert(elapsed);
                         } else {
                             entry.state = TerminalFrameState::Failed;
@@ -386,6 +388,7 @@ impl ImagePresenter for RatatuiImagePresenter {
                     area,
                     class,
                     generation,
+                    enqueued_at: std::time::Instant::now(),
                 };
                 match send_encode_request(&request_tx, request) {
                     Ok(()) => {
@@ -509,6 +512,7 @@ impl ImagePresenter for RatatuiImagePresenter {
                         area: encode_area,
                         class: PrefetchClass::CriticalCurrent,
                         generation: self.state.current_generation,
+                        enqueued_at: std::time::Instant::now(),
                     };
 
                     match send_encode_request(&request_tx, request) {

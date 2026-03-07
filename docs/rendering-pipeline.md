@@ -142,11 +142,17 @@ UI contract:
 ## Observable performance signals (`perf.rs`)
 
 The runtime tracks:
-- render time (`render_ms`)
-- encode time (`convert_ms`)
-- terminal draw time (`blit_ms`)
+- render time (`render_ms`) with count/avg/p50/p95/p99
+- encode time (`convert_ms`) with count/avg/p50/p95/p99
+- terminal draw time (`blit_ms`) with count/avg/p50/p95/p99
+- render-worker wait time (`render_wait_ms`) with count/avg/p50/p95/p99
+- encode-worker wait time (`encode_wait_ms`) with count/avg/p50/p95/p99
 - L1/L2 cache hit rates
-- prefetch queue depth
-- canceled task count
+- prefetch queue depth time-series samples
+- in-flight task count time-series samples
+- canceled task count plus time-series samples
+- redraw request reasons (`input`, `completion`, `timer`) and drawn-frame count
 
-These values are used by status/debug surfaces.
+These values are used by status/debug surfaces and by the fixed report command:
+
+- `pvf --perf-report <file.pdf>` emits a comparable JSON report

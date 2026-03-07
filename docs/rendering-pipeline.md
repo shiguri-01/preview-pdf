@@ -156,4 +156,3 @@ The runtime tracks:
 These values are used by status/debug surfaces and by the fixed report command:
 
 - `pvf --perf-report <file.pdf>` emits a comparable JSON report
-- `pvf --perf-report --format csv <file.pdf>` emits the same fixed scenario as CSV

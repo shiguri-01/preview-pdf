@@ -25,25 +25,7 @@ const SCENARIO_ITERATIONS: usize = 2;
 const DRAW_RETRY_DELAY: Duration = Duration::from_millis(5);
 const DRAW_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PerfReportFormat {
-    Json,
-    Csv,
-}
-
-impl PerfReportFormat {
-    pub fn parse(value: &str) -> AppResult<Self> {
-        match value {
-            "json" => Ok(Self::Json),
-            "csv" => Ok(Self::Csv),
-            other => Err(AppError::invalid_argument(format!(
-                "unsupported perf report format: {other} (expected json or csv)"
-            ))),
-        }
-    }
-}
-
-pub async fn run_fixed_perf_report(path: &Path, format: PerfReportFormat) -> AppResult<String> {
+pub async fn run_fixed_perf_report(path: &Path) -> AppResult<String> {
     let started = Instant::now();
     let mut pdf = open_default_backend(path)?;
     let page_count = pdf.page_count();
@@ -167,10 +149,7 @@ pub async fn run_fixed_perf_report(path: &Path, format: PerfReportFormat) -> App
         stats: runtime.perf_stats.clone(),
     };
 
-    Ok(match format {
-        PerfReportFormat::Json => report.to_json(),
-        PerfReportFormat::Csv => report.to_csv(),
-    })
+    Ok(report.to_json())
 }
 
 async fn enqueue_current_task(
@@ -316,105 +295,6 @@ impl PerfScenarioReport {
             samples_to_json(self.stats.canceled_task_samples()),
         )
     }
-
-    fn to_csv(&self) -> String {
-        let mut rows = Vec::new();
-        rows.push(
-            "section,name,string_value,at_ms,value,count,latest_ms,avg_ms,p50_ms,p95_ms,p99_ms"
-                .to_string(),
-        );
-        rows.push(csv_row([
-            "meta".to_string(),
-            "scenario".to_string(),
-            self.scenario.to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ]));
-        rows.push(csv_row([
-            "meta".to_string(),
-            "pdf_path".to_string(),
-            self.pdf_path.display().to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ]));
-        rows.push(csv_row([
-            "meta".to_string(),
-            "page_count".to_string(),
-            String::new(),
-            String::new(),
-            self.page_count.to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ]));
-        rows.push(csv_row([
-            "meta".to_string(),
-            "iterations".to_string(),
-            String::new(),
-            String::new(),
-            self.iterations.to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ]));
-        rows.push(csv_row([
-            "meta".to_string(),
-            "wall_time_ms".to_string(),
-            String::new(),
-            String::new(),
-            format!("{:.3}", self.wall_time_ms),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ]));
-
-        for (name, summary) in [
-            ("render", self.stats.render_summary()),
-            ("convert", self.stats.convert_summary()),
-            ("blit", self.stats.blit_summary()),
-            ("render_wait", self.stats.render_wait_summary()),
-            ("encode_wait", self.stats.encode_wait_summary()),
-        ] {
-            rows.push(phase_csv_row(name, summary));
-        }
-
-        let redraw = self.stats.redraw_summary();
-        rows.push(redraw_csv_row("input", redraw.input));
-        rows.push(redraw_csv_row("completion", redraw.completion));
-        rows.push(redraw_csv_row("timer", redraw.timer));
-        rows.push(redraw_csv_row("frames_drawn", redraw.frames_drawn));
-
-        append_sample_rows("queue_depth", self.stats.queue_depth_samples(), &mut rows);
-        append_sample_rows("in_flight", self.stats.in_flight_samples(), &mut rows);
-        append_sample_rows(
-            "canceled_tasks",
-            self.stats.canceled_task_samples(),
-            &mut rows,
-        );
-        rows.push(String::new());
-        rows.join("\n")
-    }
 }
 
 fn join_phase_json(phases: [(&str, PhaseSummary); 5]) -> String {
@@ -450,64 +330,6 @@ fn samples_to_json(samples: &[TimeSeriesSample]) -> String {
     format!("[{values}]")
 }
 
-fn phase_csv_row(name: &str, summary: PhaseSummary) -> String {
-    csv_row([
-        "phase".to_string(),
-        name.to_string(),
-        String::new(),
-        String::new(),
-        String::new(),
-        summary.count.to_string(),
-        format!("{:.3}", summary.latest_ms),
-        format!("{:.3}", summary.avg_ms),
-        format!("{:.3}", summary.p50_ms),
-        format!("{:.3}", summary.p95_ms),
-        format!("{:.3}", summary.p99_ms),
-    ])
-}
-
-fn redraw_csv_row(name: &str, value: u64) -> String {
-    csv_row([
-        "redraw".to_string(),
-        name.to_string(),
-        String::new(),
-        String::new(),
-        value.to_string(),
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-    ])
-}
-
-fn append_sample_rows(name: &str, samples: &[TimeSeriesSample], rows: &mut Vec<String>) {
-    for sample in samples {
-        rows.push(csv_row([
-            "sample".to_string(),
-            name.to_string(),
-            String::new(),
-            format!("{:.3}", sample.at_ms),
-            sample.value.to_string(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ]));
-    }
-}
-
-fn csv_row(fields: [String; 11]) -> String {
-    fields
-        .into_iter()
-        .map(|field| escape_csv(&field))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 fn escape_json_string(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for ch in value.chars() {
@@ -527,14 +349,6 @@ fn escape_json_string(value: &str) -> String {
     escaped
 }
 
-fn escape_csv(value: &str) -> String {
-    if value.contains([',', '"', '\n']) {
-        format!("\"{}\"", value.replace('"', "\"\""))
-    } else {
-        value.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -542,14 +356,14 @@ mod tests {
     use std::process;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    use super::{PerfReportFormat, run_fixed_perf_report};
+    use super::run_fixed_perf_report;
 
     #[tokio::test(flavor = "current_thread")]
     async fn fixed_perf_report_outputs_json_with_percentiles() {
         let file = unique_temp_path("perf_report.json.pdf");
         fs::write(&file, build_pdf(&["one", "two", "three"])).expect("test pdf should exist");
 
-        let report = run_fixed_perf_report(&file, PerfReportFormat::Json)
+        let report = run_fixed_perf_report(&file)
             .await
             .expect("perf report should succeed");
 
@@ -566,10 +380,11 @@ mod tests {
         fs::write(&file, build_pdf(&["one", "two"])).expect("test pdf should exist");
 
         let started = Instant::now();
-        let _ = run_fixed_perf_report(&file, PerfReportFormat::Csv)
+        let report = run_fixed_perf_report(&file)
             .await
             .expect("perf report should succeed");
         assert!(started.elapsed() < Duration::from_secs(10));
+        assert!(report.starts_with("{\n"));
 
         fs::remove_file(&file).expect("test pdf should be removed");
     }

@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use pvf::app::App;
 use pvf::backend::open_default_backend;
 use pvf::error::{AppError, AppResult};
-use pvf::perf_report::{PerfReportFormat, run_fixed_perf_report};
+use pvf::perf_report::run_fixed_perf_report;
 use pvf::presenter::PresenterKind;
 
 #[tokio::main(flavor = "multi_thread")]
@@ -21,8 +21,8 @@ async fn run() -> AppResult<()> {
             let mut app = App::new(PresenterKind::RatatuiImage)?;
             app.run(pdf.as_mut()).await
         }
-        CliCommand::PerfReport { pdf_path, format } => {
-            let report = run_fixed_perf_report(std::path::Path::new(&pdf_path), format).await?;
+        CliCommand::PerfReport { pdf_path } => {
+            let report = run_fixed_perf_report(std::path::Path::new(&pdf_path)).await?;
             print!("{report}");
             Ok(())
         }
@@ -31,13 +31,8 @@ async fn run() -> AppResult<()> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliCommand {
-    Viewer {
-        pdf_path: OsString,
-    },
-    PerfReport {
-        pdf_path: OsString,
-        format: PerfReportFormat,
-    },
+    Viewer { pdf_path: OsString },
+    PerfReport { pdf_path: OsString },
 }
 
 fn parse_cli_args<I>(mut args: I) -> AppResult<CliCommand>
@@ -46,41 +41,33 @@ where
 {
     let _program = args.next();
     let mut perf_report = false;
-    let mut format = PerfReportFormat::Json;
     let mut path = None;
 
-    while let Some(arg) = args.next() {
+    for arg in args {
         if arg == "--perf-report" {
             perf_report = true;
             continue;
         }
         if arg == "--format" {
-            let Some(value) = args.next() else {
-                return Err(AppError::invalid_argument(
-                    "usage: pvf --perf-report [--format json|csv] <file.pdf>",
-                ));
-            };
-            let value = value.to_str().ok_or_else(|| {
-                AppError::invalid_argument("perf report format must be valid utf-8")
-            })?;
-            format = PerfReportFormat::parse(value)?;
-            continue;
+            return Err(AppError::invalid_argument(
+                "usage: pvf --perf-report <file.pdf>",
+            ));
         }
         if path.replace(arg).is_some() {
             return Err(AppError::invalid_argument(
-                "usage: pvf <file.pdf> or pvf --perf-report [--format json|csv] <file.pdf>",
+                "usage: pvf <file.pdf> or pvf --perf-report <file.pdf>",
             ));
         }
     }
 
     let Some(pdf_path) = path else {
         return Err(AppError::invalid_argument(
-            "usage: pvf <file.pdf> or pvf --perf-report [--format json|csv] <file.pdf>",
+            "usage: pvf <file.pdf> or pvf --perf-report <file.pdf>",
         ));
     };
 
     Ok(if perf_report {
-        CliCommand::PerfReport { pdf_path, format }
+        CliCommand::PerfReport { pdf_path }
     } else {
         CliCommand::Viewer { pdf_path }
     })
@@ -89,8 +76,6 @@ where
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
-
-    use pvf::perf_report::PerfReportFormat;
 
     use super::{CliCommand, parse_cli_args};
 
@@ -121,12 +106,10 @@ mod tests {
     }
 
     #[test]
-    fn parse_cli_path_supports_perf_report_format() {
+    fn parse_cli_path_supports_perf_report() {
         let args = vec![
             OsString::from("pvf"),
             OsString::from("--perf-report"),
-            OsString::from("--format"),
-            OsString::from("csv"),
             OsString::from("sample.pdf"),
         ];
 
@@ -135,8 +118,20 @@ mod tests {
             command,
             CliCommand::PerfReport {
                 pdf_path: OsString::from("sample.pdf"),
-                format: PerfReportFormat::Csv,
             }
         );
+    }
+
+    #[test]
+    fn parse_cli_path_rejects_perf_report_format_flag() {
+        let args = vec![
+            OsString::from("pvf"),
+            OsString::from("--perf-report"),
+            OsString::from("--format"),
+            OsString::from("json"),
+            OsString::from("sample.pdf"),
+        ];
+
+        assert!(parse_cli_args(args.into_iter()).is_err());
     }
 }

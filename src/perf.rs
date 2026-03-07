@@ -77,6 +77,54 @@ impl LatencySeries {
             p99_ms: percentile(&sorted, 0.99),
         }
     }
+
+    fn extend_recent(&mut self, values_ms: &[f64]) {
+        if values_ms.is_empty() {
+            return;
+        }
+
+        if values_ms.len() >= MAX_LATENCY_SAMPLES {
+            self.values_ms = values_ms[values_ms.len() - MAX_LATENCY_SAMPLES..].to_vec();
+            self.total_ms = self.values_ms.iter().sum();
+            return;
+        }
+
+        self.values_ms.extend_from_slice(values_ms);
+        self.total_ms += values_ms.iter().sum::<f64>();
+
+        let overflow = self.values_ms.len().saturating_sub(MAX_LATENCY_SAMPLES);
+        if overflow > 0 {
+            self.total_ms -= self.values_ms[..overflow].iter().sum::<f64>();
+            self.values_ms.drain(..overflow);
+        }
+    }
+
+    fn sync_from(&mut self, current_count: u64, source: &Self, source_count: u64) {
+        if source_count < current_count {
+            debug_assert!(false, "presenter latency count unexpectedly decreased");
+            *self = source.clone();
+            return;
+        }
+
+        let appended = (source_count - current_count) as usize;
+        if appended == 0 {
+            return;
+        }
+
+        if source.values_ms.len() < self.values_ms.len() {
+            debug_assert!(false, "presenter latency window unexpectedly shrank");
+            *self = source.clone();
+            return;
+        }
+
+        if appended > source.values_ms.len() {
+            debug_assert!(false, "presenter latency delta exceeded retained window");
+            *self = source.clone();
+            return;
+        }
+
+        self.extend_recent(&source.values_ms[source.values_ms.len() - appended..]);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -237,12 +285,24 @@ impl PerfStats {
         self.blit_ms = presenter.blit_ms;
         self.encode_wait_ms = presenter.encode_wait_ms;
         self.cache_hit_rate_l2 = presenter.cache_hit_rate_l2;
+        self.convert_series.sync_from(
+            self.convert_samples,
+            &presenter.convert_series,
+            presenter.convert_samples,
+        );
+        self.blit_series.sync_from(
+            self.blit_samples,
+            &presenter.blit_series,
+            presenter.blit_samples,
+        );
+        self.encode_wait_series.sync_from(
+            self.encode_wait_samples,
+            &presenter.encode_wait_series,
+            presenter.encode_wait_samples,
+        );
         self.convert_samples = presenter.convert_samples;
         self.blit_samples = presenter.blit_samples;
         self.encode_wait_samples = presenter.encode_wait_samples;
-        self.convert_series = presenter.convert_series.clone();
-        self.blit_series = presenter.blit_series.clone();
-        self.encode_wait_series = presenter.encode_wait_series.clone();
     }
 
     pub fn render_summary(&self) -> PhaseSummary {
@@ -381,6 +441,35 @@ mod tests {
         assert_eq!(runtime.blit_ms, 2.0);
         assert_eq!(runtime.encode_wait_ms, 1.0);
         assert_eq!(runtime.cache_hit_rate_l2, 0.8);
+    }
+
+    #[test]
+    fn absorbs_presenter_metrics_incrementally() {
+        let mut runtime = PerfStats::default();
+        let mut presenter = PerfStats::default();
+
+        presenter.record_convert(Duration::from_millis(5));
+        presenter.record_blit(Duration::from_millis(2));
+        presenter.record_encode_wait(Duration::from_millis(1));
+        runtime.absorb_presenter_metrics(&presenter);
+
+        presenter.record_convert(Duration::from_millis(7));
+        presenter.record_blit(Duration::from_millis(3));
+        presenter.record_encode_wait(Duration::from_millis(2));
+        runtime.absorb_presenter_metrics(&presenter);
+
+        let convert = runtime.convert_summary();
+        let blit = runtime.blit_summary();
+        let encode_wait = runtime.encode_wait_summary();
+        assert_eq!(convert.count, 2);
+        assert_eq!(convert.latest_ms, 7.0);
+        assert_eq!(convert.avg_ms, 6.0);
+        assert_eq!(blit.count, 2);
+        assert_eq!(blit.latest_ms, 3.0);
+        assert_eq!(blit.avg_ms, 2.5);
+        assert_eq!(encode_wait.count, 2);
+        assert_eq!(encode_wait.latest_ms, 2.0);
+        assert_eq!(encode_wait.avg_ms, 1.5);
     }
 
     #[test]

@@ -181,19 +181,27 @@ async fn draw_until_ready(
     loop {
         let mut feedback = PresenterFeedback::Pending;
         let mut drew_image = false;
+        let mut render_error = None;
         terminal
             .draw(|frame| {
-                let outcome = presenter
-                    .render(
-                        frame,
-                        Rect::new(0, 0, viewport.width, viewport.height),
-                        PresenterRenderOptions::default(),
-                    )
-                    .expect("perf scenario presenter render should succeed");
+                let outcome = match presenter.render(
+                    frame,
+                    Rect::new(0, 0, viewport.width, viewport.height),
+                    PresenterRenderOptions::default(),
+                ) {
+                    Ok(outcome) => outcome,
+                    Err(err) => {
+                        render_error = Some(err);
+                        return;
+                    }
+                };
                 feedback = outcome.feedback;
                 drew_image = outcome.drew_image;
             })
             .expect("test backend draw should succeed");
+        if let Some(err) = render_error {
+            return Err(err);
+        }
         runtime.sync_presenter_metrics(presenter);
         runtime.perf_stats.record_frame_draw();
 

@@ -31,8 +31,13 @@ async fn run() -> AppResult<()> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliCommand {
-    Viewer { pdf_path: OsString },
-    PerfReport { pdf_path: OsString, format: PerfReportFormat },
+    Viewer {
+        pdf_path: OsString,
+    },
+    PerfReport {
+        pdf_path: OsString,
+        format: PerfReportFormat,
+    },
 }
 
 fn parse_cli_args<I>(mut args: I) -> AppResult<CliCommand>

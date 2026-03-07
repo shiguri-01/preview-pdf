@@ -50,9 +50,9 @@ impl LatencySeries {
         self.total_ms += value_ms;
     }
 
-    fn summary(&self, latest_ms: f64) -> PhaseSummary {
-        let count = self.values_ms.len() as u64;
-        if count == 0 {
+    fn summary(&self, latest_ms: f64, total_count: u64) -> PhaseSummary {
+        let window_count = self.values_ms.len() as u64;
+        if window_count == 0 {
             return PhaseSummary {
                 count: 0,
                 latest_ms,
@@ -69,9 +69,9 @@ impl LatencySeries {
                 .expect("perf latency samples must be finite")
         });
         PhaseSummary {
-            count,
+            count: total_count,
             latest_ms,
-            avg_ms: self.total_ms / count as f64,
+            avg_ms: self.total_ms / window_count as f64,
             p50_ms: percentile(&sorted, 0.50),
             p95_ms: percentile(&sorted, 0.95),
             p99_ms: percentile(&sorted, 0.99),
@@ -246,23 +246,27 @@ impl PerfStats {
     }
 
     pub fn render_summary(&self) -> PhaseSummary {
-        self.render_series.summary(self.render_ms)
+        self.render_series
+            .summary(self.render_ms, self.render_samples)
     }
 
     pub fn convert_summary(&self) -> PhaseSummary {
-        self.convert_series.summary(self.convert_ms)
+        self.convert_series
+            .summary(self.convert_ms, self.convert_samples)
     }
 
     pub fn blit_summary(&self) -> PhaseSummary {
-        self.blit_series.summary(self.blit_ms)
+        self.blit_series.summary(self.blit_ms, self.blit_samples)
     }
 
     pub fn render_wait_summary(&self) -> PhaseSummary {
-        self.render_wait_series.summary(self.render_wait_ms)
+        self.render_wait_series
+            .summary(self.render_wait_ms, self.render_wait_samples)
     }
 
     pub fn encode_wait_summary(&self) -> PhaseSummary {
-        self.encode_wait_series.summary(self.encode_wait_ms)
+        self.encode_wait_series
+            .summary(self.encode_wait_ms, self.encode_wait_samples)
     }
 
     pub fn queue_depth_samples(&self) -> &[TimeSeriesSample] {
@@ -322,7 +326,7 @@ fn percentile(sorted: &[f64], quantile: f64) -> f64 {
 mod tests {
     use std::time::Duration;
 
-    use super::{PerfStats, RedrawReason};
+    use super::{MAX_LATENCY_SAMPLES, PerfStats, RedrawReason};
 
     #[test]
     fn records_milliseconds_rates_and_time_series() {
@@ -393,5 +397,17 @@ mod tests {
         assert_eq!(summary.p50_ms, 6.0);
         assert_eq!(summary.p95_ms, 20.0);
         assert_eq!(summary.p99_ms, 20.0);
+    }
+
+    #[test]
+    fn summary_count_tracks_total_samples_beyond_window() {
+        let mut stats = PerfStats::default();
+        for _ in 0..(MAX_LATENCY_SAMPLES + 5) {
+            stats.record_render(Duration::from_millis(1));
+        }
+
+        let summary = stats.render_summary();
+        assert_eq!(summary.count, (MAX_LATENCY_SAMPLES + 5) as u64);
+        assert_eq!(stats.render_samples, (MAX_LATENCY_SAMPLES + 5) as u64);
     }
 }

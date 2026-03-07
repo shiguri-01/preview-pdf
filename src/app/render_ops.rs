@@ -73,7 +73,9 @@ impl RenderSubsystem {
                     completed.elapsed,
                     completed.priority == RenderPriority::CriticalCurrent,
                 );
-                self.runtime.perf_stats.record_render_wait(completed.wait_elapsed);
+                self.runtime
+                    .perf_stats
+                    .record_render_wait(completed.wait_elapsed);
                 current_keys.contains(&completed.key)
             }
             Err(err) => {

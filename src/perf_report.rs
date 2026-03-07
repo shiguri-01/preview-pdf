@@ -106,7 +106,12 @@ pub async fn run_fixed_perf_report(path: &Path, format: PerfReportFormat) -> App
                 runtime
                     .perf_stats
                     .record_render_wait(completed.wait_elapsed);
-                runtime.ingest_rendered_frame(completed.key, completed.result?, completed.elapsed, true);
+                runtime.ingest_rendered_frame(
+                    completed.key,
+                    completed.result?,
+                    completed.elapsed,
+                    true,
+                );
                 runtime.set_queue_depth_with_inflight(render_worker.in_flight_len());
                 runtime
                     .perf_stats
@@ -229,15 +234,14 @@ async fn draw_until_ready(
                 .perf_stats
                 .record_redraw_request(RedrawReason::Completion);
         }
-        runtime
-            .perf_stats
-            .record_redraw_request(RedrawReason::Timer);
-
         if Instant::now() >= deadline {
             return Err(AppError::unsupported(
                 "timed out waiting for presenter completion during perf scenario",
             ));
         }
+        runtime
+            .perf_stats
+            .record_redraw_request(RedrawReason::Timer);
         sleep(DRAW_RETRY_DELAY).await;
     }
 }
@@ -403,7 +407,11 @@ impl PerfScenarioReport {
 
         append_sample_rows("queue_depth", self.stats.queue_depth_samples(), &mut rows);
         append_sample_rows("in_flight", self.stats.in_flight_samples(), &mut rows);
-        append_sample_rows("canceled_tasks", self.stats.canceled_task_samples(), &mut rows);
+        append_sample_rows(
+            "canceled_tasks",
+            self.stats.canceled_task_samples(),
+            &mut rows,
+        );
         rows.push(String::new());
         rows.join("\n")
     }
@@ -501,10 +509,22 @@ fn csv_row(fields: [String; 11]) -> String {
 }
 
 fn escape_json_string(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            ch if ch.is_control() => {
+                use std::fmt::Write as _;
+                let _ = write!(escaped, "\\u{:04x}", ch as u32);
+            }
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 fn escape_csv(value: &str) -> String {
@@ -552,6 +572,12 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(10));
 
         fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    #[test]
+    fn escape_json_string_escapes_control_characters() {
+        let escaped = super::escape_json_string("a\tb\rc\n\"\\\u{0007}");
+        assert_eq!(escaped, "a\\tb\\rc\\n\\\"\\\\\\u0007");
     }
 
     fn unique_temp_path(suffix: &str) -> PathBuf {

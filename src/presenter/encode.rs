@@ -122,15 +122,15 @@ pub(crate) fn enqueue_encode_request(
     queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
 ) -> bool {
     match request {
-            EncodeWorkerRequest::Encode {
-                key,
-                picker,
-                frame,
-                area,
-                class,
-                generation,
-                enqueued_at,
-            } => {
+        EncodeWorkerRequest::Encode {
+            key,
+            picker,
+            frame,
+            area,
+            class,
+            generation,
+            enqueued_at,
+        } => {
             let _ = cancel_stale_prefetch_with_keys(queue, generation);
             if class == PrefetchClass::CriticalCurrent && queue.contains_key(&key) {
                 let _ = queue.retain(|_, meta| meta.key != key);

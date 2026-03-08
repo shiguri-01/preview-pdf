@@ -50,7 +50,7 @@ impl LatencySeries {
         self.total_ms += value_ms;
     }
 
-    fn summary(&self, latest_ms: f64, total_count: u64) -> PhaseSummary {
+    fn summary(&self, latest_ms: f64, _total_count: u64) -> PhaseSummary {
         let window_count = self.values_ms.len() as u64;
         if window_count == 0 {
             return PhaseSummary {
@@ -69,7 +69,7 @@ impl LatencySeries {
                 .expect("perf latency samples must be finite")
         });
         PhaseSummary {
-            count: total_count,
+            count: window_count,
             latest_ms,
             avg_ms: self.total_ms / window_count as f64,
             p50_ms: percentile(&sorted, 0.50),
@@ -489,14 +489,14 @@ mod tests {
     }
 
     #[test]
-    fn summary_count_tracks_total_samples_beyond_window() {
+    fn summary_count_tracks_retained_samples_beyond_window() {
         let mut stats = PerfStats::default();
         for _ in 0..(MAX_LATENCY_SAMPLES + 5) {
             stats.record_render(Duration::from_millis(1));
         }
 
         let summary = stats.render_summary();
-        assert_eq!(summary.count, (MAX_LATENCY_SAMPLES + 5) as u64);
+        assert_eq!(summary.count, MAX_LATENCY_SAMPLES as u64);
         assert_eq!(stats.render_samples, (MAX_LATENCY_SAMPLES + 5) as u64);
     }
 }

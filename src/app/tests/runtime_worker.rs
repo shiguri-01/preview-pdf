@@ -216,6 +216,7 @@ fn run_next_prefetch_reduces_queue_depth() {
         .expect("task should exist");
     assert_eq!(task.doc_id, doc.doc_id());
     assert_eq!(runtime.perf_stats.queue_depth, queued - 1);
+    assert!(runtime.perf_stats.in_flight_samples().is_empty());
 
     fs::remove_file(&file).expect("test pdf should be removed");
 }

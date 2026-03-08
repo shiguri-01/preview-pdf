@@ -303,7 +303,7 @@ impl RenderRuntime {
     }
 
     fn sync_queue_depth(&mut self) {
-        self.perf_stats.set_queue_state(self.scheduler.len(), 0);
+        self.perf_stats.set_queue_depth(self.scheduler.len());
     }
 
     pub fn sync_presenter_metrics(&mut self, presenter: &dyn ImagePresenter) {

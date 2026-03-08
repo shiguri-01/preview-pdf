@@ -158,13 +158,13 @@ impl RatatuiImagePresenter {
                             continue;
                         };
 
+                        self.state.perf_stats.record_encode_wait(wait_elapsed);
                         if succeeded {
                             if let Some(protocol) = protocol {
                                 entry.state = TerminalFrameState::Ready(protocol);
                             } else {
                                 entry.state = TerminalFrameState::Failed;
                             }
-                            self.state.perf_stats.record_encode_wait(wait_elapsed);
                             self.state.perf_stats.record_convert(elapsed);
                         } else {
                             entry.state = TerminalFrameState::Failed;

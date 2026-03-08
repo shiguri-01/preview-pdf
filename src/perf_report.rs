@@ -364,6 +364,8 @@ mod tests {
     use std::process;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+    use serde_json::Value;
+
     use super::run_fixed_perf_report;
 
     #[tokio::test(flavor = "current_thread")]
@@ -374,10 +376,11 @@ mod tests {
         let report = run_fixed_perf_report(&file)
             .await
             .expect("perf report should succeed");
+        let value: Value = serde_json::from_str(&report).expect("report should be valid JSON");
 
-        assert!(report.contains("\"scenario\": \"fixed-navigation-v1\""));
-        assert!(report.contains("\"p95_ms\""));
-        assert!(report.contains("\"redraw\""));
+        assert_eq!(value["scenario"].as_str(), Some("fixed-navigation-v1"));
+        assert!(value["phases"]["render"]["p95_ms"].as_f64().is_some());
+        assert!(value.get("redraw").is_some());
 
         fs::remove_file(&file).expect("test pdf should be removed");
     }
@@ -391,8 +394,10 @@ mod tests {
         let report = run_fixed_perf_report(&file)
             .await
             .expect("perf report should succeed");
+        let value: Value = serde_json::from_str(&report).expect("report should be valid JSON");
         assert!(started.elapsed() < Duration::from_secs(10));
-        assert!(report.starts_with("{\n"));
+        assert!(value["wall_time_ms"].as_f64().is_some());
+        assert!(value["samples"]["queue_depth"].as_array().is_some());
 
         fs::remove_file(&file).expect("test pdf should be removed");
     }

@@ -301,6 +301,43 @@ fn presenter_has_pending_work_tracks_encode_progress() {
 }
 
 #[test]
+fn failed_encode_still_records_encode_wait() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let rendered_page = RenderedPageKey::new(12, 1, 1.0);
+    let invalid_frame = RgbaFrame {
+        width: 4,
+        height: 4,
+        pixels: vec![255; 3].into(),
+    };
+
+    presenter
+        .prefetch_encode(
+            rendered_page,
+            &invalid_frame,
+            viewport,
+            PanOffset::default(),
+            PrefetchClass::DirectionalLead,
+            1,
+        )
+        .expect("prefetch should queue even if encode will fail");
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while presenter.has_pending_work() && Instant::now() < deadline {
+        let _ = presenter.drain_background_events();
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    assert_eq!(presenter.perf_stats().encode_wait_samples, 1);
+    assert_eq!(presenter.perf_stats().convert_samples, 0);
+}
+
+#[test]
 fn render_pending_uses_stale_fallback_when_allowed() {
     let mut presenter = RatatuiImagePresenter::new();
     let viewport = Viewport {

@@ -384,24 +384,21 @@ impl App {
                 for event in dispatch.emitted_events {
                     let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
                 }
-                if self.interaction.apply_palette_requests(&mut self.state) {
+                let palette_redraw_requested =
+                    self.interaction.apply_palette_requests(&mut self.state);
+                let redraw_requested = palette_redraw_requested
+                    || match dispatch.outcome {
+                        CommandOutcome::QuitRequested => {
+                            Self::terminate_process_now(runtime);
+                        }
+                        CommandOutcome::Applied | CommandOutcome::Noop => true,
+                    };
+                if redraw_requested {
                     self.render
                         .runtime
                         .perf_stats
                         .record_redraw_request(RedrawReason::Input);
-                    runtime.ui_actor.mark_redraw();
-                }
-                match dispatch.outcome {
-                    CommandOutcome::QuitRequested => {
-                        Self::terminate_process_now(runtime);
-                    }
-                    CommandOutcome::Applied | CommandOutcome::Noop => {
-                        self.render
-                            .runtime
-                            .perf_stats
-                            .record_redraw_request(RedrawReason::Input);
-                        runtime.ui_actor.mark_redraw()
-                    }
+                    runtime.ui_actor.mark_redraw()
                 }
             }
             WaitEvent::Event(DomainEvent::App(event)) => {
@@ -449,10 +446,6 @@ impl App {
                 runtime.render_actor.mark_prefetch_due();
             }
             WaitEvent::Event(DomainEvent::RedrawTick) => {
-                self.render
-                    .runtime
-                    .perf_stats
-                    .record_redraw_request(RedrawReason::Timer);
                 runtime.ui_actor.mark_redraw();
             }
             WaitEvent::Event(DomainEvent::Wake) => {}

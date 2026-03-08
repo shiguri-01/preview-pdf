@@ -1845,6 +1845,7 @@ dependencies = [
  "ratatui 0.30.0",
  "ratatui-image",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "toml",

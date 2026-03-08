@@ -142,11 +142,11 @@ UI contract:
 ## Observable performance signals (`perf.rs`)
 
 The runtime tracks:
-- render time (`render_ms`) with count/avg/p50/p95/p99
-- encode time (`convert_ms`) with count/avg/p50/p95/p99
-- terminal draw time (`blit_ms`) with count/avg/p50/p95/p99
-- render-worker wait time (`render_wait_ms`) with count/avg/p50/p95/p99
-- encode-worker wait time (`encode_wait_ms`) with count/avg/p50/p95/p99
+- render time (`render_ms`) with count/latest_ms/avg/p50/p95/p99
+- encode time (`convert_ms`) with count/latest_ms/avg/p50/p95/p99
+- terminal draw time (`blit_ms`) with count/latest_ms/avg/p50/p95/p99
+- render-worker wait time (`render_wait_ms`) with count/latest_ms/avg/p50/p95/p99
+- encode-worker wait time (`encode_wait_ms`) with count/latest_ms/avg/p50/p95/p99
 - L1/L2 cache hit rates
 - prefetch queue depth time-series samples
 - in-flight task count time-series samples

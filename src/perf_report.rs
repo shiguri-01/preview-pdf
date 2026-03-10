@@ -227,7 +227,7 @@ async fn draw_until_ready(
             PresenterFeedback::Pending | PresenterFeedback::None => {}
         }
 
-        let _ = presenter.drain_background_events();
+        presenter.drain_background_events();
         let after_drain_samples = presenter_sample_counts(presenter);
         let completion_after_render = after_drain_samples != after_render_samples;
         if completion_after_render {
@@ -235,17 +235,18 @@ async fn draw_until_ready(
             runtime
                 .perf_stats
                 .record_redraw_request(RedrawReason::Completion);
-            continue;
         }
         if Instant::now() >= deadline {
             return Err(AppError::unsupported(
                 "timed out waiting for presenter completion during perf scenario",
             ));
         }
-        runtime
-            .perf_stats
-            .record_redraw_request(RedrawReason::Timer);
-        sleep(DRAW_RETRY_DELAY).await;
+        if !completion_after_render {
+            runtime
+                .perf_stats
+                .record_redraw_request(RedrawReason::Timer);
+            sleep(DRAW_RETRY_DELAY).await;
+        }
     }
 }
 
@@ -256,7 +257,7 @@ async fn drain_presenter_until_idle(
     let deadline = Instant::now() + DRAW_TIMEOUT;
     loop {
         let before_samples = presenter_sample_counts(presenter);
-        let _ = presenter.drain_background_events();
+        presenter.drain_background_events();
         let after_samples = presenter_sample_counts(presenter);
         if after_samples != before_samples {
             runtime.sync_presenter_metrics(presenter);

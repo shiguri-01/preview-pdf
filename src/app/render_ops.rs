@@ -316,6 +316,9 @@ mod tests {
         assert!(current_changed);
         assert_eq!(subsystem.runtime.perf_stats.render_wait_samples, 1);
         assert_eq!(subsystem.runtime.perf_stats.render_wait_ms, 9.0);
-        assert_eq!(state.status.message, "render error: unsupported: render failed");
+        assert_eq!(
+            state.status.message,
+            "render error: unsupported: render failed"
+        );
     }
 }

@@ -13,10 +13,8 @@ description: Create and review GitHub pull requests with a consistent workflow. 
 
 ## Create PR
 
-1. Create a short branch-appropriate PR title that summarizes the net change against the target branch.
+1. Create a short branch-appropriate PR title.
 2. Write a concise PR body tailored to the change's scope:
-   - Describe what this PR changes relative to the target branch, not just what the latest commit changed.
-   - Prefer PR-level outcomes and impact over commit-by-commit narration.
    - Small/obvious changes: verification results + one-line rationale
    - Larger changes: problem, solution approach, risk/impact, verification.
    - Omit sections that add no information for this specific change.

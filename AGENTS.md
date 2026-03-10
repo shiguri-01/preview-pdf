@@ -19,5 +19,4 @@
 
 ## Commit & Pull Request Guidelines
 - Preferred commit format: `<type>(<scope>): <summary>` where useful (`feat`, `fix`, `refactor`, `docs`, `test`).
-- PR titles and bodies should describe the PR's net change against the target branch, not just the latest commit.
 - For GitHub PR creation/view/update tasks, use `pr-workflow` skill.

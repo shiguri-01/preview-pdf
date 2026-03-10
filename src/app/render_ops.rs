@@ -41,6 +41,9 @@ impl RenderSubsystem {
         interactive: bool,
     ) -> bool {
         let presenter_caps = self.presenter.capabilities();
+        self.runtime
+            .perf_stats
+            .record_render_wait(completed.wait_elapsed);
         match completed.result {
             Ok(frame) => {
                 if !interactive
@@ -73,9 +76,6 @@ impl RenderSubsystem {
                     completed.elapsed,
                     completed.priority == RenderPriority::CriticalCurrent,
                 );
-                self.runtime
-                    .perf_stats
-                    .record_render_wait(completed.wait_elapsed);
                 current_keys.contains(&completed.key)
             }
             Err(err) => {
@@ -229,5 +229,93 @@ impl RenderSubsystem {
         }
         self.runtime
             .set_queue_depth_with_inflight(render_worker.in_flight_len());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use ratatui::layout::Rect;
+
+    use crate::backend::RgbaFrame;
+    use crate::error::{AppError, AppResult};
+    use crate::presenter::{
+        ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
+        PresenterRenderOutcome, Viewport,
+    };
+
+    use super::*;
+    use crate::app::runtime::RenderRuntime;
+
+    #[derive(Default)]
+    struct NoopPresenter;
+
+    impl ImagePresenter for NoopPresenter {
+        fn prepare(
+            &mut self,
+            _cache_key: RenderedPageKey,
+            _frame: &RgbaFrame,
+            _viewport: Viewport,
+            _pan: PanOffset,
+            _generation: u64,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn render(
+            &mut self,
+            _frame: &mut ratatui::Frame<'_>,
+            _area: Rect,
+            _options: PresenterRenderOptions,
+        ) -> AppResult<PresenterRenderOutcome> {
+            Ok(PresenterRenderOutcome {
+                drew_image: false,
+                feedback: PresenterFeedback::None,
+                used_stale_fallback: false,
+            })
+        }
+
+        fn capabilities(&self) -> PresenterCaps {
+            PresenterCaps {
+                backend_name: "noop-presenter",
+                supports_l2_cache: false,
+                cell_px: None,
+                preferred_max_render_scale: 1.0,
+            }
+        }
+    }
+
+    #[test]
+    fn process_render_result_records_wait_even_on_failure() {
+        let mut subsystem = RenderSubsystem {
+            presenter: Box::<NoopPresenter>::default(),
+            runtime: RenderRuntime::default(),
+            viewer_has_image: false,
+        };
+        let mut state = AppState::default();
+        let key = RenderedPageKey::new(1, 0, 1.0);
+
+        let current_changed = subsystem.process_render_result(
+            &mut state,
+            RenderWorkerResult {
+                key,
+                priority: RenderPriority::CriticalCurrent,
+                generation: 1,
+                result: Err(AppError::unsupported("render failed")),
+                wait_elapsed: Duration::from_millis(9),
+                elapsed: Duration::from_millis(3),
+            },
+            &[key],
+            None,
+            PanOffset::default(),
+            false,
+            false,
+        );
+
+        assert!(current_changed);
+        assert_eq!(subsystem.runtime.perf_stats.render_wait_samples, 1);
+        assert_eq!(subsystem.runtime.perf_stats.render_wait_ms, 9.0);
+        assert_eq!(state.status.message, "render error: unsupported: render failed");
     }
 }

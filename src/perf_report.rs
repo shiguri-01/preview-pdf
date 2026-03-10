@@ -140,6 +140,8 @@ pub async fn run_fixed_perf_report(path: &Path) -> AppResult<String> {
         }
     }
 
+    drain_presenter_until_idle(&mut presenter, &mut runtime).await?;
+
     let report = PerfScenarioReport {
         scenario: SCENARIO_NAME,
         pdf_path: path.to_path_buf(),
@@ -179,6 +181,7 @@ async fn draw_until_ready(
 ) -> AppResult<()> {
     let deadline = Instant::now() + DRAW_TIMEOUT;
     loop {
+        let before_samples = presenter_sample_counts(presenter);
         let mut feedback = PresenterFeedback::Pending;
         let mut drew_image = false;
         let mut render_error = None;
@@ -204,9 +207,18 @@ async fn draw_until_ready(
         }
         runtime.sync_presenter_metrics(presenter);
         runtime.perf_stats.record_frame_draw();
+        let after_render_samples = presenter_sample_counts(presenter);
+        let completion_during_render = after_render_samples != before_samples;
 
         match feedback {
-            PresenterFeedback::None if drew_image => return Ok(()),
+            PresenterFeedback::None if drew_image => {
+                if completion_during_render {
+                    runtime
+                        .perf_stats
+                        .record_redraw_request(RedrawReason::Completion);
+                }
+                return Ok(());
+            }
             PresenterFeedback::Failed => {
                 return Err(AppError::unsupported(
                     "perf scenario presenter failed to render image",
@@ -215,11 +227,15 @@ async fn draw_until_ready(
             PresenterFeedback::Pending | PresenterFeedback::None => {}
         }
 
-        if presenter.drain_background_events() {
+        let _ = presenter.drain_background_events();
+        let after_drain_samples = presenter_sample_counts(presenter);
+        let completion_after_render = after_drain_samples != after_render_samples;
+        if completion_after_render {
             runtime.sync_presenter_metrics(presenter);
             runtime
                 .perf_stats
                 .record_redraw_request(RedrawReason::Completion);
+            continue;
         }
         if Instant::now() >= deadline {
             return Err(AppError::unsupported(
@@ -231,6 +247,43 @@ async fn draw_until_ready(
             .record_redraw_request(RedrawReason::Timer);
         sleep(DRAW_RETRY_DELAY).await;
     }
+}
+
+async fn drain_presenter_until_idle(
+    presenter: &mut RatatuiImagePresenter,
+    runtime: &mut RenderRuntime,
+) -> AppResult<()> {
+    let deadline = Instant::now() + DRAW_TIMEOUT;
+    loop {
+        let before_samples = presenter_sample_counts(presenter);
+        let _ = presenter.drain_background_events();
+        let after_samples = presenter_sample_counts(presenter);
+        if after_samples != before_samples {
+            runtime.sync_presenter_metrics(presenter);
+            runtime
+                .perf_stats
+                .record_redraw_request(RedrawReason::Completion);
+        }
+
+        if !presenter.has_pending_work() && after_samples == before_samples {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(AppError::unsupported(
+                "timed out waiting for presenter queue to drain during perf scenario",
+            ));
+        }
+        sleep(DRAW_RETRY_DELAY).await;
+    }
+}
+
+fn presenter_sample_counts(presenter: &RatatuiImagePresenter) -> (u64, u64, u64) {
+    let stats = presenter.perf_stats();
+    (
+        stats.convert_samples,
+        stats.encode_wait_samples,
+        stats.blit_samples,
+    )
 }
 
 fn scenario_pages(page_count: usize) -> Vec<usize> {
@@ -366,7 +419,12 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::run_fixed_perf_report;
+    use super::{drain_presenter_until_idle, run_fixed_perf_report};
+    use crate::app::RenderRuntime;
+    use crate::backend::RgbaFrame;
+    use crate::presenter::{ImagePresenter, PanOffset, RatatuiImagePresenter, Viewport};
+    use crate::render::cache::RenderedPageKey;
+    use crate::render::prefetch::PrefetchClass;
 
     #[tokio::test(flavor = "current_thread")]
     async fn fixed_perf_report_outputs_json_with_percentiles() {
@@ -400,6 +458,40 @@ mod tests {
         assert!(value["samples"]["queue_depth"].as_array().is_some());
 
         fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn drain_presenter_until_idle_syncs_prefetch_metrics() {
+        let mut presenter = RatatuiImagePresenter::new();
+        let mut runtime = RenderRuntime::default();
+        let viewport = Viewport {
+            x: 0,
+            y: 0,
+            width: 12,
+            height: 7,
+        };
+        presenter
+            .prefetch_encode(
+                RenderedPageKey::new(21, 1, 1.0),
+                &RgbaFrame {
+                    width: 4,
+                    height: 4,
+                    pixels: vec![200; 4 * 4 * 4].into(),
+                },
+                viewport,
+                PanOffset::default(),
+                PrefetchClass::DirectionalLead,
+                1,
+            )
+            .expect("prefetch should pass");
+
+        drain_presenter_until_idle(&mut presenter, &mut runtime)
+            .await
+            .expect("pending presenter work should drain");
+
+        assert!(!presenter.has_pending_work());
+        assert_eq!(runtime.perf_stats.encode_wait_samples, 1);
+        assert_eq!(runtime.perf_stats.convert_samples, 1);
     }
 
     #[test]

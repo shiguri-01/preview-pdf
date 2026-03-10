@@ -338,6 +338,50 @@ fn failed_encode_still_records_encode_wait() {
 }
 
 #[test]
+fn evicted_encode_completion_still_records_encode_wait() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let rendered_page = RenderedPageKey::new(13, 1, 1.0);
+    let key = TerminalFrameKey {
+        rendered_page,
+        viewport,
+        pan: PanOffset::default(),
+    };
+
+    presenter
+        .prefetch_encode(
+            rendered_page,
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            PrefetchClass::DirectionalLead,
+            1,
+        )
+        .expect("prefetch should pass");
+    assert!(
+        presenter.state.l2_cache.remove(&key),
+        "queued entry should exist before eviction"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        let _ = presenter.drain_background_events();
+        if presenter.perf_stats().encode_wait_samples >= 1 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    assert_eq!(presenter.perf_stats().encode_wait_samples, 1);
+    assert_eq!(presenter.perf_stats().convert_samples, 0);
+}
+
+#[test]
 fn render_pending_uses_stale_fallback_when_allowed() {
     let mut presenter = RatatuiImagePresenter::new();
     let viewport = Viewport {

@@ -154,11 +154,11 @@ impl RatatuiImagePresenter {
                         elapsed,
                         succeeded,
                     } => {
+                        self.state.perf_stats.record_encode_wait(wait_elapsed);
                         let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
                             continue;
                         };
 
-                        self.state.perf_stats.record_encode_wait(wait_elapsed);
                         if succeeded {
                             if let Some(protocol) = protocol {
                                 entry.state = TerminalFrameState::Ready(protocol);

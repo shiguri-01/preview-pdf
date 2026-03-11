@@ -127,9 +127,10 @@ impl App {
             return Err(AppError::invalid_argument("pdf has no pages"));
         }
 
+        self.render.runtime.perf_stats.reset();
+        self.render.presenter.reset_perf_metrics();
         self.render.runtime.perf_stats.enable_sample_collection();
         self.render.presenter.enable_perf_sample_collection();
-        self.render.presenter.clear_perf_blit_metrics();
         let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;
         let (loop_event_tx, loop_event_rx, loop_event_runtime) = EventBusRuntime::spawn_headless();
         let mut runtime = self.initialize_loop_runtime(

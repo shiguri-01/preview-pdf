@@ -81,6 +81,10 @@ pub struct PerfStats {
 }
 
 impl PerfStats {
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
     pub fn enable_sample_collection(&mut self) {
         self.collect_samples = true;
     }
@@ -830,6 +834,28 @@ mod tests {
         assert_eq!(stats.blit_ms, 0.0);
         assert_eq!(stats.blit_samples, 0);
         assert_eq!(summarize_metric(stats.blit_samples_ms()).count, 0);
+    }
+
+    #[test]
+    fn reset_clears_counters_and_samples() {
+        let mut stats = PerfStats::default();
+        stats.enable_sample_collection();
+        stats.record_render(Duration::from_millis(12));
+        stats.record_convert(Duration::from_millis(3));
+        stats.record_blit(Duration::from_millis(1));
+        stats.record_render_queue_wait(Duration::from_millis(4));
+        stats.record_encode_queue_wait(Duration::from_millis(2));
+        stats.set_queue_depth(7);
+        stats.set_render_in_flight(2);
+        stats.set_encode_queue_depth(3);
+        stats.set_encode_in_flight(1);
+        stats.add_canceled_tasks(2);
+        stats.add_encode_canceled_tasks(1);
+        stats.record_redraw(RedrawReason::Timer);
+
+        stats.reset();
+
+        assert_eq!(stats, PerfStats::default());
     }
 
     #[test]

@@ -579,6 +579,10 @@ impl ImagePresenter for RatatuiImagePresenter {
         Some(self.state.perf_stats.clone())
     }
 
+    fn reset_perf_metrics(&mut self) {
+        self.state.perf_stats.reset();
+    }
+
     fn enable_perf_sample_collection(&mut self) {
         self.state.perf_stats.enable_sample_collection();
     }

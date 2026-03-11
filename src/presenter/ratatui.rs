@@ -106,6 +106,13 @@ impl RatatuiImagePresenter {
         self.state.l2_cache.len()
     }
 
+    fn reset_terminal_state(&mut self) {
+        self.state.l2_cache.clear();
+        self.state.current_key = None;
+        self.state.last_ready_key = None;
+        self.state.current_generation = 0;
+    }
+
     fn ensure_frame_entry(
         &mut self,
         cache_key: RenderedPageKey,
@@ -319,12 +326,19 @@ impl ImagePresenter for RatatuiImagePresenter {
             self.config.protocol_type = protocol_type;
             self.config.protocol_label = protocol_type_label(protocol_type);
             self.config.picker = picker_with_resolved_cell_size(picker, protocol_type);
-            self.state.l2_cache.clear();
-            self.state.current_key = None;
-            self.state.last_ready_key = None;
-            self.state.current_generation = 0;
+            self.reset_terminal_state();
         }
 
+        self.state.terminal_initialized = true;
+        Ok(())
+    }
+
+    fn initialize_headless_for_perf(&mut self) -> AppResult<()> {
+        self.config.protocol_type = ProtocolType::Halfblocks;
+        self.config.protocol_label = "halfblocks";
+        self.config.picker = Picker::halfblocks();
+        self.reset_terminal_state();
+        self.state.perf_stats.reset();
         self.state.terminal_initialized = true;
         Ok(())
     }

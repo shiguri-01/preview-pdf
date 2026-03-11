@@ -186,6 +186,11 @@ impl PerfStats {
         self.encode_queue_depth = presenter.encode_queue_depth;
         self.encode_in_flight = presenter.encode_in_flight;
         self.encode_canceled_tasks = presenter.encode_canceled_tasks;
+        self.encode_samples_ms = presenter.encode_samples_ms.clone();
+        self.blit_samples_ms = presenter.blit_samples_ms.clone();
+        self.encode_queue_wait_samples_ms = presenter.encode_queue_wait_samples_ms.clone();
+        self.encode_queue_depth_samples = presenter.encode_queue_depth_samples.clone();
+        self.encode_in_flight_samples = presenter.encode_in_flight_samples.clone();
     }
 
     pub fn clear_blit_metrics(&mut self) {
@@ -448,7 +453,10 @@ impl PerfReport {
 
 pub async fn run_report(pdf_path: &Path, run: PerfRunConfig) -> AppResult<PerfReport> {
     validate_run_config(&run)?;
-    let total_iterations = run.warmup_iterations + run.measured_iterations;
+    let total_iterations = run
+        .warmup_iterations
+        .checked_add(run.measured_iterations)
+        .ok_or_else(|| AppError::invalid_argument("perf iteration count overflow"))?;
     let mut measured = Vec::with_capacity(run.measured_iterations);
     let mut doc_id = None;
 
@@ -690,11 +698,12 @@ fn percentile(sorted: &[f64], percentile: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::time::Duration;
 
     use super::{
-        PerfRunConfig, PerfScenarioId, PerfStats, RedrawReason, merge_stats, summarize_metric,
-        summarize_scalar, validate_run_config,
+        PerfRunConfig, PerfScenarioId, PerfStats, RedrawReason, merge_stats, run_report,
+        summarize_metric, summarize_scalar, validate_run_config,
     };
 
     #[test]
@@ -740,8 +749,10 @@ mod tests {
         runtime.record_render(Duration::from_millis(11));
 
         let mut presenter = PerfStats::default();
+        presenter.enable_sample_collection();
         presenter.record_convert(Duration::from_millis(5));
         presenter.record_blit(Duration::from_millis(2));
+        presenter.record_encode_queue_wait(Duration::from_millis(3));
         presenter.set_l2_hit_rate(0.8);
         presenter.set_encode_queue_depth(4);
         presenter.set_encode_in_flight(1);
@@ -756,6 +767,11 @@ mod tests {
         assert_eq!(runtime.encode_queue_depth, 4);
         assert_eq!(runtime.encode_in_flight, 1);
         assert_eq!(runtime.encode_canceled_tasks, 3);
+        assert_eq!(runtime.encode_samples_ms(), &[5.0]);
+        assert_eq!(runtime.blit_samples_ms(), &[2.0]);
+        assert_eq!(runtime.encode_queue_wait_samples_ms(), &[3.0]);
+        assert_eq!(runtime.encode_queue_depth_samples(), &[4]);
+        assert_eq!(runtime.encode_in_flight_samples(), &[1]);
     }
 
     #[test]
@@ -867,5 +883,20 @@ mod tests {
 
         let err = validate_run_config(&run).expect_err("zero measured iterations should fail");
         assert!(err.to_string().contains("measured iteration"));
+    }
+
+    #[test]
+    fn rejects_iteration_count_overflow() {
+        let runtime = tokio::runtime::Runtime::new().expect("tokio runtime should initialize");
+        let run = PerfRunConfig {
+            warmup_iterations: usize::MAX,
+            measured_iterations: 1,
+            ..PerfRunConfig::default()
+        };
+
+        let err = runtime
+            .block_on(run_report(Path::new("dummy.pdf"), run))
+            .expect_err("overflow should fail");
+        assert!(err.to_string().contains("overflow"));
     }
 }

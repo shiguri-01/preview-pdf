@@ -68,6 +68,11 @@ pub trait ImagePresenter {
         Ok(())
     }
 
+    fn initialize_headless_for_perf(&mut self) -> AppResult<()> {
+        self.reset_perf_metrics();
+        self.initialize_terminal()
+    }
+
     fn status_label(&self) -> String {
         self.capabilities().backend_name.to_string()
     }

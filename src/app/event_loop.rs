@@ -128,7 +128,7 @@ impl App {
         }
 
         self.render.runtime.perf_stats.reset();
-        self.render.presenter.reset_perf_metrics();
+        self.render.presenter.initialize_headless_for_perf()?;
         self.render.runtime.perf_stats.enable_sample_collection();
         self.render.presenter.enable_perf_sample_collection();
         let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;

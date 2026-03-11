@@ -1,7 +1,13 @@
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Serialize;
+
+use crate::app::App;
+use crate::backend::open_default_backend;
+use crate::error::{AppError, AppResult};
+use crate::presenter::PresenterKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -402,6 +408,40 @@ impl PerfReport {
             iterations,
         }
     }
+}
+
+pub async fn run_report(pdf_path: &Path, run: PerfRunConfig) -> AppResult<PerfReport> {
+    let total_iterations = run.warmup_iterations + run.measured_iterations;
+    let mut measured = Vec::with_capacity(run.measured_iterations);
+    let mut doc_id = None;
+
+    for iteration in 0..total_iterations {
+        let mut pdf = open_default_backend(pdf_path)?;
+        doc_id.get_or_insert(pdf.doc_id());
+        let mut app = App::new(PresenterKind::RatatuiImage)?;
+        let snapshot = app.run_perf(pdf.as_mut(), run.scenario).await?;
+        if iteration >= run.warmup_iterations {
+            measured.push(snapshot);
+        }
+    }
+
+    Ok(PerfReport::from_iterations(
+        &PathBuf::from(pdf_path),
+        doc_id.unwrap_or(0),
+        &run,
+        measured,
+    ))
+}
+
+pub fn write_report(report: &PerfReport, out: Option<&Path>) -> AppResult<()> {
+    let json = serde_json::to_string_pretty(report)
+        .map_err(|err| AppError::unsupported(format!("failed to serialize perf report: {err}")))?;
+
+    match out {
+        Some(path) => fs::write(path, format!("{json}\n"))?,
+        None => println!("{json}"),
+    }
+    Ok(())
 }
 
 fn merge_stats<'a>(stats: impl Iterator<Item = &'a PerfStats>) -> PerfStats {

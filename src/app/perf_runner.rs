@@ -1,5 +1,10 @@
+use std::convert::Infallible;
+use std::io;
 use std::time::Instant;
 
+use ratatui::backend::TestBackend;
+use ratatui::layout::Size;
+use ratatui::{Frame, Terminal};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::command::Command;
@@ -7,6 +12,42 @@ use crate::event::DomainEvent;
 use crate::perf::PerfScenarioId;
 
 use super::state::AppState;
+use super::terminal_session::TerminalSurface;
+
+pub(crate) const PERF_HEADLESS_WIDTH: u16 = 120;
+pub(crate) const PERF_HEADLESS_HEIGHT: u16 = 40;
+
+pub(crate) struct HeadlessTerminalSession {
+    terminal: Terminal<TestBackend>,
+}
+
+impl HeadlessTerminalSession {
+    pub(crate) fn new(width: u16, height: u16) -> io::Result<Self> {
+        let terminal = infallible_to_io(Terminal::new(TestBackend::new(width, height)))?;
+        Ok(Self { terminal })
+    }
+
+    pub(crate) fn restore(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl TerminalSurface for HeadlessTerminalSession {
+    fn size(&self) -> io::Result<Size> {
+        infallible_to_io(self.terminal.size())
+    }
+
+    fn clear(&mut self) -> io::Result<()> {
+        infallible_to_io(self.terminal.clear())
+    }
+
+    fn draw<F>(&mut self, render: F) -> io::Result<()>
+    where
+        F: FnOnce(&mut Frame<'_>),
+    {
+        infallible_to_io(self.terminal.draw(render)).map(|_| ())
+    }
+}
 
 pub(crate) struct PerfLoopDriver {
     scenario: PerfScenarioId,
@@ -77,5 +118,12 @@ impl PerfLoopDriver {
                     >= u128::from(self.scenario.parameters().idle_duration_ms)
             }
         }
+    }
+}
+
+fn infallible_to_io<T>(result: Result<T, Infallible>) -> io::Result<T> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(err) => match err {},
     }
 }

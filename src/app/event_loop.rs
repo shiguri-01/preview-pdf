@@ -15,16 +15,15 @@ use crate::render::worker::RenderWorker;
 use super::actors::{InputActor, RenderActor, UiActor};
 use super::core::App;
 use super::event_bus::EventBusRuntime;
-use super::perf_runner::PerfLoopDriver;
+use super::perf_runner::{
+    HeadlessTerminalSession, PERF_HEADLESS_HEIGHT, PERF_HEADLESS_WIDTH, PerfLoopDriver,
+};
 use super::render_ops::{CurrentTaskContext, PrefetchDispatchContext};
 use super::scale::select_input_poll_timeout;
-use super::terminal_session::{TerminalSession, TerminalSurface};
+use super::terminal_session::{InteractiveTerminalSession, TerminalSurface};
 use super::view_ops::RenderFramePlan;
 
-const PERF_HEADLESS_WIDTH: u16 = 120;
-const PERF_HEADLESS_HEIGHT: u16 = 40;
-
-struct LoopRuntime {
+struct LoopRuntime<S> {
     page_count: usize,
     prefetch_pause_after_input: Duration,
     input_poll_timeout_idle: Duration,
@@ -32,14 +31,13 @@ struct LoopRuntime {
     input_actor: InputActor,
     render_actor: RenderActor,
     ui_actor: UiActor,
-    session: TerminalSession,
+    session: S,
     render_worker: RenderWorker,
     prefetch_tick: time::Interval,
     redraw_tick: time::Interval,
     loop_event_tx: UnboundedSender<DomainEvent>,
     loop_event_rx: UnboundedReceiver<DomainEvent>,
     loop_event_runtime: EventBusRuntime,
-    perf_driver: Option<PerfLoopDriver>,
 }
 
 struct LoopStep {
@@ -65,15 +63,57 @@ enum LoopControl {
     Break,
 }
 
+trait SessionRestore {
+    fn restore(&mut self) -> std::io::Result<()>;
+}
+
+impl SessionRestore for InteractiveTerminalSession {
+    fn restore(&mut self) -> std::io::Result<()> {
+        InteractiveTerminalSession::restore(self)
+    }
+}
+
+impl SessionRestore for HeadlessTerminalSession {
+    fn restore(&mut self) -> std::io::Result<()> {
+        HeadlessTerminalSession::restore(self)
+    }
+}
+
 impl App {
-    fn terminate_process_now(runtime: &mut LoopRuntime) -> ! {
+    fn terminate_process_now<S>(runtime: &mut LoopRuntime<S>) -> !
+    where
+        S: TerminalSurface + SessionRestore,
+    {
         runtime.loop_event_runtime.shutdown();
         let _ = runtime.session.restore();
         std::process::exit(0);
     }
 
     pub async fn run(&mut self, pdf: &mut dyn PdfBackend) -> AppResult<()> {
-        let _ = self.run_internal(pdf, None).await?;
+        let page_count = pdf.page_count();
+        if page_count == 0 {
+            return Err(AppError::invalid_argument("pdf has no pages"));
+        }
+
+        let session = InteractiveTerminalSession::enter()?;
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            EventBusRuntime::spawn_interactive();
+        let mut runtime = self.initialize_loop_runtime(
+            pdf,
+            page_count,
+            session,
+            loop_event_tx,
+            loop_event_rx,
+            loop_event_runtime,
+        )?;
+        runtime
+            .loop_event_runtime
+            .start_input(runtime.loop_event_tx.clone());
+        let result = self.run_interactive_loop(&mut runtime, pdf).await;
+        runtime.loop_event_runtime.shutdown();
+        let restore_result = runtime.session.restore();
+        result?;
+        restore_result?;
         Ok(())
     }
 
@@ -82,99 +122,41 @@ impl App {
         pdf: &mut dyn PdfBackend,
         scenario: PerfScenarioId,
     ) -> AppResult<PerfIterationSnapshot> {
-        self.run_internal(pdf, Some(scenario))
-            .await?
-            .ok_or_else(|| AppError::unsupported("perf run did not produce a report"))
-    }
-
-    async fn run_internal(
-        &mut self,
-        pdf: &mut dyn PdfBackend,
-        perf_scenario: Option<PerfScenarioId>,
-    ) -> AppResult<Option<PerfIterationSnapshot>> {
         let page_count = pdf.page_count();
         if page_count == 0 {
             return Err(AppError::invalid_argument("pdf has no pages"));
         }
 
-        let mut runtime = self.initialize_loop_runtime(pdf, page_count, perf_scenario)?;
-        let mut perf_report = None;
-
-        loop {
-            let step = self.build_loop_step(
-                &runtime.session,
-                pdf,
-                &runtime.input_actor,
-                runtime.prefetch_pause_after_input,
-            );
-            let changed = self.drain_background_and_sync_navigation(
-                pdf,
-                &mut runtime.render_actor,
-                step.current_scale,
-            );
-            self.render.ensure_current_task_enqueued(
-                &mut self.state,
-                pdf,
-                &runtime.render_actor,
-                &mut runtime.render_worker,
-                CurrentTaskContext {
-                    current_scale: step.current_scale,
-                    required_pages: step.required_pages.clone(),
-                    required_keys: step.required_render_keys.clone(),
-                    current_cached: step.current_cached,
-                },
-            );
-            self.render.dispatch_prefetch_if_due(
-                &mut self.state,
-                &mut runtime.render_actor,
-                &mut runtime.render_worker,
-                PrefetchDispatchContext {
-                    required_keys: step.required_render_keys.clone(),
-                    current_cached: step.current_cached,
-                    prefetch_viewport: step.prefetch_viewport,
-                    base_pan: step.base_pan,
-                    enable_crop: step.enable_crop,
-                    interactive: step.interactive,
-                    dispatch_budget: self.config.render.prefetch_dispatch_budget_per_tick,
-                },
-            );
-            self.update_ui_and_render_frame(&mut runtime, pdf, changed, &step)?;
-            if let Some(snapshot) = self.advance_perf_driver(&mut runtime, &step) {
-                perf_report = Some(snapshot);
-                break;
-            }
-
-            let wake_timeout = select_input_poll_timeout(
-                runtime.render_worker.in_flight_len() > 0,
-                self.render.presenter.has_pending_work(),
-                runtime.input_poll_timeout_idle,
-                runtime.input_poll_timeout_busy,
-            );
-            let waited = wait_next_event(
-                &mut runtime.loop_event_rx,
-                &mut runtime.render_worker,
-                &mut runtime.prefetch_tick,
-                &mut runtime.redraw_tick,
-                wake_timeout,
-            )
-            .await;
-            match self.handle_waited_event(waited, &mut runtime, pdf)? {
-                LoopControl::Continue => {}
-                LoopControl::Break => break,
-            }
-        }
-
+        let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) = EventBusRuntime::spawn_headless();
+        let mut runtime = self.initialize_loop_runtime(
+            pdf,
+            page_count,
+            session,
+            loop_event_tx,
+            loop_event_rx,
+            loop_event_runtime,
+        )?;
+        let result = self.run_perf_loop(&mut runtime, pdf, scenario).await;
         runtime.loop_event_runtime.shutdown();
-        runtime.session.restore()?;
-        Ok(perf_report)
+        let restore_result = runtime.session.restore();
+        let snapshot = result?;
+        restore_result?;
+        Ok(snapshot)
     }
 
-    fn initialize_loop_runtime(
+    fn initialize_loop_runtime<S>(
         &mut self,
         pdf: &dyn PdfBackend,
         page_count: usize,
-        perf_scenario: Option<PerfScenarioId>,
-    ) -> AppResult<LoopRuntime> {
+        session: S,
+        loop_event_tx: UnboundedSender<DomainEvent>,
+        loop_event_rx: UnboundedReceiver<DomainEvent>,
+        loop_event_runtime: EventBusRuntime,
+    ) -> AppResult<LoopRuntime<S>>
+    where
+        S: TerminalSurface,
+    {
         self.state.current_page = self.state.current_page.min(page_count - 1);
         self.state.normalize_current_page(page_count);
 
@@ -183,12 +165,6 @@ impl App {
             Duration::from_millis(self.config.render.pending_redraw_interval_ms);
         let input_actor = InputActor::new(loop_started_at);
         let ui_actor = UiActor::new(loop_started_at, pending_redraw_interval);
-        let perf_mode = perf_scenario.is_some();
-        let session = if perf_mode {
-            TerminalSession::headless(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?
-        } else {
-            TerminalSession::enter()?
-        };
         self.render.presenter.initialize_terminal()?;
 
         let prefetch_pause_after_input =
@@ -198,7 +174,6 @@ impl App {
             Duration::from_millis(self.config.render.input_poll_timeout_idle_ms);
         let input_poll_timeout_busy =
             Duration::from_millis(self.config.render.input_poll_timeout_busy_ms);
-        let (loop_event_tx, loop_event_rx, loop_event_runtime) = EventBusRuntime::spawn(!perf_mode);
         let mut prefetch_tick = time::interval(prefetch_tick_interval);
         prefetch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut redraw_tick = time::interval(pending_redraw_interval);
@@ -235,8 +210,132 @@ impl App {
             loop_event_tx,
             loop_event_rx,
             loop_event_runtime,
-            perf_driver: perf_scenario.map(PerfLoopDriver::new),
         })
+    }
+
+    async fn run_interactive_loop(
+        &mut self,
+        runtime: &mut LoopRuntime<InteractiveTerminalSession>,
+        pdf: &mut dyn PdfBackend,
+    ) -> AppResult<()> {
+        loop {
+            let _ = self.process_loop_iteration(runtime, pdf)?;
+            match self.wait_and_handle_next_event(runtime, pdf).await? {
+                LoopControl::Continue => {}
+                LoopControl::Break => return Ok(()),
+            }
+        }
+    }
+
+    async fn run_perf_loop(
+        &mut self,
+        runtime: &mut LoopRuntime<HeadlessTerminalSession>,
+        pdf: &mut dyn PdfBackend,
+        scenario: PerfScenarioId,
+    ) -> AppResult<PerfIterationSnapshot> {
+        let mut perf_driver = PerfLoopDriver::new(scenario);
+
+        loop {
+            let step = self.process_loop_iteration(runtime, pdf)?;
+            let system_idle = step.current_cached
+                && runtime.render_worker.in_flight_len() == 0
+                && !self.render.presenter.has_pending_work()
+                && !runtime.ui_actor.needs_redraw();
+            if perf_driver.advance(
+                &self.state,
+                runtime.page_count,
+                system_idle,
+                &runtime.loop_event_tx,
+            ) {
+                return Ok(PerfIterationSnapshot {
+                    runtime: self.render.runtime.perf_stats.clone(),
+                    presenter: self.render.presenter.perf_snapshot().unwrap_or_default(),
+                });
+            }
+
+            match self.wait_and_handle_next_event(runtime, pdf).await? {
+                LoopControl::Continue => {}
+                LoopControl::Break => {
+                    return Err(AppError::unsupported(
+                        "perf run ended before producing a report",
+                    ));
+                }
+            }
+        }
+    }
+
+    fn process_loop_iteration<S>(
+        &mut self,
+        runtime: &mut LoopRuntime<S>,
+        pdf: &dyn PdfBackend,
+    ) -> AppResult<LoopStep>
+    where
+        S: TerminalSurface,
+    {
+        let step = self.build_loop_step(
+            &runtime.session,
+            pdf,
+            &runtime.input_actor,
+            runtime.prefetch_pause_after_input,
+        );
+        let changed = self.drain_background_and_sync_navigation(
+            pdf,
+            &mut runtime.render_actor,
+            step.current_scale,
+        );
+        self.render.ensure_current_task_enqueued(
+            &mut self.state,
+            pdf,
+            &runtime.render_actor,
+            &mut runtime.render_worker,
+            CurrentTaskContext {
+                current_scale: step.current_scale,
+                required_pages: step.required_pages.clone(),
+                required_keys: step.required_render_keys.clone(),
+                current_cached: step.current_cached,
+            },
+        );
+        self.render.dispatch_prefetch_if_due(
+            &mut self.state,
+            &mut runtime.render_actor,
+            &mut runtime.render_worker,
+            PrefetchDispatchContext {
+                required_keys: step.required_render_keys.clone(),
+                current_cached: step.current_cached,
+                prefetch_viewport: step.prefetch_viewport,
+                base_pan: step.base_pan,
+                enable_crop: step.enable_crop,
+                interactive: step.interactive,
+                dispatch_budget: self.config.render.prefetch_dispatch_budget_per_tick,
+            },
+        );
+        self.update_ui_and_render_frame(runtime, pdf, changed, &step)?;
+        Ok(step)
+    }
+
+    async fn wait_and_handle_next_event<S>(
+        &mut self,
+        runtime: &mut LoopRuntime<S>,
+        pdf: &mut dyn PdfBackend,
+    ) -> AppResult<LoopControl>
+    where
+        S: TerminalSurface + SessionRestore,
+    {
+        let wake_timeout = select_input_poll_timeout(
+            runtime.render_worker.in_flight_len() > 0,
+            self.render.presenter.has_pending_work(),
+            runtime.input_poll_timeout_idle,
+            runtime.input_poll_timeout_busy,
+        );
+        let waited = wait_next_event(
+            &mut runtime.loop_event_rx,
+            &mut runtime.render_worker,
+            &mut runtime.prefetch_tick,
+            &mut runtime.redraw_tick,
+            wake_timeout,
+        )
+        .await;
+        self.handle_waited_event(waited, runtime, pdf)
     }
 
     fn build_loop_step(
@@ -318,13 +417,16 @@ impl App {
         changed
     }
 
-    fn update_ui_and_render_frame(
+    fn update_ui_and_render_frame<S>(
         &mut self,
-        runtime: &mut LoopRuntime,
+        runtime: &mut LoopRuntime<S>,
         pdf: &dyn PdfBackend,
         changed: bool,
         step: &LoopStep,
-    ) -> AppResult<()> {
+    ) -> AppResult<()>
+    where
+        S: TerminalSurface,
+    {
         let render_busy = runtime.render_worker.in_flight_len() > 0;
         let presenter_busy = self.render.presenter.has_pending_work();
         if runtime.ui_actor.should_request_pending_redraw(
@@ -370,12 +472,15 @@ impl App {
         Ok(())
     }
 
-    fn handle_waited_event(
+    fn handle_waited_event<S>(
         &mut self,
         waited: WaitEvent,
-        runtime: &mut LoopRuntime,
+        runtime: &mut LoopRuntime<S>,
         pdf: &mut dyn PdfBackend,
-    ) -> AppResult<LoopControl> {
+    ) -> AppResult<LoopControl>
+    where
+        S: TerminalSurface + SessionRestore,
+    {
         match waited {
             WaitEvent::Event(DomainEvent::Input(event)) => {
                 let input_outcome = self.handle_input_event(
@@ -466,33 +571,12 @@ impl App {
         Ok(LoopControl::Continue)
     }
 
-    fn request_redraw(&mut self, runtime: &mut LoopRuntime, reason: RedrawReason) {
+    fn request_redraw<S>(&mut self, runtime: &mut LoopRuntime<S>, reason: RedrawReason)
+    where
+        S: TerminalSurface,
+    {
         runtime.ui_actor.mark_redraw();
         self.render.runtime.perf_stats.record_redraw(reason);
-    }
-
-    fn advance_perf_driver(
-        &mut self,
-        runtime: &mut LoopRuntime,
-        step: &LoopStep,
-    ) -> Option<PerfIterationSnapshot> {
-        let perf_driver = runtime.perf_driver.as_mut()?;
-        let system_idle = step.current_cached
-            && runtime.render_worker.in_flight_len() == 0
-            && !self.render.presenter.has_pending_work()
-            && !runtime.ui_actor.needs_redraw();
-        if perf_driver.advance(
-            &self.state,
-            runtime.page_count,
-            system_idle,
-            &runtime.loop_event_tx,
-        ) {
-            return Some(PerfIterationSnapshot {
-                runtime: self.render.runtime.perf_stats.clone(),
-                presenter: self.render.presenter.perf_snapshot().unwrap_or_default(),
-            });
-        }
-        None
     }
 }
 

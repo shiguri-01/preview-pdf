@@ -7,7 +7,8 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::{Rect, Size};
 use ratatui::widgets::Paragraph;
 
-use super::super::terminal_session::{TerminalSession, TerminalSurface};
+use super::super::perf_runner::HeadlessTerminalSession;
+use super::super::terminal_session::TerminalSurface;
 
 struct TestTerminalSurface {
     terminal: Terminal<TestBackend>,
@@ -61,7 +62,7 @@ fn terminal_surface_supports_size_clear_and_draw() {
 #[test]
 fn headless_terminal_session_supports_size_clear_and_draw() {
     let mut session =
-        TerminalSession::headless(80, 24).expect("headless terminal should initialize");
+        HeadlessTerminalSession::new(80, 24).expect("headless terminal should initialize");
     let size = session.size().expect("size should resolve");
     assert_eq!(size, Size::new(80, 24));
 

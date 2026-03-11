@@ -10,20 +10,27 @@ pub(crate) struct EventBusRuntime {
 }
 
 impl EventBusRuntime {
-    pub(crate) fn spawn(
-        enable_input: bool,
-    ) -> (
+    pub(crate) fn spawn_interactive() -> (
         UnboundedSender<DomainEvent>,
         UnboundedReceiver<DomainEvent>,
         Self,
     ) {
         let (tx, rx) = unbounded_channel();
-        let tasks = if enable_input {
-            vec![spawn_input_task(tx.clone())]
-        } else {
-            Vec::new()
-        };
+        (tx, rx, Self { tasks: Vec::new() })
+    }
+
+    pub(crate) fn spawn_headless() -> (
+        UnboundedSender<DomainEvent>,
+        UnboundedReceiver<DomainEvent>,
+        Self,
+    ) {
+        let (tx, rx) = unbounded_channel();
+        let tasks = Vec::new();
         (tx, rx, Self { tasks })
+    }
+
+    pub(crate) fn start_input(&mut self, tx: UnboundedSender<DomainEvent>) {
+        self.tasks.push(spawn_input_task(tx));
     }
 
     pub(crate) fn shutdown(&mut self) {
@@ -53,8 +60,21 @@ mod tests {
     use super::EventBusRuntime;
 
     #[test]
-    fn spawn_without_input_creates_runtime_without_tasks() {
-        let (_tx, _rx, mut runtime) = EventBusRuntime::spawn(false);
+    fn spawn_headless_creates_runtime_without_tasks() {
+        let (_tx, _rx, mut runtime) = EventBusRuntime::spawn_headless();
         runtime.shutdown();
+    }
+
+    #[test]
+    fn spawn_interactive_creates_runtime_with_tasks() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should initialize");
+        runtime.block_on(async {
+            let (tx, _rx, mut runtime) = EventBusRuntime::spawn_interactive();
+            runtime.start_input(tx);
+            runtime.shutdown();
+        });
     }
 }

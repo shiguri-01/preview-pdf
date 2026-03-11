@@ -1,11 +1,10 @@
 use std::ffi::OsString;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use pvf::app::App;
 use pvf::backend::open_default_backend;
 use pvf::error::{AppError, AppResult};
-use pvf::perf::{PerfReport, PerfRunConfig, PerfScenarioId};
+use pvf::perf::{PerfRunConfig, PerfScenarioId, run_report, write_report};
 use pvf::presenter::PresenterKind;
 
 #[tokio::main(flavor = "multi_thread")]
@@ -32,42 +31,13 @@ async fn run() -> AppResult<()> {
     let options = parse_cli(std::env::args_os())?;
 
     if let Some(perf) = options.perf {
-        return run_perf(options.pdf_path, perf).await;
+        let report = run_report(&options.pdf_path, perf.run).await?;
+        return write_report(&report, perf.out.as_deref());
     }
 
     let mut pdf = open_default_backend(&options.pdf_path)?;
     let mut app = App::new(PresenterKind::RatatuiImage)?;
     app.run(pdf.as_mut()).await
-}
-
-async fn run_perf(pdf_path: PathBuf, perf: PerfCliOptions) -> AppResult<()> {
-    let total_iterations = perf.run.warmup_iterations + perf.run.measured_iterations;
-    let mut measured = Vec::with_capacity(perf.run.measured_iterations);
-    let mut doc_id = None;
-
-    for iteration in 0..total_iterations {
-        let mut pdf = open_default_backend(&pdf_path)?;
-        doc_id.get_or_insert(pdf.doc_id());
-        let mut app = App::new(PresenterKind::RatatuiImage)?;
-        let snapshot = app.run_perf(pdf.as_mut(), perf.run.scenario).await?;
-        if iteration >= perf.run.warmup_iterations {
-            measured.push(snapshot);
-        }
-    }
-
-    let report = PerfReport::from_iterations(&pdf_path, doc_id.unwrap_or(0), &perf.run, measured);
-    write_perf_report(&report, perf.out.as_deref())
-}
-
-fn write_perf_report(report: &PerfReport, out: Option<&Path>) -> AppResult<()> {
-    let json = serde_json::to_string_pretty(report)
-        .map_err(|err| AppError::unsupported(format!("failed to serialize perf report: {err}")))?;
-
-    match out {
-        Some(path) => fs::write(path, format!("{json}\n"))?,
-        None => println!("{json}"),
-    }
-    Ok(())
 }
 
 fn parse_cli<I>(args: I) -> AppResult<CliOptions>

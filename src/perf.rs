@@ -411,6 +411,7 @@ impl PerfReport {
 }
 
 pub async fn run_report(pdf_path: &Path, run: PerfRunConfig) -> AppResult<PerfReport> {
+    validate_run_config(&run)?;
     let total_iterations = run.warmup_iterations + run.measured_iterations;
     let mut measured = Vec::with_capacity(run.measured_iterations);
     let mut doc_id = None;
@@ -425,12 +426,23 @@ pub async fn run_report(pdf_path: &Path, run: PerfRunConfig) -> AppResult<PerfRe
         }
     }
 
+    let doc_id = doc_id.ok_or_else(|| AppError::unsupported("perf run did not open the PDF"))?;
+
     Ok(PerfReport::from_iterations(
         &PathBuf::from(pdf_path),
-        doc_id.unwrap_or(0),
+        doc_id,
         &run,
         measured,
     ))
+}
+
+fn validate_run_config(run: &PerfRunConfig) -> AppResult<()> {
+    if run.measured_iterations == 0 {
+        return Err(AppError::invalid_argument(
+            "perf run requires at least one measured iteration",
+        ));
+    }
+    Ok(())
 }
 
 pub fn write_report(report: &PerfReport, out: Option<&Path>) -> AppResult<()> {
@@ -643,7 +655,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        PerfScenarioId, PerfStats, RedrawReason, merge_stats, summarize_metric, summarize_scalar,
+        PerfRunConfig, PerfScenarioId, PerfStats, RedrawReason, merge_stats, summarize_metric,
+        summarize_scalar, validate_run_config,
     };
 
     #[test]
@@ -739,5 +752,16 @@ mod tests {
         let merged = merge_stats([&first, &second].into_iter());
         assert_eq!(merged.cache_hit_rate_l1, 0.5);
         assert_eq!(merged.cache_hit_rate_l2, 0.375);
+    }
+
+    #[test]
+    fn rejects_zero_measured_iterations() {
+        let run = PerfRunConfig {
+            measured_iterations: 0,
+            ..PerfRunConfig::default()
+        };
+
+        let err = validate_run_config(&run).expect_err("zero measured iterations should fail");
+        assert!(err.to_string().contains("measured iteration"));
     }
 }

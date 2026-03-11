@@ -155,6 +155,11 @@ impl RatatuiImagePresenter {
                         elapsed,
                         succeeded,
                     } => {
+                        self.state.perf_stats.record_encode_queue_wait(queue_wait);
+                        if succeeded {
+                            self.state.perf_stats.record_convert(elapsed);
+                        }
+
                         let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
                             continue;
                         };
@@ -165,10 +170,7 @@ impl RatatuiImagePresenter {
                             } else {
                                 entry.state = TerminalFrameState::Failed;
                             }
-                            self.state.perf_stats.record_encode_queue_wait(queue_wait);
-                            self.state.perf_stats.record_convert(elapsed);
                         } else {
-                            self.state.perf_stats.record_encode_queue_wait(queue_wait);
                             entry.state = TerminalFrameState::Failed;
                         }
 
@@ -178,9 +180,7 @@ impl RatatuiImagePresenter {
                     }
                     EncodeWorkerEvent::CanceledStale { key } => {
                         let removed = self.state.l2_cache.remove(&key);
-                        if removed {
-                            self.state.perf_stats.add_encode_canceled_tasks(1);
-                        }
+                        self.state.perf_stats.add_encode_canceled_tasks(1);
                         if removed && Some(key) == self.state.last_ready_key {
                             self.state.last_ready_key = None;
                         }

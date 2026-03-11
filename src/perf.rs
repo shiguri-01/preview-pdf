@@ -17,6 +17,7 @@ pub enum RedrawReason {
     AppEvent,
     RenderComplete,
     PendingWork,
+    Timer,
     InputError,
     StateChanged,
 }
@@ -28,6 +29,7 @@ pub struct RedrawReasonCounts {
     pub app_event: u64,
     pub render_complete: u64,
     pub pending_work: u64,
+    pub timer: u64,
     pub input_error: u64,
     pub state_changed: u64,
 }
@@ -40,6 +42,7 @@ impl RedrawReasonCounts {
             RedrawReason::AppEvent => self.app_event += 1,
             RedrawReason::RenderComplete => self.render_complete += 1,
             RedrawReason::PendingWork => self.pending_work += 1,
+            RedrawReason::Timer => self.timer += 1,
             RedrawReason::InputError => self.input_error += 1,
             RedrawReason::StateChanged => self.state_changed += 1,
         }
@@ -511,6 +514,7 @@ fn merge_stats<'a>(stats: impl Iterator<Item = &'a PerfStats>) -> PerfStats {
         merged.redraw_by_reason.app_event += stat.redraw_by_reason.app_event;
         merged.redraw_by_reason.render_complete += stat.redraw_by_reason.render_complete;
         merged.redraw_by_reason.pending_work += stat.redraw_by_reason.pending_work;
+        merged.redraw_by_reason.timer += stat.redraw_by_reason.timer;
         merged.redraw_by_reason.input_error += stat.redraw_by_reason.input_error;
         merged.redraw_by_reason.state_changed += stat.redraw_by_reason.state_changed;
         merged
@@ -553,12 +557,13 @@ fn build_iteration_report(
     runtime: &PerfStats,
     presenter: &PerfStats,
 ) -> PerfIterationReport {
+    let summary = build_summary_report(runtime, presenter);
     PerfIterationReport {
         iteration_index,
-        phase_metrics: build_summary_report(runtime, presenter).phase_metrics,
-        redraw: build_summary_report(runtime, presenter).redraw,
-        queues: build_summary_report(runtime, presenter).queues,
-        cache: build_summary_report(runtime, presenter).cache,
+        phase_metrics: summary.phase_metrics,
+        redraw: summary.redraw,
+        queues: summary.queues,
+        cache: summary.cache,
     }
 }
 
@@ -706,6 +711,7 @@ mod tests {
         stats.add_canceled_tasks(2);
         stats.add_encode_canceled_tasks(1);
         stats.record_redraw(RedrawReason::PendingWork);
+        stats.record_redraw(RedrawReason::Timer);
 
         assert_eq!(stats.render_ms, 12.0);
         assert_eq!(stats.convert_ms, 3.0);
@@ -719,8 +725,9 @@ mod tests {
         assert_eq!(stats.canceled_tasks, 2);
         assert_eq!(stats.render_canceled_tasks, 2);
         assert_eq!(stats.encode_canceled_tasks, 1);
-        assert_eq!(stats.redraw_requests_total, 1);
+        assert_eq!(stats.redraw_requests_total, 2);
         assert_eq!(stats.redraw_by_reason.pending_work, 1);
+        assert_eq!(stats.redraw_by_reason.timer, 1);
     }
 
     #[test]
@@ -804,10 +811,12 @@ mod tests {
         let mut second = PerfStats::default();
         second.set_l1_hit_rate(0.75);
         second.set_l2_hit_rate(0.25);
+        second.record_redraw(RedrawReason::Timer);
 
         let merged = merge_stats([&first, &second].into_iter());
         assert_eq!(merged.cache_hit_rate_l1, 0.5);
         assert_eq!(merged.cache_hit_rate_l2, 0.375);
+        assert_eq!(merged.redraw_by_reason.timer, 1);
     }
 
     #[test]

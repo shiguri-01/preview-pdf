@@ -129,6 +129,7 @@ impl App {
 
         self.render.runtime.perf_stats.enable_sample_collection();
         self.render.presenter.enable_perf_sample_collection();
+        self.render.presenter.clear_perf_blit_metrics();
         let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;
         let (loop_event_tx, loop_event_rx, loop_event_runtime) = EventBusRuntime::spawn_headless();
         let mut runtime = self.initialize_loop_runtime(
@@ -249,7 +250,6 @@ impl App {
                 system_idle,
                 &runtime.loop_event_tx,
             ) {
-                self.render.presenter.clear_perf_blit_metrics();
                 return Ok(PerfIterationSnapshot {
                     runtime: self.render.runtime.perf_stats.clone(),
                     presenter: self.render.presenter.perf_snapshot().unwrap_or_default(),
@@ -566,7 +566,7 @@ impl App {
                 runtime.render_actor.mark_prefetch_due();
             }
             WaitEvent::Event(DomainEvent::RedrawTick) => {
-                self.request_redraw(runtime, RedrawReason::PendingWork);
+                self.request_redraw(runtime, RedrawReason::Timer);
             }
             WaitEvent::Event(DomainEvent::Wake) => {}
             WaitEvent::Closed => return Ok(LoopControl::Break),

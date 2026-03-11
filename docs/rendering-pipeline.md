@@ -149,6 +149,6 @@ The runtime tracks:
 - L1/L2 cache hit rates
 - render/encode queue depth and in-flight samples
 - render/encode canceled task counts
-- redraw request counts broken down by reason (`input`, `command`, `app_event`, `render_complete`, `pending_work`, `input_error`, `state_changed`)
+- redraw request counts broken down by reason (`input`, `command`, `app_event`, `render_complete`, `pending_work`, `timer`, `input_error`, `state_changed`)
 
 These values are used by status/debug surfaces and perf JSON reports.

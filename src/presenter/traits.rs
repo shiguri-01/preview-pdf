@@ -117,4 +117,8 @@ pub trait ImagePresenter {
     fn perf_snapshot(&self) -> Option<PerfStats> {
         None
     }
+
+    fn enable_perf_sample_collection(&mut self) {}
+
+    fn clear_perf_blit_metrics(&mut self) {}
 }

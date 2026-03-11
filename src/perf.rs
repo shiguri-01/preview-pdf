@@ -65,6 +65,7 @@ pub struct PerfStats {
     pub encode_canceled_tasks: usize,
     pub redraw_requests_total: u64,
     pub redraw_by_reason: RedrawReasonCounts,
+    collect_samples: bool,
     render_samples_ms: Vec<f64>,
     encode_samples_ms: Vec<f64>,
     blit_samples_ms: Vec<f64>,
@@ -77,32 +78,46 @@ pub struct PerfStats {
 }
 
 impl PerfStats {
+    pub fn enable_sample_collection(&mut self) {
+        self.collect_samples = true;
+    }
+
     pub fn record_render(&mut self, elapsed: Duration) {
         self.render_ms = elapsed.as_secs_f64() * 1000.0;
         self.render_samples += 1;
-        self.render_samples_ms.push(self.render_ms);
+        if self.collect_samples {
+            self.render_samples_ms.push(self.render_ms);
+        }
     }
 
     pub fn record_convert(&mut self, elapsed: Duration) {
         self.convert_ms = elapsed.as_secs_f64() * 1000.0;
         self.convert_samples += 1;
-        self.encode_samples_ms.push(self.convert_ms);
+        if self.collect_samples {
+            self.encode_samples_ms.push(self.convert_ms);
+        }
     }
 
     pub fn record_blit(&mut self, elapsed: Duration) {
         self.blit_ms = elapsed.as_secs_f64() * 1000.0;
         self.blit_samples += 1;
-        self.blit_samples_ms.push(self.blit_ms);
+        if self.collect_samples {
+            self.blit_samples_ms.push(self.blit_ms);
+        }
     }
 
     pub fn record_render_queue_wait(&mut self, elapsed: Duration) {
-        self.render_queue_wait_samples_ms
-            .push(elapsed.as_secs_f64() * 1000.0);
+        if self.collect_samples {
+            self.render_queue_wait_samples_ms
+                .push(elapsed.as_secs_f64() * 1000.0);
+        }
     }
 
     pub fn record_encode_queue_wait(&mut self, elapsed: Duration) {
-        self.encode_queue_wait_samples_ms
-            .push(elapsed.as_secs_f64() * 1000.0);
+        if self.collect_samples {
+            self.encode_queue_wait_samples_ms
+                .push(elapsed.as_secs_f64() * 1000.0);
+        }
     }
 
     pub fn set_l1_hit_rate(&mut self, rate: f64) {
@@ -115,22 +130,30 @@ impl PerfStats {
 
     pub fn set_queue_depth(&mut self, depth: usize) {
         self.queue_depth = depth;
-        self.render_queue_depth_samples.push(depth);
+        if self.collect_samples {
+            self.render_queue_depth_samples.push(depth);
+        }
     }
 
     pub fn set_render_in_flight(&mut self, inflight: usize) {
         self.render_in_flight = inflight;
-        self.render_in_flight_samples.push(inflight);
+        if self.collect_samples {
+            self.render_in_flight_samples.push(inflight);
+        }
     }
 
     pub fn set_encode_queue_depth(&mut self, depth: usize) {
         self.encode_queue_depth = depth;
-        self.encode_queue_depth_samples.push(depth);
+        if self.collect_samples {
+            self.encode_queue_depth_samples.push(depth);
+        }
     }
 
     pub fn set_encode_in_flight(&mut self, inflight: usize) {
         self.encode_in_flight = inflight;
-        self.encode_in_flight_samples.push(inflight);
+        if self.collect_samples {
+            self.encode_in_flight_samples.push(inflight);
+        }
     }
 
     pub fn add_canceled_tasks(&mut self, canceled: usize) {
@@ -156,6 +179,12 @@ impl PerfStats {
         self.encode_queue_depth = presenter.encode_queue_depth;
         self.encode_in_flight = presenter.encode_in_flight;
         self.encode_canceled_tasks = presenter.encode_canceled_tasks;
+    }
+
+    pub fn clear_blit_metrics(&mut self) {
+        self.blit_ms = 0.0;
+        self.blit_samples = 0;
+        self.blit_samples_ms.clear();
     }
 
     fn render_samples_ms(&self) -> &[f64] {
@@ -662,6 +691,7 @@ mod tests {
     #[test]
     fn records_milliseconds_and_clamped_rates() {
         let mut stats = PerfStats::default();
+        stats.enable_sample_collection();
         stats.record_render(Duration::from_millis(12));
         stats.record_convert(Duration::from_millis(3));
         stats.record_blit(Duration::from_millis(1));
@@ -731,6 +761,32 @@ mod tests {
     }
 
     #[test]
+    fn does_not_retain_samples_unless_enabled() {
+        let mut stats = PerfStats::default();
+        stats.record_render(Duration::from_millis(12));
+        stats.record_convert(Duration::from_millis(3));
+        stats.record_blit(Duration::from_millis(1));
+        stats.record_render_queue_wait(Duration::from_millis(4));
+        stats.record_encode_queue_wait(Duration::from_millis(2));
+        stats.set_queue_depth(7);
+        stats.set_render_in_flight(2);
+        stats.set_encode_queue_depth(3);
+        stats.set_encode_in_flight(1);
+
+        assert_eq!(summarize_metric(stats.render_samples_ms()).count, 0);
+        assert_eq!(summarize_metric(stats.encode_samples_ms()).count, 0);
+        assert_eq!(summarize_metric(stats.blit_samples_ms()).count, 0);
+        assert_eq!(
+            summarize_scalar(stats.render_queue_depth_samples()).count,
+            0
+        );
+        assert_eq!(
+            summarize_scalar(stats.encode_queue_depth_samples()).count,
+            0
+        );
+    }
+
+    #[test]
     fn parses_perf_scenarios() {
         assert_eq!(
             PerfScenarioId::parse("page-flip-forward"),
@@ -752,6 +808,19 @@ mod tests {
         let merged = merge_stats([&first, &second].into_iter());
         assert_eq!(merged.cache_hit_rate_l1, 0.5);
         assert_eq!(merged.cache_hit_rate_l2, 0.375);
+    }
+
+    #[test]
+    fn clear_blit_metrics_drops_samples_and_current_value() {
+        let mut stats = PerfStats::default();
+        stats.enable_sample_collection();
+        stats.record_blit(Duration::from_millis(2));
+
+        stats.clear_blit_metrics();
+
+        assert_eq!(stats.blit_ms, 0.0);
+        assert_eq!(stats.blit_samples, 0);
+        assert_eq!(summarize_metric(stats.blit_samples_ms()).count, 0);
     }
 
     #[test]

@@ -50,6 +50,7 @@ where
     let mut pdf_path = None;
     let mut perf_scenario = None;
     let mut perf_out = None;
+    let mut perf_out_flag = false;
 
     while let Some(arg) = args.next() {
         match arg.to_string_lossy().as_ref() {
@@ -76,6 +77,7 @@ where
                         "usage: pvf <file.pdf> [--perf-run <scenario-id>] [--perf-out <path|->]",
                     ));
                 };
+                perf_out_flag = true;
                 if value != "-" {
                     perf_out = Some(PathBuf::from(value));
                 }
@@ -102,7 +104,7 @@ where
         ));
     };
 
-    if perf_out.is_some() && perf_scenario.is_none() {
+    if perf_out_flag && perf_scenario.is_none() {
         return Err(AppError::invalid_argument("--perf-out requires --perf-run"));
     }
 
@@ -172,5 +174,13 @@ mod tests {
             OsString::from("report.json"),
         ];
         assert!(parse_cli(out_without_run.into_iter()).is_err());
+
+        let stdout_without_run = vec![
+            OsString::from("pvf"),
+            OsString::from("a.pdf"),
+            OsString::from("--perf-out"),
+            OsString::from("-"),
+        ];
+        assert!(parse_cli(stdout_without_run.into_iter()).is_err());
     }
 }

@@ -579,6 +579,14 @@ impl ImagePresenter for RatatuiImagePresenter {
         Some(self.state.perf_stats.clone())
     }
 
+    fn enable_perf_sample_collection(&mut self) {
+        self.state.perf_stats.enable_sample_collection();
+    }
+
+    fn clear_perf_blit_metrics(&mut self) {
+        self.state.perf_stats.clear_blit_metrics();
+    }
+
     fn drain_background_events(&mut self) -> bool {
         self.drain_encode_results()
     }

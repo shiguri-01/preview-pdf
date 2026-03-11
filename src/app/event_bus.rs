@@ -10,13 +10,19 @@ pub(crate) struct EventBusRuntime {
 }
 
 impl EventBusRuntime {
-    pub(crate) fn spawn() -> (
+    pub(crate) fn spawn(
+        enable_input: bool,
+    ) -> (
         UnboundedSender<DomainEvent>,
         UnboundedReceiver<DomainEvent>,
         Self,
     ) {
         let (tx, rx) = unbounded_channel();
-        let tasks = vec![spawn_input_task(tx.clone())];
+        let tasks = if enable_input {
+            vec![spawn_input_task(tx.clone())]
+        } else {
+            Vec::new()
+        };
         (tx, rx, Self { tasks })
     }
 
@@ -40,4 +46,15 @@ fn spawn_input_task(tx: UnboundedSender<DomainEvent>) -> JoinHandle<()> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EventBusRuntime;
+
+    #[test]
+    fn spawn_without_input_creates_runtime_without_tasks() {
+        let (_tx, _rx, mut runtime) = EventBusRuntime::spawn(false);
+        runtime.shutdown();
+    }
 }

@@ -7,7 +7,7 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::{Rect, Size};
 use ratatui::widgets::Paragraph;
 
-use super::super::terminal_session::TerminalSurface;
+use super::super::terminal_session::{TerminalSession, TerminalSurface};
 
 struct TestTerminalSurface {
     terminal: Terminal<TestBackend>,
@@ -47,6 +47,21 @@ fn infallible_to_io<T>(result: Result<T, Infallible>) -> io::Result<T> {
 #[test]
 fn terminal_surface_supports_size_clear_and_draw() {
     let mut session = TestTerminalSurface::new(80, 24).expect("test terminal should initialize");
+    let size = session.size().expect("size should resolve");
+    assert_eq!(size, Size::new(80, 24));
+
+    session.clear().expect("clear should succeed");
+    session
+        .draw(|frame| {
+            frame.render_widget(Paragraph::new("ok"), Rect::new(0, 0, 2, 1));
+        })
+        .expect("draw should succeed");
+}
+
+#[test]
+fn headless_terminal_session_supports_size_clear_and_draw() {
+    let mut session =
+        TerminalSession::headless(80, 24).expect("headless terminal should initialize");
     let size = session.size().expect("size should resolve");
     assert_eq!(size, Size::new(80, 24));
 

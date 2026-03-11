@@ -7,6 +7,7 @@ use crate::backend::PdfBackend;
 use crate::command::{ActionId, CommandOutcome};
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
+use crate::perf::{PerfIterationSnapshot, PerfScenarioId, RedrawReason};
 use crate::presenter::{PanOffset, Viewport};
 use crate::render::cache::RenderedPageKey;
 use crate::render::worker::RenderWorker;
@@ -14,10 +15,14 @@ use crate::render::worker::RenderWorker;
 use super::actors::{InputActor, RenderActor, UiActor};
 use super::core::App;
 use super::event_bus::EventBusRuntime;
+use super::perf_runner::PerfLoopDriver;
 use super::render_ops::{CurrentTaskContext, PrefetchDispatchContext};
 use super::scale::select_input_poll_timeout;
 use super::terminal_session::{TerminalSession, TerminalSurface};
 use super::view_ops::RenderFramePlan;
+
+const PERF_HEADLESS_WIDTH: u16 = 120;
+const PERF_HEADLESS_HEIGHT: u16 = 40;
 
 struct LoopRuntime {
     page_count: usize,
@@ -34,6 +39,7 @@ struct LoopRuntime {
     loop_event_tx: UnboundedSender<DomainEvent>,
     loop_event_rx: UnboundedReceiver<DomainEvent>,
     loop_event_runtime: EventBusRuntime,
+    perf_driver: Option<PerfLoopDriver>,
 }
 
 struct LoopStep {
@@ -67,12 +73,32 @@ impl App {
     }
 
     pub async fn run(&mut self, pdf: &mut dyn PdfBackend) -> AppResult<()> {
+        let _ = self.run_internal(pdf, None).await?;
+        Ok(())
+    }
+
+    pub async fn run_perf(
+        &mut self,
+        pdf: &mut dyn PdfBackend,
+        scenario: PerfScenarioId,
+    ) -> AppResult<PerfIterationSnapshot> {
+        self.run_internal(pdf, Some(scenario))
+            .await?
+            .ok_or_else(|| AppError::unsupported("perf run did not produce a report"))
+    }
+
+    async fn run_internal(
+        &mut self,
+        pdf: &mut dyn PdfBackend,
+        perf_scenario: Option<PerfScenarioId>,
+    ) -> AppResult<Option<PerfIterationSnapshot>> {
         let page_count = pdf.page_count();
         if page_count == 0 {
             return Err(AppError::invalid_argument("pdf has no pages"));
         }
 
-        let mut runtime = self.initialize_loop_runtime(pdf, page_count)?;
+        let mut runtime = self.initialize_loop_runtime(pdf, page_count, perf_scenario)?;
+        let mut perf_report = None;
 
         loop {
             let step = self.build_loop_step(
@@ -113,6 +139,10 @@ impl App {
                 },
             );
             self.update_ui_and_render_frame(&mut runtime, pdf, changed, &step)?;
+            if let Some(snapshot) = self.advance_perf_driver(&mut runtime, &step) {
+                perf_report = Some(snapshot);
+                break;
+            }
 
             let wake_timeout = select_input_poll_timeout(
                 runtime.render_worker.in_flight_len() > 0,
@@ -128,23 +158,22 @@ impl App {
                 wake_timeout,
             )
             .await;
-            if matches!(
-                self.handle_waited_event(waited, &mut runtime, pdf)?,
-                LoopControl::Break
-            ) {
-                break;
+            match self.handle_waited_event(waited, &mut runtime, pdf)? {
+                LoopControl::Continue => {}
+                LoopControl::Break => break,
             }
         }
 
         runtime.loop_event_runtime.shutdown();
         runtime.session.restore()?;
-        Ok(())
+        Ok(perf_report)
     }
 
     fn initialize_loop_runtime(
         &mut self,
         pdf: &dyn PdfBackend,
         page_count: usize,
+        perf_scenario: Option<PerfScenarioId>,
     ) -> AppResult<LoopRuntime> {
         self.state.current_page = self.state.current_page.min(page_count - 1);
         self.state.normalize_current_page(page_count);
@@ -154,7 +183,12 @@ impl App {
             Duration::from_millis(self.config.render.pending_redraw_interval_ms);
         let input_actor = InputActor::new(loop_started_at);
         let ui_actor = UiActor::new(loop_started_at, pending_redraw_interval);
-        let session = TerminalSession::enter()?;
+        let perf_mode = perf_scenario.is_some();
+        let session = if perf_mode {
+            TerminalSession::headless(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?
+        } else {
+            TerminalSession::enter()?
+        };
         self.render.presenter.initialize_terminal()?;
 
         let prefetch_pause_after_input =
@@ -164,7 +198,7 @@ impl App {
             Duration::from_millis(self.config.render.input_poll_timeout_idle_ms);
         let input_poll_timeout_busy =
             Duration::from_millis(self.config.render.input_poll_timeout_busy_ms);
-        let (loop_event_tx, loop_event_rx, loop_event_runtime) = EventBusRuntime::spawn();
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) = EventBusRuntime::spawn(!perf_mode);
         let mut prefetch_tick = time::interval(prefetch_tick_interval);
         prefetch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut redraw_tick = time::interval(pending_redraw_interval);
@@ -201,6 +235,7 @@ impl App {
             loop_event_tx,
             loop_event_rx,
             loop_event_runtime,
+            perf_driver: perf_scenario.map(PerfLoopDriver::new),
         })
     }
 
@@ -297,11 +332,11 @@ impl App {
             render_busy,
             presenter_busy,
         ) {
-            runtime.ui_actor.mark_redraw();
+            self.request_redraw(runtime, RedrawReason::PendingWork);
         }
 
         if changed {
-            runtime.ui_actor.mark_redraw();
+            self.request_redraw(runtime, RedrawReason::StateChanged);
         }
 
         if runtime.ui_actor.needs_redraw() {
@@ -352,6 +387,9 @@ impl App {
                 if input_outcome.quit_requested {
                     Self::terminate_process_now(runtime);
                 }
+                if input_outcome.redraw_requested {
+                    self.request_redraw(runtime, RedrawReason::Input);
+                }
                 if let Some(command) = input_outcome.command {
                     let _ = runtime.loop_event_tx.send(DomainEvent::Command(command));
                 }
@@ -359,7 +397,7 @@ impl App {
             WaitEvent::Event(DomainEvent::InputError(message)) => {
                 self.state.status.last_action_id = Some(ActionId::Input);
                 self.state.status.message = format!("input error: {message}");
-                runtime.ui_actor.mark_redraw();
+                self.request_redraw(runtime, RedrawReason::InputError);
             }
             WaitEvent::Event(DomainEvent::Command(command)) => {
                 let dispatch = self
@@ -369,20 +407,20 @@ impl App {
                     let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
                 }
                 if self.interaction.apply_palette_requests(&mut self.state) {
-                    runtime.ui_actor.mark_redraw();
+                    self.request_redraw(runtime, RedrawReason::StateChanged);
                 }
                 match dispatch.outcome {
                     CommandOutcome::QuitRequested => {
                         Self::terminate_process_now(runtime);
                     }
                     CommandOutcome::Applied | CommandOutcome::Noop => {
-                        runtime.ui_actor.mark_redraw()
+                        self.request_redraw(runtime, RedrawReason::Command)
                     }
                 }
             }
             WaitEvent::Event(DomainEvent::App(event)) => {
                 self.interaction.handle_app_event(&mut self.state, &event);
-                runtime.ui_actor.mark_redraw();
+                self.request_redraw(runtime, RedrawReason::AppEvent);
             }
             WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
                 let viewport =
@@ -410,19 +448,51 @@ impl App {
                         .input_actor
                         .is_interactive(runtime.prefetch_pause_after_input),
                 ) {
-                    runtime.ui_actor.mark_redraw();
+                    self.request_redraw(runtime, RedrawReason::RenderComplete);
                 }
+                self.render
+                    .runtime
+                    .set_queue_depth_with_inflight(runtime.render_worker.in_flight_len());
             }
             WaitEvent::Event(DomainEvent::PrefetchTick) => {
                 runtime.render_actor.mark_prefetch_due();
             }
             WaitEvent::Event(DomainEvent::RedrawTick) => {
-                runtime.ui_actor.mark_redraw();
+                self.request_redraw(runtime, RedrawReason::PendingWork);
             }
             WaitEvent::Event(DomainEvent::Wake) => {}
             WaitEvent::Closed => return Ok(LoopControl::Break),
         }
         Ok(LoopControl::Continue)
+    }
+
+    fn request_redraw(&mut self, runtime: &mut LoopRuntime, reason: RedrawReason) {
+        runtime.ui_actor.mark_redraw();
+        self.render.runtime.perf_stats.record_redraw(reason);
+    }
+
+    fn advance_perf_driver(
+        &mut self,
+        runtime: &mut LoopRuntime,
+        step: &LoopStep,
+    ) -> Option<PerfIterationSnapshot> {
+        let perf_driver = runtime.perf_driver.as_mut()?;
+        let system_idle = step.current_cached
+            && runtime.render_worker.in_flight_len() == 0
+            && !self.render.presenter.has_pending_work()
+            && !runtime.ui_actor.needs_redraw();
+        if perf_driver.advance(
+            &self.state,
+            runtime.page_count,
+            system_idle,
+            &runtime.loop_event_tx,
+        ) {
+            return Some(PerfIterationSnapshot {
+                runtime: self.render.runtime.perf_stats.clone(),
+                presenter: self.render.presenter.perf_snapshot().unwrap_or_default(),
+            });
+        }
+        None
     }
 }
 

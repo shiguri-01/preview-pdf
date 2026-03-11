@@ -26,6 +26,7 @@ pub(crate) enum EncodeWorkerRequest {
         area: Rect,
         class: PrefetchClass,
         generation: u64,
+        enqueued_at: std::time::Instant,
     },
     Shutdown,
 }
@@ -35,6 +36,7 @@ pub(crate) struct EncodeWorkerTask {
     pub(crate) picker: Picker,
     pub(crate) frame: RgbaFrame,
     pub(crate) area: Rect,
+    pub(crate) enqueued_at: std::time::Instant,
 }
 
 pub(crate) struct EncodeWorkerResult {
@@ -45,11 +47,16 @@ pub(crate) enum EncodeWorkerEvent {
     Completed {
         key: TerminalFrameKey,
         protocol: Option<Box<StatefulProtocol>>,
+        queue_wait: std::time::Duration,
         elapsed: std::time::Duration,
         succeeded: bool,
     },
     CanceledStale {
         key: TerminalFrameKey,
+    },
+    QueueState {
+        depth: usize,
+        in_flight: usize,
     },
 }
 
@@ -90,11 +97,11 @@ impl EncodeWorkerRuntime {
 pub(crate) fn send_encode_request(
     request_tx: &Option<UnboundedSender<EncodeWorkerRequest>>,
     request: EncodeWorkerRequest,
-) -> Result<(), EncodeWorkerRequest> {
+) -> Result<(), Box<EncodeWorkerRequest>> {
     let Some(request_tx) = request_tx.as_ref() else {
-        return Err(request);
+        return Err(Box::new(request));
     };
-    request_tx.send(request).map_err(|err| err.0)
+    request_tx.send(request).map_err(|err| Box::new(err.0))
 }
 
 pub(crate) fn spawn_encode_worker(
@@ -123,6 +130,7 @@ pub(crate) fn enqueue_encode_request(
             area,
             class,
             generation,
+            enqueued_at,
         } => {
             let _ = cancel_stale_prefetch_with_keys(queue, generation);
             if class == PrefetchClass::CriticalCurrent && queue.contains_key(&key) {
@@ -134,6 +142,7 @@ pub(crate) fn enqueue_encode_request(
                 picker,
                 frame,
                 area,
+                enqueued_at,
             };
             let meta = QueueTaskMeta {
                 key,
@@ -179,11 +188,21 @@ fn enqueue_with_notifications(
             area,
             class,
             generation,
+            enqueued_at,
         } => {
             let canceled = cancel_stale_prefetch_with_keys(queue, generation);
+            let canceled_count = canceled.len();
             for canceled_key in canceled {
                 let _ = result_tx.send(EncodeWorkerResult {
                     event: EncodeWorkerEvent::CanceledStale { key: canceled_key },
+                });
+            }
+            if canceled_count > 0 {
+                let _ = result_tx.send(EncodeWorkerResult {
+                    event: EncodeWorkerEvent::QueueState {
+                        depth: queue.len(),
+                        in_flight: 0,
+                    },
                 });
             }
             if class == PrefetchClass::CriticalCurrent && queue.contains_key(&key) {
@@ -195,6 +214,7 @@ fn enqueue_with_notifications(
                 picker,
                 frame,
                 area,
+                enqueued_at,
             };
             let meta = QueueTaskMeta {
                 key,
@@ -202,6 +222,12 @@ fn enqueue_with_notifications(
                 generation,
             };
             let _ = queue.push(task, meta);
+            let _ = result_tx.send(EncodeWorkerResult {
+                event: EncodeWorkerEvent::QueueState {
+                    depth: queue.len(),
+                    in_flight: 0,
+                },
+            });
             true
         }
         EncodeWorkerRequest::Shutdown => false,
@@ -246,6 +272,12 @@ fn encode_worker_main(
         let Some(task) = pop_next_encode_task(&mut queue) else {
             continue;
         };
+        let _ = result_tx.send(EncodeWorkerResult {
+            event: EncodeWorkerEvent::QueueState {
+                depth: queue.len(),
+                in_flight: 1,
+            },
+        });
 
         let started = std::time::Instant::now();
         let frame = match downscale_frame_for_area(task.frame, task.area, task.picker.font_size()) {
@@ -255,8 +287,15 @@ fn encode_worker_main(
                     event: EncodeWorkerEvent::Completed {
                         key: task.key,
                         protocol: None,
+                        queue_wait: started.saturating_duration_since(task.enqueued_at),
                         elapsed: started.elapsed(),
                         succeeded: false,
+                    },
+                });
+                let _ = result_tx.send(EncodeWorkerResult {
+                    event: EncodeWorkerEvent::QueueState {
+                        depth: queue.len(),
+                        in_flight: 0,
                     },
                 });
                 continue;
@@ -269,8 +308,15 @@ fn encode_worker_main(
                     event: EncodeWorkerEvent::Completed {
                         key: task.key,
                         protocol: None,
+                        queue_wait: started.saturating_duration_since(task.enqueued_at),
                         elapsed: started.elapsed(),
                         succeeded: false,
+                    },
+                });
+                let _ = result_tx.send(EncodeWorkerResult {
+                    event: EncodeWorkerEvent::QueueState {
+                        depth: queue.len(),
+                        in_flight: 0,
                     },
                 });
                 continue;
@@ -290,8 +336,15 @@ fn encode_worker_main(
                 } else {
                     None
                 },
+                queue_wait: started.saturating_duration_since(task.enqueued_at),
                 elapsed: started.elapsed(),
                 succeeded,
+            },
+        });
+        let _ = result_tx.send(EncodeWorkerResult {
+            event: EncodeWorkerEvent::QueueState {
+                depth: queue.len(),
+                in_flight: 0,
             },
         });
     }
@@ -299,6 +352,8 @@ fn encode_worker_main(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use ratatui::layout::Rect;
     use ratatui_image::picker::Picker;
     use tokio::sync::mpsc::unbounded_channel;
@@ -352,6 +407,7 @@ mod tests {
                 area,
                 class: PrefetchClass::DirectionalLead,
                 generation: 1,
+                enqueued_at: Instant::now(),
             },
             &mut queue
         ));
@@ -365,17 +421,19 @@ mod tests {
                 area,
                 class: PrefetchClass::CriticalCurrent,
                 generation: 2,
+                enqueued_at: Instant::now(),
             },
             &mut queue,
             &tx
         ));
 
-        let event = rx
-            .try_recv()
-            .expect("canceled-stale event should be emitted");
-        assert!(matches!(
-            event.event,
-            EncodeWorkerEvent::CanceledStale { key } if key == stale_key
-        ));
+        let mut saw_canceled = false;
+        while let Ok(event) = rx.try_recv() {
+            if matches!(event.event, EncodeWorkerEvent::CanceledStale { key } if key == stale_key) {
+                saw_canceled = true;
+                break;
+            }
+        }
+        assert!(saw_canceled, "canceled-stale event should be emitted");
     }
 }

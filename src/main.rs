@@ -1,8 +1,11 @@
 use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use pvf::app::App;
 use pvf::backend::open_default_backend;
 use pvf::error::{AppError, AppResult};
+use pvf::perf::{PerfReport, PerfRunConfig, PerfScenarioId};
 use pvf::presenter::PresenterKind;
 
 #[tokio::main(flavor = "multi_thread")]
@@ -13,57 +16,191 @@ async fn main() {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CliOptions {
+    pdf_path: PathBuf,
+    perf: Option<PerfCliOptions>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PerfCliOptions {
+    run: PerfRunConfig,
+    out: Option<PathBuf>,
+}
+
 async fn run() -> AppResult<()> {
-    let pdf_path = parse_cli_path(std::env::args_os())?;
+    let options = parse_cli(std::env::args_os())?;
 
-    let mut pdf = open_default_backend(&pdf_path)?;
+    if let Some(perf) = options.perf {
+        return run_perf(options.pdf_path, perf).await;
+    }
+
+    let mut pdf = open_default_backend(&options.pdf_path)?;
     let mut app = App::new(PresenterKind::RatatuiImage)?;
-
     app.run(pdf.as_mut()).await
 }
 
-fn parse_cli_path<I>(mut args: I) -> AppResult<OsString>
+async fn run_perf(pdf_path: PathBuf, perf: PerfCliOptions) -> AppResult<()> {
+    let total_iterations = perf.run.warmup_iterations + perf.run.measured_iterations;
+    let mut measured = Vec::with_capacity(perf.run.measured_iterations);
+    let mut doc_id = None;
+
+    for iteration in 0..total_iterations {
+        let mut pdf = open_default_backend(&pdf_path)?;
+        doc_id.get_or_insert(pdf.doc_id());
+        let mut app = App::new(PresenterKind::RatatuiImage)?;
+        let snapshot = app.run_perf(pdf.as_mut(), perf.run.scenario).await?;
+        if iteration >= perf.run.warmup_iterations {
+            measured.push(snapshot);
+        }
+    }
+
+    let report = PerfReport::from_iterations(&pdf_path, doc_id.unwrap_or(0), &perf.run, measured);
+    write_perf_report(&report, perf.out.as_deref())
+}
+
+fn write_perf_report(report: &PerfReport, out: Option<&Path>) -> AppResult<()> {
+    let json = serde_json::to_string_pretty(report)
+        .map_err(|err| AppError::unsupported(format!("failed to serialize perf report: {err}")))?;
+
+    match out {
+        Some(path) => fs::write(path, format!("{json}\n"))?,
+        None => println!("{json}"),
+    }
+    Ok(())
+}
+
+fn parse_cli<I>(args: I) -> AppResult<CliOptions>
 where
     I: Iterator<Item = OsString>,
 {
+    let mut args = args;
     let _program = args.next();
-    let Some(path) = args.next() else {
-        return Err(AppError::invalid_argument("usage: pvf <file.pdf>"));
-    };
 
-    if args.next().is_some() {
-        return Err(AppError::invalid_argument(
-            "usage: pvf <file.pdf> (exactly one path argument is required)",
-        ));
+    let mut pdf_path = None;
+    let mut perf_scenario = None;
+    let mut perf_out = None;
+
+    while let Some(arg) = args.next() {
+        match arg.to_string_lossy().as_ref() {
+            "--perf-run" => {
+                let Some(value) = args.next() else {
+                    return Err(AppError::invalid_argument(
+                        "usage: pvf <file.pdf> [--perf-run <scenario-id>] [--perf-out <path|->]",
+                    ));
+                };
+                let scenario = value
+                    .to_str()
+                    .and_then(PerfScenarioId::parse)
+                    .ok_or_else(|| {
+                        AppError::invalid_argument(format!(
+                            "unknown perf scenario: {}",
+                            value.to_string_lossy()
+                        ))
+                    })?;
+                perf_scenario = Some(scenario);
+            }
+            "--perf-out" => {
+                let Some(value) = args.next() else {
+                    return Err(AppError::invalid_argument(
+                        "usage: pvf <file.pdf> [--perf-run <scenario-id>] [--perf-out <path|->]",
+                    ));
+                };
+                if value != "-" {
+                    perf_out = Some(PathBuf::from(value));
+                }
+            }
+            value if value.starts_with('-') => {
+                return Err(AppError::invalid_argument(format!(
+                    "unknown option: {value}"
+                )));
+            }
+            _ => {
+                if pdf_path.is_some() {
+                    return Err(AppError::invalid_argument(
+                        "usage: pvf <file.pdf> [--perf-run <scenario-id>] [--perf-out <path|->]",
+                    ));
+                }
+                pdf_path = Some(PathBuf::from(arg));
+            }
+        }
     }
 
-    Ok(path)
+    let Some(pdf_path) = pdf_path else {
+        return Err(AppError::invalid_argument(
+            "usage: pvf <file.pdf> [--perf-run <scenario-id>] [--perf-out <path|->]",
+        ));
+    };
+
+    if perf_out.is_some() && perf_scenario.is_none() {
+        return Err(AppError::invalid_argument("--perf-out requires --perf-run"));
+    }
+
+    Ok(CliOptions {
+        pdf_path,
+        perf: perf_scenario.map(|scenario| PerfCliOptions {
+            run: PerfRunConfig {
+                scenario,
+                ..PerfRunConfig::default()
+            },
+            out: perf_out,
+        }),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
+    use std::path::PathBuf;
 
-    use super::parse_cli_path;
+    use pvf::perf::PerfScenarioId;
+
+    use super::parse_cli;
 
     #[test]
-    fn parse_cli_path_accepts_single_pdf_arg() {
+    fn parse_cli_accepts_plain_pdf_path() {
         let args = vec![OsString::from("pvf"), OsString::from("sample.pdf")];
 
-        let path = parse_cli_path(args.into_iter()).expect("single arg should parse");
-        assert_eq!(path, OsString::from("sample.pdf"));
+        let options = parse_cli(args.into_iter()).expect("single arg should parse");
+        assert_eq!(options.pdf_path, PathBuf::from("sample.pdf"));
+        assert!(options.perf.is_none());
     }
 
     #[test]
-    fn parse_cli_path_rejects_missing_or_extra_args() {
+    fn parse_cli_accepts_perf_options() {
+        let args = vec![
+            OsString::from("pvf"),
+            OsString::from("sample.pdf"),
+            OsString::from("--perf-run"),
+            OsString::from("page-flip-forward"),
+            OsString::from("--perf-out"),
+            OsString::from("report.json"),
+        ];
+
+        let options = parse_cli(args.into_iter()).expect("perf args should parse");
+        let perf = options.perf.expect("perf options should exist");
+        assert_eq!(perf.run.scenario, PerfScenarioId::PageFlipForward);
+        assert_eq!(perf.out, Some(PathBuf::from("report.json")));
+    }
+
+    #[test]
+    fn parse_cli_rejects_invalid_combinations() {
         let missing = vec![OsString::from("pvf")];
-        assert!(parse_cli_path(missing.into_iter()).is_err());
+        assert!(parse_cli(missing.into_iter()).is_err());
 
         let extra = vec![
             OsString::from("pvf"),
             OsString::from("a.pdf"),
             OsString::from("b.pdf"),
         ];
-        assert!(parse_cli_path(extra.into_iter()).is_err());
+        assert!(parse_cli(extra.into_iter()).is_err());
+
+        let out_without_run = vec![
+            OsString::from("pvf"),
+            OsString::from("a.pdf"),
+            OsString::from("--perf-out"),
+            OsString::from("report.json"),
+        ];
+        assert!(parse_cli(out_without_run.into_iter()).is_err());
     }
 }

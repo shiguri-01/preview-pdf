@@ -6,6 +6,7 @@ mod event_loop;
 mod frame_ops;
 mod input_ops;
 mod nav;
+mod perf_runner;
 mod render_ops;
 mod runtime;
 mod scale;

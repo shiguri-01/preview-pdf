@@ -6,6 +6,7 @@ use ratatui_image::StatefulImage;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::ProtocolType;
 use ratatui_image::protocol::StatefulProtocol;
+use std::time::Instant;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
 use tokio::task::JoinHandle;
 
@@ -150,6 +151,7 @@ impl RatatuiImagePresenter {
                     EncodeWorkerEvent::Completed {
                         key,
                         protocol,
+                        queue_wait,
                         elapsed,
                         succeeded,
                     } => {
@@ -163,8 +165,10 @@ impl RatatuiImagePresenter {
                             } else {
                                 entry.state = TerminalFrameState::Failed;
                             }
+                            self.state.perf_stats.record_encode_queue_wait(queue_wait);
                             self.state.perf_stats.record_convert(elapsed);
                         } else {
+                            self.state.perf_stats.record_encode_queue_wait(queue_wait);
                             entry.state = TerminalFrameState::Failed;
                         }
 
@@ -174,12 +178,19 @@ impl RatatuiImagePresenter {
                     }
                     EncodeWorkerEvent::CanceledStale { key } => {
                         let removed = self.state.l2_cache.remove(&key);
+                        if removed {
+                            self.state.perf_stats.add_encode_canceled_tasks(1);
+                        }
                         if removed && Some(key) == self.state.last_ready_key {
                             self.state.last_ready_key = None;
                         }
                         if removed && Some(key) == current_key {
                             changed = true;
                         }
+                    }
+                    EncodeWorkerEvent::QueueState { depth, in_flight } => {
+                        self.state.perf_stats.set_encode_queue_depth(depth);
+                        self.state.perf_stats.set_encode_in_flight(in_flight);
                     }
                 },
                 Err(TryRecvError::Empty) => break,
@@ -386,12 +397,13 @@ impl ImagePresenter for RatatuiImagePresenter {
                     area,
                     class,
                     generation,
+                    enqueued_at: Instant::now(),
                 };
                 match send_encode_request(&request_tx, request) {
                     Ok(()) => {
                         entry.state = TerminalFrameState::Encoding;
                     }
-                    Err(err) => match err {
+                    Err(err) => match *err {
                         EncodeWorkerRequest::Encode { frame, .. } => {
                             entry.state = TerminalFrameState::PendingFrame(frame);
                         }
@@ -509,6 +521,7 @@ impl ImagePresenter for RatatuiImagePresenter {
                         area: encode_area,
                         class: PrefetchClass::CriticalCurrent,
                         generation: self.state.current_generation,
+                        enqueued_at: Instant::now(),
                     };
 
                     match send_encode_request(&request_tx, request) {
@@ -516,10 +529,12 @@ impl ImagePresenter for RatatuiImagePresenter {
                             entry.state = TerminalFrameState::Encoding;
                             PresenterFeedback::Pending
                         }
-                        Err(EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown) => {
-                            entry.state = TerminalFrameState::Failed;
-                            PresenterFeedback::Failed
-                        }
+                        Err(err) => match *err {
+                            EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown => {
+                                entry.state = TerminalFrameState::Failed;
+                                PresenterFeedback::Failed
+                            }
+                        },
                     }
                 }
                 TerminalFrameState::Encoding => {

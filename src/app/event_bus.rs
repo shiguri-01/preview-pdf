@@ -62,6 +62,7 @@ mod tests {
     #[test]
     fn spawn_headless_creates_runtime_without_tasks() {
         let (_tx, _rx, mut runtime) = EventBusRuntime::spawn_headless();
+        assert!(runtime.tasks.is_empty());
         runtime.shutdown();
     }
 

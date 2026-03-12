@@ -7,6 +7,7 @@ edition = "2024"
 hayro = "0.5.0"
 kurbo = "0.12.0"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
+clap = { version = "4.5.49", features = ["derive"] }
 ratatui = "0.30.0"
 ratatui-image = { version = "10.0.6", default-features = false, features = ["crossterm"] }
 tui-input = "0.11.1"

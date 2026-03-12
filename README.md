@@ -4,6 +4,7 @@
 
 ```bash
 cargo run --release -- <file.pdf>
+cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report.json
 ```
 
 ## Features

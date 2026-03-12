@@ -1,9 +1,17 @@
-use crate::backend::RgbaFrame;
+use std::sync::OnceLock;
+
+use crate::backend::{PixelBuffer, PixelBufferPool, RgbaFrame};
 use crate::presenter::{PanOffset, Viewport};
 use crate::render::prefetch::PrefetchClass;
 use crate::render::scheduler::RenderPriority;
 
 use super::scale::resolved_cell_size_px;
+
+static FRAME_OPS_PIXEL_POOL: OnceLock<PixelBufferPool> = OnceLock::new();
+
+fn frame_ops_pixel_pool() -> &'static PixelBufferPool {
+    FRAME_OPS_PIXEL_POOL.get_or_init(PixelBufferPool::default)
+}
 
 pub(crate) fn prepare_presenter_frame(
     frame: &RgbaFrame,
@@ -54,7 +62,7 @@ pub(crate) fn crop_frame_for_viewport(
         return frame.clone();
     }
 
-    let mut pixels = vec![0_u8; out_width as usize * out_height as usize * 4];
+    let mut pixels = frame_ops_pixel_pool().take(out_width as usize * out_height as usize * 4);
 
     if copy_width > 0 && copy_height > 0 {
         let src_stride = src_width as usize * 4;
@@ -74,7 +82,7 @@ pub(crate) fn crop_frame_for_viewport(
     RgbaFrame {
         width: out_width,
         height: out_height,
-        pixels: pixels.into(),
+        pixels: PixelBuffer::from_pooled_vec(pixels, frame_ops_pixel_pool()),
     }
 }
 
@@ -112,7 +120,7 @@ pub(crate) fn compose_spread_frame(
         .saturating_add(right_width)
         .max(1);
     let out_height = left_height.max(right_height).max(1);
-    let mut pixels = vec![0_u8; out_width as usize * out_height as usize * 4];
+    let mut pixels = frame_ops_pixel_pool().take(out_width as usize * out_height as usize * 4);
 
     blit_side(&mut pixels, out_width, out_height, left, 0);
     blit_side(
@@ -126,7 +134,7 @@ pub(crate) fn compose_spread_frame(
     RgbaFrame {
         width: out_width,
         height: out_height,
-        pixels: pixels.into(),
+        pixels: PixelBuffer::from_pooled_vec(pixels, frame_ops_pixel_pool()),
     }
 }
 

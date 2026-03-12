@@ -1,37 +1,105 @@
 use std::ops::Deref;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::error::AppResult;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PixelBuffer(Arc<Vec<u8>>);
+#[derive(Debug, Default)]
+pub struct PixelBufferPool {
+    recycled: Mutex<Vec<Vec<u8>>>,
+}
+
+impl PixelBufferPool {
+    pub fn take(&self, len: usize) -> Vec<u8> {
+        let mut recycled = self.recycled.lock().expect("pixel buffer pool lock");
+        let Some(index) = recycled.iter().position(|buffer| buffer.capacity() >= len) else {
+            return vec![0; len];
+        };
+        let mut buffer = recycled.swap_remove(index);
+        buffer.resize(len, 0);
+        buffer
+    }
+
+    fn give_back(&self, mut bytes: Vec<u8>) {
+        bytes.clear();
+        let mut recycled = self.recycled.lock().expect("pixel buffer pool lock");
+        recycled.push(bytes);
+    }
+
+    #[cfg(test)]
+    fn available(&self) -> usize {
+        self.recycled.lock().expect("pixel buffer pool lock").len()
+    }
+}
+
+#[derive(Debug)]
+struct PixelStorage {
+    bytes: Vec<u8>,
+    recycle: Option<&'static PixelBufferPool>,
+}
+
+impl Drop for PixelStorage {
+    fn drop(&mut self) {
+        let Some(pool) = self.recycle.take() else {
+            return;
+        };
+        let bytes = std::mem::take(&mut self.bytes);
+        pool.give_back(bytes);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PixelBuffer(Arc<PixelStorage>);
 
 impl PixelBuffer {
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.0.bytes.len()
     }
 
     pub fn into_vec(self) -> Vec<u8> {
-        Arc::try_unwrap(self.0).unwrap_or_else(|shared| (*shared).clone())
+        match Arc::try_unwrap(self.0) {
+            Ok(mut storage) => {
+                storage.recycle = None;
+                std::mem::take(&mut storage.bytes)
+            }
+            Err(shared) => shared.bytes.clone(),
+        }
     }
 
     pub fn ptr_eq(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
+
+    pub fn from_pooled_vec(bytes: Vec<u8>, pool: &'static PixelBufferPool) -> Self {
+        Self(Arc::new(PixelStorage {
+            bytes,
+            recycle: Some(pool),
+        }))
+    }
 }
+
+impl PartialEq for PixelBuffer {
+    fn eq(&self, other: &Self) -> bool {
+        self[..] == other[..]
+    }
+}
+
+impl Eq for PixelBuffer {}
 
 impl Deref for PixelBuffer {
     type Target = [u8];
 
     fn deref(&self) -> &Self::Target {
-        self.0.as_slice()
+        self.0.bytes.as_slice()
     }
 }
 
 impl From<Vec<u8>> for PixelBuffer {
     fn from(value: Vec<u8>) -> Self {
-        Self(Arc::new(value))
+        Self(Arc::new(PixelStorage {
+            bytes: value,
+            recycle: None,
+        }))
     }
 }
 
@@ -54,7 +122,7 @@ impl RgbaFrame {
 
 #[cfg(test)]
 mod tests {
-    use super::{PixelBuffer, RgbaFrame};
+    use super::{PixelBuffer, PixelBufferPool, RgbaFrame};
 
     #[test]
     fn into_pixels_vec_reuses_unique_allocation() {
@@ -74,6 +142,16 @@ mod tests {
         let cloned = pixels.clone();
 
         assert!(pixels.ptr_eq(&cloned));
+    }
+
+    #[test]
+    fn pooled_pixel_buffer_returns_storage_after_drop() {
+        let pool = Box::leak(Box::new(PixelBufferPool::default()));
+        let pixels = PixelBuffer::from_pooled_vec(vec![1, 2, 3, 4], pool);
+
+        assert_eq!(pool.available(), 0);
+        drop(pixels);
+        assert_eq!(pool.available(), 1);
     }
 }
 

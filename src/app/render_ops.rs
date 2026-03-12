@@ -43,6 +43,9 @@ impl RenderSubsystem {
         let presenter_caps = self.presenter.capabilities();
         match completed.result {
             Ok(frame) => {
+                self.runtime
+                    .perf_stats
+                    .record_render_queue_wait(completed.queue_wait);
                 if !interactive
                     && !current_keys.contains(&completed.key)
                     && let Some(viewport) = prefetch_viewport
@@ -76,6 +79,9 @@ impl RenderSubsystem {
                 current_keys.contains(&completed.key)
             }
             Err(err) => {
+                self.runtime
+                    .perf_stats
+                    .record_render_queue_wait(completed.queue_wait);
                 state.status.last_action_id = Some(ActionId::RenderWorker);
                 state.status.message = format!("render error: {err}");
                 current_keys.contains(&completed.key)
@@ -139,6 +145,8 @@ impl RenderSubsystem {
         if canceled > 0 {
             self.runtime.perf_stats.add_canceled_tasks(canceled);
         }
+        self.runtime
+            .set_queue_depth_with_inflight(render_worker.in_flight_len());
 
         if ctx.current_cached {
             return;
@@ -179,6 +187,8 @@ impl RenderSubsystem {
                 state.status.message = format!("render queue busy; retrying page {}", page + 1);
                 break;
             }
+            self.runtime
+                .set_queue_depth_with_inflight(render_worker.in_flight_len());
         }
     }
 
@@ -201,6 +211,8 @@ impl RenderSubsystem {
                 }
                 if !self.runtime.has_cached_frame(&key) {
                     let _ = render_worker.enqueue(task);
+                    self.runtime
+                        .set_queue_depth_with_inflight(render_worker.in_flight_len());
                     continue;
                 }
                 if let Some(viewport) = ctx.prefetch_viewport {

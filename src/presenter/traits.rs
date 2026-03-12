@@ -68,6 +68,11 @@ pub trait ImagePresenter {
         Ok(())
     }
 
+    fn initialize_headless_for_perf(&mut self) -> AppResult<()> {
+        self.reset_perf_metrics();
+        self.initialize_terminal()
+    }
+
     fn status_label(&self) -> String {
         self.capabilities().backend_name.to_string()
     }
@@ -117,4 +122,10 @@ pub trait ImagePresenter {
     fn perf_snapshot(&self) -> Option<PerfStats> {
         None
     }
+
+    fn reset_perf_metrics(&mut self) {}
+
+    fn enable_perf_sample_collection(&mut self) {}
+
+    fn clear_perf_blit_metrics(&mut self) {}
 }

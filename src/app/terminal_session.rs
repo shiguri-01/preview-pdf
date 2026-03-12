@@ -4,10 +4,9 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::Frame;
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Size;
+use ratatui::{Frame, Terminal};
 
 use crate::error::AppResult;
 
@@ -21,12 +20,12 @@ pub(crate) trait TerminalSurface {
         F: FnOnce(&mut Frame<'_>);
 }
 
-pub(crate) struct TerminalSession {
+pub(crate) struct InteractiveTerminalSession {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     active: bool,
 }
 
-impl TerminalSession {
+impl InteractiveTerminalSession {
     pub(crate) fn enter() -> AppResult<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -67,7 +66,7 @@ impl TerminalSession {
     }
 }
 
-impl TerminalSurface for TerminalSession {
+impl TerminalSurface for InteractiveTerminalSession {
     fn size(&self) -> io::Result<Size> {
         self.terminal.size()
     }
@@ -84,7 +83,7 @@ impl TerminalSurface for TerminalSession {
     }
 }
 
-impl Drop for TerminalSession {
+impl Drop for InteractiveTerminalSession {
     fn drop(&mut self) {
         let _ = self.restore();
     }

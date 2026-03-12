@@ -8,11 +8,17 @@ Command:
 
 ```bash
 pvf <file.pdf>
+pvf <file.pdf> --perf-run <scenario-id> [--perf-out <path|->]
 ```
 
 Rules:
 - Exactly one PDF path argument is required.
 - The path is opened through the default backend factory (`open_default_backend`).
+- Perf mode runs a built-in scenario, emits JSON, and exits.
+- Supported perf scenarios:
+  - `page-flip-forward`
+  - `page-flip-backward`
+  - `idle-pending-redraw`
 
 ## Functional specification
 

@@ -6,6 +6,7 @@ use ratatui_image::StatefulImage;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::ProtocolType;
 use ratatui_image::protocol::StatefulProtocol;
+use std::time::Instant;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
 use tokio::task::JoinHandle;
 
@@ -105,6 +106,13 @@ impl RatatuiImagePresenter {
         self.state.l2_cache.len()
     }
 
+    fn reset_terminal_state(&mut self) {
+        self.state.l2_cache.clear();
+        self.state.current_key = None;
+        self.state.last_ready_key = None;
+        self.state.current_generation = 0;
+    }
+
     fn ensure_frame_entry(
         &mut self,
         cache_key: RenderedPageKey,
@@ -150,9 +158,15 @@ impl RatatuiImagePresenter {
                     EncodeWorkerEvent::Completed {
                         key,
                         protocol,
+                        queue_wait,
                         elapsed,
                         succeeded,
                     } => {
+                        self.state.perf_stats.record_encode_queue_wait(queue_wait);
+                        if succeeded {
+                            self.state.perf_stats.record_convert(elapsed);
+                        }
+
                         let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
                             continue;
                         };
@@ -163,7 +177,6 @@ impl RatatuiImagePresenter {
                             } else {
                                 entry.state = TerminalFrameState::Failed;
                             }
-                            self.state.perf_stats.record_convert(elapsed);
                         } else {
                             entry.state = TerminalFrameState::Failed;
                         }
@@ -174,12 +187,17 @@ impl RatatuiImagePresenter {
                     }
                     EncodeWorkerEvent::CanceledStale { key } => {
                         let removed = self.state.l2_cache.remove(&key);
+                        self.state.perf_stats.add_encode_canceled_tasks(1);
                         if removed && Some(key) == self.state.last_ready_key {
                             self.state.last_ready_key = None;
                         }
                         if removed && Some(key) == current_key {
                             changed = true;
                         }
+                    }
+                    EncodeWorkerEvent::QueueState { depth, in_flight } => {
+                        self.state.perf_stats.set_encode_queue_depth(depth);
+                        self.state.perf_stats.set_encode_in_flight(in_flight);
                     }
                 },
                 Err(TryRecvError::Empty) => break,
@@ -308,12 +326,19 @@ impl ImagePresenter for RatatuiImagePresenter {
             self.config.protocol_type = protocol_type;
             self.config.protocol_label = protocol_type_label(protocol_type);
             self.config.picker = picker_with_resolved_cell_size(picker, protocol_type);
-            self.state.l2_cache.clear();
-            self.state.current_key = None;
-            self.state.last_ready_key = None;
-            self.state.current_generation = 0;
+            self.reset_terminal_state();
         }
 
+        self.state.terminal_initialized = true;
+        Ok(())
+    }
+
+    fn initialize_headless_for_perf(&mut self) -> AppResult<()> {
+        self.config.protocol_type = ProtocolType::Halfblocks;
+        self.config.protocol_label = "halfblocks";
+        self.config.picker = Picker::halfblocks();
+        self.reset_terminal_state();
+        self.state.perf_stats.reset();
         self.state.terminal_initialized = true;
         Ok(())
     }
@@ -386,12 +411,13 @@ impl ImagePresenter for RatatuiImagePresenter {
                     area,
                     class,
                     generation,
+                    enqueued_at: Instant::now(),
                 };
                 match send_encode_request(&request_tx, request) {
                     Ok(()) => {
                         entry.state = TerminalFrameState::Encoding;
                     }
-                    Err(err) => match err {
+                    Err(err) => match *err {
                         EncodeWorkerRequest::Encode { frame, .. } => {
                             entry.state = TerminalFrameState::PendingFrame(frame);
                         }
@@ -509,6 +535,7 @@ impl ImagePresenter for RatatuiImagePresenter {
                         area: encode_area,
                         class: PrefetchClass::CriticalCurrent,
                         generation: self.state.current_generation,
+                        enqueued_at: Instant::now(),
                     };
 
                     match send_encode_request(&request_tx, request) {
@@ -516,10 +543,12 @@ impl ImagePresenter for RatatuiImagePresenter {
                             entry.state = TerminalFrameState::Encoding;
                             PresenterFeedback::Pending
                         }
-                        Err(EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown) => {
-                            entry.state = TerminalFrameState::Failed;
-                            PresenterFeedback::Failed
-                        }
+                        Err(err) => match *err {
+                            EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown => {
+                                entry.state = TerminalFrameState::Failed;
+                                PresenterFeedback::Failed
+                            }
+                        },
                     }
                 }
                 TerminalFrameState::Encoding => {
@@ -562,6 +591,18 @@ impl ImagePresenter for RatatuiImagePresenter {
 
     fn perf_snapshot(&self) -> Option<PerfStats> {
         Some(self.state.perf_stats.clone())
+    }
+
+    fn reset_perf_metrics(&mut self) {
+        self.state.perf_stats.reset();
+    }
+
+    fn enable_perf_sample_collection(&mut self) {
+        self.state.perf_stats.enable_sample_collection();
+    }
+
+    fn clear_perf_blit_metrics(&mut self) {
+        self.state.perf_stats.clear_blit_metrics();
     }
 
     fn drain_background_events(&mut self) -> bool {

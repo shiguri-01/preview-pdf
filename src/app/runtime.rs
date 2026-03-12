@@ -97,7 +97,7 @@ impl RenderRuntime {
     }
 
     pub fn has_prefetch_work(&self) -> bool {
-        self.scheduler.len() > 0
+        !self.scheduler.is_empty()
     }
 
     #[allow(clippy::too_many_arguments)]

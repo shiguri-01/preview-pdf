@@ -56,6 +56,10 @@ impl PixelBuffer {
         self.0.bytes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.0.bytes.is_empty()
+    }
+
     pub fn into_vec(self) -> Vec<u8> {
         match Arc::try_unwrap(self.0) {
             Ok(mut storage) => {
@@ -120,9 +124,18 @@ impl RgbaFrame {
     }
 }
 
+pub trait PdfBackend: Send {
+    fn path(&self) -> &Path;
+    fn doc_id(&self) -> u64;
+    fn page_count(&self) -> usize;
+    fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)>;
+    fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>;
+    fn extract_text(&self, page: usize) -> AppResult<String>;
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{PixelBuffer, PixelBufferPool, RgbaFrame};
+    use super::{PdfBackend, PixelBuffer, PixelBufferPool, RgbaFrame};
 
     #[test]
     fn into_pixels_vec_reuses_unique_allocation() {
@@ -153,13 +166,6 @@ mod tests {
         drop(pixels);
         assert_eq!(pool.available(), 1);
     }
-}
 
-pub trait PdfBackend: Send {
-    fn path(&self) -> &Path;
-    fn doc_id(&self) -> u64;
-    fn page_count(&self) -> usize;
-    fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)>;
-    fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>;
-    fn extract_text(&self, page: usize) -> AppResult<String>;
+    fn _assert_pdf_backend_object_safe(_: &dyn PdfBackend) {}
 }

@@ -13,10 +13,11 @@ pub(crate) fn scale_eq(left: f32, right: f32) -> bool {
 pub(crate) fn select_input_poll_timeout(
     render_busy: bool,
     presenter_busy: bool,
+    prefetch_pending: bool,
     idle_timeout: std::time::Duration,
     busy_timeout: std::time::Duration,
 ) -> std::time::Duration {
-    if render_busy || presenter_busy {
+    if render_busy || presenter_busy || prefetch_pending {
         busy_timeout
     } else {
         idle_timeout
@@ -132,6 +133,7 @@ mod tests {
             select_input_poll_timeout(
                 false,
                 false,
+                false,
                 Duration::from_millis(16),
                 Duration::from_millis(8)
             ),
@@ -145,6 +147,7 @@ mod tests {
             select_input_poll_timeout(
                 true,
                 false,
+                false,
                 Duration::from_millis(16),
                 Duration::from_millis(8)
             ),
@@ -154,6 +157,7 @@ mod tests {
             select_input_poll_timeout(
                 false,
                 true,
+                false,
                 Duration::from_millis(16),
                 Duration::from_millis(8)
             ),
@@ -162,6 +166,21 @@ mod tests {
         assert_eq!(
             select_input_poll_timeout(
                 true,
+                true,
+                false,
+                Duration::from_millis(16),
+                Duration::from_millis(8)
+            ),
+            Duration::from_millis(8)
+        );
+    }
+
+    #[test]
+    fn input_poll_timeout_is_busy_when_prefetch_is_pending() {
+        assert_eq!(
+            select_input_poll_timeout(
+                false,
+                false,
                 true,
                 Duration::from_millis(16),
                 Duration::from_millis(8)

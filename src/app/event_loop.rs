@@ -328,6 +328,7 @@ impl App {
     {
         let render_busy = runtime.render_worker.in_flight_len() > 0;
         let presenter_busy = self.render.presenter.has_pending_work();
+        let prefetch_pending = self.render.runtime.has_prefetch_work();
         let wait_for_pending_redraw = runtime.ui_actor.should_wait_for_pending_redraw(
             step.current_cached,
             render_busy,
@@ -336,6 +337,7 @@ impl App {
         let wake_timeout = select_input_poll_timeout(
             render_busy,
             presenter_busy,
+            prefetch_pending,
             runtime.input_poll_timeout_idle,
             runtime.input_poll_timeout_busy,
         );

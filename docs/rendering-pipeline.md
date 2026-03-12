@@ -146,6 +146,8 @@ UI contract:
 - The loop enables pending redraw ticks only while the current view is not fully cached and either:
   - render workers still have in-flight work, or
   - the presenter still has encode/presenter-side pending work.
+- Prefetch work stays wake-sensitive even after the current view is cached:
+  - queued prefetch tasks keep the loop on the busy wake timeout.
 - Once the current view is cached and presenter work is drained, redraws must be event-driven (`input`, `command`, `app_event`, `render_complete`, `state_changed`) rather than timer-driven.
 
 ## Observable performance signals (`perf.rs`)

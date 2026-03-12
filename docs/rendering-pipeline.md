@@ -26,6 +26,7 @@ fn render_page(&mut self, page: u32, scale: f64) -> AppResult<RgbaFrame>
 
 Requirements:
 - Output pixel format is RGBA (4 bytes/pixel).
+- `RgbaFrame` pixel storage is shareable across caches and presenter handoff, but encode/downscale paths should consume the owned buffer without cloning when the frame is uniquely owned.
 - Cache identity includes `doc_id` (stable hash of file path), page index, scale, and layout tag.
 - Render-worker page tasks use layout tag `0` (source page identity).
 

@@ -13,7 +13,7 @@ pub(crate) fn create_protocol_with_picker(
     picker: &Picker,
     frame: RgbaFrame,
 ) -> AppResult<StatefulProtocol> {
-    let image = RgbaImage::from_raw(frame.width, frame.height, frame.pixels_to_vec()).ok_or(
+    let image = RgbaImage::from_raw(frame.width, frame.height, frame.into_pixels_vec()).ok_or(
         AppError::invalid_argument("rgba frame pixels length does not match dimensions"),
     )?;
     let image = DynamicImage::ImageRgba8(image);
@@ -71,10 +71,13 @@ fn resize_frame_simd(frame: RgbaFrame, dst_width: u32, dst_height: u32) -> AppRe
         return Ok(frame);
     }
 
-    let src = fr::images::Image::from_vec_u8(
-        frame.width,
-        frame.height,
-        frame.pixels_to_vec(),
+    let src_width = frame.width;
+    let src_height = frame.height;
+    let mut pixels = frame.into_pixels_vec();
+    let src = fr::images::Image::from_slice_u8(
+        src_width,
+        src_height,
+        pixels.as_mut_slice(),
         fr::PixelType::U8x4,
     )
     .map_err(|_| {

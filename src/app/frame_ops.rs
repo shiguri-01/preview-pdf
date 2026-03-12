@@ -157,8 +157,6 @@ fn blit_side(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::{compose_spread_frame, crop_frame_for_viewport, prepare_presenter_frame};
     use crate::backend::RgbaFrame;
     use crate::presenter::{PanOffset, Viewport};
@@ -260,7 +258,7 @@ mod tests {
         let (prepared, pan_for_presenter) =
             prepare_presenter_frame(&frame, viewport, &mut pan, None, false);
 
-        assert!(Arc::ptr_eq(&frame.pixels, &prepared.pixels));
+        assert!(frame.pixels.ptr_eq(&prepared.pixels));
         assert_eq!(pan, PanOffset::default());
         assert_eq!(pan_for_presenter, PanOffset::default());
     }

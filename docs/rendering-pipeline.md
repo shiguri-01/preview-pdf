@@ -139,6 +139,14 @@ UI contract:
   - loading overlay,
   - error overlay.
 
+## Pending redraw timer behavior
+
+- `RedrawTick` is not a permanently active idle timer.
+- The loop enables pending redraw ticks only while the current view is not fully cached and either:
+  - render workers still have in-flight work, or
+  - the presenter still has encode/presenter-side pending work.
+- Once the current view is cached and presenter work is drained, redraws must be event-driven (`input`, `command`, `app_event`, `render_complete`, `state_changed`) rather than timer-driven.
+
 ## Observable performance signals (`perf.rs`)
 
 The runtime tracks:

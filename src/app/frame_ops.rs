@@ -50,6 +50,10 @@ pub(crate) fn crop_frame_for_viewport(
     let out_width = copy_width.max(1);
     let out_height = copy_height.max(1);
 
+    if origin_x == 0 && origin_y == 0 && out_width == src_width && out_height == src_height {
+        return frame.clone();
+    }
+
     let mut pixels = vec![0_u8; out_width as usize * out_height as usize * 4];
 
     if copy_width > 0 && copy_height > 0 {
@@ -212,6 +216,7 @@ mod tests {
         assert_eq!(cropped.height, 2);
         assert_eq!(cropped.pixels[0], 10);
         assert_eq!(cropped.pixels[12], 40);
+        assert!(frame.pixels.ptr_eq(&cropped.pixels));
     }
 
     #[test]

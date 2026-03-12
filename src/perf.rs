@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use clap::ValueEnum;
 use serde::Serialize;
 
 use crate::app::App;
@@ -313,7 +314,7 @@ pub struct PerfScenarioParameters {
     pub idle_duration_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum PerfScenarioId {
     PageFlipForward,

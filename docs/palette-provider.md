@@ -76,6 +76,8 @@ This document defines the palette provider contract in `pvf`.
   1. input
   2. assistive text
   3. candidate list
+- While a palette is open, the terminal cursor is shown at the current input position.
+- The input line itself does not draw a software caret; cursor visibility is delegated to the terminal.
 
 ## Built-in providers
 

@@ -95,9 +95,10 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
         ])
         .split(inner);
 
-    // 1. Input line (software caret to avoid terminal cursor ghosting/flicker)
-    let input_line = build_palette_input_line(&view.input, view.cursor, chunks[0].width as usize);
-    frame.render_widget(Paragraph::new(input_line), chunks[0]);
+    // 1. Input line
+    let input_layout = build_palette_input_line(&view.input, view.cursor, chunks[0].width as usize);
+    frame.render_widget(Paragraph::new(input_layout.line), chunks[0]);
+    frame.set_cursor_position((chunks[0].x + input_layout.cursor_col, chunks[0].y));
 
     // 2. Separator
     let sep_style = Style::default().fg(Color::DarkGray);
@@ -198,7 +199,12 @@ fn truncate_to_width(text: &str, max_width: usize) -> String {
     out
 }
 
-fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> Line<'static> {
+struct PaletteInputLineLayout {
+    line: Line<'static>,
+    cursor_col: u16,
+}
+
+fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> PaletteInputLineLayout {
     let prefix_spans = vec![
         Span::raw(" ".to_string()),
         Span::styled("> ".to_string(), Style::default().fg(Color::White)),
@@ -207,7 +213,10 @@ fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> Line<'s
     let max_text_width = width.saturating_sub(prefix_width);
 
     if max_text_width == 0 {
-        return Line::from(prefix_spans);
+        return PaletteInputLineLayout {
+            line: Line::from(prefix_spans),
+            cursor_col: 0,
+        };
     }
 
     #[derive(Clone)]
@@ -246,62 +255,55 @@ fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> Line<'s
     }
     let end_col = start_col.saturating_add(max_text_width);
 
-    let caret_glyph = if cursor < total_width {
-        glyphs
-            .iter()
-            .position(|glyph| glyph.start <= cursor && cursor < glyph.end)
-    } else {
-        None
-    };
-
     let mut spans = prefix_spans;
     let mut consumed = 0usize;
-    for (idx, glyph) in glyphs.iter().enumerate() {
+    for glyph in &glyphs {
         if glyph.end <= start_col {
             continue;
         }
         if glyph.start >= end_col || glyph.end > end_col {
             break;
         }
-        let style = if Some(idx) == caret_glyph {
-            Style::default().reversed()
-        } else {
-            Style::default()
-        };
-        spans.push(Span::styled(glyph.symbol.clone(), style));
+        spans.push(Span::raw(glyph.symbol.clone()));
         consumed = consumed.saturating_add(glyph.width);
-    }
-
-    if cursor == total_width {
-        let caret_rel = cursor
-            .saturating_sub(start_col)
-            .min(max_text_width.saturating_sub(1));
-        if consumed < caret_rel {
-            spans.push(Span::raw(" ".repeat(caret_rel - consumed)));
-            consumed = caret_rel;
-        }
-        if consumed < max_text_width {
-            spans.push(Span::styled(" ".to_string(), Style::default().reversed()));
-            consumed = consumed.saturating_add(1);
-        }
     }
 
     if consumed < max_text_width {
         spans.push(Span::raw(" ".repeat(max_text_width - consumed)));
     }
-    Line::from(spans)
+
+    let cursor_rel = cursor
+        .saturating_sub(start_col)
+        .min(max_text_width.saturating_sub(1));
+    let cursor_col = prefix_width.saturating_add(cursor_rel) as u16;
+
+    PaletteInputLineLayout {
+        line: Line::from(spans),
+        cursor_col,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
+    use ratatui::backend::{Backend, TestBackend};
     use ratatui::layout::Rect;
-    use ratatui::style::Modifier;
 
     use crate::palette::{PaletteItemView, PaletteKind, PaletteView};
 
     use super::{build_palette_input_line, draw_palette_overlay};
+
+    fn rendered_input_text(layout: &super::PaletteInputLineLayout) -> String {
+        layout
+            .line
+            .spans
+            .iter()
+            .skip(2)
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
 
     fn test_view(input: &str, cursor: usize) -> PaletteView {
         PaletteView {
@@ -320,27 +322,16 @@ mod tests {
     }
 
     #[test]
-    fn palette_overlay_highlights_caret_on_character() {
-        let line = build_palette_input_line("abc", 1, 12);
-        assert_eq!(line.spans[3].content.as_ref(), "b");
-        assert!(
-            line.spans[3]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        );
+    fn palette_overlay_positions_cursor_on_character() {
+        let layout = build_palette_input_line("abc", 1, 12);
+        assert_eq!(layout.cursor_col, 4);
+        assert_eq!(rendered_input_text(&layout), "abc");
     }
 
     #[test]
-    fn palette_overlay_highlights_trailing_space_at_end_cursor() {
-        let line = build_palette_input_line("abc", 3, 12);
-        assert_eq!(line.spans[5].content.as_ref(), " ");
-        assert!(
-            line.spans[5]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        );
+    fn palette_overlay_positions_cursor_at_end_of_input() {
+        let layout = build_palette_input_line("abc", 3, 12);
+        assert_eq!(layout.cursor_col, 6);
     }
 
     #[test]
@@ -355,38 +346,46 @@ mod tests {
     }
 
     #[test]
-    fn palette_overlay_highlights_next_wide_char_at_boundary_cursor() {
-        let line = build_palette_input_line("あい", 2, 12);
-        assert_eq!(line.spans[3].content.as_ref(), "い");
-        assert!(
-            line.spans[3]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        );
+    fn palette_overlay_positions_cursor_at_wide_char_boundary() {
+        let layout = build_palette_input_line("あい", 2, 12);
+        assert_eq!(layout.cursor_col, 5);
     }
 
     #[test]
     fn palette_overlay_keeps_combining_sequence() {
-        let line = build_palette_input_line("e\u{301}", 0, 12);
-        assert_eq!(line.spans[2].content.as_ref(), "e\u{301}");
-        assert!(
-            line.spans[2]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        );
+        let layout = build_palette_input_line("e\u{301}", 0, 12);
+        assert_eq!(rendered_input_text(&layout), "e\u{301}");
+        assert_eq!(layout.cursor_col, 3);
     }
 
     #[test]
     fn palette_overlay_keeps_zwj_emoji_sequence() {
-        let line = build_palette_input_line("👩\u{200d}💻", 0, 12);
-        assert_eq!(line.spans[2].content.as_ref(), "👩\u{200d}💻");
-        assert!(
-            line.spans[2]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        );
+        let layout = build_palette_input_line("👩\u{200d}💻", 0, 12);
+        assert_eq!(rendered_input_text(&layout), "👩\u{200d}💻");
+        assert_eq!(layout.cursor_col, 3);
+    }
+
+    #[test]
+    fn palette_overlay_scrolls_cursor_with_long_input() {
+        let layout = build_palette_input_line("abcdefghij", 10, 8);
+        assert_eq!(layout.cursor_col, 7);
+        assert_eq!(rendered_input_text(&layout), "ghij");
+    }
+
+    #[test]
+    fn draw_palette_overlay_sets_terminal_cursor_position() {
+        let backend = TestBackend::new(30, 10);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| {
+                draw_palette_overlay(frame, Rect::new(0, 0, 30, 10), &test_view("abc", 1));
+            })
+            .expect("draw should pass");
+
+        let position = terminal
+            .backend_mut()
+            .get_cursor_position()
+            .expect("cursor position should be available");
+        assert_eq!((position.x, position.y), (5, 1));
     }
 }

@@ -13,7 +13,7 @@ pub(crate) fn create_protocol_with_picker(
     picker: &Picker,
     frame: RgbaFrame,
 ) -> AppResult<StatefulProtocol> {
-    let image = RgbaImage::from_raw(frame.width, frame.height, frame.pixels_to_vec()).ok_or(
+    let image = RgbaImage::from_raw(frame.width, frame.height, frame.into_pixels_vec()).ok_or(
         AppError::invalid_argument("rgba frame pixels length does not match dimensions"),
     )?;
     let image = DynamicImage::ImageRgba8(image);
@@ -71,28 +71,28 @@ fn resize_frame_simd(frame: RgbaFrame, dst_width: u32, dst_height: u32) -> AppRe
         return Ok(frame);
     }
 
-    let src = fr::images::Image::from_vec_u8(
-        frame.width,
-        frame.height,
-        frame.pixels_to_vec(),
-        fr::PixelType::U8x4,
-    )
-    .map_err(|_| {
-        AppError::invalid_argument("rgba frame pixels length does not match dimensions")
-    })?;
+    let src_width = frame.width;
+    let src_height = frame.height;
+    frame.pixels.with_mut_bytes(|pixels| {
+        let src =
+            fr::images::Image::from_slice_u8(src_width, src_height, pixels, fr::PixelType::U8x4)
+                .map_err(|_| {
+                    AppError::invalid_argument("rgba frame pixels length does not match dimensions")
+                })?;
 
-    let mut dst = fr::images::Image::new(dst_width, dst_height, fr::PixelType::U8x4);
-    let mut resizer = fr::Resizer::new();
-    let options =
-        fr::ResizeOptions::new().resize_alg(fr::ResizeAlg::Convolution(SIMD_DOWNSCALE_FILTER));
+        let mut dst = fr::images::Image::new(dst_width, dst_height, fr::PixelType::U8x4);
+        let mut resizer = fr::Resizer::new();
+        let options =
+            fr::ResizeOptions::new().resize_alg(fr::ResizeAlg::Convolution(SIMD_DOWNSCALE_FILTER));
 
-    resizer
-        .resize(&src, &mut dst, &options)
-        .map_err(|_| AppError::unsupported("failed to downscale frame with SIMD"))?;
+        resizer
+            .resize(&src, &mut dst, &options)
+            .map_err(|_| AppError::unsupported("failed to downscale frame with SIMD"))?;
 
-    Ok(RgbaFrame {
-        width: dst_width,
-        height: dst_height,
-        pixels: dst.into_vec().into(),
+        Ok(RgbaFrame {
+            width: dst_width,
+            height: dst_height,
+            pixels: dst.into_vec().into(),
+        })
     })
 }

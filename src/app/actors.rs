@@ -120,6 +120,15 @@ impl UiActor {
             && self.last_pending_redraw.elapsed() >= self.pending_redraw_interval
     }
 
+    pub(crate) fn should_wait_for_pending_redraw(
+        &self,
+        current_cached: bool,
+        render_busy: bool,
+        presenter_busy: bool,
+    ) -> bool {
+        !current_cached && (render_busy || presenter_busy)
+    }
+
     pub(crate) fn on_drawn_non_cached_page(&mut self) {
         self.last_pending_redraw = Instant::now();
     }
@@ -150,5 +159,15 @@ mod tests {
         assert!(!actor.needs_redraw());
         actor.mark_redraw();
         assert!(actor.needs_redraw());
+    }
+
+    #[test]
+    fn ui_actor_waits_for_pending_redraw_only_while_busy_without_cached_frame() {
+        let actor = UiActor::new(Instant::now(), Duration::from_millis(33));
+
+        assert!(actor.should_wait_for_pending_redraw(false, true, false));
+        assert!(actor.should_wait_for_pending_redraw(false, false, true));
+        assert!(!actor.should_wait_for_pending_redraw(true, true, true));
+        assert!(!actor.should_wait_for_pending_redraw(false, false, false));
     }
 }

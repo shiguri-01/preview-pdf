@@ -1,9 +1,17 @@
-use crate::backend::RgbaFrame;
+use std::sync::OnceLock;
+
+use crate::backend::{PixelBuffer, PixelBufferPool, RgbaFrame};
 use crate::presenter::{PanOffset, Viewport};
 use crate::render::prefetch::PrefetchClass;
 use crate::render::scheduler::RenderPriority;
 
 use super::scale::resolved_cell_size_px;
+
+static FRAME_OPS_PIXEL_POOL: OnceLock<PixelBufferPool> = OnceLock::new();
+
+fn frame_ops_pixel_pool() -> &'static PixelBufferPool {
+    FRAME_OPS_PIXEL_POOL.get_or_init(PixelBufferPool::default)
+}
 
 pub(crate) fn prepare_presenter_frame(
     frame: &RgbaFrame,
@@ -50,7 +58,11 @@ pub(crate) fn crop_frame_for_viewport(
     let out_width = copy_width.max(1);
     let out_height = copy_height.max(1);
 
-    let mut pixels = vec![0_u8; out_width as usize * out_height as usize * 4];
+    if origin_x == 0 && origin_y == 0 && out_width == src_width && out_height == src_height {
+        return frame.clone();
+    }
+
+    let mut pixels = frame_ops_pixel_pool().take(out_width as usize * out_height as usize * 4);
 
     if copy_width > 0 && copy_height > 0 {
         let src_stride = src_width as usize * 4;
@@ -70,7 +82,7 @@ pub(crate) fn crop_frame_for_viewport(
     RgbaFrame {
         width: out_width,
         height: out_height,
-        pixels: pixels.into(),
+        pixels: PixelBuffer::from_pooled_vec(pixels, frame_ops_pixel_pool()),
     }
 }
 
@@ -108,7 +120,7 @@ pub(crate) fn compose_spread_frame(
         .saturating_add(right_width)
         .max(1);
     let out_height = left_height.max(right_height).max(1);
-    let mut pixels = vec![0_u8; out_width as usize * out_height as usize * 4];
+    let mut pixels = frame_ops_pixel_pool().take(out_width as usize * out_height as usize * 4);
 
     blit_side(&mut pixels, out_width, out_height, left, 0);
     blit_side(
@@ -122,7 +134,7 @@ pub(crate) fn compose_spread_frame(
     RgbaFrame {
         width: out_width,
         height: out_height,
-        pixels: pixels.into(),
+        pixels: PixelBuffer::from_pooled_vec(pixels, frame_ops_pixel_pool()),
     }
 }
 
@@ -157,8 +169,6 @@ fn blit_side(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::{compose_spread_frame, crop_frame_for_viewport, prepare_presenter_frame};
     use crate::backend::RgbaFrame;
     use crate::presenter::{PanOffset, Viewport};
@@ -214,6 +224,7 @@ mod tests {
         assert_eq!(cropped.height, 2);
         assert_eq!(cropped.pixels[0], 10);
         assert_eq!(cropped.pixels[12], 40);
+        assert!(frame.pixels.ptr_eq(&cropped.pixels));
     }
 
     #[test]
@@ -260,7 +271,7 @@ mod tests {
         let (prepared, pan_for_presenter) =
             prepare_presenter_frame(&frame, viewport, &mut pan, None, false);
 
-        assert!(Arc::ptr_eq(&frame.pixels, &prepared.pixels));
+        assert!(frame.pixels.ptr_eq(&prepared.pixels));
         assert_eq!(pan, PanOffset::default());
         assert_eq!(pan_for_presenter, PanOffset::default());
     }

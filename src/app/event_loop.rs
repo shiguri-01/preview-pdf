@@ -223,8 +223,8 @@ impl App {
         pdf: &mut dyn PdfBackend,
     ) -> AppResult<()> {
         loop {
-            let _ = self.process_loop_iteration(runtime, pdf)?;
-            match self.wait_and_handle_next_event(runtime, pdf).await? {
+            let step = self.process_loop_iteration(runtime, pdf)?;
+            match self.wait_and_handle_next_event(runtime, &step, pdf).await? {
                 LoopControl::Continue => {}
                 LoopControl::Break => return Ok(()),
             }
@@ -257,7 +257,7 @@ impl App {
                 });
             }
 
-            match self.wait_and_handle_next_event(runtime, pdf).await? {
+            match self.wait_and_handle_next_event(runtime, &step, pdf).await? {
                 LoopControl::Continue => {}
                 LoopControl::Break => {
                     return Err(AppError::unsupported(
@@ -320,14 +320,24 @@ impl App {
     async fn wait_and_handle_next_event<S>(
         &mut self,
         runtime: &mut LoopRuntime<S>,
+        step: &LoopStep,
         pdf: &mut dyn PdfBackend,
     ) -> AppResult<LoopControl>
     where
         S: TerminalSurface + SessionRestore,
     {
+        let render_busy = runtime.render_worker.in_flight_len() > 0;
+        let presenter_busy = self.render.presenter.has_pending_work();
+        let prefetch_pending = self.render.runtime.has_prefetch_work();
+        let wait_for_pending_redraw = runtime.ui_actor.should_wait_for_pending_redraw(
+            step.current_cached,
+            render_busy,
+            presenter_busy,
+        );
         let wake_timeout = select_input_poll_timeout(
-            runtime.render_worker.in_flight_len() > 0,
-            self.render.presenter.has_pending_work(),
+            render_busy,
+            presenter_busy,
+            prefetch_pending,
             runtime.input_poll_timeout_idle,
             runtime.input_poll_timeout_busy,
         );
@@ -336,6 +346,7 @@ impl App {
             &mut runtime.render_worker,
             &mut runtime.prefetch_tick,
             &mut runtime.redraw_tick,
+            wait_for_pending_redraw,
             wake_timeout,
         )
         .await;
@@ -589,6 +600,7 @@ async fn wait_next_event(
     render_worker: &mut RenderWorker,
     prefetch_tick: &mut time::Interval,
     redraw_tick: &mut time::Interval,
+    wait_for_pending_redraw: bool,
     wake_timeout: Duration,
 ) -> WaitEvent {
     tokio::select! {
@@ -608,7 +620,7 @@ async fn wait_next_event(
         _ = prefetch_tick.tick() => {
             WaitEvent::Event(DomainEvent::PrefetchTick)
         },
-        _ = redraw_tick.tick() => {
+        _ = redraw_tick.tick(), if wait_for_pending_redraw => {
             WaitEvent::Event(DomainEvent::RedrawTick)
         },
         _ = time::sleep(wake_timeout) => {

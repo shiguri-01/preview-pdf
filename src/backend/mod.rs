@@ -7,7 +7,7 @@ mod hayro;
 mod traits;
 
 pub use hayro::{HayroPdfBackend, PdfDoc};
-pub use traits::{PdfBackend, RgbaFrame};
+pub use traits::{PdfBackend, PixelBuffer, PixelBufferPool, RgbaFrame};
 
 pub fn open_default_backend(path: impl AsRef<Path>) -> AppResult<Box<dyn PdfBackend>> {
     PdfDoc::open(path).map(|doc| Box::new(doc) as Box<dyn PdfBackend>)

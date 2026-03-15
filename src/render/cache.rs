@@ -307,7 +307,7 @@ mod tests {
             .get_cloned(&key)
             .expect("cached frame should be available");
 
-        assert!(std::sync::Arc::ptr_eq(&stored.pixels, &cloned.pixels));
+        assert!(stored.pixels.ptr_eq(&cloned.pixels));
     }
 
     #[test]

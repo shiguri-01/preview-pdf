@@ -225,7 +225,6 @@ impl RatatuiImagePresenter {
         area: Rect,
         protocol: &mut StatefulProtocol,
     ) -> AppResult<()> {
-        frame.render_widget(Clear, area);
         frame.render_stateful_widget(
             StatefulImage::<StatefulProtocol>::default()
                 .resize(Resize::Fit(Some(ENCODE_RESIZE_FILTER))),
@@ -257,6 +256,7 @@ impl RatatuiImagePresenter {
                 let blit_start = std::time::Instant::now();
                 let target_size = protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
                 let render_area = center_rect_within(area, target_size.width, target_size.height);
+                frame.render_widget(Clear, area);
                 if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
                     entry.state = TerminalFrameState::Failed;
                     self.state

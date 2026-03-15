@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -745,7 +744,7 @@ fn l2_insert_keeps_pending_frame_buffer_shared() {
         Some(TerminalFrameState::PendingFrame(frame)) => &frame.pixels,
         _ => panic!("expected pending frame"),
     };
-    assert!(Arc::ptr_eq(&source.pixels, stored_pixels));
+    assert!(source.pixels.ptr_eq(stored_pixels));
 }
 
 #[test]

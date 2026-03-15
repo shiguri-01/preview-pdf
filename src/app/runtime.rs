@@ -96,6 +96,10 @@ impl RenderRuntime {
         task
     }
 
+    pub fn has_prefetch_work(&self) -> bool {
+        !self.scheduler.is_empty()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_current_page(
         &mut self,

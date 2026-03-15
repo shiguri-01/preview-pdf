@@ -26,6 +26,7 @@ fn render_page(&mut self, page: u32, scale: f64) -> AppResult<RgbaFrame>
 
 Requirements:
 - Output pixel format is RGBA (4 bytes/pixel).
+- `RgbaFrame` pixel storage is shareable across caches and presenter handoff, but encode/downscale paths should consume the owned buffer without cloning when the frame is uniquely owned.
 - Cache identity includes `doc_id` (stable hash of file path), page index, scale, and layout tag.
 - Render-worker page tasks use layout tag `0` (source page identity).
 
@@ -138,6 +139,16 @@ UI contract:
   - image content,
   - loading overlay,
   - error overlay.
+
+## Pending redraw timer behavior
+
+- `RedrawTick` is not a permanently active idle timer.
+- The loop enables pending redraw ticks only while the current view is not fully cached and either:
+  - render workers still have in-flight work, or
+  - the presenter still has encode/presenter-side pending work.
+- Prefetch work stays wake-sensitive even after the current view is cached:
+  - queued prefetch tasks keep the loop on the busy wake timeout.
+- Once the current view is cached and presenter work is drained, redraws must be event-driven (`input`, `command`, `app_event`, `render_complete`, `state_changed`) rather than timer-driven.
 
 ## Observable performance signals (`perf.rs`)
 

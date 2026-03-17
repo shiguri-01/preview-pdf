@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crossterm::event::KeyCode;
 
 use crate::app::{AppState, PaletteRequest};
-use crate::backend::PdfBackend;
+use crate::backend::SharedPdfBackend;
 use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::input::{AppInputEvent, InputHookResult};
@@ -37,7 +37,7 @@ impl SearchRuntime {
     pub fn submit(
         &mut self,
         app: &mut AppState,
-        pdf: &dyn PdfBackend,
+        pdf: SharedPdfBackend,
         query: String,
         matcher: SearchMatcherKind,
     ) -> AppResult<CommandOutcome> {
@@ -45,7 +45,7 @@ impl SearchRuntime {
             .submit(app, pdf, &mut self.engine, query, matcher)
     }
 
-    pub fn cancel(&mut self, pdf: &dyn PdfBackend) -> AppResult<bool> {
+    pub fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
         self.state.cancel(pdf, &mut self.engine)
     }
 
@@ -141,7 +141,7 @@ impl SearchState {
     pub fn submit(
         &mut self,
         app: &mut AppState,
-        pdf: &dyn PdfBackend,
+        pdf: SharedPdfBackend,
         search_engine: &mut SearchEngine,
         query: String,
         matcher: SearchMatcherKind,
@@ -152,7 +152,7 @@ impl SearchState {
 
         let query = self.query.trim().to_string();
         if query.is_empty() {
-            self.generation = search_engine.cancel(pdf.path())?;
+            self.generation = search_engine.cancel(Arc::clone(&pdf))?;
             self.query.clear();
             self.clear_results();
             app.status.message = "search query is empty".to_string();
@@ -160,7 +160,7 @@ impl SearchState {
         }
 
         let matcher = matcher_for_kind(self.matcher);
-        let generation = search_engine.submit(pdf.path(), query.clone(), matcher)?;
+        let generation = search_engine.submit(Arc::clone(&pdf), query.clone(), matcher)?;
 
         self.query = query;
         self.generation = generation;
@@ -185,14 +185,14 @@ impl SearchState {
 
     pub fn cancel(
         &mut self,
-        pdf: &dyn PdfBackend,
+        pdf: SharedPdfBackend,
         search_engine: &mut SearchEngine,
     ) -> AppResult<bool> {
         if self.query.is_empty() {
             return Ok(false);
         }
 
-        self.generation = search_engine.cancel(pdf.path())?;
+        self.generation = search_engine.cancel(pdf)?;
         self.query.clear();
         self.clear_results();
         Ok(true)
@@ -406,11 +406,12 @@ fn remove_whitespace(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use crate::app::AppState;
-    use crate::backend::{PdfBackend, RgbaFrame};
+    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{CommandOutcome, SearchMatcherKind};
     use crate::search::engine::SearchEngine;
 
@@ -494,13 +495,13 @@ mod tests {
     fn submit_search_marks_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
-        let pdf = StubPdf::new(5);
+        let pdf = Arc::new(StubPdf::new(5)) as SharedPdfBackend;
         let mut engine = SearchEngine::new();
 
         let outcome = state
             .submit(
                 &mut app,
-                &pdf,
+                Arc::clone(&pdf),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -521,13 +522,13 @@ mod tests {
     fn submit_empty_query_clears_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
-        let pdf = StubPdf::new(2);
+        let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
         let mut engine = SearchEngine::new();
 
         state
             .submit(
                 &mut app,
-                &pdf,
+                Arc::clone(&pdf),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -538,7 +539,7 @@ mod tests {
         let outcome = state
             .submit(
                 &mut app,
-                &pdf,
+                Arc::clone(&pdf),
                 &mut engine,
                 "   ".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -555,13 +556,13 @@ mod tests {
     fn cancel_clears_active_search_state() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
-        let pdf = StubPdf::new(2);
+        let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
         let mut engine = SearchEngine::new();
 
         state
             .submit(
                 &mut app,
-                &pdf,
+                Arc::clone(&pdf),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -570,7 +571,7 @@ mod tests {
         assert!(state.is_active());
 
         let canceled = state
-            .cancel(&pdf, &mut engine)
+            .cancel(Arc::clone(&pdf), &mut engine)
             .expect("cancel should succeed");
         assert!(canceled);
         assert!(!state.is_active());
@@ -603,13 +604,13 @@ mod tests {
     fn on_background_ignores_synthetic_events_after_cancel() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
-        let pdf = StubPdf::new(2);
+        let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
         let mut engine = SearchEngine::new();
 
         state
             .submit(
                 &mut app,
-                &pdf,
+                Arc::clone(&pdf),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -617,7 +618,7 @@ mod tests {
             .expect("submit should succeed");
         app.status.message = "search canceled".to_string();
         state
-            .cancel(&pdf, &mut engine)
+            .cancel(Arc::clone(&pdf), &mut engine)
             .expect("cancel should succeed");
 
         for _ in 0..20 {

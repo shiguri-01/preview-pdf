@@ -1,6 +1,6 @@
 use crossterm::event::KeyEvent;
 
-use crate::backend::PdfBackend;
+use crate::backend::SharedPdfBackend;
 use crate::command::{ActionId, Command, CommandDispatchResult, dispatch, drain_background_events};
 use crate::error::AppResult;
 use crate::event::AppEvent;
@@ -181,7 +181,7 @@ impl InteractionSubsystem {
         &mut self,
         state: &mut AppState,
         command: Command,
-        pdf: &mut dyn PdfBackend,
+        pdf: SharedPdfBackend,
     ) -> AppResult<CommandDispatchResult> {
         dispatch(
             state,

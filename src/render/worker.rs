@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::path::Path;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -8,9 +6,7 @@ use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
-use crate::backend::{
-    PdfBackend, RgbaFrame, load_default_shared_bytes, open_default_backend_with_shared_bytes,
-};
+use crate::backend::{RgbaFrame, SharedPdfBackend};
 use crate::error::{AppError, AppResult};
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::{RenderPriority, RenderTask};
@@ -22,32 +18,6 @@ enum RenderWorkerRequest {
         enqueued_at: Instant,
     },
     Shutdown,
-}
-
-pub trait RenderPdfLoader: Send + Sync {
-    fn load_shared_bytes(&self, path: &Path) -> AppResult<Arc<Vec<u8>>>;
-    fn open_with_shared_bytes(
-        &self,
-        path: &Path,
-        bytes: Arc<Vec<u8>>,
-    ) -> AppResult<Box<dyn PdfBackend>>;
-}
-
-#[derive(Debug, Default)]
-pub struct HayroRenderPdfLoader;
-
-impl RenderPdfLoader for HayroRenderPdfLoader {
-    fn load_shared_bytes(&self, path: &Path) -> AppResult<Arc<Vec<u8>>> {
-        load_default_shared_bytes(path)
-    }
-
-    fn open_with_shared_bytes(
-        &self,
-        path: &Path,
-        bytes: Arc<Vec<u8>>,
-    ) -> AppResult<Box<dyn PdfBackend>> {
-        open_default_backend_with_shared_bytes(path, bytes)
-    }
 }
 
 #[derive(Debug)]
@@ -124,41 +94,19 @@ struct InFlightTask {
 }
 
 impl RenderWorker {
-    pub(crate) fn spawn(path: PathBuf, doc_id: u64, worker_threads: usize) -> Self {
-        Self::spawn_with_loader(path, doc_id, worker_threads, Arc::new(HayroRenderPdfLoader))
-    }
-
-    pub(crate) fn spawn_with_loader(
-        path: PathBuf,
-        doc_id: u64,
-        worker_threads: usize,
-        loader: Arc<dyn RenderPdfLoader>,
-    ) -> Self {
+    pub(crate) fn spawn(pdf: SharedPdfBackend, worker_threads: usize) -> Self {
         let (request_tx, request_rx) = unbounded_channel();
         let (result_tx, result_rx) = unbounded_channel();
         let runtime = RenderWorkerRuntime::new();
         let worker_threads = worker_threads.max(1);
         let request_rx = Arc::new(Mutex::new(request_rx));
-        let shared_pdf_bytes = loader
-            .load_shared_bytes(&path)
-            .map_err(|err| err.to_string());
         let mut workers = Vec::with_capacity(worker_threads);
         for _ in 0..worker_threads {
-            let path = path.clone();
             let request_rx = Arc::clone(&request_rx);
-            let shared_pdf_bytes = shared_pdf_bytes.clone();
-            let loader = Arc::clone(&loader);
+            let pdf = Arc::clone(&pdf);
             let result_tx = result_tx.clone();
-            let worker = runtime.spawn_blocking(move || {
-                render_worker_main(
-                    path,
-                    doc_id,
-                    shared_pdf_bytes,
-                    request_rx,
-                    loader,
-                    result_tx,
-                )
-            });
+            let worker =
+                runtime.spawn_blocking(move || render_worker_main(pdf, request_rx, result_tx));
             workers.push(worker);
         }
 
@@ -356,19 +304,10 @@ impl Drop for RenderWorker {
 }
 
 fn render_worker_main(
-    path: PathBuf,
-    doc_id: u64,
-    shared_pdf_bytes: Result<Arc<Vec<u8>>, String>,
+    doc: SharedPdfBackend,
     request_rx: Arc<Mutex<UnboundedReceiver<RenderWorkerRequest>>>,
-    loader: Arc<dyn RenderPdfLoader>,
     result_tx: UnboundedSender<RenderResultEvent>,
 ) {
-    let doc = match shared_pdf_bytes {
-        Ok(bytes) => loader.open_with_shared_bytes(&path, bytes),
-        Err(message) => Err(AppError::unsupported(format!(
-            "render worker failed to load shared document bytes: {message}"
-        ))),
-    };
     loop {
         let request = match request_rx.lock() {
             Ok(mut request_rx) => request_rx.blocking_recv(),
@@ -387,20 +326,13 @@ fn render_worker_main(
             } => {
                 let key = RenderedPageKey::new(task.doc_id, task.page, task.scale);
                 let started = Instant::now();
-                let result = match &doc {
-                    Ok(doc) => {
-                        if doc.doc_id() != doc_id || task.doc_id != doc_id {
-                            Err(AppError::invalid_argument(
-                                "render task does not match active document",
-                            ))
-                        } else {
-                            doc.render_page(task.page, task.scale)
-                                .map_err(|err| AppError::pdf_render(task.page, err))
-                        }
-                    }
-                    Err(err) => Err(AppError::unsupported(format!(
-                        "render worker failed to open active document: {err}"
-                    ))),
+                let result = if doc.doc_id() != task.doc_id {
+                    Err(AppError::invalid_argument(
+                        "render task does not match active document",
+                    ))
+                } else {
+                    doc.render_page(task.page, task.scale)
+                        .map_err(|err| AppError::pdf_render(task.page, err))
                 };
 
                 let event = RenderResultEvent {
@@ -425,11 +357,12 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
     use std::process;
+    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::RenderWorker;
-    use crate::backend::PdfDoc;
+    use crate::backend::{PdfBackend, PdfDoc, SharedPdfBackend};
     use crate::render::cache::RenderedPageKey;
     use crate::render::scheduler::{RenderPriority, RenderTask};
 
@@ -437,14 +370,14 @@ mod tests {
     fn current_enqueue_preempts_prefetch_when_worker_is_full() {
         let file = unique_temp_path("render_worker_preempt_current.pdf");
         fs::write(&file, build_pdf(&["p1", "p2"])).expect("test pdf should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let mut worker = spawn_worker(file.clone(), doc.doc_id(), 1);
+        let doc = Arc::new(PdfDoc::open(&file).expect("pdf should open"));
+        let mut worker = spawn_worker(Arc::clone(&doc), 1);
         let old_key = RenderedPageKey::new(doc.doc_id(), 1, 1.0);
         let current_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
 
-        assert!(worker.enqueue(render_task(&doc, 1, RenderPriority::Background, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 1, RenderPriority::Background, 1)));
         let (enqueued, preempted) = worker.enqueue_current_with_preemption(
-            render_task(&doc, 0, RenderPriority::CriticalCurrent, 2),
+            render_task(doc.as_ref(), 0, RenderPriority::CriticalCurrent, 2),
             2,
             &[current_key],
         );
@@ -461,7 +394,12 @@ mod tests {
         }
 
         assert!(!completed.contains(&old_key));
-        assert!(worker.enqueue(render_task(&doc, 0, RenderPriority::CriticalCurrent, 2)));
+        assert!(worker.enqueue(render_task(
+            doc.as_ref(),
+            0,
+            RenderPriority::CriticalCurrent,
+            2
+        )));
         let deadline = Instant::now() + Duration::from_secs(2);
         while worker.in_flight_len() > 0 && Instant::now() < deadline {
             completed.extend(drain_render_results(&mut worker));
@@ -475,14 +413,14 @@ mod tests {
     fn enqueue_current_with_preemption_does_not_exceed_inflight_limit() {
         let file = unique_temp_path("render_worker_preempt_limit.pdf");
         fs::write(&file, build_pdf(&["p1", "p2"])).expect("test pdf should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let mut worker = spawn_worker(file.clone(), doc.doc_id(), 1);
+        let doc = Arc::new(PdfDoc::open(&file).expect("pdf should open"));
+        let mut worker = spawn_worker(Arc::clone(&doc), 1);
         let keep_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
 
-        assert!(worker.enqueue(render_task(&doc, 1, RenderPriority::Background, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 1, RenderPriority::Background, 1)));
         for _ in 0..8 {
             let _ = worker.enqueue_current_with_preemption(
-                render_task(&doc, 0, RenderPriority::CriticalCurrent, 2),
+                render_task(doc.as_ref(), 0, RenderPriority::CriticalCurrent, 2),
                 2,
                 &[keep_key],
             );
@@ -496,14 +434,29 @@ mod tests {
     fn cancel_stale_prefetch_drops_results_for_old_generation_prefetch() {
         let file = unique_temp_path("render_worker_cancel_stale.pdf");
         fs::write(&file, build_pdf(&["p1", "p2", "p3", "p4"])).expect("test pdf should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let mut worker = spawn_worker(file.clone(), doc.doc_id(), 4);
+        let doc = Arc::new(PdfDoc::open(&file).expect("pdf should open"));
+        let mut worker = spawn_worker(Arc::clone(&doc), 4);
         let current_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
 
-        assert!(worker.enqueue(render_task(&doc, 0, RenderPriority::CriticalCurrent, 1)));
-        assert!(worker.enqueue(render_task(&doc, 1, RenderPriority::DirectionalLead, 1)));
-        assert!(worker.enqueue(render_task(&doc, 2, RenderPriority::Background, 1)));
-        assert!(worker.enqueue(render_task(&doc, 3, RenderPriority::GuardReverse, 1)));
+        assert!(worker.enqueue(render_task(
+            doc.as_ref(),
+            0,
+            RenderPriority::CriticalCurrent,
+            1
+        )));
+        assert!(worker.enqueue(render_task(
+            doc.as_ref(),
+            1,
+            RenderPriority::DirectionalLead,
+            1
+        )));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 2, RenderPriority::Background, 1)));
+        assert!(worker.enqueue(render_task(
+            doc.as_ref(),
+            3,
+            RenderPriority::GuardReverse,
+            1
+        )));
 
         let canceled = worker.cancel_stale_prefetch_except(2, &[current_key]);
         assert_eq!(canceled, 2);
@@ -523,7 +476,7 @@ mod tests {
     }
 
     fn render_task(
-        doc: &PdfDoc,
+        doc: &dyn PdfBackend,
         page: usize,
         priority: RenderPriority,
         generation: u64,
@@ -538,8 +491,9 @@ mod tests {
         }
     }
 
-    fn spawn_worker(path: PathBuf, doc_id: u64, worker_threads: usize) -> RenderWorker {
-        RenderWorker::spawn(path, doc_id, worker_threads)
+    fn spawn_worker(doc: Arc<PdfDoc>, worker_threads: usize) -> RenderWorker {
+        let doc: SharedPdfBackend = doc;
+        RenderWorker::spawn(doc, worker_threads)
     }
 
     fn drain_render_results(worker: &mut RenderWorker) -> Vec<RenderedPageKey> {

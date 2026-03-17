@@ -67,9 +67,9 @@ async fn run() -> AppResult<()> {
         return write_report(&report, perf.out.as_deref());
     }
 
-    let mut pdf = open_default_backend(&options.pdf_path)?;
+    let pdf = open_default_backend(&options.pdf_path)?;
     let mut app = App::new(PresenterKind::RatatuiImage)?;
-    app.run(pdf.as_mut()).await
+    app.run(pdf).await
 }
 
 fn parse_cli(cli: Cli) -> CliOptions {

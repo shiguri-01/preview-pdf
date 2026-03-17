@@ -462,10 +462,10 @@ pub async fn run_report(pdf_path: &Path, run: PerfRunConfig) -> AppResult<PerfRe
     let mut doc_id = None;
 
     for iteration in 0..total_iterations {
-        let mut pdf = open_default_backend(pdf_path)?;
+        let pdf = open_default_backend(pdf_path)?;
         doc_id.get_or_insert(pdf.doc_id());
         let mut app = App::new(PresenterKind::RatatuiImage)?;
-        let snapshot = app.run_perf(pdf.as_mut(), run.scenario).await?;
+        let snapshot = app.run_perf(pdf, run.scenario).await?;
         if iteration >= run.warmup_iterations {
             measured.push(snapshot);
         }

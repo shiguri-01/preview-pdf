@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use crate::app::{AppState, Mode, PaletteRequest};
-use crate::backend::PdfBackend;
+use crate::backend::SharedPdfBackend;
 use crate::error::AppResult;
 use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::extension::ExtensionHost;
@@ -23,7 +24,7 @@ pub struct CommandDispatchResult {
 pub fn dispatch(
     app: &mut AppState,
     cmd: Command,
-    pdf: &mut dyn PdfBackend,
+    pdf: SharedPdfBackend,
     extension_host: &mut ExtensionHost,
     palette_requests: &mut VecDeque<PaletteRequest>,
 ) -> AppResult<CommandDispatchResult> {
@@ -72,7 +73,7 @@ pub fn dispatch(
         }
         Command::OpenSearch => Ok(extension_host.open_search_palette(app, palette_requests)),
         Command::SubmitSearch { query, matcher } => {
-            extension_host.submit_search(app, pdf, query, matcher)
+            extension_host.submit_search(app, Arc::clone(&pdf), query, matcher)
         }
         Command::NextSearchHit => Ok(extension_host.next_search_hit(app)),
         Command::PrevSearchHit => Ok(extension_host.prev_search_hit(app)),
@@ -191,9 +192,10 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
 mod tests {
     use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     use crate::app::AppState;
-    use crate::backend::{PdfBackend, RgbaFrame};
+    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{ActionId, Command, CommandOutcome, PageLayoutModeArg, SearchMatcherKind};
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
@@ -249,14 +251,14 @@ mod tests {
     #[test]
     fn dispatch_next_page_emits_page_changed_and_command_executed() {
         let mut app = AppState::default();
-        let mut pdf = StubPdf::new(3);
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
             &mut app,
             Command::NextPage,
-            &mut pdf,
+            pdf,
             &mut host,
             &mut palette_requests,
         )
@@ -284,14 +286,14 @@ mod tests {
     #[test]
     fn dispatch_open_palette_emits_command_executed_only() {
         let mut app = AppState::default();
-        let mut pdf = StubPdf::new(3);
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
             &mut app,
             Command::ClosePalette,
-            &mut pdf,
+            pdf,
             &mut host,
             &mut palette_requests,
         )
@@ -311,13 +313,13 @@ mod tests {
     #[test]
     fn dispatch_cancel_clears_active_search() {
         let mut app = AppState::default();
-        let mut pdf = StubPdf::new(3);
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
         let mut palette_requests = VecDeque::new();
 
         host.submit_search(
             &mut app,
-            &pdf,
+            Arc::clone(&pdf),
             "needle".to_string(),
             SearchMatcherKind::ContainsInsensitive,
         )
@@ -327,7 +329,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::Cancel,
-            &mut pdf,
+            pdf,
             &mut host,
             &mut palette_requests,
         )
@@ -343,11 +345,11 @@ mod tests {
     #[test]
     fn collect_transition_events_emits_search_when_page_is_unchanged() {
         let mut app = AppState::default();
-        let pdf = StubPdf::new(3);
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
         host.submit_search(
             &mut app,
-            &pdf,
+            pdf,
             "needle".to_string(),
             SearchMatcherKind::ContainsInsensitive,
         )
@@ -381,7 +383,7 @@ mod tests {
             current_page: 3,
             ..AppState::default()
         };
-        let mut pdf = StubPdf::new(8);
+        let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
         let mut palette_requests = VecDeque::new();
 
@@ -391,7 +393,7 @@ mod tests {
                 mode: PageLayoutModeArg::Spread,
                 direction: None,
             },
-            &mut pdf,
+            pdf,
             &mut host,
             &mut palette_requests,
         )

@@ -1,13 +1,12 @@
-use std::collections::VecDeque;
-
 use crate::app::{AppState, PaletteRequest};
-use crate::backend::PdfBackend;
+use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::event::AppEvent;
 use crate::history::{HistoryExtension, HistoryState};
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::search::{SearchExtension, SearchRuntime};
+use std::collections::VecDeque;
 
 use super::traits::Extension;
 
@@ -71,14 +70,14 @@ impl ExtensionHost {
     pub fn submit_search(
         &mut self,
         app: &mut AppState,
-        pdf: &dyn PdfBackend,
+        pdf: SharedPdfBackend,
         query: String,
         matcher: SearchMatcherKind,
     ) -> AppResult<CommandOutcome> {
         self.search.submit(app, pdf, query, matcher)
     }
 
-    pub fn cancel_search(&mut self, pdf: &dyn PdfBackend) -> AppResult<bool> {
+    pub fn cancel_search(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
         self.search.cancel(pdf)
     }
 
@@ -154,8 +153,9 @@ impl Default for ExtensionHost {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
-    use crate::backend::{PdfBackend, RgbaFrame};
+    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::SearchMatcherKind;
 
     use super::ExtensionHost;
@@ -219,7 +219,7 @@ mod tests {
 
         host.submit_search(
             &mut app,
-            &pdf,
+            Arc::new(pdf) as SharedPdfBackend,
             "needle".to_string(),
             SearchMatcherKind::ContainsInsensitive,
         )
@@ -234,11 +234,11 @@ mod tests {
     fn cancel_search_clears_active_query() {
         let mut host = ExtensionHost::default();
         let mut app = crate::app::AppState::default();
-        let pdf = StubPdf::new(4);
+        let pdf = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
 
         host.submit_search(
             &mut app,
-            &pdf,
+            Arc::clone(&pdf),
             "needle".to_string(),
             SearchMatcherKind::ContainsInsensitive,
         )
@@ -246,7 +246,7 @@ mod tests {
         assert!(host.ui_snapshot().search_active);
 
         let canceled = host
-            .cancel_search(&pdf)
+            .cancel_search(pdf)
             .expect("cancel-search should succeed");
         assert!(canceled);
         assert!(!host.ui_snapshot().search_active);

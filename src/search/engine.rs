@@ -1,4 +1,3 @@
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::runtime::{Builder, Handle, Runtime};
@@ -7,7 +6,7 @@ use tokio::sync::mpsc::{
 };
 use tokio::task::JoinHandle;
 
-use crate::backend::{PdfBackend, open_default_backend};
+use crate::backend::SharedPdfBackend;
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,23 +30,10 @@ pub trait SearchMatcher: Send + Sync {
     fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool;
 }
 
-pub trait SearchPdfLoader: Send + Sync {
-    fn load(&self, path: &Path) -> AppResult<Box<dyn PdfBackend>>;
-}
-
-#[derive(Debug, Default)]
-pub struct HayroSearchPdfLoader;
-
-impl SearchPdfLoader for HayroSearchPdfLoader {
-    fn load(&self, path: &Path) -> AppResult<Box<dyn PdfBackend>> {
-        open_default_backend(path)
-    }
-}
-
 #[derive(Clone)]
 struct SearchJob {
     generation: u64,
-    pdf_path: PathBuf,
+    pdf: SharedPdfBackend,
     query: String,
     matcher: Arc<dyn SearchMatcher>,
 }
@@ -112,14 +98,10 @@ impl Default for SearchEngine {
 
 impl SearchEngine {
     pub fn new() -> Self {
-        Self::new_with_loader(Arc::new(HayroSearchPdfLoader))
-    }
-
-    pub fn new_with_loader(loader: Arc<dyn SearchPdfLoader>) -> Self {
         let (request_tx, request_rx) = unbounded_channel();
         let (event_tx, event_rx) = unbounded_channel();
         let runtime = SearchWorkerRuntime::new();
-        let worker = runtime.spawn_blocking(move || worker_main(request_rx, event_tx, loader));
+        let worker = runtime.spawn_blocking(move || worker_main(request_rx, event_tx));
 
         Self {
             request_tx,
@@ -132,7 +114,7 @@ impl SearchEngine {
 
     pub fn submit(
         &mut self,
-        pdf_path: &Path,
+        pdf: SharedPdfBackend,
         query: impl Into<String>,
         matcher: Arc<dyn SearchMatcher>,
     ) -> AppResult<u64> {
@@ -141,7 +123,7 @@ impl SearchEngine {
         let generation = self.next_generation;
         let job = SearchJob {
             generation,
-            pdf_path: pdf_path.to_path_buf(),
+            pdf,
             query: query.into(),
             matcher,
         };
@@ -153,8 +135,8 @@ impl SearchEngine {
         Ok(generation)
     }
 
-    pub fn cancel(&mut self, pdf_path: &Path) -> AppResult<u64> {
-        self.submit(pdf_path, String::new(), Arc::new(CancelMatcher))
+    pub fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<u64> {
+        self.submit(pdf, String::new(), Arc::new(CancelMatcher))
     }
 
     pub fn drain_events(&mut self) -> Vec<SearchEvent> {
@@ -197,7 +179,6 @@ impl Drop for SearchEngine {
 fn worker_main(
     mut request_rx: UnboundedReceiver<WorkerRequest>,
     event_tx: UnboundedSender<SearchEvent>,
-    loader: Arc<dyn SearchPdfLoader>,
 ) {
     let mut pending: Option<SearchJob> = None;
 
@@ -210,13 +191,7 @@ fn worker_main(
             },
         };
 
-        match run_job(
-            job,
-            &mut request_rx,
-            &event_tx,
-            &mut pending,
-            loader.as_ref(),
-        ) {
+        match run_job(job, &mut request_rx, &event_tx, &mut pending) {
             WorkerControl::Continue => {}
             WorkerControl::Shutdown => break,
         }
@@ -235,7 +210,6 @@ fn run_job(
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     event_tx: &UnboundedSender<SearchEvent>,
     pending: &mut Option<SearchJob>,
-    loader: &dyn SearchPdfLoader,
 ) -> WorkerControl {
     let query = job.matcher.prepare_query(job.query.trim());
     if query.is_empty() {
@@ -254,16 +228,7 @@ fn run_job(
         return WorkerControl::Continue;
     }
 
-    let doc = match loader.load(&job.pdf_path) {
-        Ok(doc) => doc,
-        Err(err) => {
-            let _ = event_tx.send(SearchEvent::Failed {
-                generation: job.generation,
-                message: err.to_string(),
-            });
-            return WorkerControl::Continue;
-        }
-    };
+    let doc = job.pdf;
 
     let total_pages = doc.page_count();
 
@@ -337,6 +302,7 @@ mod tests {
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::{SearchEngine, SearchEvent, SearchMatcher};
+    use crate::backend::open_default_backend;
 
     #[derive(Debug)]
     struct ContainsMatcher {
@@ -377,9 +343,10 @@ mod tests {
         fs::write(&file, build_pdf(&["one"])).expect("test file should be created");
 
         let mut engine = SearchEngine::new();
+        let pdf = open_default_backend(&file).expect("pdf should open");
         let gen1 = engine
             .submit(
-                &file,
+                Arc::clone(&pdf),
                 "one",
                 Arc::new(ContainsMatcher {
                     case_sensitive: false,
@@ -388,7 +355,7 @@ mod tests {
             .expect("first submit should succeed");
         let gen2 = engine
             .submit(
-                &file,
+                pdf,
                 "two",
                 Arc::new(ContainsMatcher {
                     case_sensitive: false,
@@ -408,16 +375,17 @@ mod tests {
         fs::write(&file, build_pdf(&["one", "two", "three"])).expect("test file should be created");
 
         let mut engine = SearchEngine::new();
+        let pdf = open_default_backend(&file).expect("pdf should open");
         let running_generation = engine
             .submit(
-                &file,
+                Arc::clone(&pdf),
                 "one",
                 Arc::new(ContainsMatcher {
                     case_sensitive: false,
                 }),
             )
             .expect("submit should succeed");
-        let cancel_generation = engine.cancel(&file).expect("cancel should succeed");
+        let cancel_generation = engine.cancel(pdf).expect("cancel should succeed");
 
         assert_eq!(cancel_generation, running_generation + 1);
         let hits = wait_for_completed_hits(&mut engine, cancel_generation);
@@ -433,9 +401,10 @@ mod tests {
             .expect("test file should be created");
 
         let mut engine = SearchEngine::new();
+        let pdf = open_default_backend(&file).expect("pdf should open");
         let generation = engine
             .submit(
-                &file,
+                pdf,
                 "alpha",
                 Arc::new(ContainsMatcher {
                     case_sensitive: false,
@@ -456,9 +425,10 @@ mod tests {
             .expect("test file should be created");
 
         let mut engine = SearchEngine::new();
+        let pdf = open_default_backend(&file).expect("pdf should open");
         let generation = engine
             .submit(
-                &file,
+                pdf,
                 "alpha",
                 Arc::new(ContainsMatcher {
                     case_sensitive: true,
@@ -482,9 +452,10 @@ mod tests {
         .expect("test file should be created");
 
         let mut engine = SearchEngine::new();
+        let pdf = open_default_backend(&file).expect("pdf should open");
         let generation = engine
             .submit(
-                &file,
+                pdf,
                 "hello world",
                 Arc::new(ContainsMatcher {
                     case_sensitive: false,

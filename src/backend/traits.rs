@@ -132,7 +132,7 @@ impl RgbaFrame {
     }
 }
 
-pub trait PdfBackend: Send {
+pub trait PdfBackend: Send + Sync {
     fn path(&self) -> &Path;
     fn doc_id(&self) -> u64;
     fn page_count(&self) -> usize;

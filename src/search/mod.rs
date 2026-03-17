@@ -5,7 +5,6 @@ pub mod state;
 use crate::app::AppState;
 use crate::event::AppEvent;
 use crate::extension::Extension;
-use crate::input::{AppInputEvent, InputHookResult};
 pub use palette::SearchPaletteProvider;
 pub use state::{SearchRuntime, SearchState};
 
@@ -22,14 +21,6 @@ impl Extension for SearchExtension {
 
     fn init_state() -> Self::State {
         SearchRuntime::default()
-    }
-
-    fn handle_input(
-        state: &mut Self::State,
-        event: AppInputEvent,
-        app: &mut AppState,
-    ) -> InputHookResult {
-        state.on_input(event, app)
     }
 
     fn handle_event(state: &mut Self::State, event: &AppEvent, app: &mut AppState) {

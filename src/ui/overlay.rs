@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
@@ -154,11 +154,16 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
                 // Detail
                 if let Some(detail) = &item.detail {
                     spans.push(Span::raw("  "));
-                    spans.push(Span::styled(detail, Style::default().fg(Color::DarkGray)));
+                    let detail_style = if item.selected {
+                        Style::default()
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    spans.push(Span::styled(detail, detail_style));
                 }
 
                 let line_style = if item.selected {
-                    Style::default().bg(Color::Rgb(45, 45, 50))
+                    Style::default().add_modifier(Modifier::REVERSED)
                 } else {
                     Style::default()
                 };

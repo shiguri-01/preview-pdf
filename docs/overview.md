@@ -38,7 +38,7 @@ Rules:
 - Zoom and viewport:
   - zoom in/out with bounded scale
   - fit-to-viewport behavior
-  - horizontal pan when rendered content exceeds viewport width
+  - scroll when rendered content exceeds viewport bounds
 
 - Search:
   - full-text substring search
@@ -72,8 +72,7 @@ Rules:
 | `G`      | Last page |
 | `+`      | Zoom in |
 | `-`      | Zoom out |
-| `h`      | Scroll left |
-| `l`      | Scroll right |
+| `H` / `J` / `K` / `L` | Scroll |
 | `/`      | Open search palette |
 | `n`      | Next search hit |
 | `N`      | Previous search hit |

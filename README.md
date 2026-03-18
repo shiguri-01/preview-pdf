@@ -10,7 +10,7 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 ## Features
 
 - Single or spread layout
-- Zoom and horizontal pan
+- Zoom
 - Full-text search with next/previous hit navigation
 - Page history (back/forward)
 - Command palette for actions like `goto-page` and `set-page-layout`
@@ -22,7 +22,7 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 | `j` / `k` | Next page / Previous page |
 | `g` / `G` | First page / Last page |
 | `+` / `-` | Zoom in / Zoom out |
-| `h` / `l` | Pan left / Pan right |
+| `H` / `J` / `K` / `L` | Scroll |
 | `/` | Open search palette |
 | `n` / `N` | Next search hit / Previous search hit |
 | `Ctrl+O` / `Ctrl+I` | History back / History forward |

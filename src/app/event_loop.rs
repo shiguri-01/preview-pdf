@@ -1,9 +1,10 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::{self, MissedTickBehavior};
 
-use crate::backend::PdfBackend;
+use crate::backend::{PdfBackend, SharedPdfBackend};
 use crate::command::{ActionId, CommandOutcome};
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
@@ -89,7 +90,7 @@ impl App {
         std::process::exit(0);
     }
 
-    pub async fn run(&mut self, pdf: &mut dyn PdfBackend) -> AppResult<()> {
+    pub async fn run(&mut self, pdf: SharedPdfBackend) -> AppResult<()> {
         let page_count = pdf.page_count();
         if page_count == 0 {
             return Err(AppError::invalid_argument("pdf has no pages"));
@@ -99,7 +100,7 @@ impl App {
         let (loop_event_tx, loop_event_rx, loop_event_runtime) =
             EventBusRuntime::spawn_interactive();
         let mut runtime = self.initialize_loop_runtime(
-            pdf,
+            Arc::clone(&pdf),
             page_count,
             session,
             loop_event_tx,
@@ -119,7 +120,7 @@ impl App {
 
     pub async fn run_perf(
         &mut self,
-        pdf: &mut dyn PdfBackend,
+        pdf: SharedPdfBackend,
         scenario: PerfScenarioId,
     ) -> AppResult<PerfIterationSnapshot> {
         let page_count = pdf.page_count();
@@ -134,7 +135,7 @@ impl App {
         let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;
         let (loop_event_tx, loop_event_rx, loop_event_runtime) = EventBusRuntime::spawn_headless();
         let mut runtime = self.initialize_loop_runtime(
-            pdf,
+            Arc::clone(&pdf),
             page_count,
             session,
             loop_event_tx,
@@ -151,7 +152,7 @@ impl App {
 
     fn initialize_loop_runtime<S>(
         &mut self,
-        pdf: &dyn PdfBackend,
+        pdf: SharedPdfBackend,
         page_count: usize,
         session: S,
         loop_event_tx: UnboundedSender<DomainEvent>,
@@ -182,18 +183,16 @@ impl App {
         prefetch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut redraw_tick = time::interval(pending_redraw_interval);
         redraw_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        let render_worker = RenderWorker::spawn(
-            pdf.path().to_path_buf(),
-            pdf.doc_id(),
-            self.config.render.worker_threads,
-        );
+        let render_worker =
+            RenderWorker::spawn(Arc::clone(&pdf), self.config.render.worker_threads);
         let viewport = Self::current_viewport(&session, self.state.debug_status_visible);
         let visible_pages = self.state.visible_page_slots(page_count);
-        let tracked_scale = self.compute_current_scale(pdf, visible_pages.anchor_page, viewport);
+        let tracked_scale =
+            self.compute_current_scale(pdf.as_ref(), visible_pages.anchor_page, viewport);
         let mut render_actor =
             RenderActor::new(visible_pages.anchor_page, self.state.zoom, tracked_scale);
         self.render.runtime.reset_prefetch(
-            pdf,
+            pdf.as_ref(),
             visible_pages.anchor_page,
             render_actor.nav_mut().intent(),
             tracked_scale,
@@ -220,11 +219,14 @@ impl App {
     async fn run_interactive_loop(
         &mut self,
         runtime: &mut LoopRuntime<InteractiveTerminalSession>,
-        pdf: &mut dyn PdfBackend,
+        pdf: SharedPdfBackend,
     ) -> AppResult<()> {
         loop {
-            let step = self.process_loop_iteration(runtime, pdf)?;
-            match self.wait_and_handle_next_event(runtime, &step, pdf).await? {
+            let step = self.process_loop_iteration(runtime, pdf.as_ref())?;
+            match self
+                .wait_and_handle_next_event(runtime, &step, Arc::clone(&pdf))
+                .await?
+            {
                 LoopControl::Continue => {}
                 LoopControl::Break => return Ok(()),
             }
@@ -234,13 +236,13 @@ impl App {
     async fn run_perf_loop(
         &mut self,
         runtime: &mut LoopRuntime<HeadlessTerminalSession>,
-        pdf: &mut dyn PdfBackend,
+        pdf: SharedPdfBackend,
         scenario: PerfScenarioId,
     ) -> AppResult<PerfIterationSnapshot> {
         let mut perf_driver = PerfLoopDriver::new(scenario);
 
         loop {
-            let step = self.process_loop_iteration(runtime, pdf)?;
+            let step = self.process_loop_iteration(runtime, pdf.as_ref())?;
             let system_idle = step.current_cached
                 && runtime.render_worker.in_flight_len() == 0
                 && !self.render.presenter.has_pending_work()
@@ -257,7 +259,10 @@ impl App {
                 });
             }
 
-            match self.wait_and_handle_next_event(runtime, &step, pdf).await? {
+            match self
+                .wait_and_handle_next_event(runtime, &step, Arc::clone(&pdf))
+                .await?
+            {
                 LoopControl::Continue => {}
                 LoopControl::Break => {
                     return Err(AppError::unsupported(
@@ -321,7 +326,7 @@ impl App {
         &mut self,
         runtime: &mut LoopRuntime<S>,
         step: &LoopStep,
-        pdf: &mut dyn PdfBackend,
+        pdf: SharedPdfBackend,
     ) -> AppResult<LoopControl>
     where
         S: TerminalSurface + SessionRestore,
@@ -491,7 +496,7 @@ impl App {
         &mut self,
         waited: WaitEvent,
         runtime: &mut LoopRuntime<S>,
-        pdf: &mut dyn PdfBackend,
+        pdf: SharedPdfBackend,
     ) -> AppResult<LoopControl>
     where
         S: TerminalSurface + SessionRestore,
@@ -520,9 +525,11 @@ impl App {
                 self.request_redraw(runtime, RedrawReason::InputError);
             }
             WaitEvent::Event(DomainEvent::Command(command)) => {
-                let dispatch = self
-                    .interaction
-                    .dispatch_command(&mut self.state, command, pdf)?;
+                let dispatch = self.interaction.dispatch_command(
+                    &mut self.state,
+                    command,
+                    Arc::clone(&pdf),
+                )?;
                 for event in dispatch.emitted_events {
                     let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
                 }
@@ -546,7 +553,8 @@ impl App {
                 let viewport =
                     Self::current_viewport(&runtime.session, self.state.debug_status_visible);
                 let visible_pages = self.state.visible_page_slots(pdf.page_count());
-                let scale = self.compute_current_scale(pdf, visible_pages.anchor_page, viewport);
+                let scale =
+                    self.compute_current_scale(pdf.as_ref(), visible_pages.anchor_page, viewport);
                 let mut current_keys = vec![RenderedPageKey::new(
                     pdf.doc_id(),
                     visible_pages.anchor_page,

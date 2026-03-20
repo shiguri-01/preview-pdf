@@ -9,8 +9,10 @@ mod traits;
 pub use hayro::{HayroPdfBackend, PdfDoc};
 pub use traits::{PdfBackend, PixelBuffer, PixelBufferPool, RgbaFrame};
 
-pub fn open_default_backend(path: impl AsRef<Path>) -> AppResult<Box<dyn PdfBackend>> {
-    PdfDoc::open(path).map(|doc| Box::new(doc) as Box<dyn PdfBackend>)
+pub type SharedPdfBackend = Arc<dyn PdfBackend>;
+
+pub fn open_default_backend(path: impl AsRef<Path>) -> AppResult<SharedPdfBackend> {
+    PdfDoc::open(path).map(|doc| Arc::new(doc) as SharedPdfBackend)
 }
 
 pub fn load_default_shared_bytes(path: impl AsRef<Path>) -> AppResult<Arc<Vec<u8>>> {
@@ -20,6 +22,6 @@ pub fn load_default_shared_bytes(path: impl AsRef<Path>) -> AppResult<Arc<Vec<u8
 pub fn open_default_backend_with_shared_bytes(
     path: impl AsRef<Path>,
     bytes: Arc<Vec<u8>>,
-) -> AppResult<Box<dyn PdfBackend>> {
-    PdfDoc::open_with_shared_bytes(path, bytes).map(|doc| Box::new(doc) as Box<dyn PdfBackend>)
+) -> AppResult<SharedPdfBackend> {
+    PdfDoc::open_with_shared_bytes(path, bytes).map(|doc| Arc::new(doc) as SharedPdfBackend)
 }

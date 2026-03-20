@@ -409,6 +409,7 @@ impl ImagePresenter for RatatuiImagePresenter {
                     picker: self.config.picker.clone(),
                     frame,
                     area,
+                    allow_upscale: false,
                     class,
                     generation,
                     enqueued_at: Instant::now(),
@@ -472,7 +473,6 @@ impl ImagePresenter for RatatuiImagePresenter {
                 used_stale_fallback: drew_image,
             });
         };
-        let font_size = self.config.picker.font_size();
         let request_tx = self.encode.request_tx.clone();
         if self.state.l2_cache.cached_mut(&key).is_none() {
             self.state
@@ -527,12 +527,22 @@ impl ImagePresenter for RatatuiImagePresenter {
                     });
                 }
                 TerminalFrameState::PendingFrame(frame) => {
-                    let encode_area = centered_fit_area(frame.width, frame.height, font_size, area);
+                    let picker = if options.is_initial_preview() {
+                        Picker::halfblocks()
+                    } else {
+                        self.config.picker.clone()
+                    };
+                    let encode_area = if options.is_initial_preview() {
+                        area
+                    } else {
+                        centered_fit_area(frame.width, frame.height, picker.font_size(), area)
+                    };
                     let request = EncodeWorkerRequest::Encode {
                         key,
-                        picker: self.config.picker.clone(),
+                        picker,
                         frame,
                         area: encode_area,
+                        allow_upscale: options.is_initial_preview(),
                         class: PrefetchClass::CriticalCurrent,
                         generation: self.state.current_generation,
                         enqueued_at: Instant::now(),

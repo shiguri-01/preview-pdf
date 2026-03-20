@@ -52,8 +52,29 @@ pub enum PresenterFeedback {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PresenterRenderMode {
+    #[default]
+    Full,
+    InitialPreview,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PresenterRenderOptions {
     pub allow_stale_fallback: bool,
+    pub render_mode: PresenterRenderMode,
+}
+
+impl PresenterRenderOptions {
+    pub const fn new(allow_stale_fallback: bool, render_mode: PresenterRenderMode) -> Self {
+        Self {
+            allow_stale_fallback,
+            render_mode,
+        }
+    }
+
+    pub const fn is_initial_preview(self) -> bool {
+        matches!(self.render_mode, PresenterRenderMode::InitialPreview)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

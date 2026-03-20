@@ -11,12 +11,13 @@ use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig}
 
 use super::encode::{EncodeWorkerRequest, enqueue_encode_request, pop_next_encode_task};
 use super::factory::create_presenter;
-use super::image_ops::fit_downscale_dimensions;
+use super::image_ops::{fit_downscale_dimensions, fit_resize_dimensions};
 use super::l2_cache::{L2_MAX_ENTRIES, TerminalFrameCache, TerminalFrameKey, TerminalFrameState};
 use super::ratatui::RatatuiImagePresenter;
 use super::terminal_cell::cell_size_from_window_metrics;
 use super::traits::{
-    ImagePresenter, PanOffset, PresenterFeedback, PresenterKind, PresenterRenderOptions, Viewport,
+    ImagePresenter, PanOffset, PresenterFeedback, PresenterKind, PresenterRenderMode,
+    PresenterRenderOptions, Viewport,
 };
 
 fn frame() -> RgbaFrame {
@@ -337,9 +338,7 @@ fn render_pending_uses_stale_fallback_when_allowed() {
             result = Some(presenter.render(
                 frame,
                 area,
-                PresenterRenderOptions {
-                    allow_stale_fallback: true,
-                },
+                PresenterRenderOptions::new(true, PresenterRenderMode::Full),
             ));
         })
         .expect("draw should pass");
@@ -390,9 +389,7 @@ fn render_pending_does_not_use_stale_fallback_when_disallowed() {
             result = Some(presenter.render(
                 frame,
                 area,
-                PresenterRenderOptions {
-                    allow_stale_fallback: false,
-                },
+                PresenterRenderOptions::new(false, PresenterRenderMode::Full),
             ));
         })
         .expect("draw should pass");
@@ -450,9 +447,7 @@ fn render_returns_failed_feedback_for_failed_current_entry() {
             result = Some(presenter.render(
                 frame,
                 area,
-                PresenterRenderOptions {
-                    allow_stale_fallback: true,
-                },
+                PresenterRenderOptions::new(true, PresenterRenderMode::Full),
             ));
         })
         .expect("draw should pass");
@@ -510,9 +505,7 @@ fn render_failed_does_not_use_stale_fallback_when_disallowed() {
             result = Some(presenter.render(
                 frame,
                 area,
-                PresenterRenderOptions {
-                    allow_stale_fallback: false,
-                },
+                PresenterRenderOptions::new(false, PresenterRenderMode::Full),
             ));
         })
         .expect("draw should pass");
@@ -608,6 +601,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         picker: presenter.config.picker.clone(),
         frame: frame(),
         area,
+        allow_upscale: false,
         class: PrefetchClass::DirectionalLead,
         generation: 1,
         enqueued_at: Instant::now(),
@@ -617,6 +611,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         picker: presenter.config.picker.clone(),
         frame: frame(),
         area,
+        allow_upscale: false,
         class: PrefetchClass::DirectionalLead,
         generation: 1,
         enqueued_at: Instant::now(),
@@ -626,6 +621,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         picker: presenter.config.picker.clone(),
         frame: frame(),
         area,
+        allow_upscale: false,
         class: PrefetchClass::CriticalCurrent,
         generation: 1,
         enqueued_at: Instant::now(),
@@ -665,6 +661,7 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         picker: presenter.config.picker.clone(),
         frame: frame(),
         area,
+        allow_upscale: false,
         class: PrefetchClass::DirectionalLead,
         generation: 1,
         enqueued_at: Instant::now(),
@@ -678,6 +675,7 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         picker: presenter.config.picker.clone(),
         frame: frame(),
         area,
+        allow_upscale: false,
         class: PrefetchClass::Background,
         generation: 1,
         enqueued_at: Instant::now(),
@@ -691,6 +689,7 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         picker: presenter.config.picker.clone(),
         frame: frame(),
         area,
+        allow_upscale: false,
         class: PrefetchClass::CriticalCurrent,
         generation: 2,
         enqueued_at: Instant::now(),
@@ -801,6 +800,18 @@ fn fit_downscale_dimensions_returns_none_when_source_fits() {
 fn fit_downscale_dimensions_preserves_aspect_ratio() {
     let dims = fit_downscale_dimensions(2400, 3200, 960, 640);
     assert_eq!(dims, Some((480, 640)));
+}
+
+#[test]
+fn fit_resize_dimensions_upscales_when_allowed() {
+    let dims = fit_resize_dimensions(400, 200, 1200, 900, true);
+    assert_eq!(dims, Some((1200, 600)));
+}
+
+#[test]
+fn fit_resize_dimensions_skips_upscale_when_disallowed() {
+    let dims = fit_resize_dimensions(400, 200, 1200, 900, false);
+    assert_eq!(dims, None);
 }
 
 #[test]

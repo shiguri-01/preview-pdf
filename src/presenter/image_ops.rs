@@ -20,17 +20,22 @@ pub(crate) fn create_protocol_with_picker(
     Ok(picker.new_resize_protocol(image))
 }
 
-pub(crate) fn downscale_frame_for_area(
+pub(crate) fn resize_frame_for_area(
     frame: RgbaFrame,
     area: Rect,
     cell_px: (u16, u16),
+    allow_upscale: bool,
 ) -> AppResult<RgbaFrame> {
     let max_width = u32::from(area.width.max(1)).saturating_mul(u32::from(cell_px.0.max(1)));
     let max_height = u32::from(area.height.max(1)).saturating_mul(u32::from(cell_px.1.max(1)));
 
-    let Some((dst_width, dst_height)) =
-        fit_downscale_dimensions(frame.width, frame.height, max_width, max_height)
-    else {
+    let Some((dst_width, dst_height)) = fit_resize_dimensions(
+        frame.width,
+        frame.height,
+        max_width,
+        max_height,
+        allow_upscale,
+    ) else {
         return Ok(frame);
     };
 
@@ -43,10 +48,20 @@ pub(crate) fn fit_downscale_dimensions(
     max_width: u32,
     max_height: u32,
 ) -> Option<(u32, u32)> {
+    fit_resize_dimensions(src_width, src_height, max_width, max_height, false)
+}
+
+pub(crate) fn fit_resize_dimensions(
+    src_width: u32,
+    src_height: u32,
+    max_width: u32,
+    max_height: u32,
+    allow_upscale: bool,
+) -> Option<(u32, u32)> {
     if src_width == 0 || src_height == 0 || max_width == 0 || max_height == 0 {
         return None;
     }
-    if src_width <= max_width && src_height <= max_height {
+    if !allow_upscale && src_width <= max_width && src_height <= max_height {
         return None;
     }
 
@@ -57,12 +72,20 @@ pub(crate) fn fit_downscale_dimensions(
         let dst_width = max_width.max(1);
         let dst_height =
             ((src_height as u64).saturating_mul(dst_width as u64) / src_width as u64).max(1) as u32;
-        Some((dst_width, dst_height.min(max_height.max(1))))
+        let dst_height = dst_height.min(max_height.max(1));
+        if dst_width == src_width && dst_height == src_height {
+            return None;
+        }
+        Some((dst_width, dst_height))
     } else {
         let dst_height = max_height.max(1);
         let dst_width = ((src_width as u64).saturating_mul(dst_height as u64) / src_height as u64)
             .max(1) as u32;
-        Some((dst_width.min(max_width.max(1)), dst_height))
+        let dst_width = dst_width.min(max_width.max(1));
+        if dst_width == src_width && dst_height == src_height {
+            return None;
+        }
+        Some((dst_width, dst_height))
     }
 }
 

@@ -7,18 +7,29 @@ use crate::config::Config;
 use crate::error::AppResult;
 use crate::palette::PaletteView;
 use crate::presenter::{
-    PanOffset, PresenterFeedback, PresenterRenderOptions, PresenterRenderOutcome, Viewport,
+    PanOffset, PresenterFeedback, PresenterRenderMode, PresenterRenderOptions,
+    PresenterRenderOutcome, Viewport,
 };
 use crate::render::cache::RenderedPageKey;
 use crate::ui;
 
 use super::constants::DEFAULT_PAGE_SIZE_PT;
 use super::core::{App, RenderSubsystem};
-use super::scale::{compute_render_scale, compute_scale, quantize_scale, resolved_cell_size_px};
+use super::scale::{
+    compute_render_scale, compute_scale, quantize_scale, resolved_cell_size_px, scale_eq,
+};
 use super::state::{AppState, VisiblePageSlots};
 use super::terminal_session::TerminalSurface;
 
 const SPREAD_GAP_CELLS: u16 = 2;
+const INITIAL_PREVIEW_SCALE_RATIO: f32 = 0.25;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct InitialPreviewPlan {
+    pub(super) scale: f32,
+    pub(super) page_keys: Vec<RenderedPageKey>,
+    pub(super) presenter_key: RenderedPageKey,
+}
 
 pub(super) struct RenderFramePlan {
     pub(super) palette_view: Option<PaletteView>,
@@ -26,6 +37,7 @@ pub(super) struct RenderFramePlan {
     pub(super) page_count: usize,
     pub(super) visible_pages: VisiblePageSlots,
     pub(super) current_scale: f32,
+    pub(super) initial_preview: Option<InitialPreviewPlan>,
     pub(super) presenter_key: RenderedPageKey,
     pub(super) generation: u64,
     pub(super) nav_streak: usize,
@@ -88,6 +100,106 @@ impl App {
 }
 
 impl RenderSubsystem {
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_single_page_or_preview_from_cache(
+        &mut self,
+        pdf: &dyn PdfBackend,
+        viewport: Viewport,
+        page: usize,
+        full_scale: f32,
+        initial_preview: Option<&InitialPreviewPlan>,
+        pan: &mut PanOffset,
+        cell_px: Option<(u16, u16)>,
+        enable_crop: bool,
+        generation: u64,
+    ) -> AppResult<Option<PresenterRenderMode>> {
+        if self.runtime.try_prepare_current_page_from_cache(
+            pdf,
+            self.presenter.as_mut(),
+            viewport,
+            page,
+            full_scale,
+            pan,
+            cell_px,
+            enable_crop,
+            generation,
+        )? {
+            return Ok(Some(PresenterRenderMode::Full));
+        }
+
+        let Some(preview_plan) = initial_preview else {
+            return Ok(None);
+        };
+
+        if self.runtime.try_prepare_cached_page_from_cache(
+            self.presenter.as_mut(),
+            viewport,
+            preview_plan.page_keys[0],
+            pan,
+            cell_px,
+            enable_crop,
+            generation,
+        )? {
+            return Ok(Some(PresenterRenderMode::InitialPreview));
+        }
+
+        Ok(None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_spread_or_preview_from_cache(
+        &mut self,
+        pdf: &dyn PdfBackend,
+        viewport: Viewport,
+        visible_pages: VisiblePageSlots,
+        presenter_key: RenderedPageKey,
+        full_scale: f32,
+        initial_preview: Option<&InitialPreviewPlan>,
+        pan: &mut PanOffset,
+        cell_px: Option<(u16, u16)>,
+        enable_crop: bool,
+        generation: u64,
+        spread_gap_px: u32,
+    ) -> AppResult<Option<PresenterRenderMode>> {
+        if self.runtime.try_prepare_spread_from_cache(
+            pdf,
+            self.presenter.as_mut(),
+            viewport,
+            visible_pages,
+            presenter_key,
+            full_scale,
+            pan,
+            cell_px,
+            enable_crop,
+            generation,
+            spread_gap_px,
+        )? {
+            return Ok(Some(PresenterRenderMode::Full));
+        }
+
+        let Some(preview_plan) = initial_preview else {
+            return Ok(None);
+        };
+
+        if self.runtime.try_prepare_spread_from_cache(
+            pdf,
+            self.presenter.as_mut(),
+            viewport,
+            visible_pages,
+            preview_plan.presenter_key,
+            preview_plan.scale,
+            pan,
+            cell_px,
+            enable_crop,
+            generation,
+            spread_gap_px,
+        )? {
+            return Ok(Some(PresenterRenderMode::InitialPreview));
+        }
+
+        Ok(None)
+    }
+
     pub(super) fn render_frame(
         &mut self,
         state: &mut AppState,
@@ -102,6 +214,7 @@ impl RenderSubsystem {
             page_count,
             visible_pages,
             current_scale,
+            initial_preview,
             presenter_key,
             generation,
             nav_streak: _nav_streak,
@@ -154,24 +267,24 @@ impl RenderSubsystem {
             let image_area = layout.viewer_inner;
 
             let prepare_result = match state.page_layout_mode {
-                PageLayoutMode::Single => self.runtime.try_prepare_current_page_from_cache(
+                PageLayoutMode::Single => self.prepare_single_page_or_preview_from_cache(
                     pdf,
-                    self.presenter.as_mut(),
                     viewport,
                     visible_pages.anchor_page,
                     current_scale,
+                    initial_preview.as_ref(),
                     &mut pan,
                     presenter_caps.cell_px,
                     enable_crop,
                     generation,
                 ),
-                PageLayoutMode::Spread => self.runtime.try_prepare_spread_from_cache(
+                PageLayoutMode::Spread => self.prepare_spread_or_preview_from_cache(
                     pdf,
-                    self.presenter.as_mut(),
                     viewport,
                     visible_pages,
                     presenter_key,
                     current_scale,
+                    initial_preview.as_ref(),
                     &mut pan,
                     presenter_caps.cell_px,
                     enable_crop,
@@ -181,12 +294,10 @@ impl RenderSubsystem {
             };
 
             match prepare_result {
-                Ok(true) => match self.presenter.render(
+                Ok(Some(render_mode)) => match self.presenter.render(
                     frame,
                     image_area,
-                    PresenterRenderOptions {
-                        allow_stale_fallback,
-                    },
+                    PresenterRenderOptions::new(allow_stale_fallback, render_mode),
                 ) {
                     Ok(outcome) => {
                         render_feedback = outcome.feedback;
@@ -220,7 +331,7 @@ impl RenderSubsystem {
                         );
                     }
                 },
-                Ok(false) => {
+                Ok(None) => {
                     render_feedback = PresenterFeedback::Pending;
                     let outcome = PresenterRenderOutcome {
                         drew_image: false,
@@ -299,7 +410,11 @@ fn decide_viewer_display(
                 show_loading = true;
             }
         }
-        PresenterFeedback::Pending => show_loading = true,
+        PresenterFeedback::Pending => {
+            if !viewer_has_image || outcome.drew_image {
+                show_loading = true;
+            }
+        }
         PresenterFeedback::Failed => show_error = true,
     }
     ViewerDisplayDecision {
@@ -359,6 +474,48 @@ fn resolve_layout_dimensions(
     }
 }
 
+pub(super) fn compute_initial_preview_plan(
+    doc_id: u64,
+    visible_pages: VisiblePageSlots,
+    page_layout_mode: PageLayoutMode,
+    current_scale: f32,
+    presenter_layout_tag: u16,
+) -> Option<InitialPreviewPlan> {
+    let preview_scale = quantize_scale(current_scale * INITIAL_PREVIEW_SCALE_RATIO);
+    if scale_eq(preview_scale, current_scale) {
+        return None;
+    }
+
+    let page_keys = match page_layout_mode {
+        PageLayoutMode::Single => vec![RenderedPageKey::new(
+            doc_id,
+            visible_pages.anchor_page,
+            preview_scale,
+        )],
+        PageLayoutMode::Spread => visible_pages
+            .existing_pages()
+            .into_iter()
+            .flatten()
+            .map(|page| RenderedPageKey::new(doc_id, page, preview_scale))
+            .collect(),
+    };
+    let presenter_key = match page_layout_mode {
+        PageLayoutMode::Single => page_keys[0],
+        PageLayoutMode::Spread => RenderedPageKey::with_layout(
+            doc_id,
+            visible_pages.anchor_page,
+            preview_scale,
+            presenter_layout_tag,
+        ),
+    };
+
+    Some(InitialPreviewPlan {
+        scale: preview_scale,
+        page_keys,
+        presenter_key,
+    })
+}
+
 fn format_loading_target(slots: VisiblePageSlots) -> String {
     match slots.trailing_page {
         Some(trailing) => format!("pages {}-{}", slots.anchor_page + 1, trailing + 1),
@@ -378,10 +535,14 @@ fn format_render_target(slots: VisiblePageSlots, page_count: usize) -> String {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{ViewerDisplayDecision, decide_viewer_display, resolve_layout_dimensions};
+    use super::{
+        InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
+        decide_viewer_display, resolve_layout_dimensions,
+    };
     use crate::app::{PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
     use crate::presenter::{PresenterFeedback, PresenterRenderOutcome};
+    use crate::render::cache::RenderedPageKey;
 
     struct DimPdf {
         path: PathBuf,
@@ -544,7 +705,7 @@ mod tests {
             decision,
             ViewerDisplayDecision {
                 clear: false,
-                show_loading: true,
+                show_loading: false,
                 show_error: false,
             }
         );
@@ -579,5 +740,71 @@ mod tests {
 
         let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
         assert_eq!(spread, (380.0, 300.0));
+    }
+
+    #[test]
+    fn compute_initial_preview_plan_uses_lower_scale_on_cold_start() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Single, 1.0, 0);
+
+        assert_eq!(
+            preview,
+            Some(InitialPreviewPlan {
+                scale: 0.25,
+                page_keys: vec![RenderedPageKey::new(7, 0, 0.25)],
+                presenter_key: RenderedPageKey::new(7, 0, 0.25),
+            })
+        );
+    }
+
+    #[test]
+    fn compute_initial_preview_plan_includes_both_spread_pages() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: Some(1),
+            left_page: Some(0),
+            right_page: Some(1),
+        };
+
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Spread, 1.0, 1);
+
+        assert_eq!(
+            preview,
+            Some(InitialPreviewPlan {
+                scale: 0.25,
+                page_keys: vec![
+                    RenderedPageKey::new(7, 0, 0.25),
+                    RenderedPageKey::new(7, 1, 0.25),
+                ],
+                presenter_key: RenderedPageKey::with_layout(7, 0, 0.25, 1),
+            })
+        );
+    }
+
+    #[test]
+    fn compute_initial_preview_plan_handles_tail_spread() {
+        let slots = VisiblePageSlots {
+            anchor_page: 2,
+            trailing_page: None,
+            left_page: Some(2),
+            right_page: None,
+        };
+
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Spread, 1.0, 3);
+
+        assert_eq!(
+            preview,
+            Some(InitialPreviewPlan {
+                scale: 0.25,
+                page_keys: vec![RenderedPageKey::new(7, 2, 0.25)],
+                presenter_key: RenderedPageKey::with_layout(7, 2, 0.25, 3),
+            })
+        );
     }
 }

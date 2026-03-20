@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 use crate::backend::RgbaFrame;
 use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
 
-use super::image_ops::{create_protocol_with_picker, downscale_frame_for_area};
+use super::image_ops::{create_protocol_with_picker, resize_frame_for_area};
 use super::l2_cache::TerminalFrameKey;
 
 pub(crate) const ENCODE_RESIZE_FILTER: FilterType = FilterType::Nearest;
@@ -24,6 +24,7 @@ pub(crate) enum EncodeWorkerRequest {
         picker: Picker,
         frame: RgbaFrame,
         area: Rect,
+        allow_upscale: bool,
         class: PrefetchClass,
         generation: u64,
         enqueued_at: std::time::Instant,
@@ -36,6 +37,7 @@ pub(crate) struct EncodeWorkerTask {
     pub(crate) picker: Picker,
     pub(crate) frame: RgbaFrame,
     pub(crate) area: Rect,
+    pub(crate) allow_upscale: bool,
     pub(crate) enqueued_at: std::time::Instant,
 }
 
@@ -128,6 +130,7 @@ pub(crate) fn enqueue_encode_request(
             picker,
             frame,
             area,
+            allow_upscale,
             class,
             generation,
             enqueued_at,
@@ -142,6 +145,7 @@ pub(crate) fn enqueue_encode_request(
                 picker,
                 frame,
                 area,
+                allow_upscale,
                 enqueued_at,
             };
             let meta = QueueTaskMeta {
@@ -186,6 +190,7 @@ fn enqueue_with_notifications(
             picker,
             frame,
             area,
+            allow_upscale,
             class,
             generation,
             enqueued_at,
@@ -214,6 +219,7 @@ fn enqueue_with_notifications(
                 picker,
                 frame,
                 area,
+                allow_upscale,
                 enqueued_at,
             };
             let meta = QueueTaskMeta {
@@ -280,7 +286,12 @@ fn encode_worker_main(
         });
 
         let started = std::time::Instant::now();
-        let frame = match downscale_frame_for_area(task.frame, task.area, task.picker.font_size()) {
+        let frame = match resize_frame_for_area(
+            task.frame,
+            task.area,
+            task.picker.font_size(),
+            task.allow_upscale,
+        ) {
             Ok(frame) => frame,
             Err(_) => {
                 let _ = result_tx.send(EncodeWorkerResult {
@@ -405,6 +416,7 @@ mod tests {
                 picker: picker.clone(),
                 frame: frame(),
                 area,
+                allow_upscale: false,
                 class: PrefetchClass::DirectionalLead,
                 generation: 1,
                 enqueued_at: Instant::now(),
@@ -419,6 +431,7 @@ mod tests {
                 picker,
                 frame: frame(),
                 area,
+                allow_upscale: false,
                 class: PrefetchClass::CriticalCurrent,
                 generation: 2,
                 enqueued_at: Instant::now(),

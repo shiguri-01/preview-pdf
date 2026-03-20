@@ -15,7 +15,9 @@ pub(crate) struct CurrentTaskContext {
     pub(crate) current_scale: f32,
     pub(crate) required_pages: Vec<usize>,
     pub(crate) required_keys: Vec<RenderedPageKey>,
+    pub(crate) current_interest_keys: Vec<RenderedPageKey>,
     pub(crate) current_cached: bool,
+    pub(crate) preview_tasks: Vec<RenderTask>,
 }
 
 pub(crate) struct PrefetchDispatchContext {
@@ -141,7 +143,7 @@ impl RenderSubsystem {
         ctx: CurrentTaskContext,
     ) {
         let canceled = render_worker
-            .cancel_stale_prefetch_except(render_actor.generation(), &ctx.required_keys);
+            .cancel_stale_prefetch_except(render_actor.generation(), &ctx.current_interest_keys);
         if canceled > 0 {
             self.runtime.perf_stats.add_canceled_tasks(canceled);
         }
@@ -150,6 +152,31 @@ impl RenderSubsystem {
 
         if ctx.current_cached {
             return;
+        }
+
+        for preview_task in ctx.preview_tasks {
+            let preview_key =
+                RenderedPageKey::new(preview_task.doc_id, preview_task.page, preview_task.scale);
+            if !self.runtime.has_cached_frame(&preview_key)
+                && !render_worker.has_in_flight(&preview_key)
+            {
+                let (enqueued, preempted) = render_worker.enqueue_current_with_preemption(
+                    preview_task,
+                    render_actor.generation(),
+                    &ctx.current_interest_keys,
+                );
+                if preempted > 0 {
+                    self.runtime.perf_stats.add_canceled_tasks(preempted);
+                }
+                if !enqueued {
+                    state.status.last_action_id = Some(ActionId::RenderQueue);
+                    state.status.message =
+                        "render queue busy; retrying initial preview".to_string();
+                    return;
+                }
+                self.runtime
+                    .set_queue_depth_with_inflight(render_worker.in_flight_len());
+            }
         }
 
         debug_assert_eq!(
@@ -177,7 +204,7 @@ impl RenderSubsystem {
                     },
                 },
                 render_actor.generation(),
-                &ctx.required_keys,
+                &ctx.current_interest_keys,
             );
             if preempted > 0 {
                 self.runtime.perf_stats.add_canceled_tasks(preempted);

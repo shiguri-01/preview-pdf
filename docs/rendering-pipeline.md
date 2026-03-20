@@ -8,6 +8,7 @@ Pipeline:
 
 1. Open PDF backend document.
 2. Rasterize visible page(s) into `RgbaFrame`.
+   - On cold start, the visible page or spread may also be rasterized at a lower preview scale so the viewer can present a coarse image before the full-resolution content is ready.
 3. Cache rasterized frame in L1 cache.
 4. Compose spread frame (when enabled), then crop to viewport/pan window when required.
 5. Prepare terminal frame entry in L2 cache.
@@ -71,6 +72,13 @@ Preemption rule for current-page critical tasks:
   - `GuardReverse`
   - `DirectionalLead`
   - `Background`
+
+Cold-start preview rule:
+- While no page image has been displayed yet, the runtime may enqueue both:
+  - lower-resolution preview render(s) for the currently visible page(s), and
+  - the normal full-resolution current-page render(s).
+- In spread layout, the preview path renders each visible source page at preview scale, then composes them into a temporary spread image with the same layout tag as the eventual full-resolution spread.
+- The preview is only a temporary display path; pending redraws continue until the full-resolution current page is cached and presented.
 
 ## 5. Scheduling and prefetch (`render/scheduler.rs`, `render/prefetch.rs`)
 

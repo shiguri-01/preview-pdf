@@ -1,13 +1,10 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crossterm::event::KeyCode;
-
 use crate::app::{AppState, PaletteRequest};
 use crate::backend::SharedPdfBackend;
-use crate::command::{ActionId, Command, CommandOutcome, SearchMatcherKind};
+use crate::command::{ActionId, CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
-use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::PaletteKind;
 
 use super::engine::{SearchEngine, SearchEvent, SearchMatcher};
@@ -55,10 +52,6 @@ impl SearchRuntime {
 
     pub fn prev_hit(&mut self, app: &mut AppState) -> CommandOutcome {
         self.state.prev_hit(app)
-    }
-
-    pub fn on_input(&mut self, event: AppInputEvent, app: &mut AppState) -> InputHookResult {
-        self.state.on_input(event, app)
     }
 
     pub fn on_background(&mut self, app: &mut AppState) -> bool {
@@ -196,24 +189,6 @@ impl SearchState {
         self.query.clear();
         self.clear_results();
         Ok(true)
-    }
-
-    pub fn on_input(&mut self, event: AppInputEvent, app: &mut AppState) -> InputHookResult {
-        let AppInputEvent::Key(key) = event;
-        let _ = app;
-        if key.code == KeyCode::Char('/') {
-            let seed = if self.query.is_empty() {
-                None
-            } else {
-                Some(self.query.clone())
-            };
-            return InputHookResult::EmitCommand(Command::OpenPalette {
-                kind: PaletteKind::Search,
-                seed,
-            });
-        }
-
-        InputHookResult::Ignored
     }
 
     pub fn on_background(&mut self, app: &mut AppState, search_engine: &mut SearchEngine) -> bool {
@@ -408,16 +383,12 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
     use crate::app::AppState;
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{CommandOutcome, SearchMatcherKind};
     use crate::search::engine::SearchEngine;
 
     use super::SearchState;
-    use crate::input::{AppInputEvent, InputHookResult};
-    use crate::palette::PaletteKind;
 
     struct StubPdf {
         path: PathBuf,
@@ -461,34 +432,6 @@ mod tests {
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
         }
-    }
-
-    #[test]
-    fn slash_key_opens_search_palette() {
-        let mut state = SearchState::default();
-        let mut app = AppState::default();
-        let result = state.on_input(
-            AppInputEvent::Key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE)),
-            &mut app,
-        );
-        assert!(matches!(
-            result,
-            InputHookResult::EmitCommand(crate::command::Command::OpenPalette {
-                kind: PaletteKind::Search,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn non_search_key_is_ignored() {
-        let mut state = SearchState::default();
-        let mut app = AppState::default();
-        let result = state.on_input(
-            AppInputEvent::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
-            &mut app,
-        );
-        assert_eq!(result, InputHookResult::Ignored);
     }
 
     #[test]

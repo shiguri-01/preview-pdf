@@ -52,6 +52,7 @@ fn map_normal_mode_key_default(key: KeyEvent) -> Option<Command> {
             kind: PaletteKind::Command,
             seed: None,
         }),
+        KeyCode::Char('/') => Some(Command::OpenSearch),
         KeyCode::Char('H') => Some(Command::Scroll { dx: -1, dy: 0 }),
         KeyCode::Char('J') => Some(Command::Scroll { dx: 0, dy: 1 }),
         KeyCode::Char('K') => Some(Command::Scroll { dx: 0, dy: -1 }),
@@ -133,5 +134,16 @@ mod tests {
             KeymapPreset::Emacs,
         );
         assert!(matches!(palette, Some(Command::OpenPalette { .. })));
+    }
+
+    #[test]
+    fn default_preset_maps_slash_to_open_search() {
+        let search = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+            Mode::Normal,
+            KeymapPreset::Default,
+        );
+
+        assert_eq!(search, Some(Command::OpenSearch));
     }
 }

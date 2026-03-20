@@ -54,6 +54,7 @@ Dispatch order is fixed:
 - Input flow:
   - `ExtensionHost::handle_input()` invokes search, then history.
   - First non-`Ignored` hook result is applied.
+  - Built-in global shortcuts should live in app keymap/command routing; extension input hooks are for extension-local interception only.
 
 - Event flow:
   - `command::dispatch()` emits typed `AppEvent` values.
@@ -85,7 +86,6 @@ State (`SearchState`) contains:
 - latest error
 
 Behavior:
-- opens search palette
 - submits async search jobs
 - moves to next/previous hit
 - consumes background search events (`Snapshot`, `Completed`, `Failed`)

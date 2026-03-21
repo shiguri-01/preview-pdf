@@ -25,11 +25,12 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         "first-page" => parse_no_args(id, args_text, Command::FirstPage),
         "last-page" => parse_no_args(id, args_text, Command::LastPage),
         "goto-page" => parse_goto_page(args_text),
-        "set-zoom" => parse_set_zoom(args_text),
+        "zoom" => parse_zoom(args_text),
         "zoom-in" => parse_no_args(id, args_text, Command::ZoomIn),
         "zoom-out" => parse_no_args(id, args_text, Command::ZoomOut),
         "scroll" => parse_scroll(args_text),
-        "set-page-layout" => parse_set_page_layout(args_text),
+        "page-layout-single" => parse_page_layout_single(args_text),
+        "page-layout-spread" => parse_page_layout_spread(args_text),
         "debug-status-show" => parse_no_args(id, args_text, Command::DebugStatusShow),
         "debug-status-hide" => parse_no_args(id, args_text, Command::DebugStatusHide),
         "debug-status-toggle" => parse_no_args(id, args_text, Command::DebugStatusToggle),
@@ -61,6 +62,7 @@ fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResult<Command> 
         "prev-page" => "prev-page does not accept arguments",
         "first-page" => "first-page does not accept arguments",
         "last-page" => "last-page does not accept arguments",
+        "page-layout-single" => "page-layout-single does not accept arguments",
         "zoom-in" => "zoom-in does not accept arguments",
         "zoom-out" => "zoom-out does not accept arguments",
         "debug-status-show" => "debug-status-show does not accept arguments",
@@ -132,83 +134,131 @@ fn parse_goto_page(args_text: &str) -> AppResult<Command> {
     })
 }
 
-fn parse_set_zoom(args_text: &str) -> AppResult<Command> {
+fn parse_zoom(args_text: &str) -> AppResult<Command> {
     let mut parts = args_text.split_whitespace();
     let Some(value_text) = parts.next() else {
         return Err(AppError::invalid_argument(
-            "set-zoom requires 1 argument: value",
+            "zoom requires 1 argument: value",
         ));
     };
     if parts.next().is_some() {
         return Err(AppError::invalid_argument(
-            "set-zoom accepts exactly 1 argument",
+            "zoom accepts exactly 1 argument",
         ));
     }
 
     let value = value_text
         .parse::<f32>()
-        .map_err(|_| AppError::invalid_argument("set-zoom value must be f32"))?;
+        .map_err(|_| AppError::invalid_argument("zoom value must be f32"))?;
 
     Ok(Command::SetZoom { value })
 }
 
 fn parse_scroll(args_text: &str) -> AppResult<Command> {
-    let mut parts = args_text.split_whitespace();
-    let Some(dx_text) = parts.next() else {
+    let parts = args_text.split_whitespace().collect::<Vec<_>>();
+    if parts.is_empty() {
         return Err(AppError::invalid_argument(
-            "scroll requires 2 arguments: dx dy",
-        ));
-    };
-    let Some(dy_text) = parts.next() else {
-        return Err(AppError::invalid_argument(
-            "scroll requires 2 arguments: dx dy",
-        ));
-    };
-    if parts.next().is_some() {
-        return Err(AppError::invalid_argument(
-            "scroll accepts exactly 2 arguments",
+            "scroll requires direction [amount] or dx dy",
         ));
     }
 
-    let dx = dx_text
+    if parts.len() > 2 {
+        return Err(AppError::invalid_argument(
+            "scroll accepts direction [amount] or dx dy",
+        ));
+    }
+
+    if let Some((dx, dy)) = parse_scroll_direction(&parts)? {
+        return Ok(Command::Scroll { dx, dy });
+    }
+
+    if parts.len() != 2 {
+        return Err(AppError::invalid_argument(
+            "scroll requires direction [amount] or dx dy",
+        ));
+    }
+
+    let dx = parts[0]
         .parse::<i32>()
         .map_err(|_| AppError::invalid_argument("scroll dx must be i32"))?;
-    let dy = dy_text
+    let dy = parts[1]
         .parse::<i32>()
         .map_err(|_| AppError::invalid_argument("scroll dy must be i32"))?;
 
     Ok(Command::Scroll { dx, dy })
 }
 
-fn parse_set_page_layout(args_text: &str) -> AppResult<Command> {
-    let mut parts = args_text.split_whitespace();
-    let Some(mode_text) = parts.next() else {
-        return Err(AppError::invalid_argument(
-            "set-page-layout requires at least 1 argument: mode",
-        ));
+fn parse_scroll_direction(parts: &[&str]) -> AppResult<Option<(i32, i32)>> {
+    let Some(direction) = parse_scroll_direction_token(parts[0]) else {
+        return Ok(None);
     };
-    let mode = PageLayoutModeArg::parse(mode_text)
-        .ok_or(AppError::invalid_argument("unknown page layout mode"))?;
 
-    let direction = match parts.next() {
-        Some(direction_text) => Some(
-            SpreadDirectionArg::parse(direction_text)
-                .ok_or(AppError::invalid_argument("unknown spread direction"))?,
-        ),
-        None => None,
+    let amount = match parts.get(1) {
+        Some(value_text) => value_text
+            .parse::<i32>()
+            .map_err(|_| AppError::invalid_argument("scroll amount must be i32"))?,
+        None => 1,
     };
+    if amount < 1 {
+        return Err(AppError::invalid_argument("scroll amount must be >= 1"));
+    }
+
+    let delta = match direction {
+        "left" => (-amount, 0),
+        "right" => (amount, 0),
+        "up" => (0, -amount),
+        "down" => (0, amount),
+        _ => unreachable!("parse_scroll_direction_token limits values"),
+    };
+    Ok(Some(delta))
+}
+
+fn parse_scroll_direction_token(value: &str) -> Option<&'static str> {
+    match value {
+        "left" => Some("left"),
+        "right" => Some("right"),
+        "up" => Some("up"),
+        "down" => Some("down"),
+        _ => None,
+    }
+}
+
+fn parse_page_layout_single(args_text: &str) -> AppResult<Command> {
+    parse_no_args(
+        "page-layout-single",
+        args_text,
+        Command::SetPageLayout {
+            mode: PageLayoutModeArg::Single,
+            direction: None,
+        },
+    )
+}
+
+fn parse_page_layout_spread(args_text: &str) -> AppResult<Command> {
+    let trimmed = args_text.trim();
+    if trimmed.is_empty() {
+        return Ok(Command::SetPageLayout {
+            mode: PageLayoutModeArg::Spread,
+            direction: None,
+        });
+    }
+
+    let mut parts = trimmed.split_whitespace();
+    let Some(direction_text) = parts.next() else {
+        unreachable!("trimmed non-empty input should yield one token");
+    };
+    let direction = SpreadDirectionArg::parse(direction_text)
+        .ok_or(AppError::invalid_argument("unknown spread direction"))?;
     if parts.next().is_some() {
         return Err(AppError::invalid_argument(
-            "set-page-layout accepts at most 2 arguments",
-        ));
-    }
-    if mode == PageLayoutModeArg::Single && direction.is_some() {
-        return Err(AppError::invalid_argument(
-            "single layout does not accept a spread direction",
+            "page-layout-spread accepts at most 1 argument",
         ));
     }
 
-    Ok(Command::SetPageLayout { mode, direction })
+    Ok(Command::SetPageLayout {
+        mode: PageLayoutModeArg::Spread,
+        direction: Some(direction),
+    })
 }
 
 fn parse_submit_search(args_text: &str) -> AppResult<Command> {
@@ -287,7 +337,7 @@ mod tests {
             Command::NextPage
         );
         assert_eq!(
-            parse_command_text("set-zoom 1.25").expect("parse should succeed"),
+            parse_command_text("zoom 1.25").expect("parse should succeed"),
             Command::SetZoom { value: 1.25 }
         );
         assert_eq!(
@@ -296,6 +346,14 @@ mod tests {
                 kind: PaletteKind::Command,
                 seed: None,
             }
+        );
+    }
+
+    #[test]
+    fn parse_search_without_args_opens_search_palette() {
+        assert_eq!(
+            parse_command_text("search").expect("parse should succeed"),
+            Command::OpenSearch
         );
     }
 
@@ -319,20 +377,43 @@ mod tests {
     }
 
     #[test]
-    fn parse_set_page_layout_supports_mode_and_direction() {
+    fn parse_page_layout_aliases_support_mode_and_direction() {
         assert_eq!(
-            parse_command_text("set-page-layout spread").expect("parse should succeed"),
+            parse_command_text("page-layout-single").expect("parse should succeed"),
+            Command::SetPageLayout {
+                mode: PageLayoutModeArg::Single,
+                direction: None,
+            }
+        );
+        assert_eq!(
+            parse_command_text("page-layout-spread").expect("parse should succeed"),
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Spread,
                 direction: None,
             }
         );
         assert_eq!(
-            parse_command_text("set-page-layout spread rtl").expect("parse should succeed"),
+            parse_command_text("page-layout-spread rtl").expect("parse should succeed"),
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Spread,
                 direction: Some(SpreadDirectionArg::Rtl),
             }
+        );
+    }
+
+    #[test]
+    fn parse_scroll_supports_directional_and_raw_forms() {
+        assert_eq!(
+            parse_command_text("scroll down").expect("parse should succeed"),
+            Command::Scroll { dx: 0, dy: 1 }
+        );
+        assert_eq!(
+            parse_command_text("scroll left 3").expect("parse should succeed"),
+            Command::Scroll { dx: -3, dy: 0 }
+        );
+        assert_eq!(
+            parse_command_text("scroll -2 4").expect("parse should succeed"),
+            Command::Scroll { dx: -2, dy: 4 }
         );
     }
 }

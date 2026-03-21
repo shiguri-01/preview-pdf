@@ -61,7 +61,7 @@ impl PaletteProvider for CommandPaletteProvider {
         if let Some(candidate) = selected
             && let Some(spec) = find_spec(&candidate.id)
         {
-            if spec.args.is_empty() {
+            if !command_requires_argument_input(spec) {
                 // No args needed: dispatch immediately.
                 if let Ok(command) = parse_command_text(spec.id) {
                     return Ok(PaletteSubmitEffect::Dispatch {
@@ -198,6 +198,10 @@ fn can_show_command_spec(id: &str, ctx: &PaletteContext<'_>) -> bool {
         return ctx.extensions.search_active;
     }
     true
+}
+
+fn command_requires_argument_input(spec: crate::command::CommandSpec) -> bool {
+    spec.args.iter().any(|arg| arg.required)
 }
 
 fn is_search_navigation_command(id: &str) -> bool {
@@ -350,8 +354,11 @@ fn is_subsequence(query: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::app::AppState;
+    use crate::command::Command;
     use crate::extension::ExtensionUiSnapshot;
-    use crate::palette::{PaletteContext, PaletteKind, PaletteProvider};
+    use crate::palette::{
+        PaletteContext, PaletteKind, PalettePostAction, PaletteProvider, PaletteSubmitEffect,
+    };
 
     use super::CommandPaletteProvider;
 
@@ -374,6 +381,31 @@ mod tests {
             seed: None,
         };
         provider.list(&ctx).expect("list should be built")
+    }
+
+    fn command_submit_effect(
+        input: &str,
+        selected_id: &str,
+        search_active: bool,
+    ) -> PaletteSubmitEffect {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input,
+            seed: None,
+        };
+        let candidates = provider.list(&ctx).expect("list should be built");
+        let selected = candidates
+            .iter()
+            .find(|candidate| candidate.id == selected_id)
+            .expect("selected candidate should exist");
+        provider
+            .on_submit(&ctx, Some(selected))
+            .expect("submit should succeed")
     }
 
     #[test]
@@ -507,5 +539,44 @@ mod tests {
         assert!(idx_goto_page < idx_last_page);
         assert!(idx_last_page < idx_next_page);
         assert!(idx_next_page < idx_prev_page);
+    }
+
+    #[test]
+    fn submit_dispatches_optional_only_page_layout_without_reopen() {
+        let effect = command_submit_effect("", "page-layout-spread", false);
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Dispatch {
+                command: Command::SetPageLayout {
+                    mode: crate::command::PageLayoutModeArg::Spread,
+                    direction: None,
+                },
+                next: PalettePostAction::Close,
+            }
+        );
+    }
+
+    #[test]
+    fn submit_reopens_for_required_argument_commands() {
+        let effect = command_submit_effect("", "zoom", false);
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Reopen {
+                kind: PaletteKind::Command,
+                seed: Some("zoom ".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn submit_dispatches_search_to_open_search_palette() {
+        let effect = command_submit_effect("", "search", false);
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Dispatch {
+                command: Command::OpenSearch,
+                next: PalettePostAction::Close,
+            }
+        );
     }
 }

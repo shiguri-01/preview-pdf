@@ -6,35 +6,28 @@ const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     kind: ArgKind::I32,
     required: true,
 }];
-const ARGS_SET_ZOOM: [ArgSpec; 1] = [ArgSpec {
+const ARGS_ZOOM: [ArgSpec; 1] = [ArgSpec {
     name: "value",
     kind: ArgKind::F32,
     required: true,
 }];
 const ARGS_SCROLL: [ArgSpec; 2] = [
     ArgSpec {
-        name: "dx",
-        kind: ArgKind::I32,
-        required: true,
-    },
-    ArgSpec {
-        name: "dy",
-        kind: ArgKind::I32,
-        required: true,
-    },
-];
-const ARGS_SET_PAGE_LAYOUT: [ArgSpec; 2] = [
-    ArgSpec {
-        name: "mode",
-        kind: ArgKind::String,
-        required: true,
-    },
-    ArgSpec {
         name: "direction",
         kind: ArgKind::String,
+        required: true,
+    },
+    ArgSpec {
+        name: "amount",
+        kind: ArgKind::I32,
         required: false,
     },
 ];
+const ARGS_PAGE_LAYOUT_SPREAD: [ArgSpec; 1] = [ArgSpec {
+    name: "direction",
+    kind: ArgKind::String,
+    required: false,
+}];
 const ARGS_OPEN_PALETTE: [ArgSpec; 2] = [
     ArgSpec {
         name: "kind",
@@ -65,7 +58,7 @@ const ARGS_HISTORY_GOTO: [ArgSpec; 1] = [ArgSpec {
     required: true,
 }];
 
-const COMMAND_SPECS: [CommandSpec; 25] = [
+const COMMAND_SPECS: [CommandSpec; 26] = [
     CommandSpec {
         id: "next-page",
         title: "Next Page",
@@ -92,9 +85,9 @@ const COMMAND_SPECS: [CommandSpec; 25] = [
         args: &ARGS_GOTO_PAGE,
     },
     CommandSpec {
-        id: "set-zoom",
-        title: "Set Zoom",
-        args: &ARGS_SET_ZOOM,
+        id: "zoom",
+        title: "Zoom",
+        args: &ARGS_ZOOM,
     },
     CommandSpec {
         id: "zoom-in",
@@ -112,9 +105,14 @@ const COMMAND_SPECS: [CommandSpec; 25] = [
         args: &ARGS_SCROLL,
     },
     CommandSpec {
-        id: "set-page-layout",
-        title: "Set Page Layout",
-        args: &ARGS_SET_PAGE_LAYOUT,
+        id: "page-layout-single",
+        title: "Single Page Layout",
+        args: &NO_ARGS,
+    },
+    CommandSpec {
+        id: "page-layout-spread",
+        title: "Spread Page Layout",
+        args: &ARGS_PAGE_LAYOUT_SPREAD,
     },
     CommandSpec {
         id: "debug-status-show",

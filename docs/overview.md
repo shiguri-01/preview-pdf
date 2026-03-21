@@ -33,12 +33,13 @@ Rules:
   - `single` (default)
   - `spread` (2-page side-by-side: 1-2, 3-4, ...)
   - spread direction: `ltr` / `rtl` (display order only)
-  - runtime switch via command: `set-page-layout <single|spread> [ltr|rtl]`
+  - runtime switch via commands: `page-layout-single`, `page-layout-spread [ltr|rtl]`
 
 - Zoom and viewport:
   - zoom in/out with bounded scale
   - fit-to-viewport behavior
   - scroll when rendered content exceeds viewport bounds
+  - command forms: `zoom <value>`, `scroll <left|right|up|down> [amount]`
 
 - Search:
   - full-text substring search
@@ -46,6 +47,7 @@ Rules:
   - asynchronous scanning with progress updates
   - compact search status segment in chrome/status bar while active
   - `Esc` in normal mode cancels active search state
+  - command forms: `search` opens the dedicated search palette, `submit-search <query> [contains-insensitive|contains-sensitive]` executes it directly
 
 - History:
   - back/forward navigation history

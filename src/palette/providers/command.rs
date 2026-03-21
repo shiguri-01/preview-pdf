@@ -100,7 +100,8 @@ impl PaletteProvider for CommandPaletteProvider {
         };
 
         Ok(PaletteTabEffect::SetInput {
-            value,
+            // Keep completion uniform so the next keystroke can always start an argument.
+            value: format!("{value} "),
             move_cursor_to_end: true,
         })
     }
@@ -358,6 +359,7 @@ mod tests {
     use crate::extension::ExtensionUiSnapshot;
     use crate::palette::{
         PaletteContext, PaletteKind, PalettePostAction, PaletteProvider, PaletteSubmitEffect,
+        PaletteTabEffect,
     };
 
     use super::CommandPaletteProvider;
@@ -406,6 +408,27 @@ mod tests {
         provider
             .on_submit(&ctx, Some(selected))
             .expect("submit should succeed")
+    }
+
+    fn command_tab_effect(input: &str, selected_id: &str, search_active: bool) -> PaletteTabEffect {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input,
+            seed: None,
+        };
+        let candidates = provider.list(&ctx).expect("list should be built");
+        let selected = candidates
+            .iter()
+            .find(|candidate| candidate.id == selected_id)
+            .expect("selected candidate should exist");
+        provider
+            .on_tab(&ctx, Some(selected))
+            .expect("tab should succeed")
     }
 
     #[test]
@@ -576,6 +599,30 @@ mod tests {
             PaletteSubmitEffect::Dispatch {
                 command: Command::OpenSearch,
                 next: PalettePostAction::Close,
+            }
+        );
+    }
+
+    #[test]
+    fn tab_completion_appends_trailing_space_for_required_argument_commands() {
+        let effect = command_tab_effect("z", "zoom", false);
+        assert_eq!(
+            effect,
+            PaletteTabEffect::SetInput {
+                value: "zoom ".to_string(),
+                move_cursor_to_end: true,
+            }
+        );
+    }
+
+    #[test]
+    fn tab_completion_appends_trailing_space_for_no_argument_commands() {
+        let effect = command_tab_effect("q", "quit", false);
+        assert_eq!(
+            effect,
+            PaletteTabEffect::SetInput {
+                value: "quit ".to_string(),
+                move_cursor_to_end: true,
             }
         );
     }

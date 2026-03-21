@@ -89,7 +89,7 @@ This document defines the palette provider contract in `pvf`.
   2. Else if selected candidate has no args, dispatch directly.
   3. Else if selected candidate requires args, reopen with `seed = "{command-id} "`.
   4. Otherwise reopen preserving input.
-- `Tab` may autocomplete from selected candidate.
+- `Tab` autocompletes from selected candidate and always appends one trailing space.
 - If input includes whitespace (argument phase), candidate list is hidden.
 - Candidate ranking uses command-aware scoring:
   - command `id` (hyphen-separated lowercase) is the primary target.

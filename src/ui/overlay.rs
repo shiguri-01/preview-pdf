@@ -6,7 +6,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::palette::PaletteView;
+use crate::palette::{PaletteItemView, PaletteView};
 
 use super::layout::centered_rect;
 
@@ -139,52 +139,52 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
             };
 
             for item in view.items.iter().skip(start_idx).take(max_items) {
-                let mut spans = Vec::new();
-
-                // Selection indicator
-                if item.selected {
-                    spans.push(Span::styled(" ┃ ", Style::default().fg(Color::White)));
-                } else {
-                    spans.push(Span::raw("   "));
-                }
-
-                // Label
-                spans.push(Span::raw(&item.label));
-
-                // Detail
-                if let Some(detail) = &item.detail {
-                    spans.push(Span::raw("  "));
-                    let detail_style = if item.selected {
-                        Style::default()
-                    } else {
-                        Style::default().fg(Color::DarkGray)
-                    };
-                    spans.push(Span::styled(detail, detail_style));
-                }
-
-                let line_style = if item.selected {
-                    Style::default().add_modifier(Modifier::REVERSED)
-                } else {
-                    Style::default()
-                };
-
-                // Create a padded line to ensure the background covers the full width
-                let label_len = item.label.chars().count();
-                let detail_len = item
-                    .detail
-                    .as_ref()
-                    .map(|d| d.chars().count() + 2)
-                    .unwrap_or(0);
-                let total_len = 3 + label_len + detail_len;
-                let padding = " ".repeat((inner.width as usize).saturating_sub(total_len));
-                spans.push(Span::raw(padding));
-
-                lines.push(Line::from(spans).style(line_style));
+                lines.push(build_palette_item_line(item, inner.width as usize));
             }
         }
     }
 
     frame.render_widget(Paragraph::new(lines), list_area);
+}
+
+fn build_palette_item_line(item: &PaletteItemView, width: usize) -> Line<'static> {
+    let mut spans = Vec::new();
+
+    if item.selected {
+        spans.push(Span::styled(" ┃ ", Style::default().fg(Color::White)));
+    } else {
+        spans.push(Span::raw("   "));
+    }
+
+    spans.push(Span::raw(item.label.clone()));
+
+    if let Some(detail) = &item.detail {
+        spans.push(Span::raw(" "));
+        let detail_style = if item.selected {
+            Style::default()
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(detail.clone(), detail_style));
+    }
+
+    let line_style = if item.selected {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+
+    let label_width = UnicodeWidthStr::width(item.label.as_str());
+    let detail_width = item
+        .detail
+        .as_ref()
+        .map(|detail| 1 + UnicodeWidthStr::width(detail.as_str()))
+        .unwrap_or(0);
+    let total_width = 3 + label_width + detail_width;
+    let padding = " ".repeat(width.saturating_sub(total_width));
+    spans.push(Span::raw(padding));
+
+    Line::from(spans).style(line_style)
 }
 
 fn truncate_to_width(text: &str, max_width: usize) -> String {
@@ -296,7 +296,7 @@ mod tests {
 
     use crate::palette::{PaletteItemView, PaletteKind, PaletteView};
 
-    use super::{build_palette_input_line, draw_palette_overlay};
+    use super::{build_palette_input_line, build_palette_item_line, draw_palette_overlay};
 
     fn rendered_input_text(layout: &super::PaletteInputLineLayout) -> String {
         layout
@@ -304,6 +304,16 @@ mod tests {
             .spans
             .iter()
             .skip(2)
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    fn rendered_candidate_text(line: &ratatui::text::Line<'_>) -> String {
+        line.spans
+            .iter()
+            .skip(1)
             .map(|span| span.content.as_ref())
             .collect::<String>()
             .trim_end()
@@ -392,5 +402,19 @@ mod tests {
             .get_cursor_position()
             .expect("cursor position should be available");
         assert_eq!((position.x, position.y), (5, 1));
+    }
+
+    #[test]
+    fn palette_item_line_uses_single_space_before_detail() {
+        let line = build_palette_item_line(
+            &PaletteItemView {
+                label: "goto-page".to_string(),
+                detail: Some("<page> | Jump".to_string()),
+                selected: false,
+            },
+            40,
+        );
+
+        assert_eq!(rendered_candidate_text(&line), "goto-page <page> | Jump");
     }
 }

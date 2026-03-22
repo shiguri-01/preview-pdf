@@ -1,7 +1,10 @@
 use crossterm::event::KeyEvent;
 
 use crate::backend::SharedPdfBackend;
-use crate::command::{ActionId, Command, CommandDispatchResult, dispatch, drain_background_events};
+use crate::command::{
+    ActionId, Command, CommandDispatchResult, CommandInvocationSource, CommandRequest, dispatch,
+    drain_background_events,
+};
 use crate::error::AppResult;
 use crate::event::AppEvent;
 use crate::input::keymap::{KeymapPreset, map_key_to_command_with_preset};
@@ -17,7 +20,7 @@ pub(crate) struct KeyEventOutcome {
     pub redraw: bool,
     pub clear_terminal: bool,
     pub quit_requested: bool,
-    pub command: Option<Command>,
+    pub command: Option<CommandRequest>,
 }
 
 impl InteractionSubsystem {
@@ -95,7 +98,10 @@ impl InteractionSubsystem {
             redraw: false,
             clear_terminal: false,
             quit_requested: false,
-            command: Some(command),
+            command: Some(CommandRequest::new(
+                command,
+                CommandInvocationSource::Keymap,
+            )),
         })
     }
 
@@ -180,12 +186,13 @@ impl InteractionSubsystem {
     pub(crate) fn dispatch_command(
         &mut self,
         state: &mut AppState,
-        command: Command,
+        request: CommandRequest,
         pdf: SharedPdfBackend,
     ) -> AppResult<CommandDispatchResult> {
         dispatch(
             state,
-            command,
+            request.command,
+            request.source,
             pdf,
             &mut self.extensions.host,
             &mut self.palette.pending_requests,
@@ -201,7 +208,7 @@ impl InteractionSubsystem {
         state: &mut AppState,
         session_id: u64,
         effect: PaletteSubmitEffect,
-    ) -> AppResult<(bool, Option<Command>)> {
+    ) -> AppResult<(bool, Option<CommandRequest>)> {
         if !self.palette.manager.close_if_matches(session_id) {
             return Ok((false, None));
         }
@@ -217,7 +224,10 @@ impl InteractionSubsystem {
                     .push_back(PaletteRequest::Open { kind, seed });
             }
             PaletteSubmitEffect::Dispatch { command, next } => {
-                pending_command = Some(command);
+                pending_command = Some(CommandRequest::new(
+                    command,
+                    CommandInvocationSource::PaletteProvider,
+                ));
                 match next {
                     PalettePostAction::Close => {}
                     PalettePostAction::Reopen { kind, seed } => {

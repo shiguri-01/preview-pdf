@@ -33,12 +33,13 @@ Rules:
   - `single` (default)
   - `spread` (2-page side-by-side: 1-2, 3-4, ...)
   - spread direction: `ltr` / `rtl` (display order only)
-  - runtime switch via command: `set-page-layout <single|spread> [ltr|rtl]`
+  - runtime switch via commands: `page-layout-single`, `page-layout-spread [ltr|rtl]`
 
 - Zoom and viewport:
   - zoom in/out with bounded scale
   - fit-to-viewport behavior
   - scroll when rendered content exceeds viewport bounds
+  - command forms: `zoom <value>`, `scroll <left|right|up|down> [amount]`
 
 - Search:
   - full-text substring search
@@ -46,6 +47,8 @@ Rules:
   - asynchronous scanning with progress updates
   - compact search status segment in chrome/status bar while active
   - `Esc` in normal mode cancels active search state
+  - command form: `search` opens the dedicated search palette
+  - `next-search-hit` / `prev-search-hit` are available only while search is active
 
 - History:
   - back/forward navigation history
@@ -89,6 +92,7 @@ Key behavior is configurable through keymap presets (`default`, `emacs`) in `con
 - `App` orchestrates interaction, rendering, and UI draw flow.
 - `DomainEvent` is the typed loop message boundary.
 - Command execution emits typed `AppEvent` values.
+- Command definitions carry visibility, invocation, and availability metadata.
 - Extensions and palette providers are statically wired.
 
 ## Runtime configuration

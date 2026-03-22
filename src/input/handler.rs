@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crossterm::event::{Event, KeyEventKind};
 
-use crate::command::Command;
+use crate::command::CommandRequest;
 use crate::error::AppResult;
 
 use crate::app::App;
@@ -10,7 +10,7 @@ use crate::app::terminal_session::TerminalSurface;
 
 pub(crate) struct InputEventOutcome {
     pub(crate) quit_requested: bool,
-    pub(crate) command: Option<Command>,
+    pub(crate) command: Option<CommandRequest>,
     pub(crate) redraw_requested: bool,
 }
 

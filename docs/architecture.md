@@ -14,11 +14,11 @@ This document defines the current architecture of `pvf`.
 ## Top-level module map
 
 - `src/command/`
-  - `types.rs`: `Command`, matcher kinds, layout command argument kinds, command outcome types.
-  - `spec.rs`: command catalog for parser/palette.
-  - `parse.rs`: command text parser.
+  - `types.rs`: `Command`, invocation metadata types, matcher kinds, layout command argument kinds, command outcome types.
+  - `spec.rs`: command catalog plus visibility/invocation/availability policy.
+  - `parse.rs`: command text parser and direct-invocation validation.
   - `core.rs`: command implementations (navigation/zoom/layout/debug).
-  - `dispatch.rs`: typed dispatch entry point returning `CommandDispatchResult`.
+  - `dispatch.rs`: typed dispatch entry point returning `CommandDispatchResult`, with source-aware invocation checks.
   - `ActionId`: stable typed identifier for executed commands.
 
 - `src/event.rs`
@@ -111,5 +111,5 @@ This document defines the current architecture of `pvf`.
   - `InteractionSubsystem` (`ExtensionSubsystem`, `PaletteSubsystem`)
 - Extension dispatch order is fixed in code.
 - Palette providers are resolved via static `match` on `PaletteKind`.
-- Palette providers consume extension-owned UI snapshot data (`ExtensionUiSnapshot`) for extension-specific visibility/state.
+- Palette providers consume extension-owned UI snapshot data (`ExtensionUiSnapshot`) for command availability/state checks.
 - Render and search workers support backend-loader injection via typed contracts.

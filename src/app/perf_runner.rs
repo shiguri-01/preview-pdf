@@ -7,7 +7,7 @@ use ratatui::layout::Size;
 use ratatui::{Frame, Terminal};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::command::Command;
+use crate::command::{Command, CommandInvocationSource, CommandRequest};
 use crate::event::DomainEvent;
 use crate::perf::PerfScenarioId;
 
@@ -85,7 +85,10 @@ impl PerfLoopDriver {
                 if state.current_page >= last_page || self.command_count >= params.page_flip_limit {
                     return true;
                 }
-                let _ = loop_event_tx.send(DomainEvent::Command(Command::NextPage));
+                let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
+                    Command::NextPage,
+                    CommandInvocationSource::Keymap,
+                )));
                 self.command_count += 1;
                 false
             }
@@ -94,7 +97,10 @@ impl PerfLoopDriver {
                 let last_page = page_count.saturating_sub(1);
                 if !self.positioned_backward_start {
                     if state.current_page < last_page {
-                        let _ = loop_event_tx.send(DomainEvent::Command(Command::LastPage));
+                        let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
+                            Command::LastPage,
+                            CommandInvocationSource::Keymap,
+                        )));
                         self.positioned_backward_start = true;
                         return false;
                     }
@@ -105,7 +111,10 @@ impl PerfLoopDriver {
                     return true;
                 }
 
-                let _ = loop_event_tx.send(DomainEvent::Command(Command::PrevPage));
+                let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
+                    Command::PrevPage,
+                    CommandInvocationSource::Keymap,
+                )));
                 self.command_count += 1;
                 false
             }

@@ -13,7 +13,7 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 - Zoom
 - Full-text search with next/previous hit navigation
 - Page history (back/forward)
-- Command palette for actions like `goto-page` and `set-page-layout`
+- Command palette for actions like `goto-page` and `page-layout-spread`
 
 ## Keys (default)
 
@@ -33,10 +33,10 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 ## Common Commands
 
 - `goto-page <number>`
-- `set-page-layout spread`
+- `page-layout-spread [ltr|rtl]`
+- `zoom <value>`
 - `search`
 - `history`
-
 ## Configuration (optional)
 
 `pvf` loads `config.toml` from:

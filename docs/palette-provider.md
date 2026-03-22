@@ -89,14 +89,19 @@ This document defines the palette provider contract in `pvf`.
   2. Else if selected candidate has no args, dispatch directly.
   3. Else if selected candidate requires args, reopen with `seed = "{command-id} "`.
   4. Otherwise reopen preserving input.
-- `Tab` may autocomplete from selected candidate.
+- `Tab` autocompletes from selected candidate and always appends one trailing space.
 - If input includes whitespace (argument phase), candidate list is hidden.
 - Candidate ranking uses command-aware scoring:
   - command `id` (hyphen-separated lowercase) is the primary target.
   - `title` is a weaker secondary target.
   - acronym-style queries from id tokens are supported (for example, `nsh` -> `next-search-hit`).
-- Candidate visibility may depend on runtime app state.
-  - `next-search-hit` / `prev-search-hit` are shown only while search is active.
+- Candidate visibility is derived from command metadata.
+  - internal-only commands are never listed
+  - commands with availability conditions are listed only when all conditions are met
+  - `next-search-hit` / `prev-search-hit` are shown only while search is active
+- Hand-typed command execution also respects command metadata.
+  - internal-only commands cannot be invoked from command palette input
+  - commands gated by runtime conditions cannot be invoked until those conditions are met
 
 ## Search palette (`PaletteKind::Search`)
 
@@ -106,7 +111,7 @@ This document defines the palette provider contract in `pvf`.
 - Candidate list exposes matcher choices:
   - `contains-insensitive` (default)
   - `contains-sensitive`
-- Enter dispatches `palette-search-submit` with query + matcher and closes.
+- Enter dispatches internal search-submit behavior with query + matcher and closes.
 - Empty input on Enter reopens for correction.
 
 ## History palette (`PaletteKind::History`)
@@ -116,4 +121,4 @@ This document defines the palette provider contract in `pvf`.
 - `initial_input` returns empty text; seed is used as serialized context.
 - Candidates include back stack, current page, and forward stack (newest first).
 - Current page is marked and not jump-targetable.
-- Enter dispatches `history-goto` with selected page and closes.
+- Enter dispatches internal history-goto behavior with selected page and closes.

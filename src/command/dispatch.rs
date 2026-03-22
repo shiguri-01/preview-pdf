@@ -11,7 +11,8 @@ use super::core::{
     first_page, goto_page, last_page, next_page, prev_page, set_debug_status_visible,
     set_page_layout, set_zoom, set_zoom_with_id,
 };
-use super::types::{ActionId, Command, CommandOutcome};
+use super::spec::{CommandConditionContext, rejection_message_for_command};
+use super::types::{ActionId, Command, CommandInvocationSource, CommandOutcome};
 
 const ZOOM_STEP: f32 = 0.1;
 
@@ -24,14 +25,34 @@ pub struct CommandDispatchResult {
 pub fn dispatch(
     app: &mut AppState,
     cmd: Command,
+    source: CommandInvocationSource,
     pdf: SharedPdfBackend,
     extension_host: &mut ExtensionHost,
     palette_requests: &mut VecDeque<PaletteRequest>,
 ) -> AppResult<CommandDispatchResult> {
+    let action_id = cmd.action_id();
+    let extensions = extension_host.ui_snapshot();
+    let ctx = CommandConditionContext {
+        app,
+        extensions: &extensions,
+        source,
+    };
+    if let Some(message) = rejection_message_for_command(&cmd, &ctx) {
+        app.status.last_action_id = Some(action_id);
+        app.status.message = message;
+        let outcome = CommandOutcome::Noop;
+        return Ok(CommandDispatchResult {
+            outcome,
+            emitted_events: vec![AppEvent::CommandExecuted {
+                id: action_id,
+                outcome,
+            }],
+        });
+    }
+
     let previous_page = app.current_page;
     let prev_mode = app.mode;
     let dispatched_command = cmd.clone();
-    let action_id = dispatched_command.action_id();
     let page_count = pdf.page_count();
 
     let outcome = match cmd {
@@ -196,7 +217,10 @@ mod tests {
 
     use crate::app::AppState;
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
-    use crate::command::{ActionId, Command, CommandOutcome, PageLayoutModeArg, SearchMatcherKind};
+    use crate::command::{
+        ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg,
+        SearchMatcherKind,
+    };
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
 
@@ -258,6 +282,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::NextPage,
+            CommandInvocationSource::Keymap,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -293,6 +318,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ClosePalette,
+            CommandInvocationSource::PaletteProvider,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -329,6 +355,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::Cancel,
+            CommandInvocationSource::Keymap,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -393,6 +420,7 @@ mod tests {
                 mode: PageLayoutModeArg::Spread,
                 direction: None,
             },
+            CommandInvocationSource::Keymap,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -409,5 +437,56 @@ mod tests {
                 reason: NavReason::LayoutNormalize
             }
         ));
+    }
+
+    #[test]
+    fn dispatch_rejects_internal_command_from_keymap() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::SubmitSearch {
+                query: "needle".to_string(),
+                matcher: SearchMatcherKind::ContainsInsensitive,
+            },
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert_eq!(
+            app.status.message,
+            "submit-search is an internal command and cannot be invoked directly"
+        );
+    }
+
+    #[test]
+    fn dispatch_rejects_unavailable_command_from_keymap() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::NextSearchHit,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert_eq!(
+            app.status.message,
+            "next-search-hit is unavailable while search is inactive"
+        );
     }
 }

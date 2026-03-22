@@ -558,8 +558,8 @@ impl App {
                 if input_outcome.redraw_requested {
                     self.request_redraw(runtime, RedrawReason::Input);
                 }
-                if let Some(command) = input_outcome.command {
-                    let _ = runtime.loop_event_tx.send(DomainEvent::Command(command));
+                if let Some(request) = input_outcome.command {
+                    let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
                 }
             }
             WaitEvent::Event(DomainEvent::InputError(message)) => {
@@ -567,10 +567,10 @@ impl App {
                 self.state.status.message = format!("input error: {message}");
                 self.request_redraw(runtime, RedrawReason::InputError);
             }
-            WaitEvent::Event(DomainEvent::Command(command)) => {
+            WaitEvent::Event(DomainEvent::Command(request)) => {
                 let dispatch = self.interaction.dispatch_command(
                     &mut self.state,
-                    command,
+                    request,
                     Arc::clone(&pdf),
                 )?;
                 for event in dispatch.emitted_events {

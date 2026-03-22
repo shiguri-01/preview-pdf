@@ -147,6 +147,7 @@ UI contract:
   - image content,
   - loading overlay,
   - error overlay.
+- When the current page is pending and an older image is still visible, the loading overlay is drawn on top of that existing image instead of suppressing it.
 
 ## Pending redraw timer behavior
 

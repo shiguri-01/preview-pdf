@@ -410,11 +410,7 @@ fn decide_viewer_display(
                 show_loading = true;
             }
         }
-        PresenterFeedback::Pending => {
-            if !viewer_has_image || outcome.drew_image {
-                show_loading = true;
-            }
-        }
+        PresenterFeedback::Pending => show_loading = true,
         PresenterFeedback::Failed => show_error = true,
     }
     ViewerDisplayDecision {
@@ -692,7 +688,7 @@ mod tests {
     }
 
     #[test]
-    fn display_decision_keeps_previous_image_when_pending_and_viewer_has_image() {
+    fn display_decision_overlays_loading_when_pending_and_viewer_has_image() {
         let decision = decide_viewer_display(
             PresenterRenderOutcome {
                 drew_image: false,
@@ -705,7 +701,7 @@ mod tests {
             decision,
             ViewerDisplayDecision {
                 clear: false,
-                show_loading: false,
+                show_loading: true,
                 show_error: false,
             }
         );

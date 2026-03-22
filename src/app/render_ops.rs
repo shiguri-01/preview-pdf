@@ -172,7 +172,7 @@ impl RenderSubsystem {
                     state.status.last_action_id = Some(ActionId::RenderQueue);
                     state.status.message =
                         "render queue busy; retrying initial preview".to_string();
-                    return;
+                    break;
                 }
                 self.runtime
                     .set_queue_depth_with_inflight(render_worker.in_flight_len());

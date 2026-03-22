@@ -409,7 +409,8 @@ impl App {
         let presenter_layout_tag = self
             .state
             .presenter_layout_tag(visible_pages.trailing_page.is_some());
-        let initial_preview = compute_initial_preview_plan(
+        let initial_preview = cold_start_initial_preview_plan(
+            self.render.viewer_has_image,
             pdf.doc_id(),
             visible_pages,
             self.state.page_layout_mode,
@@ -605,7 +606,8 @@ impl App {
                 if let Some(trailing_page) = visible_pages.trailing_page {
                     current_keys.push(RenderedPageKey::new(pdf.doc_id(), trailing_page, scale));
                 }
-                if let Some(preview_plan) = compute_initial_preview_plan(
+                if let Some(preview_plan) = cold_start_initial_preview_plan(
+                    self.render.viewer_has_image,
                     pdf.doc_id(),
                     visible_pages,
                     self.state.page_layout_mode,
@@ -655,6 +657,27 @@ impl App {
     }
 }
 
+fn cold_start_initial_preview_plan(
+    viewer_has_image: bool,
+    doc_id: u64,
+    visible_pages: super::state::VisiblePageSlots,
+    page_layout_mode: super::state::PageLayoutMode,
+    current_scale: f32,
+    presenter_layout_tag: u16,
+) -> Option<InitialPreviewPlan> {
+    if viewer_has_image {
+        return None;
+    }
+
+    compute_initial_preview_plan(
+        doc_id,
+        visible_pages,
+        page_layout_mode,
+        current_scale,
+        presenter_layout_tag,
+    )
+}
+
 async fn wait_next_event(
     loop_event_rx: &mut UnboundedReceiver<DomainEvent>,
     render_worker: &mut RenderWorker,
@@ -686,5 +709,41 @@ async fn wait_next_event(
         _ = time::sleep(wake_timeout) => {
             WaitEvent::Event(DomainEvent::Wake)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cold_start_initial_preview_plan;
+    use crate::app::state::{PageLayoutMode, VisiblePageSlots};
+
+    #[test]
+    fn cold_start_initial_preview_plan_is_disabled_after_first_image() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(true, 7, slots, PageLayoutMode::Single, 1.0, 0);
+
+        assert_eq!(preview, None);
+    }
+
+    #[test]
+    fn cold_start_initial_preview_plan_is_available_before_first_image() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+
+        assert!(preview.is_some());
     }
 }

@@ -119,3 +119,32 @@ fn resize_frame_simd(frame: RgbaFrame, dst_width: u32, dst_height: u32) -> AppRe
         })
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{fit_downscale_dimensions, fit_resize_dimensions};
+
+    #[test]
+    fn fit_downscale_dimensions_returns_none_when_source_fits() {
+        let dims = fit_downscale_dimensions(640, 480, 1280, 720);
+        assert_eq!(dims, None);
+    }
+
+    #[test]
+    fn fit_downscale_dimensions_preserves_aspect_ratio() {
+        let dims = fit_downscale_dimensions(2400, 3200, 960, 640);
+        assert_eq!(dims, Some((480, 640)));
+    }
+
+    #[test]
+    fn fit_resize_dimensions_upscales_when_allowed() {
+        let dims = fit_resize_dimensions(400, 200, 1200, 900, true);
+        assert_eq!(dims, Some((1200, 600)));
+    }
+
+    #[test]
+    fn fit_resize_dimensions_skips_upscale_when_disallowed() {
+        let dims = fit_resize_dimensions(400, 200, 1200, 900, false);
+        assert_eq!(dims, None);
+    }
+}

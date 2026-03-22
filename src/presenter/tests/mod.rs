@@ -11,7 +11,6 @@ use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig}
 
 use super::encode::{EncodeWorkerRequest, enqueue_encode_request, pop_next_encode_task};
 use super::factory::create_presenter;
-use super::image_ops::{fit_downscale_dimensions, fit_resize_dimensions};
 use super::l2_cache::{L2_MAX_ENTRIES, TerminalFrameCache, TerminalFrameKey, TerminalFrameState};
 use super::ratatui::RatatuiImagePresenter;
 use super::terminal_cell::cell_size_from_window_metrics;
@@ -788,30 +787,6 @@ fn l2_non_oversize_insert_does_not_evict_single_oversize_entry() {
     assert_eq!(cache.len(), 1);
     assert!(cache.cached_mut(&oversize).is_some());
     assert!(cache.cached_mut(&prefetch).is_none());
-}
-
-#[test]
-fn fit_downscale_dimensions_returns_none_when_source_fits() {
-    let dims = fit_downscale_dimensions(640, 480, 1280, 720);
-    assert_eq!(dims, None);
-}
-
-#[test]
-fn fit_downscale_dimensions_preserves_aspect_ratio() {
-    let dims = fit_downscale_dimensions(2400, 3200, 960, 640);
-    assert_eq!(dims, Some((480, 640)));
-}
-
-#[test]
-fn fit_resize_dimensions_upscales_when_allowed() {
-    let dims = fit_resize_dimensions(400, 200, 1200, 900, true);
-    assert_eq!(dims, Some((1200, 600)));
-}
-
-#[test]
-fn fit_resize_dimensions_skips_upscale_when_disallowed() {
-    let dims = fit_resize_dimensions(400, 200, 1200, 900, false);
-    assert_eq!(dims, None);
 }
 
 #[test]

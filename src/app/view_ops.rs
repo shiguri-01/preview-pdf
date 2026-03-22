@@ -219,7 +219,9 @@ impl RenderSubsystem {
             generation,
             nav_streak: _nav_streak,
         } = plan;
-        let allow_stale_fallback = false;
+        // Keep the last ready frame visible while the next page is still preparing
+        // so page flips do not briefly expose the terminal background.
+        let allow_stale_fallback = self.viewer_has_image;
         let file_name = pdf
             .path()
             .file_name()

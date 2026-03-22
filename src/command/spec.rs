@@ -296,8 +296,8 @@ pub fn find_command_spec(id: &str) -> Option<CommandSpec> {
     COMMAND_SPECS.iter().find(|spec| spec.id == id).copied()
 }
 
-pub fn spec_for_command(command: &Command) -> CommandSpec {
-    find_command_spec(command.id()).expect("command spec should exist for typed command")
+pub fn spec_for_command(command: &Command) -> Option<CommandSpec> {
+    find_command_spec(command.id())
 }
 
 pub fn is_command_visible_in_palette(spec: CommandSpec, ctx: &CommandConditionContext<'_>) -> bool {
@@ -320,7 +320,12 @@ pub fn validate_command_for_source(
     command: &Command,
     ctx: &CommandConditionContext<'_>,
 ) -> AppResult<()> {
-    validate_command_spec_for_source(spec_for_command(command), ctx)
+    let Some(spec) = spec_for_command(command) else {
+        return Err(AppError::unsupported(
+            "command spec should exist for typed command",
+        ));
+    };
+    validate_command_spec_for_source(spec, ctx)
 }
 
 pub fn rejection_message_for_command(

@@ -75,7 +75,7 @@ impl PaletteProvider for CommandPaletteProvider {
 
         // 2. A candidate is selected → use it.
         if let Some(candidate) = selected
-            && let Some(spec) = find_spec(&candidate.id)
+            && let Some(spec) = find_command_spec(&candidate.id)
         {
             if !command_requires_argument_input(spec) {
                 // No args needed: dispatch immediately.
@@ -134,7 +134,7 @@ impl PaletteProvider for CommandPaletteProvider {
 
         if has_argument_phase(ctx.input) {
             let command_id = first_token(trimmed);
-            return match find_spec(command_id) {
+            return match find_command_spec(command_id) {
                 Some(spec) => {
                     let usage = usage_text(spec.args);
                     if usage.is_empty() {
@@ -147,7 +147,7 @@ impl PaletteProvider for CommandPaletteProvider {
             };
         }
 
-        if let Some(spec) = find_spec(trimmed) {
+        if let Some(spec) = find_command_spec(trimmed) {
             let usage = usage_text(spec.args);
             if usage.is_empty() {
                 return Some(format!("{} | {}", spec.id, spec.title));
@@ -204,10 +204,6 @@ fn first_token(input: &str) -> &str {
         Some(index) => &input[..index],
         None => input,
     }
-}
-
-fn find_spec(id: &str) -> Option<crate::command::CommandSpec> {
-    find_command_spec(id)
 }
 
 fn command_requires_argument_input(spec: crate::command::CommandSpec) -> bool {

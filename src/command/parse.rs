@@ -190,32 +190,21 @@ fn parse_scroll(args_text: &str) -> AppResult<Command> {
     let parts = args_text.split_whitespace().collect::<Vec<_>>();
     if parts.is_empty() {
         return Err(AppError::invalid_argument(
-            "scroll requires direction [amount] or dx dy",
+            "scroll requires direction [amount]",
         ));
     }
 
     if parts.len() > 2 {
         return Err(AppError::invalid_argument(
-            "scroll accepts direction [amount] or dx dy",
+            "scroll accepts direction [amount]",
         ));
     }
 
-    if let Some((dx, dy)) = parse_scroll_direction(&parts)? {
-        return Ok(Command::Scroll { dx, dy });
-    }
-
-    if parts.len() != 2 {
+    let Some((dx, dy)) = parse_scroll_direction(&parts)? else {
         return Err(AppError::invalid_argument(
-            "scroll requires direction [amount] or dx dy",
+            "scroll direction must be one of: left, right, up, down",
         ));
-    }
-
-    let dx = parts[0]
-        .parse::<i32>()
-        .map_err(|_| AppError::invalid_argument("scroll dx must be i32"))?;
-    let dy = parts[1]
-        .parse::<i32>()
-        .map_err(|_| AppError::invalid_argument("scroll dy must be i32"))?;
+    };
 
     Ok(Command::Scroll { dx, dy })
 }
@@ -231,9 +220,6 @@ fn parse_scroll_direction(parts: &[&str]) -> AppResult<Option<(i32, i32)>> {
             .map_err(|_| AppError::invalid_argument("scroll amount must be i32"))?,
         None => 1,
     };
-    if amount < 1 {
-        return Err(AppError::invalid_argument("scroll amount must be >= 1"));
-    }
 
     let delta = match direction {
         "left" => (-amount, 0),
@@ -434,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_scroll_supports_directional_and_raw_forms() {
+    fn parse_scroll_supports_directional_form_only() {
         assert_eq!(
             parse_command_text("scroll down").expect("parse should succeed"),
             Command::Scroll { dx: 0, dy: 1 }
@@ -444,8 +430,16 @@ mod tests {
             Command::Scroll { dx: -3, dy: 0 }
         );
         assert_eq!(
-            parse_command_text("scroll -2 4").expect("parse should succeed"),
-            Command::Scroll { dx: -2, dy: 4 }
+            parse_command_text("scroll down 0").expect("parse should succeed"),
+            Command::Scroll { dx: 0, dy: 0 }
+        );
+        assert_eq!(
+            parse_command_text("scroll left -3").expect("parse should succeed"),
+            Command::Scroll { dx: 3, dy: 0 }
+        );
+        assert!(
+            parse_command_text("scroll -2 4").is_err(),
+            "raw dx dy form should be rejected"
         );
     }
 }

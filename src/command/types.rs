@@ -116,6 +116,84 @@ pub enum Command {
     Quit,
 }
 
+impl Command {
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::NextPage => "next-page",
+            Self::PrevPage => "prev-page",
+            Self::FirstPage => "first-page",
+            Self::LastPage => "last-page",
+            Self::GotoPage { .. } => "goto-page",
+            Self::SetZoom { .. } => "zoom",
+            Self::ZoomIn => "zoom-in",
+            Self::ZoomOut => "zoom-out",
+            Self::Scroll { .. } => "scroll",
+            Self::SetPageLayout { mode, .. } => match mode {
+                PageLayoutModeArg::Single => "page-layout-single",
+                PageLayoutModeArg::Spread => "page-layout-spread",
+            },
+            Self::DebugStatusShow => "debug-status-show",
+            Self::DebugStatusHide => "debug-status-hide",
+            Self::DebugStatusToggle => "debug-status-toggle",
+            Self::OpenPalette { .. } => "open-palette",
+            Self::ClosePalette => "close-palette",
+            Self::OpenSearch => "search",
+            Self::SubmitSearch { .. } => "submit-search",
+            Self::NextSearchHit => "next-search-hit",
+            Self::PrevSearchHit => "prev-search-hit",
+            Self::HistoryBack => "history-back",
+            Self::HistoryForward => "history-forward",
+            Self::HistoryGoto { .. } => "history-goto",
+            Self::OpenHistory => "history",
+            Self::Cancel => "cancel",
+            Self::Quit => "quit",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandExposure {
+    Public,
+    Internal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandInvocationPolicy {
+    User,
+    KeymapOnly,
+    InternalOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandCondition {
+    SearchActive,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandAvailability {
+    Always,
+    AllOf(&'static [CommandCondition]),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandInvocationSource {
+    Keymap,
+    CommandPaletteInput,
+    PaletteProvider,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandRequest {
+    pub command: Command,
+    pub source: CommandInvocationSource,
+}
+
+impl CommandRequest {
+    pub fn new(command: Command, source: CommandInvocationSource) -> Self {
+        Self { command, source }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionId {
     NextPage,
@@ -286,6 +364,9 @@ pub struct CommandSpec {
     pub id: &'static str,
     pub title: &'static str,
     pub args: &'static [ArgSpec],
+    pub exposure: CommandExposure,
+    pub invocation: CommandInvocationPolicy,
+    pub availability: CommandAvailability,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

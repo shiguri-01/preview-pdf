@@ -47,7 +47,8 @@ Rules:
   - asynchronous scanning with progress updates
   - compact search status segment in chrome/status bar while active
   - `Esc` in normal mode cancels active search state
-  - command forms: `search` opens the dedicated search palette, `submit-search <query> [contains-insensitive|contains-sensitive]` executes it directly
+  - command form: `search` opens the dedicated search palette
+  - `next-search-hit` / `prev-search-hit` are available only while search is active
 
 - History:
   - back/forward navigation history
@@ -90,6 +91,7 @@ Key behavior is configurable through keymap presets (`default`, `emacs`) in `con
 - `App` orchestrates interaction, rendering, and UI draw flow.
 - `DomainEvent` is the typed loop message boundary.
 - Command execution emits typed `AppEvent` values.
+- Command definitions carry visibility, invocation, and availability metadata.
 - Extensions and palette providers are statically wired.
 
 ## Runtime configuration

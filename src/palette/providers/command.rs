@@ -1,5 +1,9 @@
 use crate::command::all_command_specs;
+use crate::command::find_command_spec;
+use crate::command::is_command_visible_in_palette;
 use crate::command::parse_command_text;
+use crate::command::parse_invocable_command_text;
+use crate::command::{CommandConditionContext, CommandInvocationSource};
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
@@ -28,7 +32,14 @@ impl PaletteProvider for CommandPaletteProvider {
 
         let mut candidates = all_command_specs()
             .into_iter()
-            .filter(|spec| can_show_command_spec(spec.id, ctx))
+            .filter(|spec| {
+                let command_ctx = CommandConditionContext {
+                    app: ctx.app,
+                    extensions: ctx.extensions,
+                    source: CommandInvocationSource::CommandPaletteInput,
+                };
+                is_command_visible_in_palette(*spec, &command_ctx)
+            })
             .map(|spec| PaletteCandidate {
                 id: spec.id.to_string(),
                 label: spec.id.to_string(),
@@ -49,7 +60,12 @@ impl PaletteProvider for CommandPaletteProvider {
 
         // 1. Input text parses as a valid command (with args) → dispatch directly.
         if !input.is_empty()
-            && let Ok(command) = parse_command_text(input)
+            && let Ok(command) = parse_invocable_command_text(
+                input,
+                CommandInvocationSource::CommandPaletteInput,
+                ctx.app,
+                ctx.extensions,
+            )
         {
             return Ok(PaletteSubmitEffect::Dispatch {
                 command,
@@ -191,22 +207,11 @@ fn first_token(input: &str) -> &str {
 }
 
 fn find_spec(id: &str) -> Option<crate::command::CommandSpec> {
-    all_command_specs().into_iter().find(|spec| spec.id == id)
-}
-
-fn can_show_command_spec(id: &str, ctx: &PaletteContext<'_>) -> bool {
-    if is_search_navigation_command(id) {
-        return ctx.extensions.search_active;
-    }
-    true
+    find_command_spec(id)
 }
 
 fn command_requires_argument_input(spec: crate::command::CommandSpec) -> bool {
     spec.args.iter().any(|arg| arg.required)
-}
-
-fn is_search_navigation_command(id: &str) -> bool {
-    matches!(id, "next-search-hit" | "prev-search-hit")
 }
 
 const SCORE_ID_EXACT: i32 = 10_000;
@@ -410,6 +415,25 @@ mod tests {
             .expect("submit should succeed")
     }
 
+    fn command_submit_effect_without_selection(
+        input: &str,
+        search_active: bool,
+    ) -> PaletteSubmitEffect {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input,
+            seed: None,
+        };
+        provider
+            .on_submit(&ctx, None)
+            .expect("submit should succeed")
+    }
+
     fn command_tab_effect(input: &str, selected_id: &str, search_active: bool) -> PaletteTabEffect {
         let provider = CommandPaletteProvider;
         let app = AppState::default();
@@ -455,6 +479,9 @@ mod tests {
                 .iter()
                 .any(|candidate| candidate.id == "prev-search-hit")
         );
+        assert!(!list.iter().any(|candidate| candidate.id == "open-palette"));
+        assert!(!list.iter().any(|candidate| candidate.id == "submit-search"));
+        assert!(!list.iter().any(|candidate| candidate.id == "history-goto"));
     }
 
     #[test]
@@ -517,24 +544,6 @@ mod tests {
         assert_eq!(
             list.first().map(|candidate| candidate.id.as_str()),
             Some("next-search-hit")
-        );
-    }
-
-    #[test]
-    fn scoring_prefers_id_matches_over_title_only_matches() {
-        let list = command_list_for_input("open", false);
-        let ids = ids(&list);
-        let idx_open_palette = ids
-            .iter()
-            .position(|id| id == "open-palette")
-            .expect("open-palette should exist");
-        let idx_history = ids
-            .iter()
-            .position(|id| id == "history")
-            .expect("history should exist");
-        assert!(
-            idx_open_palette < idx_history,
-            "id matches should outrank title-only matches"
         );
     }
 
@@ -623,6 +632,18 @@ mod tests {
             PaletteTabEffect::SetInput {
                 value: "quit ".to_string(),
                 move_cursor_to_end: true,
+            }
+        );
+    }
+
+    #[test]
+    fn submit_reopens_when_input_targets_internal_command() {
+        let effect = command_submit_effect_without_selection("submit-search hello", true);
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Reopen {
+                kind: PaletteKind::Command,
+                seed: Some("submit-search hello".to_string()),
             }
         );
     }

@@ -1,8 +1,12 @@
+use crate::app::AppState;
 use crate::error::{AppError, AppResult};
+use crate::extension::ExtensionUiSnapshot;
 use crate::palette::PaletteKind;
 
-use super::spec::all_command_specs;
-use super::types::{Command, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg};
+use super::spec::{CommandConditionContext, find_command_spec, validate_command_id_for_source};
+use super::types::{
+    Command, CommandInvocationSource, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg,
+};
 
 pub fn parse_command_text(input: &str) -> AppResult<Command> {
     let trimmed = input.trim();
@@ -15,7 +19,7 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         None => (trimmed, ""),
     };
 
-    if !all_command_specs().iter().any(|spec| spec.id == id) {
+    if find_command_spec(id).is_none() {
         return Err(AppError::invalid_argument("unknown command id"));
     }
 
@@ -49,6 +53,34 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         _ => Err(AppError::unsupported(
             "command parser is out of sync with registry",
         )),
+    }
+}
+
+pub fn parse_invocable_command_text(
+    input: &str,
+    source: CommandInvocationSource,
+    app: &AppState,
+    extensions: &ExtensionUiSnapshot,
+) -> AppResult<Command> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::invalid_argument("command must not be empty"));
+    }
+
+    let id = first_token(trimmed);
+    let ctx = CommandConditionContext {
+        app,
+        extensions,
+        source,
+    };
+    validate_command_id_for_source(id, &ctx)?;
+    parse_command_text(trimmed)
+}
+
+fn first_token(input: &str) -> &str {
+    match input.find(char::is_whitespace) {
+        Some(index) => &input[..index],
+        None => input,
     }
 }
 

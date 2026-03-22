@@ -37,6 +37,8 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 - `search`
 - `history`
 
+Search hit navigation commands are available only while a search is active. Internal palette plumbing commands are not exposed for direct command-palette execution.
+
 ## Configuration (optional)
 
 `pvf` loads `config.toml` from:

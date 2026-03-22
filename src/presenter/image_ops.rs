@@ -110,7 +110,7 @@ fn resize_frame_simd(frame: RgbaFrame, dst_width: u32, dst_height: u32) -> AppRe
 
         resizer
             .resize(&src, &mut dst, &options)
-            .map_err(|_| AppError::unsupported("failed to downscale frame with SIMD"))?;
+            .map_err(|_| AppError::unsupported("failed to resize frame with SIMD"))?;
 
         Ok(RgbaFrame {
             width: dst_width,

@@ -11,6 +11,7 @@ use crate::event::DomainEvent;
 use crate::perf::{PerfIterationSnapshot, PerfScenarioId, RedrawReason};
 use crate::presenter::{PanOffset, Viewport};
 use crate::render::cache::RenderedPageKey;
+use crate::render::scheduler::{RenderPriority, RenderTask};
 use crate::render::worker::RenderWorker;
 
 use super::actors::{InputActor, RenderActor, UiActor};
@@ -22,7 +23,7 @@ use super::perf_runner::{
 use super::render_ops::{CurrentTaskContext, PrefetchDispatchContext};
 use super::scale::select_input_poll_timeout;
 use super::terminal_session::{InteractiveTerminalSession, TerminalSurface};
-use super::view_ops::RenderFramePlan;
+use super::view_ops::{InitialPreviewPlan, RenderFramePlan, compute_initial_preview_plan};
 
 struct LoopRuntime<S> {
     page_count: usize,
@@ -50,6 +51,8 @@ struct LoopStep {
     visible_pages: super::state::VisiblePageSlots,
     required_pages: Vec<usize>,
     required_render_keys: Vec<RenderedPageKey>,
+    current_interest_keys: Vec<RenderedPageKey>,
+    initial_preview: Option<InitialPreviewPlan>,
     presenter_key: RenderedPageKey,
     current_cached: bool,
 }
@@ -301,7 +304,30 @@ impl App {
                 current_scale: step.current_scale,
                 required_pages: step.required_pages.clone(),
                 required_keys: step.required_render_keys.clone(),
+                current_interest_keys: step.current_interest_keys.clone(),
                 current_cached: step.current_cached,
+                preview_tasks: step
+                    .initial_preview
+                    .as_ref()
+                    .map(|plan| {
+                        plan.page_keys
+                            .iter()
+                            .enumerate()
+                            .map(|(idx, key)| RenderTask {
+                                doc_id: key.doc_id,
+                                page: key.page,
+                                scale: key.scale_milli as f32 / 1000.0,
+                                priority: RenderPriority::CriticalCurrent,
+                                generation: runtime.render_actor.generation(),
+                                reason: if idx == 0 {
+                                    "initial-preview"
+                                } else {
+                                    "initial-preview-spread"
+                                },
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             },
         );
         self.render.dispatch_prefetch_if_due(
@@ -380,6 +406,21 @@ impl App {
             .iter()
             .map(|page| RenderedPageKey::new(pdf.doc_id(), *page, current_scale))
             .collect::<Vec<_>>();
+        let presenter_layout_tag = self
+            .state
+            .presenter_layout_tag(visible_pages.trailing_page.is_some());
+        let initial_preview = cold_start_initial_preview_plan(
+            self.render.viewer_has_image,
+            pdf.doc_id(),
+            visible_pages,
+            self.state.page_layout_mode,
+            current_scale,
+            presenter_layout_tag,
+        );
+        let mut current_interest_keys = required_render_keys.clone();
+        if let Some(preview_plan) = initial_preview.as_ref() {
+            current_interest_keys.extend(preview_plan.page_keys.iter().copied());
+        }
         let current_cached = required_render_keys
             .iter()
             .all(|key| self.render.runtime.has_cached_frame(key));
@@ -387,8 +428,7 @@ impl App {
             pdf.doc_id(),
             visible_pages.anchor_page,
             current_scale,
-            self.state
-                .presenter_layout_tag(visible_pages.trailing_page.is_some()),
+            presenter_layout_tag,
         );
 
         LoopStep {
@@ -400,6 +440,8 @@ impl App {
             visible_pages,
             required_pages,
             required_render_keys,
+            current_interest_keys,
+            initial_preview,
             presenter_key,
             current_cached,
         }
@@ -479,6 +521,7 @@ impl App {
                     page_count: runtime.page_count,
                     visible_pages: step.visible_pages,
                     current_scale: step.current_scale,
+                    initial_preview: step.initial_preview.clone(),
                     presenter_key: step.presenter_key,
                     generation: runtime.render_actor.generation(),
                     nav_streak: runtime.render_actor.nav_streak(),
@@ -563,6 +606,17 @@ impl App {
                 if let Some(trailing_page) = visible_pages.trailing_page {
                     current_keys.push(RenderedPageKey::new(pdf.doc_id(), trailing_page, scale));
                 }
+                if let Some(preview_plan) = cold_start_initial_preview_plan(
+                    self.render.viewer_has_image,
+                    pdf.doc_id(),
+                    visible_pages,
+                    self.state.page_layout_mode,
+                    scale,
+                    self.state
+                        .presenter_layout_tag(visible_pages.trailing_page.is_some()),
+                ) {
+                    current_keys.extend(preview_plan.page_keys);
+                }
                 let pan = self.current_pan();
                 let enable_crop = self.state.zoom > 1.0;
                 if self.render.process_render_result(
@@ -603,6 +657,27 @@ impl App {
     }
 }
 
+fn cold_start_initial_preview_plan(
+    viewer_has_image: bool,
+    doc_id: u64,
+    visible_pages: super::state::VisiblePageSlots,
+    page_layout_mode: super::state::PageLayoutMode,
+    current_scale: f32,
+    presenter_layout_tag: u16,
+) -> Option<InitialPreviewPlan> {
+    if viewer_has_image {
+        return None;
+    }
+
+    compute_initial_preview_plan(
+        doc_id,
+        visible_pages,
+        page_layout_mode,
+        current_scale,
+        presenter_layout_tag,
+    )
+}
+
 async fn wait_next_event(
     loop_event_rx: &mut UnboundedReceiver<DomainEvent>,
     render_worker: &mut RenderWorker,
@@ -634,5 +709,41 @@ async fn wait_next_event(
         _ = time::sleep(wake_timeout) => {
             WaitEvent::Event(DomainEvent::Wake)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cold_start_initial_preview_plan;
+    use crate::app::state::{PageLayoutMode, VisiblePageSlots};
+
+    #[test]
+    fn cold_start_initial_preview_plan_is_disabled_after_first_image() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(true, 7, slots, PageLayoutMode::Single, 1.0, 0);
+
+        assert_eq!(preview, None);
+    }
+
+    #[test]
+    fn cold_start_initial_preview_plan_is_available_before_first_image() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+
+        assert!(preview.is_some());
     }
 }

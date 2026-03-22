@@ -147,6 +147,28 @@ impl RenderRuntime {
         generation: u64,
     ) -> AppResult<bool> {
         let key = RenderedPageKey::new(doc.doc_id(), page, scale);
+        self.try_prepare_cached_page_from_cache(
+            presenter,
+            viewport,
+            key,
+            pan,
+            cell_px,
+            enable_crop,
+            generation,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_prepare_cached_page_from_cache(
+        &mut self,
+        presenter: &mut dyn ImagePresenter,
+        viewport: Viewport,
+        key: RenderedPageKey,
+        pan: &mut PanOffset,
+        cell_px: Option<(u16, u16)>,
+        enable_crop: bool,
+        generation: u64,
+    ) -> AppResult<bool> {
         let prepared = if let Some(frame) = self.l1_cache.get(&key) {
             let (frame, pan_for_presenter) =
                 prepare_presenter_frame(frame, viewport, pan, cell_px, enable_crop);

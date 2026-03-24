@@ -20,6 +20,6 @@ mod tests;
 pub use core::App;
 pub use runtime::RenderRuntime;
 pub use state::{
-    AppState, CacheHandle, CacheRefs, Mode, PageLayoutMode, PaletteRequest, SpreadDirection,
-    StatusState, VisiblePageSlots,
+    AppState, CacheHandle, CacheRefs, Mode, Notice, NoticeAction, NoticeLevel, PageLayoutMode,
+    PaletteRequest, SpreadDirection, VisiblePageSlots,
 };

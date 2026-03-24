@@ -58,19 +58,28 @@ impl PaletteProvider for CommandPaletteProvider {
     ) -> AppResult<PaletteSubmitEffect> {
         let input = ctx.input.trim();
 
-        // 1. Input text parses as a valid command (with args) → dispatch directly.
-        if !input.is_empty()
-            && let Ok(command) = parse_invocable_command_text(
+        // 1. If the user typed an explicit command form, prefer that over candidate fallback.
+        if !input.is_empty() {
+            match parse_invocable_command_text(
                 input,
                 CommandInvocationSource::CommandPaletteInput,
                 ctx.app,
                 ctx.extensions,
-            )
-        {
-            return Ok(PaletteSubmitEffect::Dispatch {
-                command,
-                next: PalettePostAction::Close,
-            });
+            ) {
+                Ok(command) => {
+                    return Ok(PaletteSubmitEffect::Dispatch {
+                        command,
+                        next: PalettePostAction::Close,
+                    });
+                }
+                Err(err)
+                    if has_argument_phase(input)
+                        || find_command_spec(first_token(input)).is_some() =>
+                {
+                    return Err(err);
+                }
+                Err(_) => {}
+            }
         }
 
         // 2. A candidate is selected → use it.
@@ -411,25 +420,6 @@ mod tests {
             .expect("submit should succeed")
     }
 
-    fn command_submit_effect_without_selection(
-        input: &str,
-        search_active: bool,
-    ) -> PaletteSubmitEffect {
-        let provider = CommandPaletteProvider;
-        let app = AppState::default();
-        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
-        let ctx = PaletteContext {
-            app: &app,
-            extensions: &extensions,
-            kind: PaletteKind::Command,
-            input,
-            seed: None,
-        };
-        provider
-            .on_submit(&ctx, None)
-            .expect("submit should succeed")
-    }
-
     fn command_tab_effect(input: &str, selected_id: &str, search_active: bool) -> PaletteTabEffect {
         let provider = CommandPaletteProvider;
         let app = AppState::default();
@@ -634,13 +624,45 @@ mod tests {
 
     #[test]
     fn submit_reopens_when_input_targets_internal_command() {
-        let effect = command_submit_effect_without_selection("submit-search hello", true);
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::with_search_active(true);
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input: "submit-search hello",
+            seed: None,
+        };
+
+        let err = provider
+            .on_submit(&ctx, None)
+            .expect_err("internal command input should error");
         assert_eq!(
-            effect,
-            PaletteSubmitEffect::Reopen {
-                kind: PaletteKind::Command,
-                seed: Some("submit-search hello".to_string()),
-            }
+            err.to_string(),
+            "invalid argument: submit-search is an internal command and cannot be invoked directly"
+        );
+    }
+
+    #[test]
+    fn submit_errors_when_explicit_input_has_invalid_arguments() {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input: "first-page hoge",
+            seed: None,
+        };
+
+        let err = provider
+            .on_submit(&ctx, None)
+            .expect_err("invalid command arguments should error");
+        assert_eq!(
+            err.to_string(),
+            "invalid argument: first-page does not accept arguments"
         );
     }
 }

@@ -1,5 +1,4 @@
 use crate::backend::PdfBackend;
-use crate::command::ActionId;
 use crate::presenter::{PanOffset, Viewport};
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::{RenderPriority, RenderTask};
@@ -34,7 +33,7 @@ impl RenderSubsystem {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn process_render_result(
         &mut self,
-        state: &mut AppState,
+        _state: &mut AppState,
         completed: RenderWorkerResult,
         current_keys: &[RenderedPageKey],
         prefetch_viewport: Option<Viewport>,
@@ -68,8 +67,7 @@ impl RenderSubsystem {
                         prefetch_class_for_completed_task(completed.priority),
                         completed.generation,
                     ) {
-                        state.status.last_action_id = Some(ActionId::PrefetchEncode);
-                        state.status.message = format!("encode prefetch error: {err}");
+                        let _ = err;
                     }
                 }
                 self.runtime.ingest_rendered_frame(
@@ -84,8 +82,7 @@ impl RenderSubsystem {
                 self.runtime
                     .perf_stats
                     .record_render_queue_wait(completed.queue_wait);
-                state.status.last_action_id = Some(ActionId::RenderWorker);
-                state.status.message = format!("render error: {err}");
+                let _ = err;
                 current_keys.contains(&completed.key)
             }
         }
@@ -136,7 +133,7 @@ impl RenderSubsystem {
 
     pub(crate) fn ensure_current_task_enqueued(
         &mut self,
-        state: &mut AppState,
+        _state: &mut AppState,
         pdf: &dyn PdfBackend,
         render_actor: &RenderActor,
         render_worker: &mut RenderWorker,
@@ -169,9 +166,6 @@ impl RenderSubsystem {
                     self.runtime.perf_stats.add_canceled_tasks(preempted);
                 }
                 if !enqueued {
-                    state.status.last_action_id = Some(ActionId::RenderQueue);
-                    state.status.message =
-                        "render queue busy; retrying initial preview".to_string();
                     break;
                 }
                 self.runtime
@@ -210,8 +204,6 @@ impl RenderSubsystem {
                 self.runtime.perf_stats.add_canceled_tasks(preempted);
             }
             if !enqueued {
-                state.status.last_action_id = Some(ActionId::RenderQueue);
-                state.status.message = format!("render queue busy; retrying page {}", page + 1);
                 break;
             }
             self.runtime
@@ -221,7 +213,7 @@ impl RenderSubsystem {
 
     pub(crate) fn dispatch_prefetch_if_due(
         &mut self,
-        state: &mut AppState,
+        _state: &mut AppState,
         render_actor: &mut RenderActor,
         render_worker: &mut RenderWorker,
         mut ctx: PrefetchDispatchContext,
@@ -255,8 +247,7 @@ impl RenderSubsystem {
                         prefetch_class_for_completed_task(task.priority),
                         task.generation,
                     ) {
-                        state.status.last_action_id = Some(ActionId::PrefetchEncode);
-                        state.status.message = format!("encode prefetch error: {err}");
+                        let _ = err;
                     }
                 }
             }

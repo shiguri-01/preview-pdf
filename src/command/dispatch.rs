@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::app::{AppState, Mode, PaletteRequest};
+use crate::app::{AppState, Mode, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::error::AppResult;
 use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
@@ -9,10 +9,10 @@ use crate::extension::ExtensionHost;
 
 use super::core::{
     first_page, goto_page, last_page, next_page, prev_page, set_debug_status_visible,
-    set_page_layout, set_zoom, set_zoom_with_id,
+    set_page_layout, set_zoom, set_zoom_internal,
 };
 use super::spec::{CommandConditionContext, rejection_message_for_command};
-use super::types::{ActionId, Command, CommandInvocationSource, CommandOutcome};
+use super::types::{Command, CommandInvocationSource, CommandOutcome};
 
 const ZOOM_STEP: f32 = 0.1;
 
@@ -20,6 +20,19 @@ const ZOOM_STEP: f32 = 0.1;
 pub struct CommandDispatchResult {
     pub outcome: CommandOutcome,
     pub emitted_events: Vec<AppEvent>,
+}
+
+fn apply_notice(app: &mut AppState, action: NoticeAction) {
+    app.apply_notice_action(action);
+}
+
+fn rejection_notice(command: &Command, message: String) -> NoticeAction {
+    match command {
+        // Search hit navigation is often retried while search state is still settling,
+        // so keep the current notice instead of replacing it with a generic rejection.
+        Command::NextSearchHit | Command::PrevSearchHit => NoticeAction::Keep,
+        _ => NoticeAction::warning(message),
+    }
 }
 
 pub fn dispatch(
@@ -38,8 +51,7 @@ pub fn dispatch(
         source,
     };
     if let Some(message) = rejection_message_for_command(&cmd, &ctx) {
-        app.status.last_action_id = Some(action_id);
-        app.status.message = message;
+        apply_notice(app, rejection_notice(&cmd, message));
         let outcome = CommandOutcome::Noop;
         return Ok(CommandDispatchResult {
             outcome,
@@ -55,42 +67,36 @@ pub fn dispatch(
     let dispatched_command = cmd.clone();
     let page_count = pdf.page_count();
 
-    let outcome = match cmd {
+    let (outcome, notice) = match cmd {
         Command::NextPage => next_page(app, page_count),
         Command::PrevPage => prev_page(app, page_count),
         Command::FirstPage => first_page(app, page_count),
         Command::LastPage => last_page(app, page_count),
         Command::GotoPage { page } => goto_page(app, page_count, page),
         Command::SetZoom { value } => set_zoom(app, value),
-        Command::ZoomIn => set_zoom_with_id(app, app.zoom + ZOOM_STEP, ActionId::ZoomIn),
-        Command::ZoomOut => set_zoom_with_id(app, app.zoom - ZOOM_STEP, ActionId::ZoomOut),
+        Command::ZoomIn => set_zoom_internal(app, app.zoom + ZOOM_STEP),
+        Command::ZoomOut => set_zoom_internal(app, app.zoom - ZOOM_STEP),
         Command::Scroll { dx, dy } => {
             app.scroll_x = app.scroll_x.saturating_add(dx);
             app.scroll_y = app.scroll_y.saturating_add(dy);
-            app.status.last_action_id = Some(ActionId::Scroll);
-            app.status.message = format!("scrolled to ({}, {})", app.scroll_x, app.scroll_y);
-            Ok(CommandOutcome::Applied)
+            Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
         Command::SetPageLayout { mode, direction } => {
             set_page_layout(app, page_count, mode, direction)
         }
-        Command::DebugStatusShow => set_debug_status_visible(app, true, ActionId::DebugStatusShow),
-        Command::DebugStatusHide => set_debug_status_visible(app, false, ActionId::DebugStatusHide),
+        Command::DebugStatusShow => set_debug_status_visible(app, true),
+        Command::DebugStatusHide => set_debug_status_visible(app, false),
         Command::DebugStatusToggle => {
             let visible = !app.debug_status_visible;
-            set_debug_status_visible(app, visible, ActionId::DebugStatusToggle)
+            set_debug_status_visible(app, visible)
         }
         Command::OpenPalette { kind, seed } => {
             palette_requests.push_back(PaletteRequest::Open { kind, seed });
-            app.status.last_action_id = Some(ActionId::OpenPalette);
-            app.status.message = "opening palette".to_string();
-            Ok(CommandOutcome::Applied)
+            Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
         Command::ClosePalette => {
             palette_requests.push_back(PaletteRequest::Close);
-            app.status.last_action_id = Some(ActionId::ClosePalette);
-            app.status.message = "closing palette".to_string();
-            Ok(CommandOutcome::Applied)
+            Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
         Command::OpenSearch => Ok(extension_host.open_search_palette(app, palette_requests)),
         Command::SubmitSearch { query, matcher } => {
@@ -105,24 +111,14 @@ pub fn dispatch(
         Command::Cancel => {
             if app.mode == Mode::Palette {
                 palette_requests.push_back(PaletteRequest::Close);
-                app.status.last_action_id = Some(ActionId::Cancel);
-                app.status.message = "canceled current mode".to_string();
-            } else if extension_host.cancel_search(pdf)? {
-                app.status.last_action_id = Some(ActionId::Cancel);
-                app.status.message = "search canceled".to_string();
             } else {
-                app.mode = Mode::Normal;
-                app.status.last_action_id = Some(ActionId::Cancel);
-                app.status.message = "canceled current mode".to_string();
+                let _ = extension_host.cancel_search(pdf)?;
             }
-            Ok(CommandOutcome::Applied)
+            Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
-        Command::Quit => {
-            app.status.last_action_id = Some(ActionId::Quit);
-            app.status.message = "quit requested".to_string();
-            Ok(CommandOutcome::QuitRequested)
-        }
+        Command::Quit => Ok((CommandOutcome::QuitRequested, NoticeAction::Keep)),
     }?;
+    apply_notice(app, notice);
 
     let mut emitted_events = collect_transition_events(
         app,
@@ -365,7 +361,7 @@ mod tests {
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(result.emitted_events.len(), 1);
         assert!(!host.ui_snapshot().search_active);
-        assert_eq!(app.status.message, "search canceled");
+        assert_eq!(app.notice, None);
         assert!(palette_requests.is_empty());
     }
 
@@ -461,8 +457,8 @@ mod tests {
 
         assert_eq!(result.outcome, CommandOutcome::Noop);
         assert_eq!(
-            app.status.message,
-            "submit-search is an internal command and cannot be invoked directly"
+            app.notice.as_ref().map(|notice| notice.message.as_str()),
+            Some("submit-search is an internal command and cannot be invoked directly")
         );
     }
 
@@ -484,9 +480,6 @@ mod tests {
         .expect("dispatch should succeed");
 
         assert_eq!(result.outcome, CommandOutcome::Noop);
-        assert_eq!(
-            app.status.message,
-            "next-search-hit is unavailable while search is inactive"
-        );
+        assert!(app.notice.is_none());
     }
 }

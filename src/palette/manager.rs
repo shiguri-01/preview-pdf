@@ -3,7 +3,7 @@ use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
 use crate::app::AppState;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
 
 use super::kind::PaletteKind;
@@ -109,7 +109,7 @@ impl PaletteManager {
     pub fn handle_key(
         &mut self,
         registry: &PaletteRegistry,
-        app: &AppState,
+        app: &mut AppState,
         extensions: &ExtensionUiSnapshot,
         key: KeyEvent,
     ) -> AppResult<PaletteKeyResult> {
@@ -171,7 +171,13 @@ impl PaletteManager {
                     input: session.input.value(),
                     seed: session.seed.as_deref(),
                 };
-                let effect = provider.on_submit(&ctx, selected)?;
+                let effect = match provider.on_submit(&ctx, selected) {
+                    Ok(effect) => effect,
+                    Err(err) => {
+                        apply_palette_submit_error_notice(app, err);
+                        return Ok(PaletteKeyResult::Consumed { redraw: true });
+                    }
+                };
                 return Ok(PaletteKeyResult::Submit(PaletteSubmitAction {
                     session_id: session.id,
                     effect,
@@ -298,6 +304,15 @@ impl PaletteManager {
         let id = self.next_session_id;
         self.next_session_id = self.next_session_id.saturating_add(1);
         id
+    }
+}
+
+fn apply_palette_submit_error_notice(app: &mut AppState, err: AppError) {
+    match err {
+        AppError::InvalidArgument(message)
+        | AppError::Unsupported(message)
+        | AppError::Unimplemented(message) => app.set_warning_notice(message),
+        other => app.set_error_notice(other.to_string()),
     }
 }
 

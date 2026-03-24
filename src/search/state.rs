@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::app::{AppState, PaletteRequest};
+use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
-use crate::command::{ActionId, CommandOutcome, SearchMatcherKind};
+use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::palette::PaletteKind;
 
@@ -27,7 +27,7 @@ impl SearchRuntime {
         &mut self,
         app: &mut AppState,
         palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> CommandOutcome {
+    ) -> (CommandOutcome, NoticeAction) {
         self.state.open_palette(app, palette_requests)
     }
 
@@ -37,7 +37,7 @@ impl SearchRuntime {
         pdf: SharedPdfBackend,
         query: String,
         matcher: SearchMatcherKind,
-    ) -> AppResult<CommandOutcome> {
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
         self.state
             .submit(app, pdf, &mut self.engine, query, matcher)
     }
@@ -46,11 +46,11 @@ impl SearchRuntime {
         self.state.cancel(pdf, &mut self.engine)
     }
 
-    pub fn next_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+    pub fn next_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
         self.state.next_hit(app)
     }
 
-    pub fn prev_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+    pub fn prev_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
         self.state.prev_hit(app)
     }
 
@@ -114,9 +114,9 @@ impl Default for SearchState {
 impl SearchState {
     pub fn open_palette(
         &mut self,
-        app: &mut AppState,
+        _app: &mut AppState,
         palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> CommandOutcome {
+    ) -> (CommandOutcome, NoticeAction) {
         let seed = if self.query.is_empty() {
             None
         } else {
@@ -126,20 +126,17 @@ impl SearchState {
             kind: PaletteKind::Search,
             seed,
         });
-        app.status.last_action_id = Some(ActionId::Search);
-        app.status.message = "opening search palette".to_string();
-        CommandOutcome::Applied
+        (CommandOutcome::Applied, NoticeAction::Clear)
     }
 
     pub fn submit(
         &mut self,
-        app: &mut AppState,
+        _app: &mut AppState,
         pdf: SharedPdfBackend,
         search_engine: &mut SearchEngine,
         query: String,
         matcher: SearchMatcherKind,
-    ) -> AppResult<CommandOutcome> {
-        app.status.last_action_id = Some(ActionId::SubmitSearch);
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
         self.query = query;
         self.matcher = matcher;
 
@@ -148,8 +145,7 @@ impl SearchState {
             self.generation = search_engine.cancel(Arc::clone(&pdf))?;
             self.query.clear();
             self.clear_results();
-            app.status.message = "search query is empty".to_string();
-            return Ok(CommandOutcome::Noop);
+            return Ok((CommandOutcome::Noop, NoticeAction::Clear));
         }
 
         let matcher = matcher_for_kind(self.matcher);
@@ -164,15 +160,14 @@ impl SearchState {
         self.hits.clear();
         self.current_hit = None;
         self.last_error = None;
-        app.status.message = format!("search started ({})", self.matcher.id());
-        Ok(CommandOutcome::Applied)
+        Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }
 
-    pub fn next_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+    pub fn next_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
         self.move_hit(app, true)
     }
 
-    pub fn prev_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+    pub fn prev_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
         self.move_hit(app, false)
     }
 
@@ -213,11 +208,6 @@ impl SearchState {
                     self.total_pages = snapshot.total_pages;
                     self.hit_pages_progress = snapshot.hit_pages;
                     self.in_progress = true;
-                    app.status.last_action_id = Some(ActionId::SearchProgress);
-                    app.status.message = format!(
-                        "searching... {}/{} pages ({} hits)",
-                        snapshot.scanned_pages, snapshot.total_pages, snapshot.hit_pages
-                    );
                     changed = true;
                 }
                 SearchEvent::Completed { generation, hits } => {
@@ -229,8 +219,6 @@ impl SearchState {
                     self.hit_pages_progress = hits.len();
                     self.current_hit = None;
                     self.hits = hits;
-                    app.status.last_action_id = Some(ActionId::SearchComplete);
-                    app.status.message = format!("search complete ({} hits)", self.hits.len());
                     changed = true;
                 }
                 SearchEvent::Failed {
@@ -242,8 +230,9 @@ impl SearchState {
                     }
                     self.in_progress = false;
                     self.last_error = Some(message.clone());
-                    app.status.last_action_id = Some(ActionId::SearchFailed);
-                    app.status.message = format!("search failed: {message}");
+                    app.apply_notice_action(NoticeAction::error(format!(
+                        "search failed: {message}"
+                    )));
                     changed = true;
                 }
             }
@@ -287,20 +276,9 @@ impl SearchState {
         Some(format!("SEARCH {} hits", self.hit_pages_progress))
     }
 
-    fn move_hit(&mut self, app: &mut AppState, forward: bool) -> CommandOutcome {
-        app.status.last_action_id = Some(if forward {
-            ActionId::NextSearchHit
-        } else {
-            ActionId::PrevSearchHit
-        });
-
+    fn move_hit(&mut self, app: &mut AppState, forward: bool) -> (CommandOutcome, NoticeAction) {
         if self.hits.is_empty() {
-            app.status.message = if self.in_progress {
-                "search is still in progress".to_string()
-            } else {
-                "no search hits available".to_string()
-            };
-            return CommandOutcome::Noop;
+            return (CommandOutcome::Noop, NoticeAction::Clear);
         }
 
         let next_index = if forward {
@@ -319,13 +297,7 @@ impl SearchState {
         let hit_page = self.hits[next_index];
         let page_count = self.total_pages.max(hit_page + 1);
         app.current_page = app.normalize_page_for_layout(hit_page, page_count);
-        app.status.message = format!(
-            "search hit {}/{} (page {})",
-            next_index + 1,
-            self.hits.len(),
-            hit_page + 1
-        );
-        CommandOutcome::Applied
+        (CommandOutcome::Applied, NoticeAction::Clear)
     }
 
     fn clear_results(&mut self) {
@@ -441,7 +413,7 @@ mod tests {
         let pdf = Arc::new(StubPdf::new(5)) as SharedPdfBackend;
         let mut engine = SearchEngine::new();
 
-        let outcome = state
+        let (outcome, _) = state
             .submit(
                 &mut app,
                 Arc::clone(&pdf),
@@ -479,7 +451,7 @@ mod tests {
             .expect("submit should succeed");
         assert!(state.is_active());
 
-        let outcome = state
+        let (outcome, _) = state
             .submit(
                 &mut app,
                 Arc::clone(&pdf),
@@ -559,7 +531,7 @@ mod tests {
                 SearchMatcherKind::ContainsInsensitive,
             )
             .expect("submit should succeed");
-        app.status.message = "search canceled".to_string();
+        app.clear_notice();
         state
             .cancel(Arc::clone(&pdf), &mut engine)
             .expect("cancel should succeed");
@@ -567,7 +539,7 @@ mod tests {
         for _ in 0..20 {
             let changed = state.on_background(&mut app, &mut engine);
             assert!(!changed);
-            assert_eq!(app.status.message, "search canceled");
+            assert_eq!(app.notice, None);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }

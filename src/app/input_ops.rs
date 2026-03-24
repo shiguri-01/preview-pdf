@@ -2,7 +2,7 @@ use crossterm::event::KeyEvent;
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
-    ActionId, Command, CommandDispatchResult, CommandInvocationSource, CommandRequest, dispatch,
+    Command, CommandDispatchResult, CommandInvocationSource, CommandRequest, dispatch,
     drain_background_events,
 };
 use crate::error::AppResult;
@@ -155,21 +155,16 @@ impl InteractionSubsystem {
                     ) {
                         Ok(()) => {
                             state.mode = Mode::Palette;
-                            state.status.last_action_id = Some(ActionId::OpenPalette);
-                            state.status.message = format!("palette opened: {}", kind.id());
                             changed = true;
                         }
                         Err(err) => {
-                            state.status.last_action_id = Some(ActionId::OpenPalette);
-                            state.status.message = format!("failed to open palette: {err}");
+                            state.set_error_notice(format!("failed to open palette: {err}"));
                         }
                     }
                 }
                 PaletteRequest::Close => {
                     if self.palette.manager.close() {
                         state.mode = Mode::Normal;
-                        state.status.last_action_id = Some(ActionId::ClosePalette);
-                        state.status.message = "palette closed".to_string();
                         changed = true;
                     }
                 }

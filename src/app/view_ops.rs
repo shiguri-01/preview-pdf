@@ -2,7 +2,6 @@ use ratatui::widgets::Clear;
 
 use crate::app::PageLayoutMode;
 use crate::backend::PdfBackend;
-use crate::command::ActionId;
 use crate::config::Config;
 use crate::error::AppResult;
 use crate::palette::PaletteView;
@@ -252,7 +251,6 @@ impl RenderSubsystem {
                 state,
                 &file_name,
                 page_count,
-                &self.runtime.perf_stats,
                 presenter_caps.backend_name,
                 presenter_runtime.graphics_protocol,
                 &status_bar_segments,
@@ -376,14 +374,9 @@ impl RenderSubsystem {
         self.viewer_has_image = viewer_has_image;
 
         if let Some(err) = render_error {
-            state.status.last_action_id = Some(ActionId::RenderPage);
-            state.status.message = format!("render error: {err}");
+            state.set_error_notice(format!("render error: {err}"));
         } else if render_feedback == PresenterFeedback::Failed {
-            state.status.last_action_id = Some(ActionId::RenderPage);
-            state.status.message = format!("render error: failed to render {render_target}");
-        } else if render_feedback == PresenterFeedback::Pending {
-            state.status.last_action_id = Some(ActionId::RenderPending);
-            state.status.message = format!("rendering {render_target}...");
+            state.set_error_notice(format!("render error: failed to render {render_target}"));
         }
 
         Ok(())

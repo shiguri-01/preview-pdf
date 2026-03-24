@@ -1,4 +1,4 @@
-use crate::app::{AppState, PaletteRequest};
+use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
@@ -63,7 +63,7 @@ impl ExtensionHost {
         &mut self,
         app: &mut AppState,
         palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> CommandOutcome {
+    ) -> (CommandOutcome, NoticeAction) {
         self.search.open_palette(app, palette_requests)
     }
 
@@ -73,7 +73,7 @@ impl ExtensionHost {
         pdf: SharedPdfBackend,
         query: String,
         matcher: SearchMatcherKind,
-    ) -> AppResult<CommandOutcome> {
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
         self.search.submit(app, pdf, query, matcher)
     }
 
@@ -81,19 +81,27 @@ impl ExtensionHost {
         self.search.cancel(pdf)
     }
 
-    pub fn next_search_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+    pub fn next_search_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
         self.search.next_hit(app)
     }
 
-    pub fn prev_search_hit(&mut self, app: &mut AppState) -> CommandOutcome {
+    pub fn prev_search_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
         self.search.prev_hit(app)
     }
 
-    pub fn history_back(&mut self, app: &mut AppState, page_count: usize) -> CommandOutcome {
+    pub fn history_back(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+    ) -> (CommandOutcome, NoticeAction) {
         self.history.back(app, page_count)
     }
 
-    pub fn history_forward(&mut self, app: &mut AppState, page_count: usize) -> CommandOutcome {
+    pub fn history_forward(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+    ) -> (CommandOutcome, NoticeAction) {
         self.history.forward(app, page_count)
     }
 
@@ -102,7 +110,7 @@ impl ExtensionHost {
         app: &mut AppState,
         page_count: usize,
         page: usize,
-    ) -> AppResult<CommandOutcome> {
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
         self.history.goto(app, page_count, page)
     }
 
@@ -110,7 +118,7 @@ impl ExtensionHost {
         &self,
         app: &mut AppState,
         palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> CommandOutcome {
+    ) -> (CommandOutcome, NoticeAction) {
         self.history.open_palette(app, palette_requests)
     }
 

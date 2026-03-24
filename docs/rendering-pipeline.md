@@ -163,7 +163,7 @@ UI contract:
 
 The runtime tracks:
 - render time (`render_ms`)
-- encode time (`encode_ms`, surfaced as `convert_ms` in the live debug chrome)
+- encode time (`encode_ms`, surfaced as `convert_ms` in perf reports)
 - terminal draw time (`blit_ms`)
 - render/encode queue wait time (`render_queue_wait_ms`, `encode_queue_wait_ms`)
 - L1/L2 cache hit rates
@@ -171,4 +171,4 @@ The runtime tracks:
 - render/encode canceled task counts
 - redraw request counts broken down by reason (`input`, `command`, `app_event`, `render_complete`, `pending_work`, `timer`, `input_error`, `state_changed`)
 
-These values are used by status/debug surfaces and perf JSON reports.
+These values are used by perf JSON reports and other offline/debugging analysis. The interactive diagnostics bar is intentionally narrower and only shows the active presenter/protocol path.

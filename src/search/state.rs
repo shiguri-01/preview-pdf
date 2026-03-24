@@ -278,9 +278,16 @@ impl SearchState {
 
     fn move_hit(&mut self, app: &mut AppState, forward: bool) -> (CommandOutcome, NoticeAction) {
         if self.hits.is_empty() {
-            // Retrying hit navigation should not erase the in-flight/error notice when the
-            // search state itself has not improved yet.
-            let notice = if self.in_progress || self.last_error.is_some() {
+            // Without an active search context, hit navigation does not need extra feedback.
+            // Once a search has started, reflect its current state instead of looking like a
+            // broken keybinding.
+            let notice = if self.in_progress {
+                if app.notice.is_some() {
+                    NoticeAction::Keep
+                } else {
+                    NoticeAction::warning("searching...")
+                }
+            } else if self.last_error.is_some() {
                 NoticeAction::Keep
             } else {
                 NoticeAction::Clear
@@ -589,5 +596,33 @@ mod tests {
             app.notice.expect("progress notice should stay").message,
             "searching..."
         );
+    }
+
+    #[test]
+    fn next_hit_shows_progress_notice_when_search_is_running_without_notice() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            in_progress: true,
+            ..SearchState::default()
+        };
+        let mut app = AppState::default();
+
+        let (outcome, notice) = state.next_hit(&mut app);
+
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert_eq!(notice, NoticeAction::warning("searching..."));
+        assert!(app.notice.is_none());
+    }
+
+    #[test]
+    fn next_hit_stays_silent_when_no_search_is_active() {
+        let mut state = SearchState::default();
+        let mut app = AppState::default();
+
+        let (outcome, notice) = state.next_hit(&mut app);
+
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert!(app.notice.is_none());
     }
 }

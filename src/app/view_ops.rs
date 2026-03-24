@@ -304,6 +304,7 @@ impl RenderSubsystem {
                     },
                 ) {
                     Ok(outcome) => {
+                        let outcome = normalize_render_outcome(render_mode, outcome);
                         render_feedback = outcome.feedback;
                         if outcome.drew_image {
                             viewer_has_image = true;
@@ -417,6 +418,19 @@ fn decide_viewer_display(
         clear,
         show_loading,
         show_error,
+    }
+}
+
+fn normalize_render_outcome(
+    render_mode: PresenterRenderMode,
+    outcome: PresenterRenderOutcome,
+) -> PresenterRenderOutcome {
+    match render_mode {
+        PresenterRenderMode::InitialPreview => PresenterRenderOutcome {
+            feedback: PresenterFeedback::Pending,
+            ..outcome
+        },
+        PresenterRenderMode::Full => outcome,
     }
 }
 
@@ -557,8 +571,8 @@ mod tests {
 
     use super::{
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
-        decide_viewer_display, presenter_render_options, resolve_layout_dimensions,
-        sync_render_notice,
+        decide_viewer_display, normalize_render_outcome, presenter_render_options,
+        resolve_layout_dimensions, sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
@@ -630,6 +644,21 @@ mod tests {
                 show_error: false,
             }
         );
+    }
+
+    #[test]
+    fn normalize_render_outcome_keeps_loading_feedback_for_initial_preview() {
+        let outcome = normalize_render_outcome(
+            PresenterRenderMode::InitialPreview,
+            PresenterRenderOutcome {
+                drew_image: true,
+                feedback: PresenterFeedback::None,
+                used_stale_fallback: false,
+            },
+        );
+
+        assert!(outcome.drew_image);
+        assert_eq!(outcome.feedback, PresenterFeedback::Pending);
     }
 
     #[test]

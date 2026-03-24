@@ -278,7 +278,14 @@ impl SearchState {
 
     fn move_hit(&mut self, app: &mut AppState, forward: bool) -> (CommandOutcome, NoticeAction) {
         if self.hits.is_empty() {
-            return (CommandOutcome::Noop, NoticeAction::Clear);
+            // Retrying hit navigation should not erase the in-flight/error notice when the
+            // search state itself has not improved yet.
+            let notice = if self.in_progress || self.last_error.is_some() {
+                NoticeAction::Keep
+            } else {
+                NoticeAction::Clear
+            };
+            return (CommandOutcome::Noop, notice);
         }
 
         let next_index = if forward {
@@ -355,7 +362,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::AppState;
+    use crate::app::{AppState, NoticeAction};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{CommandOutcome, SearchMatcherKind};
     use crate::search::engine::SearchEngine;
@@ -542,5 +549,45 @@ mod tests {
             assert_eq!(app.notice, None);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    #[test]
+    fn next_hit_keeps_active_error_notice_when_no_hits_exist() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            last_error: Some("backend failed".to_string()),
+            ..SearchState::default()
+        };
+        let mut app = AppState::default();
+        app.set_error_notice("search failed: backend failed");
+
+        let (outcome, notice) = state.next_hit(&mut app);
+
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert_eq!(notice, NoticeAction::Keep);
+        assert_eq!(
+            app.notice.expect("existing notice should stay").message,
+            "search failed: backend failed"
+        );
+    }
+
+    #[test]
+    fn next_hit_keeps_progress_notice_while_search_is_still_running() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            in_progress: true,
+            ..SearchState::default()
+        };
+        let mut app = AppState::default();
+        app.set_warning_notice("searching...");
+
+        let (outcome, notice) = state.next_hit(&mut app);
+
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert_eq!(notice, NoticeAction::Keep);
+        assert_eq!(
+            app.notice.expect("progress notice should stay").message,
+            "searching..."
+        );
     }
 }

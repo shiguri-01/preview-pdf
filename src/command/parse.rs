@@ -77,10 +77,11 @@ pub fn parse_invocable_command_text(
     parse_command_text(trimmed)
 }
 
-fn first_token(input: &str) -> &str {
-    match input.find(char::is_whitespace) {
-        Some(index) => &input[..index],
-        None => input,
+pub(crate) fn first_token(input: &str) -> &str {
+    let trimmed = input.trim_start();
+    match trimmed.find(char::is_whitespace) {
+        Some(index) => &trimmed[..index],
+        None => trimmed,
     }
 }
 
@@ -344,7 +345,7 @@ fn split_last_token(input: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_command_text;
+    use super::{first_token, parse_command_text};
     use crate::command::{Command, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg};
     use crate::palette::PaletteKind;
 
@@ -441,5 +442,11 @@ mod tests {
             parse_command_text("scroll -2 4").is_err(),
             "raw dx dy form should be rejected"
         );
+    }
+
+    #[test]
+    fn first_token_ignores_leading_whitespace() {
+        assert_eq!(first_token("  next-page"), "next-page");
+        assert_eq!(first_token("\tzoom 1.5"), "zoom");
     }
 }

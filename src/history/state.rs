@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-use crate::app::{AppState, PaletteRequest};
-use crate::command::{ActionId, CommandOutcome};
+use crate::app::{AppState, NoticeAction, PaletteRequest};
+use crate::command::CommandOutcome;
 use crate::error::{AppError, AppResult};
 use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::palette::PaletteKind;
@@ -23,11 +23,13 @@ pub struct HistoryState {
 }
 
 impl HistoryState {
-    pub fn back(&mut self, app: &mut AppState, page_count: usize) -> CommandOutcome {
+    pub fn back(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+    ) -> (CommandOutcome, NoticeAction) {
         let Some(target) = self.back_stack.pop_back() else {
-            app.status.last_action_id = Some(ActionId::HistoryBack);
-            app.status.message = "history back is empty".to_string();
-            return CommandOutcome::Noop;
+            return (CommandOutcome::Noop, NoticeAction::Clear);
         };
 
         self.push_forward(HistoryEntry {
@@ -38,16 +40,16 @@ impl HistoryState {
         self.suppress_next_record = app.current_page != normalized_target;
         app.current_page = normalized_target;
         self.current_reason = target.reason;
-        app.status.last_action_id = Some(ActionId::HistoryBack);
-        app.status.message = format!("history back -> page {}", app.current_page + 1);
-        CommandOutcome::Applied
+        (CommandOutcome::Applied, NoticeAction::Clear)
     }
 
-    pub fn forward(&mut self, app: &mut AppState, page_count: usize) -> CommandOutcome {
+    pub fn forward(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+    ) -> (CommandOutcome, NoticeAction) {
         let Some(target) = self.forward_stack.pop_back() else {
-            app.status.last_action_id = Some(ActionId::HistoryForward);
-            app.status.message = "history forward is empty".to_string();
-            return CommandOutcome::Noop;
+            return (CommandOutcome::Noop, NoticeAction::Clear);
         };
 
         self.push_back(HistoryEntry {
@@ -58,9 +60,7 @@ impl HistoryState {
         self.suppress_next_record = app.current_page != normalized_target;
         app.current_page = normalized_target;
         self.current_reason = target.reason;
-        app.status.last_action_id = Some(ActionId::HistoryForward);
-        app.status.message = format!("history forward -> page {}", app.current_page + 1);
-        CommandOutcome::Applied
+        (CommandOutcome::Applied, NoticeAction::Clear)
     }
 
     pub fn goto(
@@ -68,7 +68,7 @@ impl HistoryState {
         app: &mut AppState,
         page_count: usize,
         page: usize,
-    ) -> AppResult<CommandOutcome> {
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
         if page < 1 {
             return Err(AppError::invalid_argument("page number must be >= 1"));
         }
@@ -79,10 +79,8 @@ impl HistoryState {
         }
 
         let target = app.normalize_page_for_layout(page - 1, page_count);
-        app.status.last_action_id = Some(ActionId::HistoryGoto);
         if app.current_page == target {
-            app.status.message = format!("already at page {page}");
-            return Ok(CommandOutcome::Noop);
+            return Ok((CommandOutcome::Noop, NoticeAction::Clear));
         }
         let target_reason = self.find_reason_for_page(target);
 
@@ -93,23 +91,20 @@ impl HistoryState {
         self.suppress_next_record = true;
         app.current_page = target;
         self.current_reason = target_reason;
-        app.status.message = format!("history goto -> page {}", app.current_page + 1);
-        Ok(CommandOutcome::Applied)
+        Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }
 
     pub fn open_palette(
         &self,
         app: &mut AppState,
         palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> CommandOutcome {
+    ) -> (CommandOutcome, NoticeAction) {
         let seed = self.serialize_seed(app.current_page);
         palette_requests.push_back(PaletteRequest::Open {
             kind: PaletteKind::History,
             seed: Some(seed),
         });
-        app.status.last_action_id = Some(ActionId::History);
-        app.status.message = "opening history palette".to_string();
-        CommandOutcome::Applied
+        (CommandOutcome::Applied, NoticeAction::Clear)
     }
 
     pub fn on_event(&mut self, event: &AppEvent) {
@@ -394,7 +389,7 @@ mod tests {
             ..AppState::default()
         };
 
-        let outcome = state.back(&mut app, 8);
+        let (outcome, _) = state.back(&mut app, 8);
         assert!(matches!(outcome, crate::command::CommandOutcome::Applied));
         assert_eq!(app.current_page, 2);
         assert!(state.current_reason.is_none());
@@ -433,7 +428,7 @@ mod tests {
             ..AppState::default()
         };
 
-        let outcome = state.back(&mut app, 10);
+        let (outcome, _) = state.back(&mut app, 10);
         assert!(matches!(outcome, crate::command::CommandOutcome::Applied));
         assert_eq!(app.current_page, 5);
         assert!(matches!(
@@ -441,7 +436,7 @@ mod tests {
             Some(NavReason::Search { query }) if query == "needle"
         ));
 
-        let outcome = state.forward(&mut app, 10);
+        let (outcome, _) = state.forward(&mut app, 10);
         assert!(matches!(outcome, crate::command::CommandOutcome::Applied));
         assert_eq!(app.current_page, 7);
         assert!(matches!(

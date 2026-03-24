@@ -4,8 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{AppState, PageLayoutMode};
-use crate::perf::PerfStats;
+use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
 
 use super::layout::UiLayout;
 
@@ -16,8 +15,7 @@ pub fn draw_chrome(
     app: &AppState,
     file_name: &str,
     page_count: usize,
-    perf: &PerfStats,
-    presenter_backend: &str,
+    presenter_label: &str,
     graphics_protocol: Option<&str>,
     extension_status_segments: &[String],
 ) {
@@ -28,36 +26,24 @@ pub fn draw_chrome(
         extension_status_segments,
         layout.status.width as usize,
     );
-
-    let status = Paragraph::new(stylize_status_line(&status_text))
-        .style(Style::default())
-        .wrap(Wrap { trim: true });
+    let primary = if let Some(notice) = app.notice.as_ref() {
+        Paragraph::new(stylize_notice_line(notice, layout.status.width as usize))
+            .style(Style::default())
+            .wrap(Wrap { trim: true })
+    } else {
+        Paragraph::new(stylize_status_line(&status_text))
+            .style(Style::default())
+            .wrap(Wrap { trim: true })
+    };
     if app.debug_status_visible && layout.status.height >= 2 {
         let top =
             ratatui::layout::Rect::new(layout.status.x, layout.status.y, layout.status.width, 1);
-        frame.render_widget(status, top);
+        frame.render_widget(primary, top);
 
-        let command_id = app
-            .status
-            .last_action_id
-            .map(|id| id.as_str())
-            .unwrap_or("-");
-        let message = if app.status.message.is_empty() {
-            "-"
-        } else {
-            app.status.message.as_str()
-        };
-        let protocol = graphics_protocol.unwrap_or("-");
-        let debug_text = format!(
-            "cmd={command_id} | msg={message} | perf=r{:.1} c{:.1} b{:.1} | q={} | hit=l1 {:.0}% l2 {:.0}% | presenter={} | proto={}",
-            perf.render_ms,
-            perf.convert_ms,
-            perf.blit_ms,
-            perf.queue_depth,
-            perf.cache_hit_rate_l1 * 100.0,
-            perf.cache_hit_rate_l2 * 100.0,
-            presenter_backend,
-            protocol
+        let presenter_path_text = build_presenter_path_text(
+            presenter_label,
+            graphics_protocol,
+            layout.status.width as usize,
         );
         let bottom = ratatui::layout::Rect::new(
             layout.status.x,
@@ -65,14 +51,14 @@ pub fn draw_chrome(
             layout.status.width,
             layout.status.height.saturating_sub(1).max(1),
         );
-        let debug = Paragraph::new(debug_text)
+        let debug = Paragraph::new(presenter_path_text)
             .style(Style::default())
             .wrap(Wrap { trim: true });
         frame.render_widget(debug, bottom);
         return;
     }
 
-    frame.render_widget(status, layout.status);
+    frame.render_widget(primary, layout.status);
 }
 
 fn build_status_text(
@@ -158,6 +144,16 @@ fn format_page_segment(app: &AppState, page_total: usize) -> String {
     }
 }
 
+fn build_presenter_path_text(
+    presenter_label: &str,
+    graphics_protocol: Option<&str>,
+    max_width: usize,
+) -> String {
+    let protocol = graphics_protocol.unwrap_or("-");
+    let text = format!("presenter={presenter_label}(proto={protocol})");
+    truncate_right_by_width(&text, max_width)
+}
+
 fn stylize_status_line(text: &str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (idx, part) in text.split(" | ").enumerate() {
@@ -170,6 +166,19 @@ fn stylize_status_line(text: &str) -> Line<'static> {
         spans.push(Span::raw(part.to_string()));
     }
     Line::from(spans)
+}
+
+fn stylize_notice_line(notice: &Notice, max_width: usize) -> Line<'static> {
+    let label = match notice.level {
+        NoticeLevel::Warning => "notice",
+        NoticeLevel::Error => "error",
+    };
+    let accent = match notice.level {
+        NoticeLevel::Warning => Color::Yellow,
+        NoticeLevel::Error => Color::Red,
+    };
+    let text = truncate_right_by_width(&format!("{label}: {}", notice.message), max_width);
+    Line::from(vec![Span::styled(text, Style::default().fg(accent))])
 }
 
 fn display_width(text: &str) -> usize {
@@ -243,9 +252,9 @@ fn elide_middle_by_width(input: &str, max_width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{AppState, PageLayoutMode};
+    use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
 
-    use super::{build_status_text, display_width};
+    use super::{build_presenter_path_text, build_status_text, display_width, stylize_notice_line};
 
     #[test]
     fn build_status_text_includes_page_zoom_and_file() {
@@ -257,6 +266,33 @@ mod tests {
 
         let text = build_status_text(&app, "sample.pdf", 10, &[], 80);
         assert_eq!(text, "p.  3/10 | Zoom 1.50x | sample.pdf");
+    }
+
+    #[test]
+    fn build_presenter_path_text_formats_presenter_with_proto() {
+        let text = build_presenter_path_text("ratatui-image", Some("kitty"), 200);
+
+        assert_eq!(text, "presenter=ratatui-image(proto=kitty)");
+    }
+
+    #[test]
+    fn build_presenter_path_text_uses_placeholder_for_unknown_proto() {
+        let text = build_presenter_path_text("ratatui-image", None, 200);
+
+        assert_eq!(text, "presenter=ratatui-image(proto=-)");
+    }
+
+    #[test]
+    fn stylize_notice_line_prefixes_severity() {
+        let line = stylize_notice_line(
+            &Notice {
+                level: NoticeLevel::Error,
+                message: "render failed".to_string(),
+            },
+            80,
+        );
+
+        assert_eq!(line.to_string(), "error: render failed");
     }
 
     #[test]

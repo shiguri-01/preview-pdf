@@ -1,4 +1,3 @@
-use crate::command::ActionId;
 use crate::palette::PaletteKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -70,10 +69,39 @@ pub enum PaletteRequest {
     Close,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct StatusState {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeLevel {
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub level: NoticeLevel,
     pub message: String,
-    pub last_action_id: Option<ActionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoticeAction {
+    Keep,
+    Clear,
+    Show { level: NoticeLevel, message: String },
+}
+
+impl NoticeAction {
+    pub fn warning(message: impl Into<String>) -> Self {
+        Self::Show {
+            level: NoticeLevel::Warning,
+            message: message.into(),
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::Show {
+            level: NoticeLevel::Error,
+            message: message.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +125,7 @@ pub struct AppState {
     pub scroll_y: i32,
     pub debug_status_visible: bool,
     pub mode: Mode,
-    pub status: StatusState,
+    pub notice: Option<Notice>,
     pub caches: CacheRefs,
 }
 
@@ -112,13 +140,51 @@ impl Default for AppState {
             scroll_y: 0,
             debug_status_visible: false,
             mode: Mode::Normal,
-            status: StatusState::default(),
+            notice: None,
             caches: CacheRefs::default(),
         }
     }
 }
 
 impl AppState {
+    const RENDER_NOTICE_PREFIX: &str = "render error: ";
+
+    pub fn apply_notice_action(&mut self, action: NoticeAction) {
+        match action {
+            NoticeAction::Keep => {}
+            NoticeAction::Clear => self.notice = None,
+            NoticeAction::Show { level, message } => self.notice = Some(Notice { level, message }),
+        }
+    }
+
+    pub fn set_notice(&mut self, level: NoticeLevel, message: impl Into<String>) {
+        self.notice = Some(Notice {
+            level,
+            message: message.into(),
+        });
+    }
+
+    pub fn set_warning_notice(&mut self, message: impl Into<String>) {
+        self.set_notice(NoticeLevel::Warning, message);
+    }
+
+    pub fn set_error_notice(&mut self, message: impl Into<String>) {
+        self.set_notice(NoticeLevel::Error, message);
+    }
+
+    pub fn clear_notice(&mut self) {
+        self.notice = None;
+    }
+
+    pub fn clear_render_notice(&mut self) {
+        if self.notice.as_ref().is_some_and(|notice| {
+            notice.level == NoticeLevel::Error
+                && notice.message.starts_with(Self::RENDER_NOTICE_PREFIX)
+        }) {
+            self.notice = None;
+        }
+    }
+
     pub fn page_step(&self) -> usize {
         match self.page_layout_mode {
             PageLayoutMode::Single => 1,

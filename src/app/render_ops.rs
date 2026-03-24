@@ -1,5 +1,4 @@
 use crate::backend::PdfBackend;
-use crate::command::ActionId;
 use crate::presenter::{PanOffset, Viewport};
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::{RenderPriority, RenderTask};
@@ -68,8 +67,7 @@ impl RenderSubsystem {
                         prefetch_class_for_completed_task(completed.priority),
                         completed.generation,
                     ) {
-                        state.status.last_action_id = Some(ActionId::PrefetchEncode);
-                        state.status.message = format!("encode prefetch error: {err}");
+                        let _ = err;
                     }
                 }
                 self.runtime.ingest_rendered_frame(
@@ -84,9 +82,14 @@ impl RenderSubsystem {
                 self.runtime
                     .perf_stats
                     .record_render_queue_wait(completed.queue_wait);
-                state.status.last_action_id = Some(ActionId::RenderWorker);
-                state.status.message = format!("render error: {err}");
-                current_keys.contains(&completed.key)
+                let is_current = current_keys.contains(&completed.key);
+                if is_current {
+                    // Only surface failures for pages the user is actively waiting on.
+                    // Prefetch can fail for off-screen pages, but notifying that background
+                    // work would surface a problem the user cannot act on yet.
+                    state.set_error_notice(format!("render error: {err}"));
+                }
+                is_current
             }
         }
     }
@@ -136,7 +139,7 @@ impl RenderSubsystem {
 
     pub(crate) fn ensure_current_task_enqueued(
         &mut self,
-        state: &mut AppState,
+        _state: &mut AppState,
         pdf: &dyn PdfBackend,
         render_actor: &RenderActor,
         render_worker: &mut RenderWorker,
@@ -169,9 +172,6 @@ impl RenderSubsystem {
                     self.runtime.perf_stats.add_canceled_tasks(preempted);
                 }
                 if !enqueued {
-                    state.status.last_action_id = Some(ActionId::RenderQueue);
-                    state.status.message =
-                        "render queue busy; retrying initial preview".to_string();
                     break;
                 }
                 self.runtime
@@ -210,8 +210,6 @@ impl RenderSubsystem {
                 self.runtime.perf_stats.add_canceled_tasks(preempted);
             }
             if !enqueued {
-                state.status.last_action_id = Some(ActionId::RenderQueue);
-                state.status.message = format!("render queue busy; retrying page {}", page + 1);
                 break;
             }
             self.runtime
@@ -221,7 +219,7 @@ impl RenderSubsystem {
 
     pub(crate) fn dispatch_prefetch_if_due(
         &mut self,
-        state: &mut AppState,
+        _state: &mut AppState,
         render_actor: &mut RenderActor,
         render_worker: &mut RenderWorker,
         mut ctx: PrefetchDispatchContext,
@@ -255,13 +253,148 @@ impl RenderSubsystem {
                         prefetch_class_for_completed_task(task.priority),
                         task.generation,
                     ) {
-                        state.status.last_action_id = Some(ActionId::PrefetchEncode);
-                        state.status.message = format!("encode prefetch error: {err}");
+                        let _ = err;
                     }
                 }
+                self.runtime
+                    .set_queue_depth_with_inflight(render_worker.in_flight_len());
             }
         }
-        self.runtime
-            .set_queue_depth_with_inflight(render_worker.in_flight_len());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use ratatui::layout::Rect;
+
+    use super::*;
+    use crate::app::{NoticeLevel, RenderRuntime};
+    use crate::backend::RgbaFrame;
+    use crate::error::{AppError, AppResult};
+    use crate::perf::PerfStats;
+    use crate::presenter::{
+        ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
+        PresenterRenderOutcome,
+    };
+
+    #[derive(Default)]
+    struct StubPresenter;
+
+    impl ImagePresenter for StubPresenter {
+        fn prepare(
+            &mut self,
+            _cache_key: RenderedPageKey,
+            _frame: &RgbaFrame,
+            _viewport: Viewport,
+            _pan: PanOffset,
+            _generation: u64,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn render(
+            &mut self,
+            _frame: &mut ratatui::Frame<'_>,
+            _area: Rect,
+            _options: PresenterRenderOptions,
+        ) -> AppResult<PresenterRenderOutcome> {
+            Ok(PresenterRenderOutcome {
+                drew_image: false,
+                feedback: PresenterFeedback::None,
+                used_stale_fallback: false,
+            })
+        }
+
+        fn prefetch_encode(
+            &mut self,
+            _cache_key: RenderedPageKey,
+            _frame: &RgbaFrame,
+            _viewport: Viewport,
+            _pan: PanOffset,
+            _class: crate::render::prefetch::PrefetchClass,
+            _generation: u64,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+
+        fn capabilities(&self) -> PresenterCaps {
+            PresenterCaps {
+                backend_name: "stub",
+                supports_l2_cache: false,
+                cell_px: None,
+                preferred_max_render_scale: 2.0,
+            }
+        }
+
+        fn perf_snapshot(&self) -> Option<PerfStats> {
+            None
+        }
+    }
+
+    fn subsystem() -> RenderSubsystem {
+        RenderSubsystem {
+            presenter: Box::<StubPresenter>::default(),
+            runtime: RenderRuntime::default(),
+            viewer_has_image: false,
+        }
+    }
+
+    fn failed_result(key: RenderedPageKey, priority: RenderPriority) -> RenderWorkerResult {
+        RenderWorkerResult {
+            key,
+            priority,
+            generation: 3,
+            result: Err(AppError::pdf_render(
+                2,
+                AppError::invalid_argument("decode failed"),
+            )),
+            queue_wait: Duration::from_millis(1),
+            elapsed: Duration::from_millis(2),
+        }
+    }
+
+    #[test]
+    fn process_render_result_surfaces_visible_render_failure() {
+        let key = RenderedPageKey::new(7, 2, 1.0);
+        let mut render = subsystem();
+        let mut state = AppState::default();
+
+        let redraw = render.process_render_result(
+            &mut state,
+            failed_result(key, RenderPriority::CriticalCurrent),
+            &[key],
+            None,
+            PanOffset::default(),
+            false,
+            false,
+        );
+
+        assert!(redraw);
+        let notice = state.notice.expect("visible failure should set notice");
+        assert_eq!(notice.level, NoticeLevel::Error);
+        assert_eq!(notice.message, "render error: PDF render failed for page 2");
+    }
+
+    #[test]
+    fn process_render_result_ignores_prefetch_render_failure_notice() {
+        let current_key = RenderedPageKey::new(7, 0, 1.0);
+        let prefetch_key = RenderedPageKey::new(7, 3, 1.0);
+        let mut render = subsystem();
+        let mut state = AppState::default();
+
+        let redraw = render.process_render_result(
+            &mut state,
+            failed_result(prefetch_key, RenderPriority::Background),
+            &[current_key],
+            None,
+            PanOffset::default(),
+            false,
+            false,
+        );
+
+        assert!(!redraw);
+        assert!(state.notice.is_none());
     }
 }

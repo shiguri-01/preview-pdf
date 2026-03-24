@@ -5,6 +5,7 @@ mod spec;
 mod types;
 
 pub use dispatch::{CommandDispatchResult, dispatch, drain_background_events};
+pub(crate) use parse::first_token;
 pub use parse::{parse_command_text, parse_invocable_command_text};
 pub use spec::{
     CommandConditionContext, all_command_specs, command_registry, find_command_spec,

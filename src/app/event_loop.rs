@@ -5,7 +5,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::{self, MissedTickBehavior};
 
 use crate::backend::{PdfBackend, SharedPdfBackend};
-use crate::command::{ActionId, CommandOutcome};
+use crate::command::CommandOutcome;
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
 use crate::perf::{PerfIterationSnapshot, PerfScenarioId, RedrawReason};
@@ -563,8 +563,8 @@ impl App {
                 }
             }
             WaitEvent::Event(DomainEvent::InputError(message)) => {
-                self.state.status.last_action_id = Some(ActionId::Input);
-                self.state.status.message = format!("input error: {message}");
+                self.state
+                    .set_error_notice(format!("input error: {message}"));
                 self.request_redraw(runtime, RedrawReason::InputError);
             }
             WaitEvent::Event(DomainEvent::Command(request)) => {

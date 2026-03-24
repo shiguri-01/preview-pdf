@@ -14,12 +14,11 @@ This document defines the current architecture of `pvf`.
 ## Top-level module map
 
 - `src/command/`
-  - `types.rs`: `Command`, invocation metadata types, matcher kinds, layout command argument kinds, command outcome types.
+  - `types.rs`: `Command`, invocation metadata types, matcher kinds, layout command argument kinds, command outcome types, stable `ActionId`s for emitted command events.
   - `spec.rs`: command catalog plus visibility/invocation/availability policy.
   - `parse.rs`: command text parser and direct-invocation validation.
   - `core.rs`: command implementations (navigation/zoom/layout/debug).
   - `dispatch.rs`: typed dispatch entry point returning `CommandDispatchResult`, with source-aware invocation checks.
-  - `ActionId`: stable typed identifier for executed commands.
 
 - `src/event.rs`
   - Defines `DomainEvent` for loop-level routing:
@@ -33,7 +32,7 @@ This document defines the current architecture of `pvf`.
   - `core.rs`: application construction and subsystem ownership.
   - `event_loop.rs`: event-driven orchestration with `tokio::select!`.
   - `actors.rs`: loop-local actor state (`InputActor`, `RenderActor`, `UiActor`).
-  - `state.rs`: app state (current page, layout mode/direction, status, cache refs).
+  - `state.rs`: app state (current page, layout mode/direction, transient notice, cache refs).
   - `input_ops.rs`: key routing, palette flow, extension background drain, command dispatch wiring.
   - `render_ops.rs`: render completion ingestion, prefetch dispatch, visible-page enqueue.
   - `view_ops.rs`: viewport/scale helpers and frame draw operations.
@@ -101,7 +100,7 @@ This document defines the current architecture of `pvf`.
 
 - `src/ui/`
   - `layout.rs`: region geometry.
-  - `chrome.rs`: status/debug bars.
+  - `chrome.rs`: status, transient notices, compact presenter/protocol diagnostics.
   - `overlay.rs`: loading/error/palette overlays.
 
 ## Structural constraints

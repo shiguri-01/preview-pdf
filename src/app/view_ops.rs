@@ -218,7 +218,10 @@ impl RenderSubsystem {
             generation,
             nav_streak: _nav_streak,
         } = plan;
-        let allow_stale_fallback = false;
+        // Keep the last ready frame visible while the next page is still preparing
+        // so page flips do not briefly expose the terminal background.
+        let render_options =
+            presenter_render_options(self.viewer_has_image, PresenterRenderMode::Full);
         let file_name = pdf
             .path()
             .file_name()
@@ -295,7 +298,10 @@ impl RenderSubsystem {
                 Ok(Some(render_mode)) => match self.presenter.render(
                     frame,
                     image_area,
-                    PresenterRenderOptions::new(allow_stale_fallback, render_mode),
+                    PresenterRenderOptions {
+                        render_mode,
+                        ..render_options
+                    },
                 ) {
                     Ok(outcome) => {
                         render_feedback = outcome.feedback;
@@ -454,6 +460,13 @@ fn sync_render_notice(
     state.clear_render_notice();
 }
 
+fn presenter_render_options(
+    viewer_has_image: bool,
+    render_mode: PresenterRenderMode,
+) -> PresenterRenderOptions {
+    PresenterRenderOptions::new(viewer_has_image, render_mode)
+}
+
 fn resolve_layout_dimensions(
     pdf: &dyn PdfBackend,
     mode: PageLayoutMode,
@@ -544,11 +557,12 @@ mod tests {
 
     use super::{
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
-        decide_viewer_display, resolve_layout_dimensions, sync_render_notice,
+        decide_viewer_display, presenter_render_options, resolve_layout_dimensions,
+        sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
-    use crate::presenter::{PresenterFeedback, PresenterRenderOutcome};
+    use crate::presenter::{PresenterFeedback, PresenterRenderMode, PresenterRenderOutcome};
     use crate::render::cache::RenderedPageKey;
 
     struct DimPdf {
@@ -748,6 +762,20 @@ mod tests {
         assert_eq!(
             app.notice.as_ref().map(|notice| notice.message.as_str()),
             Some("search failed: backend failed")
+        );
+    }
+
+    #[test]
+    fn presenter_render_options_derive_stale_fallback_from_viewer_image_state() {
+        let with_image = presenter_render_options(true, PresenterRenderMode::Full);
+        let without_image = presenter_render_options(false, PresenterRenderMode::InitialPreview);
+
+        assert!(with_image.allow_stale_fallback);
+        assert!(!without_image.allow_stale_fallback);
+        assert_eq!(with_image.render_mode, PresenterRenderMode::Full);
+        assert_eq!(
+            without_image.render_mode,
+            PresenterRenderMode::InitialPreview
         );
     }
 

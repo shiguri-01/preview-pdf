@@ -130,10 +130,6 @@ pub(crate) fn set_page_layout(
 }
 
 pub(crate) fn set_zoom(app: &mut AppState, value: f32) -> AppResult<CommandNoticeResult> {
-    set_zoom_internal(app, value)
-}
-
-pub(crate) fn set_zoom_internal(app: &mut AppState, value: f32) -> AppResult<CommandNoticeResult> {
     if !value.is_finite() || value <= 0.0 {
         return Err(AppError::invalid_argument(
             "zoom must be a positive finite value",

@@ -1,5 +1,6 @@
 use crate::command::all_command_specs;
 use crate::command::find_command_spec;
+use crate::command::first_token;
 use crate::command::is_command_visible_in_palette;
 use crate::command::parse_command_text;
 use crate::command::parse_invocable_command_text;
@@ -206,13 +207,6 @@ fn has_argument_phase(input: &str) -> bool {
         return false;
     }
     trimmed.contains(char::is_whitespace)
-}
-
-fn first_token(input: &str) -> &str {
-    match input.find(char::is_whitespace) {
-        Some(index) => &input[..index],
-        None => input,
-    }
 }
 
 fn command_requires_argument_input(spec: crate::command::CommandSpec) -> bool {

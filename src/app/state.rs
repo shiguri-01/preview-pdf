@@ -147,6 +147,8 @@ impl Default for AppState {
 }
 
 impl AppState {
+    const RENDER_NOTICE_PREFIX: &str = "render error: ";
+
     pub fn apply_notice_action(&mut self, action: NoticeAction) {
         match action {
             NoticeAction::Keep => {}
@@ -172,6 +174,15 @@ impl AppState {
 
     pub fn clear_notice(&mut self) {
         self.notice = None;
+    }
+
+    pub fn clear_render_notice(&mut self) {
+        if self.notice.as_ref().is_some_and(|notice| {
+            notice.level == NoticeLevel::Error
+                && notice.message.starts_with(Self::RENDER_NOTICE_PREFIX)
+        }) {
+            self.notice = None;
+        }
     }
 
     pub fn page_step(&self) -> usize {

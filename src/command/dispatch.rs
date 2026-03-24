@@ -9,7 +9,7 @@ use crate::extension::ExtensionHost;
 
 use super::core::{
     first_page, goto_page, last_page, next_page, prev_page, set_debug_status_visible,
-    set_page_layout, set_zoom, set_zoom_internal,
+    set_page_layout, set_zoom,
 };
 use super::spec::{CommandConditionContext, rejection_message_for_command};
 use super::types::{Command, CommandInvocationSource, CommandOutcome};
@@ -74,8 +74,8 @@ pub fn dispatch(
         Command::LastPage => last_page(app, page_count),
         Command::GotoPage { page } => goto_page(app, page_count, page),
         Command::SetZoom { value } => set_zoom(app, value),
-        Command::ZoomIn => set_zoom_internal(app, app.zoom + ZOOM_STEP),
-        Command::ZoomOut => set_zoom_internal(app, app.zoom - ZOOM_STEP),
+        Command::ZoomIn => set_zoom(app, app.zoom + ZOOM_STEP),
+        Command::ZoomOut => set_zoom(app, app.zoom - ZOOM_STEP),
         Command::Scroll { dx, dy } => {
             app.scroll_x = app.scroll_x.saturating_add(dx);
             app.scroll_y = app.scroll_y.saturating_add(dy);

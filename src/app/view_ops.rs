@@ -373,11 +373,12 @@ impl RenderSubsystem {
         self.runtime.sync_presenter_metrics(self.presenter.as_ref());
         self.viewer_has_image = viewer_has_image;
 
-        if let Some(err) = render_error {
-            state.set_error_notice(format!("render error: {err}"));
-        } else if render_feedback == PresenterFeedback::Failed {
-            state.set_error_notice(format!("render error: failed to render {render_target}"));
-        }
+        sync_render_notice(
+            state,
+            render_error.as_deref(),
+            render_feedback,
+            &render_target,
+        );
 
         Ok(())
     }
@@ -434,6 +435,23 @@ fn draw_viewer_outcome(
             .unwrap_or_else(|| format!("Failed to render {loading_label}"));
         ui::draw_error_overlay(frame, image_area, &message);
     }
+}
+
+fn sync_render_notice(
+    state: &mut AppState,
+    render_error: Option<&str>,
+    render_feedback: PresenterFeedback,
+    render_target: &str,
+) {
+    if let Some(err) = render_error {
+        state.set_error_notice(format!("render error: {err}"));
+        return;
+    }
+    if render_feedback == PresenterFeedback::Failed {
+        state.set_error_notice(format!("render error: failed to render {render_target}"));
+        return;
+    }
+    state.clear_render_notice();
 }
 
 fn resolve_layout_dimensions(
@@ -526,9 +544,9 @@ mod tests {
 
     use super::{
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
-        decide_viewer_display, resolve_layout_dimensions,
+        decide_viewer_display, resolve_layout_dimensions, sync_render_notice,
     };
-    use crate::app::{PageLayoutMode, VisiblePageSlots};
+    use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
     use crate::presenter::{PresenterFeedback, PresenterRenderOutcome};
     use crate::render::cache::RenderedPageKey;
@@ -697,6 +715,39 @@ mod tests {
                 show_loading: true,
                 show_error: false,
             }
+        );
+    }
+
+    #[test]
+    fn sync_render_notice_clears_stale_render_error_after_success() {
+        let mut app = AppState::default();
+        app.set_error_notice("render error: decode failed");
+
+        sync_render_notice(&mut app, None, PresenterFeedback::None, "page 1/10");
+
+        assert!(app.notice.is_none());
+    }
+
+    #[test]
+    fn sync_render_notice_clears_stale_render_error_while_pending() {
+        let mut app = AppState::default();
+        app.set_error_notice("render error: decode failed");
+
+        sync_render_notice(&mut app, None, PresenterFeedback::Pending, "page 1/10");
+
+        assert!(app.notice.is_none());
+    }
+
+    #[test]
+    fn sync_render_notice_preserves_non_render_notice() {
+        let mut app = AppState::default();
+        app.set_error_notice("search failed: backend failed");
+
+        sync_render_notice(&mut app, None, PresenterFeedback::None, "page 1/10");
+
+        assert_eq!(
+            app.notice.as_ref().map(|notice| notice.message.as_str()),
+            Some("search failed: backend failed")
         );
     }
 

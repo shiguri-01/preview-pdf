@@ -77,7 +77,7 @@ pub fn parse_invocable_command_text(
     parse_command_text(trimmed)
 }
 
-fn first_token(input: &str) -> &str {
+pub(crate) fn first_token(input: &str) -> &str {
     match input.find(char::is_whitespace) {
         Some(index) => &input[..index],
         None => input,

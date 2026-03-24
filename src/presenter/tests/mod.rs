@@ -351,6 +351,60 @@ fn render_pending_uses_stale_fallback_when_allowed() {
 }
 
 #[test]
+fn render_pending_keeps_stale_fallback_when_new_oversize_entry_arrives() {
+    let mut presenter = RatatuiImagePresenter::with_cache_limits(8, 32);
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let area = Rect::new(1, 1, 12, 7);
+    let oversize = frame();
+
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 1, 0.25),
+            &oversize,
+            viewport,
+            PanOffset::default(),
+            1,
+        )
+        .expect("preview prepare should pass");
+    render_until_ready(&mut presenter, area);
+
+    presenter
+        .prepare(
+            RenderedPageKey::new(9, 1, 1.0),
+            &oversize,
+            viewport,
+            PanOffset::default(),
+            2,
+        )
+        .expect("full prepare should pass");
+
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut result = None;
+    terminal
+        .draw(|frame| {
+            result = Some(presenter.render(
+                frame,
+                area,
+                PresenterRenderOptions::new(true, PresenterRenderMode::Full),
+            ));
+        })
+        .expect("draw should pass");
+
+    let outcome = result
+        .expect("render result should be captured")
+        .expect("render should succeed");
+    assert_eq!(outcome.feedback, PresenterFeedback::Pending);
+    assert!(outcome.drew_image);
+    assert!(outcome.used_stale_fallback);
+}
+
+#[test]
 fn render_pending_does_not_use_stale_fallback_when_disallowed() {
     let mut presenter = RatatuiImagePresenter::new();
     let viewport = Viewport {
@@ -707,12 +761,12 @@ fn encode_queue_cancels_stale_prefetch_generation() {
 fn l2_cached_mut_does_not_touch_lru_order() {
     let mut cache = TerminalFrameCache::default();
     for page in 0..L2_MAX_ENTRIES {
-        let _ = cache.insert(l2_key(page), frame(), 1, false);
+        let _ = cache.insert(l2_key(page), frame(), 1, false, None);
     }
 
     let oldest = l2_key(0);
     assert!(cache.cached_mut(&oldest).is_some());
-    let _ = cache.insert(l2_key(L2_MAX_ENTRIES), frame(), 1, false);
+    let _ = cache.insert(l2_key(L2_MAX_ENTRIES), frame(), 1, false, None);
 
     assert!(cache.entries.peek(&oldest).is_none());
     assert!(cache.entries.peek(&l2_key(1)).is_some());
@@ -722,9 +776,9 @@ fn l2_cached_mut_does_not_touch_lru_order() {
 fn l2_insert_at_capacity_keeps_memory_accounting_consistent() {
     let mut cache = TerminalFrameCache::default();
     for page in 0..L2_MAX_ENTRIES {
-        let _ = cache.insert(l2_key(page), frame(), 16, false);
+        let _ = cache.insert(l2_key(page), frame(), 16, false, None);
     }
-    let _ = cache.insert(l2_key(L2_MAX_ENTRIES), frame(), 20, false);
+    let _ = cache.insert(l2_key(L2_MAX_ENTRIES), frame(), 20, false, None);
 
     let expected = (L2_MAX_ENTRIES - 1) * 16 + 20;
     assert_eq!(cache.len(), L2_MAX_ENTRIES);
@@ -736,7 +790,7 @@ fn l2_insert_keeps_pending_frame_buffer_shared() {
     let mut cache = TerminalFrameCache::default();
     let key = l2_key(0);
     let source = frame();
-    let _ = cache.insert(key, source.clone(), source.byte_len(), false);
+    let _ = cache.insert(key, source.clone(), source.byte_len(), false, None);
 
     let stored_pixels = match cache.cached_mut(&key).map(|entry| &entry.state) {
         Some(TerminalFrameState::PendingFrame(frame)) => &frame.pixels,
@@ -750,9 +804,9 @@ fn l2_oversize_insert_without_override_preserves_existing_entries() {
     let mut cache = TerminalFrameCache::new(8, 32);
     let kept = l2_key(0);
     let oversize = l2_key(1);
-    let _ = cache.insert(kept, frame(), 16, false);
+    let _ = cache.insert(kept, frame(), 16, false, None);
 
-    let inserted = cache.insert(oversize, frame(), 64, false);
+    let inserted = cache.insert(oversize, frame(), 64, false, None);
     assert!(!inserted);
     assert!(cache.cached_mut(&kept).is_some());
     assert!(cache.cached_mut(&oversize).is_none());
@@ -763,13 +817,28 @@ fn l2_oversize_insert_with_override_keeps_single_entry() {
     let mut cache = TerminalFrameCache::new(8, 32);
     let kept = l2_key(0);
     let oversize = l2_key(1);
-    let _ = cache.insert(kept, frame(), 16, false);
+    let _ = cache.insert(kept, frame(), 16, false, None);
 
-    let inserted = cache.insert(oversize, frame(), 64, true);
+    let inserted = cache.insert(oversize, frame(), 64, true, None);
     assert!(inserted);
     assert!(cache.cached_mut(&kept).is_none());
     assert!(cache.cached_mut(&oversize).is_some());
     assert_eq!(cache.len(), 1);
+}
+
+#[test]
+fn l2_oversize_insert_with_protected_key_keeps_visible_entry() {
+    let mut cache = TerminalFrameCache::new(8, 32);
+    let visible = l2_key(0);
+    let oversize = l2_key(1);
+    let _ = cache.insert(visible, frame(), 16, false, None);
+
+    let inserted = cache.insert(oversize, frame(), 64, true, Some(visible));
+    assert!(inserted);
+    assert!(cache.cached_mut(&visible).is_some());
+    assert!(cache.cached_mut(&oversize).is_some());
+    assert_eq!(cache.len(), 2);
+    assert!(cache.memory_bytes > cache.memory_budget_bytes());
 }
 
 #[test]
@@ -778,11 +847,11 @@ fn l2_non_oversize_insert_does_not_evict_single_oversize_entry() {
     let oversize = l2_key(1);
     let prefetch = l2_key(2);
 
-    assert!(cache.insert(oversize, frame(), 64, true));
+    assert!(cache.insert(oversize, frame(), 64, true, None));
     assert_eq!(cache.len(), 1);
     assert!(cache.cached_mut(&oversize).is_some());
 
-    let inserted_prefetch = cache.insert(prefetch, frame(), 16, false);
+    let inserted_prefetch = cache.insert(prefetch, frame(), 16, false, None);
     assert!(!inserted_prefetch);
     assert_eq!(cache.len(), 1);
     assert!(cache.cached_mut(&oversize).is_some());

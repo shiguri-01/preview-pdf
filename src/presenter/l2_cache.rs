@@ -230,24 +230,25 @@ impl TerminalFrameCache {
         &mut self,
         protected_key: Option<TerminalFrameKey>,
     ) -> Option<(TerminalFrameKey, TerminalFrameEntry)> {
-        let mut protected_entry = None;
+        let mut protected_entry = Vec::new();
 
         loop {
-            let popped = self.entries.pop_lru();
-            match popped {
+            match self.entries.pop_lru() {
                 Some((key, entry)) if Some(key) == protected_key => {
-                    protected_entry = Some((key, entry));
+                    protected_entry.push((key, entry));
                     continue;
                 }
                 Some(pair) => {
-                    if let Some((protected_key, protected_entry)) = protected_entry {
-                        self.entries.put(protected_key, protected_entry);
+                    for (key, entry) in protected_entry.into_iter().rev() {
+                        let _ = self.entries.push(key, entry);
+                        let _ = self.entries.demote(&key);
                     }
                     return Some(pair);
                 }
                 None => {
-                    if let Some((protected_key, protected_entry)) = protected_entry {
-                        self.entries.put(protected_key, protected_entry);
+                    for (key, entry) in protected_entry.into_iter().rev() {
+                        let _ = self.entries.push(key, entry);
+                        let _ = self.entries.demote(&key);
                     }
                     return None;
                 }

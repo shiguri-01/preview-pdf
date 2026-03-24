@@ -98,7 +98,13 @@ impl TerminalFrameCache {
             // Keep the visible ready frame resident while swapping in an oversize current
             // entry. We allow this narrow over-budget state so the viewer never regresses
             // from "image visible" back to blank while the replacement frame is pending.
-            self.retain_only(protected_key.filter(|protected| *protected != key));
+            // If the cache is configured for a single entry, honor that cap and fall back
+            // to the original replacement behavior.
+            let protected_key = (self.max_entries > 1)
+                .then_some(protected_key)
+                .flatten()
+                .filter(|protected| *protected != key);
+            self.retain_only(protected_key);
             self.memory_bytes = self.memory_bytes.saturating_add(approx_bytes);
             self.entries.put(
                 key,

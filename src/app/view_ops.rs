@@ -336,47 +336,20 @@ impl RenderSubsystem {
                     }
                 },
                 Ok(None) => {
-                    // Some terminal protocols do not keep the previously drawn image alive
-                    // across unrelated UI redraws, so while the next current frame is still
-                    // pending we must explicitly redraw the visible image underneath Loading.
-                    match redraw_visible_image_while_pending(
-                        self.presenter.as_mut(),
+                    render_feedback = PresenterFeedback::Pending;
+                    let outcome = PresenterRenderOutcome {
+                        drew_image: false,
+                        feedback: PresenterFeedback::Pending,
+                        used_stale_fallback: false,
+                    };
+                    draw_viewer_outcome(
                         frame,
                         image_area,
-                        render_options,
-                    ) {
-                        Ok(outcome) => {
-                            render_feedback = outcome.feedback;
-                            if outcome.drew_image {
-                                viewer_has_image = true;
-                            }
-                            draw_viewer_outcome(
-                                frame,
-                                image_area,
-                                outcome,
-                                loading_label.as_str(),
-                                None,
-                                viewer_has_image,
-                            );
-                        }
-                        Err(err) => {
-                            let message = err.to_string();
-                            render_error = Some(message.clone());
-                            let outcome = PresenterRenderOutcome {
-                                drew_image: false,
-                                feedback: PresenterFeedback::Failed,
-                                used_stale_fallback: false,
-                            };
-                            draw_viewer_outcome(
-                                frame,
-                                image_area,
-                                outcome,
-                                loading_label.as_str(),
-                                Some(&message),
-                                viewer_has_image,
-                            );
-                        }
-                    }
+                        outcome,
+                        loading_label.as_str(),
+                        None,
+                        viewer_has_image,
+                    );
                 }
                 Err(err) => {
                     let message = err.to_string();
@@ -468,19 +441,6 @@ fn draw_viewer_outcome(
             .unwrap_or_else(|| format!("Failed to render {loading_label}"));
         ui::draw_error_overlay(frame, image_area, &message);
     }
-}
-
-fn redraw_visible_image_while_pending(
-    presenter: &mut dyn crate::presenter::ImagePresenter,
-    frame: &mut ratatui::Frame<'_>,
-    image_area: ratatui::layout::Rect,
-    render_options: PresenterRenderOptions,
-) -> AppResult<PresenterRenderOutcome> {
-    let outcome = presenter.render(frame, image_area, render_options)?;
-    Ok(PresenterRenderOutcome {
-        feedback: PresenterFeedback::Pending,
-        ..outcome
-    })
 }
 
 fn sync_render_notice(
@@ -595,22 +555,14 @@ fn format_render_target(slots: VisiblePageSlots, page_count: usize) -> String {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-    use ratatui::layout::Rect;
-
     use super::{
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
-        decide_viewer_display, presenter_render_options, redraw_visible_image_while_pending,
-        resolve_layout_dimensions, sync_render_notice,
+        decide_viewer_display, presenter_render_options, resolve_layout_dimensions,
+        sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
-    use crate::error::AppResult;
-    use crate::presenter::{
-        ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderMode,
-        PresenterRenderOptions, PresenterRenderOutcome, Viewport,
-    };
+    use crate::presenter::{PresenterFeedback, PresenterRenderMode, PresenterRenderOutcome};
     use crate::render::cache::RenderedPageKey;
 
     struct DimPdf {
@@ -657,41 +609,6 @@ mod tests {
 
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
-        }
-    }
-
-    struct StubPresenter {
-        outcome: PresenterRenderOutcome,
-    }
-
-    impl ImagePresenter for StubPresenter {
-        fn prepare(
-            &mut self,
-            _cache_key: RenderedPageKey,
-            _frame: &RgbaFrame,
-            _viewport: Viewport,
-            _pan: PanOffset,
-            _generation: u64,
-        ) -> AppResult<()> {
-            Ok(())
-        }
-
-        fn render(
-            &mut self,
-            _frame: &mut ratatui::Frame<'_>,
-            _area: Rect,
-            _options: PresenterRenderOptions,
-        ) -> AppResult<PresenterRenderOutcome> {
-            Ok(self.outcome)
-        }
-
-        fn capabilities(&self) -> PresenterCaps {
-            PresenterCaps {
-                backend_name: "stub",
-                supports_l2_cache: false,
-                cell_px: None,
-                preferred_max_render_scale: 1.0,
-            }
         }
     }
 
@@ -833,37 +750,6 @@ mod tests {
         sync_render_notice(&mut app, None, PresenterFeedback::Pending, "page 1/10");
 
         assert!(app.notice.is_none());
-    }
-
-    #[test]
-    fn redraw_visible_image_while_pending_preserves_drawn_image() {
-        let backend = TestBackend::new(20, 10);
-        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-        let mut presenter = StubPresenter {
-            outcome: PresenterRenderOutcome {
-                drew_image: true,
-                feedback: PresenterFeedback::None,
-                used_stale_fallback: false,
-            },
-        };
-        let mut result = None;
-
-        terminal
-            .draw(|frame| {
-                result = Some(redraw_visible_image_while_pending(
-                    &mut presenter,
-                    frame,
-                    Rect::new(0, 0, 20, 10),
-                    PresenterRenderOptions::new(true, PresenterRenderMode::Full),
-                ));
-            })
-            .expect("draw should pass");
-
-        let outcome = result
-            .expect("render result should be captured")
-            .expect("render should succeed");
-        assert!(outcome.drew_image);
-        assert_eq!(outcome.feedback, PresenterFeedback::Pending);
     }
 
     #[test]

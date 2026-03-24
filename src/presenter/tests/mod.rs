@@ -842,6 +842,20 @@ fn l2_oversize_insert_with_protected_key_keeps_visible_entry() {
 }
 
 #[test]
+fn l2_oversize_insert_with_protected_key_respects_single_entry_limit() {
+    let mut cache = TerminalFrameCache::new(1, 32);
+    let visible = l2_key(0);
+    let oversize = l2_key(1);
+    let _ = cache.insert(visible, frame(), 16, false, None);
+
+    let inserted = cache.insert(oversize, frame(), 64, true, Some(visible));
+    assert!(inserted);
+    assert!(cache.cached_mut(&visible).is_none());
+    assert!(cache.cached_mut(&oversize).is_some());
+    assert_eq!(cache.len(), 1);
+}
+
+#[test]
 fn l2_non_oversize_insert_does_not_evict_single_oversize_entry() {
     let mut cache = TerminalFrameCache::new(8, 32);
     let oversize = l2_key(1);

@@ -17,7 +17,7 @@ fn noop() -> CommandNoticeResult {
 }
 
 pub(crate) fn next_page(app: &mut AppState, page_count: usize) -> AppResult<CommandNoticeResult> {
-    let page_count = resolve_page_count(app, page_count)?;
+    let page_count = resolve_page_count(page_count)?;
     let step = app.page_step();
 
     if app.current_page.saturating_add(step) >= page_count {
@@ -30,7 +30,7 @@ pub(crate) fn next_page(app: &mut AppState, page_count: usize) -> AppResult<Comm
 }
 
 pub(crate) fn prev_page(app: &mut AppState, page_count: usize) -> AppResult<CommandNoticeResult> {
-    let page_count = resolve_page_count(app, page_count)?;
+    let page_count = resolve_page_count(page_count)?;
     let step = app.page_step();
 
     if app.current_page == 0 {
@@ -43,7 +43,7 @@ pub(crate) fn prev_page(app: &mut AppState, page_count: usize) -> AppResult<Comm
 }
 
 pub(crate) fn first_page(app: &mut AppState, page_count: usize) -> AppResult<CommandNoticeResult> {
-    let page_count = resolve_page_count(app, page_count)?;
+    let page_count = resolve_page_count(page_count)?;
 
     if app.current_page == 0 {
         return Ok(noop());
@@ -54,7 +54,7 @@ pub(crate) fn first_page(app: &mut AppState, page_count: usize) -> AppResult<Com
 }
 
 pub(crate) fn last_page(app: &mut AppState, page_count: usize) -> AppResult<CommandNoticeResult> {
-    let page_count = resolve_page_count(app, page_count)?;
+    let page_count = resolve_page_count(page_count)?;
 
     let target = app.normalize_page_for_layout(page_count - 1, page_count);
     if app.current_page == target {
@@ -70,7 +70,7 @@ pub(crate) fn goto_page(
     page_count: usize,
     page: usize,
 ) -> AppResult<CommandNoticeResult> {
-    let page_count = resolve_page_count(app, page_count)?;
+    let page_count = resolve_page_count(page_count)?;
 
     if page < 1 {
         return Err(AppError::invalid_argument("page number must be >= 1"));
@@ -96,7 +96,7 @@ pub(crate) fn set_page_layout(
     mode: PageLayoutModeArg,
     direction: Option<SpreadDirectionArg>,
 ) -> AppResult<CommandNoticeResult> {
-    let page_count = resolve_page_count(app, page_count)?;
+    let page_count = resolve_page_count(page_count)?;
 
     let next_mode = match mode {
         PageLayoutModeArg::Single => PageLayoutMode::Single,
@@ -157,7 +157,7 @@ pub(crate) fn set_debug_status_visible(
     Ok(applied())
 }
 
-fn resolve_page_count(_app: &mut AppState, page_count: usize) -> AppResult<usize> {
+fn resolve_page_count(page_count: usize) -> AppResult<usize> {
     if page_count > 0 {
         return Ok(page_count);
     }

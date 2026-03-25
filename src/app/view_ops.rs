@@ -653,12 +653,13 @@ mod tests {
             PresenterRenderOutcome {
                 drew_image: true,
                 feedback: PresenterFeedback::None,
-                used_stale_fallback: false,
+                used_stale_fallback: true,
             },
         );
 
         assert!(outcome.drew_image);
         assert_eq!(outcome.feedback, PresenterFeedback::Pending);
+        assert!(outcome.used_stale_fallback);
     }
 
     #[test]

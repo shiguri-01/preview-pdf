@@ -1,5 +1,6 @@
 use crate::render::cache::RenderedPageKey;
-use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
+use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
+use crate::work::WorkClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavDirection {
@@ -24,34 +25,6 @@ impl Default for NavIntent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RenderPriority {
-    CriticalCurrent,
-    GuardReverse,
-    DirectionalLead,
-    Background,
-}
-
-impl RenderPriority {
-    pub fn to_prefetch_class(self) -> PrefetchClass {
-        match self {
-            Self::CriticalCurrent => PrefetchClass::CriticalCurrent,
-            Self::GuardReverse => PrefetchClass::GuardReverse,
-            Self::DirectionalLead => PrefetchClass::DirectionalLead,
-            Self::Background => PrefetchClass::Background,
-        }
-    }
-
-    pub fn from_prefetch_class(class: PrefetchClass) -> Self {
-        match class {
-            PrefetchClass::CriticalCurrent => Self::CriticalCurrent,
-            PrefetchClass::GuardReverse => Self::GuardReverse,
-            PrefetchClass::DirectionalLead => Self::DirectionalLead,
-            PrefetchClass::Background => Self::Background,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrefetchPolicy {
     pub max_prefetch_depth: usize,
@@ -72,7 +45,7 @@ pub struct RenderTask {
     pub doc_id: u64,
     pub page: usize,
     pub scale: f32,
-    pub priority: RenderPriority,
+    pub class: WorkClass,
     pub generation: u64,
     pub reason: &'static str,
 }
@@ -101,7 +74,7 @@ impl RenderScheduler {
         let key = RenderedPageKey::new(task.doc_id, task.page, task.scale);
         let meta = QueueTaskMeta {
             key,
-            class: task.priority.to_prefetch_class(),
+            class: task.class,
             generation: task.generation,
         };
         let _ = self.tasks.push(task, meta);
@@ -180,7 +153,7 @@ pub fn build_prefetch_plan_with_policy(
         doc_id,
         page: cursor,
         scale,
-        priority: RenderPriority::CriticalCurrent,
+        class: WorkClass::CriticalCurrent,
         generation: nav_intent.generation,
         reason: "current-page",
     });
@@ -194,7 +167,7 @@ pub fn build_prefetch_plan_with_policy(
                 page_count,
                 doc_id,
                 scale,
-                RenderPriority::DirectionalLead,
+                WorkClass::DirectionalLead,
                 nav_intent.generation,
                 "lead+1",
             );
@@ -207,7 +180,7 @@ pub fn build_prefetch_plan_with_policy(
                     page_count,
                     doc_id,
                     scale,
-                    RenderPriority::GuardReverse,
+                    WorkClass::GuardReverse,
                     nav_intent.generation,
                     "guard-reverse",
                 );
@@ -222,7 +195,7 @@ pub fn build_prefetch_plan_with_policy(
                     page_count,
                     doc_id,
                     scale,
-                    RenderPriority::DirectionalLead,
+                    WorkClass::DirectionalLead,
                     nav_intent.generation,
                     reason,
                 );
@@ -236,7 +209,7 @@ pub fn build_prefetch_plan_with_policy(
                     page_count,
                     doc_id,
                     scale,
-                    RenderPriority::Background,
+                    WorkClass::Background,
                     nav_intent.generation,
                     "background-reverse",
                 );
@@ -250,7 +223,7 @@ pub fn build_prefetch_plan_with_policy(
                 page_count,
                 doc_id,
                 scale,
-                RenderPriority::DirectionalLead,
+                WorkClass::DirectionalLead,
                 nav_intent.generation,
                 "lead-1",
             );
@@ -263,7 +236,7 @@ pub fn build_prefetch_plan_with_policy(
                     page_count,
                     doc_id,
                     scale,
-                    RenderPriority::GuardReverse,
+                    WorkClass::GuardReverse,
                     nav_intent.generation,
                     "guard-reverse",
                 );
@@ -278,7 +251,7 @@ pub fn build_prefetch_plan_with_policy(
                     page_count,
                     doc_id,
                     scale,
-                    RenderPriority::DirectionalLead,
+                    WorkClass::DirectionalLead,
                     nav_intent.generation,
                     reason,
                 );
@@ -292,7 +265,7 @@ pub fn build_prefetch_plan_with_policy(
                     page_count,
                     doc_id,
                     scale,
-                    RenderPriority::Background,
+                    WorkClass::Background,
                     nav_intent.generation,
                     "background-reverse",
                 );
@@ -318,8 +291,8 @@ pub fn should_cancel(task: &RenderTask, nav_intent: NavIntent, scale: f32) -> bo
     }
 
     matches!(
-        task.priority,
-        RenderPriority::DirectionalLead | RenderPriority::Background
+        task.class,
+        WorkClass::DirectionalLead | WorkClass::Background
     )
 }
 
@@ -339,7 +312,7 @@ fn push_relative(
     page_count: usize,
     doc_id: u64,
     scale: f32,
-    priority: RenderPriority,
+    class: WorkClass,
     generation: u64,
     reason: &'static str,
 ) {
@@ -351,7 +324,7 @@ fn push_relative(
         doc_id,
         page: pos as usize,
         scale,
-        priority,
+        class,
         generation,
         reason,
     });
@@ -360,9 +333,10 @@ fn push_relative(
 #[cfg(test)]
 mod tests {
     use super::{
-        NavDirection, NavIntent, PrefetchPolicy, RenderPriority, RenderScheduler, RenderTask,
-        build_prefetch_plan, build_prefetch_plan_with_policy, should_cancel,
+        NavDirection, NavIntent, PrefetchPolicy, RenderScheduler, RenderTask, build_prefetch_plan,
+        build_prefetch_plan_with_policy, should_cancel,
     };
+    use crate::work::WorkClass;
 
     #[test]
     fn prefetch_forward_order_matches_rule() {
@@ -375,9 +349,9 @@ mod tests {
         let pages: Vec<usize> = tasks.iter().map(|t| t.page).collect();
 
         assert_eq!(pages, vec![10, 11, 9, 12, 13, 8]);
-        assert_eq!(tasks[0].priority, RenderPriority::CriticalCurrent);
-        assert_eq!(tasks[2].priority, RenderPriority::GuardReverse);
-        assert_eq!(tasks[5].priority, RenderPriority::Background);
+        assert_eq!(tasks[0].class, WorkClass::CriticalCurrent);
+        assert_eq!(tasks[2].class, WorkClass::GuardReverse);
+        assert_eq!(tasks[5].class, WorkClass::Background);
     }
 
     #[test]
@@ -412,7 +386,7 @@ mod tests {
             doc_id: 1,
             page: 2,
             scale: 1.0,
-            priority: RenderPriority::Background,
+            class: WorkClass::Background,
             generation: 1,
             reason: "bg",
         });
@@ -420,13 +394,13 @@ mod tests {
             doc_id: 1,
             page: 1,
             scale: 1.0,
-            priority: RenderPriority::CriticalCurrent,
+            class: WorkClass::CriticalCurrent,
             generation: 1,
             reason: "critical",
         });
 
         let first = scheduler.next_task().expect("task should exist");
-        assert_eq!(first.priority, RenderPriority::CriticalCurrent);
+        assert_eq!(first.class, WorkClass::CriticalCurrent);
     }
 
     #[test]
@@ -435,7 +409,7 @@ mod tests {
             doc_id: 3,
             page: 9,
             scale: 1.0,
-            priority: RenderPriority::DirectionalLead,
+            class: WorkClass::DirectionalLead,
             generation: 1,
             reason: "lead",
         };
@@ -456,7 +430,7 @@ mod tests {
             doc_id: 1,
             page: 5,
             scale: 1.0,
-            priority: RenderPriority::DirectionalLead,
+            class: WorkClass::DirectionalLead,
             generation: 1,
             reason: "lead",
         });
@@ -464,7 +438,7 @@ mod tests {
             doc_id: 1,
             page: 4,
             scale: 1.0,
-            priority: RenderPriority::GuardReverse,
+            class: WorkClass::GuardReverse,
             generation: 1,
             reason: "guard",
         });
@@ -523,7 +497,7 @@ mod tests {
 
         let pages: Vec<usize> = tasks
             .iter()
-            .filter(|task| task.priority == RenderPriority::GuardReverse)
+            .filter(|task| task.class == WorkClass::GuardReverse)
             .map(|task| task.page)
             .collect();
         assert_eq!(pages, vec![9, 8]);

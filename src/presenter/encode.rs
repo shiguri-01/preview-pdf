@@ -11,12 +11,19 @@ use tokio::sync::mpsc::{
 use tokio::task::JoinHandle;
 
 use crate::backend::RgbaFrame;
-use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
+use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
+use crate::work::WorkClass;
 
 use super::image_ops::{create_protocol_with_picker, resize_frame_for_area};
 use super::l2_cache::TerminalFrameKey;
 
 pub(crate) const ENCODE_RESIZE_FILTER: FilterType = FilterType::Nearest;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EncodeLaneKind {
+    Current,
+    Background,
+}
 
 pub(crate) enum EncodeWorkerRequest {
     Encode {
@@ -25,7 +32,7 @@ pub(crate) enum EncodeWorkerRequest {
         frame: RgbaFrame,
         area: Rect,
         allow_upscale: bool,
-        class: PrefetchClass,
+        class: WorkClass,
         generation: u64,
         enqueued_at: std::time::Instant,
     },
@@ -42,6 +49,7 @@ pub(crate) struct EncodeWorkerTask {
 }
 
 pub(crate) struct EncodeWorkerResult {
+    pub(crate) lane: EncodeLaneKind,
     pub(crate) event: EncodeWorkerEvent,
 }
 
@@ -108,6 +116,7 @@ pub(crate) fn send_encode_request(
 
 pub(crate) fn spawn_encode_worker(
     runtime: &EncodeWorkerRuntime,
+    lane: EncodeLaneKind,
 ) -> (
     UnboundedSender<EncodeWorkerRequest>,
     UnboundedReceiver<EncodeWorkerResult>,
@@ -115,12 +124,13 @@ pub(crate) fn spawn_encode_worker(
 ) {
     let (request_tx, request_rx) = unbounded_channel();
     let (result_tx, result_rx) = unbounded_channel();
-    let worker = runtime.spawn_blocking(move || encode_worker_main(request_rx, result_tx));
+    let worker = runtime.spawn_blocking(move || encode_worker_main(lane, request_rx, result_tx));
     (request_tx, result_rx, worker)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn enqueue_encode_request(
+    lane: EncodeLaneKind,
     request: EncodeWorkerRequest,
     queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
 ) -> bool {
@@ -135,9 +145,11 @@ pub(crate) fn enqueue_encode_request(
             generation,
             enqueued_at,
         } => {
-            let _ = cancel_stale_prefetch_with_keys(queue, generation);
-            if class == PrefetchClass::CriticalCurrent && queue.contains_key(&key) {
-                let _ = queue.retain(|_, meta| meta.key != key);
+            let _ = cancel_stale_tasks_with_keys(lane, queue, generation);
+            if lane == EncodeLaneKind::Current
+                && retain_current_lane_same_key(queue, key, generation)
+            {
+                return true;
             }
 
             let task = EncodeWorkerTask {
@@ -160,17 +172,19 @@ pub(crate) fn enqueue_encode_request(
     }
 }
 
-fn cancel_stale_prefetch_with_keys(
+fn cancel_stale_tasks_with_keys(
+    lane: EncodeLaneKind,
     queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
     generation: u64,
 ) -> Vec<TerminalFrameKey> {
     let mut removed = Vec::new();
     let _ = queue.retain(|_, meta| {
-        let keep = meta.generation >= generation
-            || matches!(
-                meta.class,
-                PrefetchClass::CriticalCurrent | PrefetchClass::GuardReverse
-            );
+        let keep = match lane {
+            EncodeLaneKind::Current => meta.generation >= generation,
+            EncodeLaneKind::Background => {
+                meta.generation >= generation || meta.class.kept_on_background_stale_generation()
+            }
+        };
         if !keep {
             removed.push(meta.key);
         }
@@ -179,7 +193,27 @@ fn cancel_stale_prefetch_with_keys(
     removed
 }
 
+fn retain_current_lane_same_key(
+    queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
+    key: TerminalFrameKey,
+    generation: u64,
+) -> bool {
+    let mut newer_duplicate_queued = false;
+    let _ = queue.retain(|_, meta| {
+        if meta.key != key {
+            return true;
+        }
+        if meta.generation > generation {
+            newer_duplicate_queued = true;
+            return true;
+        }
+        false
+    });
+    newer_duplicate_queued
+}
+
 fn enqueue_with_notifications(
+    lane: EncodeLaneKind,
     request: EncodeWorkerRequest,
     queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
     result_tx: &UnboundedSender<EncodeWorkerResult>,
@@ -195,23 +229,27 @@ fn enqueue_with_notifications(
             generation,
             enqueued_at,
         } => {
-            let canceled = cancel_stale_prefetch_with_keys(queue, generation);
+            let canceled = cancel_stale_tasks_with_keys(lane, queue, generation);
             let canceled_count = canceled.len();
             for canceled_key in canceled {
                 let _ = result_tx.send(EncodeWorkerResult {
+                    lane,
                     event: EncodeWorkerEvent::CanceledStale { key: canceled_key },
                 });
             }
             if canceled_count > 0 {
                 let _ = result_tx.send(EncodeWorkerResult {
+                    lane,
                     event: EncodeWorkerEvent::QueueState {
                         depth: queue.len(),
                         in_flight: 0,
                     },
                 });
             }
-            if class == PrefetchClass::CriticalCurrent && queue.contains_key(&key) {
-                let _ = queue.retain(|_, meta| meta.key != key);
+            if lane == EncodeLaneKind::Current
+                && retain_current_lane_same_key(queue, key, generation)
+            {
+                return true;
             }
 
             let task = EncodeWorkerTask {
@@ -229,6 +267,7 @@ fn enqueue_with_notifications(
             };
             let _ = queue.push(task, meta);
             let _ = result_tx.send(EncodeWorkerResult {
+                lane,
                 event: EncodeWorkerEvent::QueueState {
                     depth: queue.len(),
                     in_flight: 0,
@@ -247,6 +286,7 @@ pub(crate) fn pop_next_encode_task(
 }
 
 fn encode_worker_main(
+    lane: EncodeLaneKind,
     mut request_rx: UnboundedReceiver<EncodeWorkerRequest>,
     result_tx: UnboundedSender<EncodeWorkerResult>,
 ) {
@@ -258,7 +298,7 @@ fn encode_worker_main(
                 Some(request) => request,
                 None => break,
             };
-            if !enqueue_with_notifications(request, &mut queue, &result_tx) {
+            if !enqueue_with_notifications(lane, request, &mut queue, &result_tx) {
                 break;
             }
         }
@@ -266,7 +306,7 @@ fn encode_worker_main(
         loop {
             match request_rx.try_recv() {
                 Ok(request) => {
-                    if !enqueue_with_notifications(request, &mut queue, &result_tx) {
+                    if !enqueue_with_notifications(lane, request, &mut queue, &result_tx) {
                         return;
                     }
                 }
@@ -279,6 +319,7 @@ fn encode_worker_main(
             continue;
         };
         let _ = result_tx.send(EncodeWorkerResult {
+            lane,
             event: EncodeWorkerEvent::QueueState {
                 depth: queue.len(),
                 in_flight: 1,
@@ -295,6 +336,7 @@ fn encode_worker_main(
             Ok(frame) => frame,
             Err(_) => {
                 let _ = result_tx.send(EncodeWorkerResult {
+                    lane,
                     event: EncodeWorkerEvent::Completed {
                         key: task.key,
                         protocol: None,
@@ -304,6 +346,7 @@ fn encode_worker_main(
                     },
                 });
                 let _ = result_tx.send(EncodeWorkerResult {
+                    lane,
                     event: EncodeWorkerEvent::QueueState {
                         depth: queue.len(),
                         in_flight: 0,
@@ -316,6 +359,7 @@ fn encode_worker_main(
             Ok(protocol) => protocol,
             Err(_) => {
                 let _ = result_tx.send(EncodeWorkerResult {
+                    lane,
                     event: EncodeWorkerEvent::Completed {
                         key: task.key,
                         protocol: None,
@@ -325,6 +369,7 @@ fn encode_worker_main(
                     },
                 });
                 let _ = result_tx.send(EncodeWorkerResult {
+                    lane,
                     event: EncodeWorkerEvent::QueueState {
                         depth: queue.len(),
                         in_flight: 0,
@@ -340,6 +385,7 @@ fn encode_worker_main(
             .unwrap_or(true);
 
         let _ = result_tx.send(EncodeWorkerResult {
+            lane,
             event: EncodeWorkerEvent::Completed {
                 key: task.key,
                 protocol: if succeeded {
@@ -353,6 +399,7 @@ fn encode_worker_main(
             },
         });
         let _ = result_tx.send(EncodeWorkerResult {
+            lane,
             event: EncodeWorkerEvent::QueueState {
                 depth: queue.len(),
                 in_flight: 0,
@@ -373,11 +420,12 @@ mod tests {
     use crate::presenter::l2_cache::TerminalFrameKey;
     use crate::presenter::{PanOffset, Viewport};
     use crate::render::cache::RenderedPageKey;
-    use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig};
+    use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig};
+    use crate::work::WorkClass;
 
     use super::{
-        EncodeWorkerEvent, EncodeWorkerRequest, EncodeWorkerTask, enqueue_encode_request,
-        enqueue_with_notifications,
+        EncodeLaneKind, EncodeWorkerEvent, EncodeWorkerRequest, EncodeWorkerTask,
+        enqueue_encode_request, enqueue_with_notifications,
     };
 
     fn frame() -> RgbaFrame {
@@ -411,13 +459,14 @@ mod tests {
         let area = Rect::new(0, 0, 10, 6);
 
         assert!(enqueue_encode_request(
+            EncodeLaneKind::Background,
             EncodeWorkerRequest::Encode {
                 key: stale_key,
                 picker: picker.clone(),
                 frame: frame(),
                 area,
                 allow_upscale: false,
-                class: PrefetchClass::DirectionalLead,
+                class: WorkClass::DirectionalLead,
                 generation: 1,
                 enqueued_at: Instant::now(),
             },
@@ -426,13 +475,14 @@ mod tests {
 
         let (tx, mut rx) = unbounded_channel();
         assert!(enqueue_with_notifications(
+            EncodeLaneKind::Background,
             EncodeWorkerRequest::Encode {
                 key: fresh_key,
                 picker,
                 frame: frame(),
                 area,
                 allow_upscale: false,
-                class: PrefetchClass::CriticalCurrent,
+                class: WorkClass::CriticalCurrent,
                 generation: 2,
                 enqueued_at: Instant::now(),
             },
@@ -448,5 +498,149 @@ mod tests {
             }
         }
         assert!(saw_canceled, "canceled-stale event should be emitted");
+    }
+
+    #[test]
+    fn current_lane_drops_older_generations() {
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
+            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let picker = Picker::halfblocks();
+        let area = Rect::new(0, 0, 10, 6);
+        let stale_key = key(1);
+        let fresh_key = key(2);
+
+        assert!(enqueue_encode_request(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: stale_key,
+                picker: picker.clone(),
+                frame: frame(),
+                area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 1,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue
+        ));
+
+        assert!(enqueue_encode_request(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: fresh_key,
+                picker,
+                frame: frame(),
+                area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 2,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue
+        ));
+
+        let first = super::pop_next_encode_task(&mut queue).expect("fresh current should remain");
+        assert_eq!(first.key, fresh_key);
+        assert!(super::pop_next_encode_task(&mut queue).is_none());
+    }
+
+    #[test]
+    fn current_lane_keeps_newer_same_key_when_older_request_arrives_late() {
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
+            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let picker = Picker::halfblocks();
+        let same_key = key(1);
+        let newer_area = Rect::new(0, 0, 10, 6);
+        let older_area = Rect::new(0, 0, 6, 4);
+
+        assert!(enqueue_encode_request(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: same_key,
+                picker: picker.clone(),
+                frame: frame(),
+                area: newer_area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 2,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue
+        ));
+
+        assert!(enqueue_encode_request(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: same_key,
+                picker,
+                frame: frame(),
+                area: older_area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 1,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue
+        ));
+
+        let task =
+            super::pop_next_encode_task(&mut queue).expect("newer current task should remain");
+        assert_eq!(task.key, same_key);
+        assert_eq!(task.area, newer_area);
+        assert!(super::pop_next_encode_task(&mut queue).is_none());
+    }
+
+    #[test]
+    fn enqueue_with_notifications_keeps_newer_same_key_when_older_request_arrives_late() {
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
+            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let picker = Picker::halfblocks();
+        let same_key = key(1);
+        let newer_area = Rect::new(0, 0, 10, 6);
+        let older_area = Rect::new(0, 0, 6, 4);
+        let (tx, mut rx) = unbounded_channel();
+
+        assert!(enqueue_with_notifications(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: same_key,
+                picker: picker.clone(),
+                frame: frame(),
+                area: newer_area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 2,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue,
+            &tx
+        ));
+
+        assert!(enqueue_with_notifications(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: same_key,
+                picker,
+                frame: frame(),
+                area: older_area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 1,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue,
+            &tx
+        ));
+
+        let task =
+            super::pop_next_encode_task(&mut queue).expect("newer current task should remain");
+        assert_eq!(task.key, same_key);
+        assert_eq!(task.area, newer_area);
+        assert!(super::pop_next_encode_task(&mut queue).is_none());
+
+        let queue_state_events = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter(|event| matches!(event.event, EncodeWorkerEvent::QueueState { .. }))
+            .count();
+        assert_eq!(queue_state_events, 1);
     }
 }

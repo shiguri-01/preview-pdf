@@ -2,8 +2,7 @@ use std::sync::OnceLock;
 
 use crate::backend::{PixelBuffer, PixelBufferPool, RgbaFrame};
 use crate::presenter::{PanOffset, Viewport};
-use crate::render::prefetch::PrefetchClass;
-use crate::render::scheduler::RenderPriority;
+use crate::work::WorkClass;
 
 use super::scale::resolved_cell_size_px;
 
@@ -86,10 +85,10 @@ pub(crate) fn crop_frame_for_viewport(
     }
 }
 
-pub(crate) fn prefetch_class_for_completed_task(priority: RenderPriority) -> PrefetchClass {
-    match priority {
-        RenderPriority::CriticalCurrent => PrefetchClass::DirectionalLead,
-        _ => priority.to_prefetch_class(),
+pub(crate) fn encode_work_class_for_completed_render(class: WorkClass) -> WorkClass {
+    match class {
+        WorkClass::CriticalCurrent => WorkClass::DirectionalLead,
+        _ => class,
     }
 }
 

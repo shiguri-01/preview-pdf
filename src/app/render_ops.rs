@@ -1,12 +1,13 @@
 use crate::backend::PdfBackend;
 use crate::presenter::{PanOffset, Viewport};
 use crate::render::cache::RenderedPageKey;
-use crate::render::scheduler::{RenderPriority, RenderTask};
+use crate::render::scheduler::RenderTask;
 use crate::render::worker::{RenderWorker, RenderWorkerResult};
+use crate::work::WorkClass;
 
 use super::actors::{RenderActor, RenderNavSyncParts};
 use super::core::RenderSubsystem;
-use super::frame_ops::{prefetch_class_for_completed_task, prepare_presenter_frame};
+use super::frame_ops::{encode_work_class_for_completed_render, prepare_presenter_frame};
 use super::scale::{scale_eq, zoom_eq};
 use super::state::AppState;
 
@@ -64,7 +65,7 @@ impl RenderSubsystem {
                         &frame,
                         viewport,
                         pan_for_presenter,
-                        prefetch_class_for_completed_task(completed.priority),
+                        encode_work_class_for_completed_render(completed.class),
                         completed.generation,
                     ) {
                         let _ = err;
@@ -74,7 +75,7 @@ impl RenderSubsystem {
                     completed.key,
                     frame,
                     completed.elapsed,
-                    completed.priority == RenderPriority::CriticalCurrent,
+                    completed.class == WorkClass::CriticalCurrent,
                 );
                 current_keys.contains(&completed.key)
             }
@@ -195,7 +196,7 @@ impl RenderSubsystem {
                     doc_id: pdf.doc_id(),
                     page,
                     scale: ctx.current_scale,
-                    priority: RenderPriority::CriticalCurrent,
+                    class: WorkClass::CriticalCurrent,
                     generation: render_actor.generation(),
                     reason: if idx == 0 {
                         "current-page"
@@ -250,7 +251,7 @@ impl RenderSubsystem {
                         &mut prefetch_pan,
                         presenter_caps.cell_px,
                         ctx.enable_crop,
-                        prefetch_class_for_completed_task(task.priority),
+                        encode_work_class_for_completed_render(task.class),
                         task.generation,
                     ) {
                         let _ = err;
@@ -313,7 +314,7 @@ mod tests {
             _frame: &RgbaFrame,
             _viewport: Viewport,
             _pan: PanOffset,
-            _class: crate::render::prefetch::PrefetchClass,
+            _class: crate::work::WorkClass,
             _generation: u64,
         ) -> AppResult<()> {
             Ok(())
@@ -341,10 +342,10 @@ mod tests {
         }
     }
 
-    fn failed_result(key: RenderedPageKey, priority: RenderPriority) -> RenderWorkerResult {
+    fn failed_result(key: RenderedPageKey, class: WorkClass) -> RenderWorkerResult {
         RenderWorkerResult {
             key,
-            priority,
+            class,
             generation: 3,
             result: Err(AppError::pdf_render(
                 2,
@@ -363,7 +364,7 @@ mod tests {
 
         let redraw = render.process_render_result(
             &mut state,
-            failed_result(key, RenderPriority::CriticalCurrent),
+            failed_result(key, WorkClass::CriticalCurrent),
             &[key],
             None,
             PanOffset::default(),
@@ -386,7 +387,7 @@ mod tests {
 
         let redraw = render.process_render_result(
             &mut state,
-            failed_result(prefetch_key, RenderPriority::Background),
+            failed_result(prefetch_key, WorkClass::Background),
             &[current_key],
             None,
             PanOffset::default(),

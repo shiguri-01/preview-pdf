@@ -1,3 +1,6 @@
+use std::future::{Future, pending};
+use std::pin::Pin;
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -5,7 +8,7 @@ use crate::backend::RgbaFrame;
 use crate::error::AppResult;
 use crate::perf::PerfStats;
 use crate::render::cache::RenderedPageKey;
-use crate::render::prefetch::PrefetchClass;
+use crate::work::WorkClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresenterKind {
@@ -84,6 +87,11 @@ pub struct PresenterRenderOutcome {
     pub used_stale_fallback: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresenterBackgroundEvent {
+    EncodeComplete { redraw_requested: bool },
+}
+
 pub trait ImagePresenter {
     fn initialize_terminal(&mut self) -> AppResult<()> {
         Ok(())
@@ -117,7 +125,7 @@ pub trait ImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
-        class: PrefetchClass,
+        class: WorkClass,
         generation: u64,
     ) -> AppResult<()> {
         let _ = (cache_key, frame, viewport, pan, class, generation);
@@ -138,6 +146,12 @@ pub trait ImagePresenter {
 
     fn drain_background_events(&mut self) -> bool {
         false
+    }
+
+    fn recv_background_event<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = Option<PresenterBackgroundEvent>> + 'a>> {
+        Box::pin(pending())
     }
 
     fn perf_snapshot(&self) -> Option<PerfStats> {

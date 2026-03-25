@@ -6,11 +6,10 @@ use crate::error::{AppError, AppResult};
 use crate::perf::PerfStats;
 use crate::presenter::{ImagePresenter, PanOffset, Viewport};
 use crate::render::cache::{RenderedPageCache, RenderedPageKey};
-use crate::render::prefetch::PrefetchClass;
 use crate::render::scheduler::{
-    NavIntent, PrefetchPolicy, RenderPriority, RenderScheduler, RenderTask,
-    build_prefetch_plan_with_policy,
+    NavIntent, PrefetchPolicy, RenderScheduler, RenderTask, build_prefetch_plan_with_policy,
 };
+use crate::work::WorkClass;
 
 use super::frame_ops::{compose_spread_frame, prepare_presenter_frame};
 use super::state::VisiblePageSlots;
@@ -116,7 +115,7 @@ impl RenderRuntime {
             doc_id: doc.doc_id(),
             page,
             scale,
-            priority: RenderPriority::CriticalCurrent,
+            class: WorkClass::CriticalCurrent,
             generation: 0,
             reason: "current-page",
         };
@@ -250,7 +249,7 @@ impl RenderRuntime {
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
-        class: PrefetchClass,
+        class: WorkClass,
         generation: u64,
     ) -> AppResult<bool> {
         let prepared = if let Some(frame) = self.l1_cache.get(&key) {
@@ -320,7 +319,7 @@ impl RenderRuntime {
         let render_start = Instant::now();
         let frame = doc.render_page(task.page, task.scale)?;
         self.perf_stats.record_render(render_start.elapsed());
-        let allow_single_oversize = task.priority == RenderPriority::CriticalCurrent;
+        let allow_single_oversize = task.class == WorkClass::CriticalCurrent;
         let _ = self
             .l1_cache
             .insert(key, frame.clone(), allow_single_oversize);

@@ -9,10 +9,11 @@ use crate::command::CommandOutcome;
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
 use crate::perf::{PerfIterationSnapshot, PerfScenarioId, RedrawReason};
-use crate::presenter::{PanOffset, Viewport};
+use crate::presenter::{ImagePresenter, PanOffset, PresenterBackgroundEvent, Viewport};
 use crate::render::cache::RenderedPageKey;
-use crate::render::scheduler::{RenderPriority, RenderTask};
+use crate::render::scheduler::RenderTask;
 use crate::render::worker::RenderWorker;
+use crate::work::WorkClass;
 
 use super::actors::{InputActor, RenderActor, UiActor};
 use super::core::App;
@@ -318,7 +319,7 @@ impl App {
                                 doc_id: key.doc_id,
                                 page: key.page,
                                 scale: key.scale_milli as f32 / 1000.0,
-                                priority: RenderPriority::CriticalCurrent,
+                                class: WorkClass::CriticalCurrent,
                                 generation: runtime.render_actor.generation(),
                                 reason: if idx == 0 {
                                     "initial-preview"
@@ -376,6 +377,7 @@ impl App {
         let waited = wait_next_event(
             &mut runtime.loop_event_rx,
             &mut runtime.render_worker,
+            &mut *self.render.presenter,
             &mut runtime.prefetch_tick,
             &mut runtime.redraw_tick,
             wait_for_pending_redraw,
@@ -642,6 +644,13 @@ impl App {
                     .runtime
                     .set_queue_depth_with_inflight(runtime.render_worker.in_flight_len());
             }
+            WaitEvent::Event(DomainEvent::EncodeComplete(
+                PresenterBackgroundEvent::EncodeComplete { redraw_requested },
+            )) => {
+                if redraw_requested {
+                    self.request_redraw(runtime, RedrawReason::RenderComplete);
+                }
+            }
             WaitEvent::Event(DomainEvent::PrefetchTick) => {
                 runtime.render_actor.mark_prefetch_due();
             }
@@ -688,41 +697,238 @@ fn cold_start_initial_preview_plan(
 async fn wait_next_event(
     loop_event_rx: &mut UnboundedReceiver<DomainEvent>,
     render_worker: &mut RenderWorker,
+    presenter: &mut dyn ImagePresenter,
     prefetch_tick: &mut time::Interval,
     redraw_tick: &mut time::Interval,
     wait_for_pending_redraw: bool,
     wake_timeout: Duration,
 ) -> WaitEvent {
-    tokio::select! {
-        biased;
-        maybe_loop = loop_event_rx.recv() => {
-            match maybe_loop {
-                Some(event) => WaitEvent::Event(event),
-                None => WaitEvent::Closed,
+    if presenter.has_pending_work() {
+        tokio::select! {
+            biased;
+            maybe_loop = loop_event_rx.recv() => {
+                match maybe_loop {
+                    Some(event) => WaitEvent::Event(event),
+                    None => WaitEvent::Closed,
+                }
+            },
+            maybe_render = render_worker.recv_result() => {
+                match maybe_render {
+                    Some(result) => WaitEvent::Event(DomainEvent::RenderComplete(result)),
+                    None => WaitEvent::Closed,
+                }
+            },
+            maybe_presenter = presenter.recv_background_event() => {
+                match maybe_presenter {
+                    Some(event) => WaitEvent::Event(DomainEvent::EncodeComplete(event)),
+                    None => WaitEvent::Event(DomainEvent::Wake),
+                }
+            },
+            _ = prefetch_tick.tick() => {
+                WaitEvent::Event(DomainEvent::PrefetchTick)
+            },
+            _ = redraw_tick.tick(), if wait_for_pending_redraw => {
+                WaitEvent::Event(DomainEvent::RedrawTick)
+            },
+            _ = time::sleep(wake_timeout) => {
+                WaitEvent::Event(DomainEvent::Wake)
             }
-        },
-        maybe_render = render_worker.recv_result() => {
-            match maybe_render {
-                Some(result) => WaitEvent::Event(DomainEvent::RenderComplete(result)),
-                None => WaitEvent::Closed,
+        }
+    } else {
+        tokio::select! {
+            biased;
+            maybe_loop = loop_event_rx.recv() => {
+                match maybe_loop {
+                    Some(event) => WaitEvent::Event(event),
+                    None => WaitEvent::Closed,
+                }
+            },
+            maybe_render = render_worker.recv_result() => {
+                match maybe_render {
+                    Some(result) => WaitEvent::Event(DomainEvent::RenderComplete(result)),
+                    None => WaitEvent::Closed,
+                }
+            },
+            _ = prefetch_tick.tick() => {
+                WaitEvent::Event(DomainEvent::PrefetchTick)
+            },
+            _ = redraw_tick.tick(), if wait_for_pending_redraw => {
+                WaitEvent::Event(DomainEvent::RedrawTick)
+            },
+            _ = time::sleep(wake_timeout) => {
+                WaitEvent::Event(DomainEvent::Wake)
             }
-        },
-        _ = prefetch_tick.tick() => {
-            WaitEvent::Event(DomainEvent::PrefetchTick)
-        },
-        _ = redraw_tick.tick(), if wait_for_pending_redraw => {
-            WaitEvent::Event(DomainEvent::RedrawTick)
-        },
-        _ = time::sleep(wake_timeout) => {
-            WaitEvent::Event(DomainEvent::Wake)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::cold_start_initial_preview_plan;
+    use std::collections::VecDeque;
+    use std::fs;
+    use std::future::Future;
+    use std::path::PathBuf;
+    use std::pin::Pin;
+    use std::process;
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    use tokio::runtime::Builder;
+    use tokio::sync::mpsc::unbounded_channel;
+
+    use super::{WaitEvent, cold_start_initial_preview_plan, wait_next_event};
     use crate::app::state::{PageLayoutMode, VisiblePageSlots};
+    use crate::backend::{PdfDoc, SharedPdfBackend};
+    use crate::event::DomainEvent;
+    use crate::presenter::{
+        ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
+        PresenterRenderOptions, PresenterRenderOutcome, PresenterRuntimeInfo, Viewport,
+    };
+    use crate::render::cache::RenderedPageKey;
+    use crate::render::worker::RenderWorker;
+
+    #[derive(Default)]
+    struct StubPresenter {
+        events: VecDeque<Option<PresenterBackgroundEvent>>,
+    }
+
+    impl StubPresenter {
+        fn with_events(events: impl IntoIterator<Item = Option<PresenterBackgroundEvent>>) -> Self {
+            Self {
+                events: events.into_iter().collect(),
+            }
+        }
+    }
+
+    impl ImagePresenter for StubPresenter {
+        fn prepare(
+            &mut self,
+            _cache_key: RenderedPageKey,
+            _frame: &crate::backend::RgbaFrame,
+            _viewport: Viewport,
+            _pan: PanOffset,
+            _generation: u64,
+        ) -> crate::error::AppResult<()> {
+            Ok(())
+        }
+
+        fn render(
+            &mut self,
+            _frame: &mut ratatui::Frame<'_>,
+            _area: ratatui::layout::Rect,
+            _options: PresenterRenderOptions,
+        ) -> crate::error::AppResult<PresenterRenderOutcome> {
+            Ok(PresenterRenderOutcome {
+                drew_image: false,
+                feedback: PresenterFeedback::None,
+                used_stale_fallback: false,
+            })
+        }
+
+        fn capabilities(&self) -> PresenterCaps {
+            PresenterCaps {
+                backend_name: "stub",
+                supports_l2_cache: false,
+                cell_px: None,
+                preferred_max_render_scale: 1.0,
+            }
+        }
+
+        fn runtime_info(&self) -> PresenterRuntimeInfo {
+            PresenterRuntimeInfo::default()
+        }
+
+        fn has_pending_work(&self) -> bool {
+            !self.events.is_empty()
+        }
+
+        fn recv_background_event<'a>(
+            &'a mut self,
+        ) -> Pin<Box<dyn Future<Output = Option<PresenterBackgroundEvent>> + 'a>> {
+            let event = self.events.pop_front().flatten();
+            Box::pin(async move { event })
+        }
+    }
+
+    fn unique_temp_path(suffix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("pvf-event-loop-{}-{nanos}{suffix}", process::id()))
+    }
+
+    fn build_pdf(page_texts: &[&str]) -> Vec<u8> {
+        let page_texts = if page_texts.is_empty() {
+            vec!["".to_string()]
+        } else {
+            page_texts
+                .iter()
+                .map(|text| format!("BT /F1 14 Tf 36 260 Td ({text}) Tj ET"))
+                .collect()
+        };
+
+        let page_count = page_texts.len();
+        let page_ids: Vec<usize> = (0..page_count).map(|i| 4 + i * 2).collect();
+
+        let mut objects = Vec::new();
+        objects.push("<< /Type /Catalog /Pages 2 0 R >>".to_string());
+        let kids = page_ids
+            .iter()
+            .map(|id| format!("{id} 0 R"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        objects.push(format!(
+            "<< /Type /Pages /Kids [{kids}] /Count {page_count} >>"
+        ));
+        objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string());
+
+        for (index, stream) in page_texts.iter().enumerate() {
+            let content_id = 5 + index * 2;
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>"
+            ));
+            objects.push(format!(
+                "<< /Length {} >>\nstream\n{}\nendstream",
+                stream.len(),
+                stream
+            ));
+        }
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+        let mut offsets = vec![0_usize];
+        for (index, object) in objects.iter().enumerate() {
+            let object_id = index + 1;
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{object_id} 0 obj\n{object}\nendobj\n").as_bytes());
+        }
+
+        let xref_start = bytes.len();
+        bytes.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        bytes.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets.iter().skip(1) {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                objects.len() + 1,
+                xref_start
+            )
+            .as_bytes(),
+        );
+        bytes
+    }
+
+    fn idle_render_worker() -> RenderWorker {
+        let file = unique_temp_path(".pdf");
+        fs::write(&file, build_pdf(&["page"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        fs::remove_file(&file).expect("test pdf should be removed");
+        let shared: SharedPdfBackend = Arc::new(doc);
+        RenderWorker::spawn(shared, 1)
+    }
 
     #[test]
     fn cold_start_initial_preview_plan_is_disabled_after_first_image() {
@@ -782,5 +988,56 @@ mod tests {
             cold_start_initial_preview_plan(false, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
 
         assert_eq!(preview, None);
+    }
+
+    #[test]
+    fn wait_next_event_maps_presenter_event_then_eof_to_wake() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let mut render_worker = idle_render_worker();
+        let mut presenter = StubPresenter::with_events([
+            Some(PresenterBackgroundEvent::EncodeComplete {
+                redraw_requested: true,
+            }),
+            None,
+        ]);
+        let (_tx, mut loop_event_rx) = unbounded_channel();
+        runtime.block_on(async {
+            let mut prefetch_tick = tokio::time::interval(Duration::from_secs(60));
+            let mut redraw_tick = tokio::time::interval(Duration::from_secs(60));
+
+            let first = wait_next_event(
+                &mut loop_event_rx,
+                &mut render_worker,
+                &mut presenter,
+                &mut prefetch_tick,
+                &mut redraw_tick,
+                false,
+                Duration::from_secs(60),
+            )
+            .await;
+            assert!(matches!(
+                first,
+                WaitEvent::Event(DomainEvent::EncodeComplete(
+                    PresenterBackgroundEvent::EncodeComplete {
+                        redraw_requested: true
+                    }
+                ))
+            ));
+
+            let second = wait_next_event(
+                &mut loop_event_rx,
+                &mut render_worker,
+                &mut presenter,
+                &mut prefetch_tick,
+                &mut redraw_tick,
+                false,
+                Duration::from_secs(60),
+            )
+            .await;
+            assert!(matches!(second, WaitEvent::Event(DomainEvent::Wake)));
+        });
     }
 }

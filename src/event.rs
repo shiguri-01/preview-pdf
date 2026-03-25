@@ -2,6 +2,7 @@ use crossterm::event::Event;
 
 use crate::app::Mode;
 use crate::command::{ActionId, CommandOutcome, CommandRequest};
+use crate::presenter::PresenterBackgroundEvent;
 use crate::render::worker::RenderWorkerResult;
 
 /// Describes *why* a page navigation occurred.
@@ -59,6 +60,7 @@ pub(crate) enum DomainEvent {
     Command(CommandRequest),
     App(AppEvent),
     RenderComplete(RenderWorkerResult),
+    EncodeComplete(PresenterBackgroundEvent),
     PrefetchTick,
     RedrawTick,
     Wake,

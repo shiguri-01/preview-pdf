@@ -94,35 +94,51 @@ fn resize_frame_simd(frame: RgbaFrame, dst_width: u32, dst_height: u32) -> AppRe
         return Ok(frame);
     }
 
-    let src_width = frame.width;
-    let src_height = frame.height;
-    frame.pixels.with_mut_bytes(|pixels| {
-        let src =
-            fr::images::Image::from_slice_u8(src_width, src_height, pixels, fr::PixelType::U8x4)
-                .map_err(|_| {
-                    AppError::invalid_argument("rgba frame pixels length does not match dimensions")
-                })?;
+    let RgbaFrame {
+        width: src_width,
+        height: src_height,
+        pixels,
+    } = frame;
+    let pixels = resize_rgba_bytes_simd(&pixels, src_width, src_height, dst_width, dst_height)?;
 
-        let mut dst = fr::images::Image::new(dst_width, dst_height, fr::PixelType::U8x4);
-        let mut resizer = fr::Resizer::new();
-        let options =
-            fr::ResizeOptions::new().resize_alg(fr::ResizeAlg::Convolution(SIMD_DOWNSCALE_FILTER));
-
-        resizer
-            .resize(&src, &mut dst, &options)
-            .map_err(|_| AppError::unsupported("failed to resize frame with SIMD"))?;
-
-        Ok(RgbaFrame {
-            width: dst_width,
-            height: dst_height,
-            pixels: dst.into_vec().into(),
-        })
+    Ok(RgbaFrame {
+        width: dst_width,
+        height: dst_height,
+        pixels: pixels.into(),
     })
+}
+
+fn resize_rgba_bytes_simd(
+    src_pixels: &[u8],
+    src_width: u32,
+    src_height: u32,
+    dst_width: u32,
+    dst_height: u32,
+) -> AppResult<Vec<u8>> {
+    let src = fr::images::ImageRef::new(src_width, src_height, src_pixels, fr::PixelType::U8x4)
+        .map_err(|_| {
+            AppError::invalid_argument("rgba frame pixels length does not match dimensions")
+        })?;
+
+    let mut dst = fr::images::Image::new(dst_width, dst_height, fr::PixelType::U8x4);
+    let mut resizer = fr::Resizer::new();
+    let options =
+        fr::ResizeOptions::new().resize_alg(fr::ResizeAlg::Convolution(SIMD_DOWNSCALE_FILTER));
+
+    resizer
+        .resize(&src, &mut dst, &options)
+        .map_err(|_| AppError::unsupported("failed to resize frame with SIMD"))?;
+
+    Ok(dst.into_vec())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{fit_downscale_dimensions, fit_resize_dimensions};
+    use ratatui::layout::Rect;
+
+    use crate::backend::RgbaFrame;
+
+    use super::{fit_downscale_dimensions, fit_resize_dimensions, resize_frame_for_area};
 
     #[test]
     fn fit_downscale_dimensions_returns_none_when_source_fits() {
@@ -146,5 +162,27 @@ mod tests {
     fn fit_resize_dimensions_skips_upscale_when_disallowed() {
         let dims = fit_resize_dimensions(400, 200, 1200, 900, false);
         assert_eq!(dims, None);
+    }
+
+    #[test]
+    fn resize_frame_for_area_downscales_shared_frame_without_touching_source() {
+        let pixels: Vec<u8> = (0..4 * 4 * 4).map(|i| i as u8).collect();
+        let source = RgbaFrame {
+            width: 4,
+            height: 4,
+            pixels: pixels.clone().into(),
+        };
+        let shared = source.clone();
+
+        let resized = resize_frame_for_area(source.clone(), Rect::new(0, 0, 2, 2), (1, 1), false)
+            .expect("resize should succeed");
+
+        assert_eq!(resized.width, 2);
+        assert_eq!(resized.height, 2);
+        assert_eq!(source.width, 4);
+        assert_eq!(source.height, 4);
+        assert_eq!(&source.pixels[..], pixels.as_slice());
+        assert!(source.pixels.ptr_eq(&shared.pixels));
+        assert!(!resized.pixels.ptr_eq(&source.pixels));
     }
 }

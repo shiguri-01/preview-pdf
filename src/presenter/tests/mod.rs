@@ -338,7 +338,10 @@ fn recv_background_event_requests_redraw_for_current_encode_completion() {
         .build()
         .expect("tokio runtime should build");
     let event = runtime
-        .block_on(presenter.recv_background_event())
+        .block_on(async {
+            tokio::time::timeout(Duration::from_secs(2), presenter.recv_background_event()).await
+        })
+        .expect("encode completion event timed out")
         .expect("encode completion event should arrive");
 
     assert_eq!(

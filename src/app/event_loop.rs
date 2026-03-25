@@ -703,34 +703,61 @@ async fn wait_next_event(
     wait_for_pending_redraw: bool,
     wake_timeout: Duration,
 ) -> WaitEvent {
-    tokio::select! {
-        biased;
-        maybe_loop = loop_event_rx.recv() => {
-            match maybe_loop {
-                Some(event) => WaitEvent::Event(event),
-                None => WaitEvent::Closed,
+    if presenter.has_pending_work() {
+        tokio::select! {
+            biased;
+            maybe_loop = loop_event_rx.recv() => {
+                match maybe_loop {
+                    Some(event) => WaitEvent::Event(event),
+                    None => WaitEvent::Closed,
+                }
+            },
+            maybe_render = render_worker.recv_result() => {
+                match maybe_render {
+                    Some(result) => WaitEvent::Event(DomainEvent::RenderComplete(result)),
+                    None => WaitEvent::Closed,
+                }
+            },
+            maybe_presenter = presenter.recv_background_event() => {
+                match maybe_presenter {
+                    Some(event) => WaitEvent::Event(DomainEvent::EncodeComplete(event)),
+                    None => WaitEvent::Event(DomainEvent::Wake),
+                }
+            },
+            _ = prefetch_tick.tick() => {
+                WaitEvent::Event(DomainEvent::PrefetchTick)
+            },
+            _ = redraw_tick.tick(), if wait_for_pending_redraw => {
+                WaitEvent::Event(DomainEvent::RedrawTick)
+            },
+            _ = time::sleep(wake_timeout) => {
+                WaitEvent::Event(DomainEvent::Wake)
             }
-        },
-        maybe_render = render_worker.recv_result() => {
-            match maybe_render {
-                Some(result) => WaitEvent::Event(DomainEvent::RenderComplete(result)),
-                None => WaitEvent::Closed,
+        }
+    } else {
+        tokio::select! {
+            biased;
+            maybe_loop = loop_event_rx.recv() => {
+                match maybe_loop {
+                    Some(event) => WaitEvent::Event(event),
+                    None => WaitEvent::Closed,
+                }
+            },
+            maybe_render = render_worker.recv_result() => {
+                match maybe_render {
+                    Some(result) => WaitEvent::Event(DomainEvent::RenderComplete(result)),
+                    None => WaitEvent::Closed,
+                }
+            },
+            _ = prefetch_tick.tick() => {
+                WaitEvent::Event(DomainEvent::PrefetchTick)
+            },
+            _ = redraw_tick.tick(), if wait_for_pending_redraw => {
+                WaitEvent::Event(DomainEvent::RedrawTick)
+            },
+            _ = time::sleep(wake_timeout) => {
+                WaitEvent::Event(DomainEvent::Wake)
             }
-        },
-        maybe_presenter = presenter.recv_background_event(), if presenter.has_pending_work() => {
-            match maybe_presenter {
-                Some(event) => WaitEvent::Event(DomainEvent::EncodeComplete(event)),
-                None => WaitEvent::Closed,
-            }
-        },
-        _ = prefetch_tick.tick() => {
-            WaitEvent::Event(DomainEvent::PrefetchTick)
-        },
-        _ = redraw_tick.tick(), if wait_for_pending_redraw => {
-            WaitEvent::Event(DomainEvent::RedrawTick)
-        },
-        _ = time::sleep(wake_timeout) => {
-            WaitEvent::Event(DomainEvent::Wake)
         }
     }
 }

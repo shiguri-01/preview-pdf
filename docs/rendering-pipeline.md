@@ -111,7 +111,7 @@ Requirements:
 - `CriticalCurrent` tasks use the current lane.
 - `GuardReverse`, `DirectionalLead`, and `Background` tasks use the background lane.
 - Current-lane queued work drops older generations so fast page flips do not build a stale current backlog.
-- Background-lane stale-generation tasks are discarded before encode completion path.
+- Background-lane stale-generation tasks are discarded before encode completion path, except for `GuardReverse` and any other work class preserved by `WorkClass::kept_on_background_stale_generation()`.
 - Render-complete handoff keeps one explicit exception: completed `CriticalCurrent` render work is downgraded to `DirectionalLead` before presenter-side prefetch encode routing.
 - Resize/downscale reads source RGBA bytes through an immutable image view, so shared `RgbaFrame` storage does not trigger copy-on-write cloning before the destination buffer is produced.
 - Results are returned as `EncodeWorkerResult` and drained by presenter.

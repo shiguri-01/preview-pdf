@@ -180,11 +180,7 @@ fn cancel_stale_tasks_with_keys(
         let keep = match lane {
             EncodeLaneKind::Current => meta.generation >= generation,
             EncodeLaneKind::Background => {
-                meta.generation >= generation
-                    || matches!(
-                        meta.class,
-                        WorkClass::CriticalCurrent | WorkClass::GuardReverse
-                    )
+                meta.generation >= generation || meta.class.kept_on_background_stale_generation()
             }
         };
         if !keep {

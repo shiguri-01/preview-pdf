@@ -136,6 +136,11 @@ Suggested direction:
 - `PrefetchQueue::retain` pops every single item from the `BinaryHeap`, filters them, and then pushes the retained items back one by one.
 - Since `push` is `O(log N)`, the total operation is `O(N log N)`.
 
+Status:
+
+- Fixed on 2026-03-25.
+- `src/render/prefetch.rs` now filters the heap via `BinaryHeap::into_vec()` + `Vec::retain()` and rebuilds it with `BinaryHeap::from()`, avoiding repeated `push()` calls during cancellation-heavy paths.
+
 Relevant code:
 
 - `src/render/prefetch.rs`

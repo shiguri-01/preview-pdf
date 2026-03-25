@@ -183,24 +183,19 @@ where
     where
         F: FnMut(&T, &QueueTaskMeta<K>) -> bool,
     {
-        let mut removed = 0_usize;
-        let mut kept = Vec::with_capacity(self.tasks.len());
+        let original_len = self.tasks.len();
+        let mut tasks = std::mem::take(&mut self.tasks).into_vec();
 
-        while let Some(item) = self.tasks.pop() {
-            if keep(&item.task, &item.meta) {
-                kept.push(item);
-            } else {
-                removed = removed.saturating_add(1);
-            }
+        tasks.retain(|item| keep(&item.task, &item.meta));
+        let removed = original_len.saturating_sub(tasks.len());
+
+        if self.config.dedupe_by_key {
+            self.queued_keys.clear();
+            self.queued_keys
+                .extend(tasks.iter().map(|item| item.meta.key.clone()));
         }
 
-        self.queued_keys.clear();
-        for item in kept {
-            if self.config.dedupe_by_key {
-                self.queued_keys.insert(item.meta.key.clone());
-            }
-            self.tasks.push(item);
-        }
+        self.tasks = BinaryHeap::from(tasks);
         removed
     }
 }
@@ -287,5 +282,19 @@ mod tests {
 
         cfg.guard_reverse_depth = 2;
         assert_eq!(cfg.effective_guard_reverse_depth(), 2);
+    }
+
+    #[test]
+    fn retain_rebuilds_dedupe_index_after_filtering() {
+        let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+        assert!(queue.push(1, meta(1, PrefetchClass::Background, 1)));
+        assert!(queue.push(2, meta(2, PrefetchClass::DirectionalLead, 1)));
+
+        let removed = queue.retain(|task, _| *task != 1);
+
+        assert_eq!(removed, 1);
+        assert!(!queue.contains_key(&1));
+        assert!(queue.contains_key(&2));
+        assert!(queue.push(3, meta(1, PrefetchClass::CriticalCurrent, 2)));
     }
 }

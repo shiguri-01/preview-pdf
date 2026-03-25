@@ -115,6 +115,13 @@ Suggested direction:
 - `PdfDoc::load_shared_bytes` uses `std::fs::read(path)?` to load the entire document into memory.
 - For large PDFs (e.g., 500MB+), this causes a multi-second block of the main thread during initialization.
 
+Status:
+
+- Deferred as of 2026-03-25.
+- `memmap` is not a good fit for the current viewer because the app should remain safe if the source PDF is edited or replaced after open.
+- A background snapshot load without any preload UI was judged too low-impact from the user's perspective to justify the added startup complexity.
+- Revisit this only as an explicit startup UX task that enters the TUI first and shows loading state while preserving snapshot-owned PDF bytes after load.
+
 Relevant code:
 
 - `src/backend/hayro.rs`
@@ -125,8 +132,8 @@ Impact:
 
 Suggested direction:
 
-- Use `memmap2` for memory-mapped I/O to allow the OS to handle demand-paging of the PDF data.
-- Alternatively, move the document load to a background task or use asynchronous I/O if the parser supports it.
+- If startup UX becomes a priority, enter the TUI first and move document load to a background task while keeping snapshot-owned bytes.
+- Do not switch the current backend to `memmap` unless the product accepts the risk of source-file mutation during viewing.
 
 ### 6. RenderWorker threads block on a shared Mutex during task reception
 

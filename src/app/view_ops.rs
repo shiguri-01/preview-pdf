@@ -663,6 +663,22 @@ mod tests {
     }
 
     #[test]
+    fn normalize_render_outcome_keeps_full_feedback_unchanged() {
+        let outcome = normalize_render_outcome(
+            PresenterRenderMode::Full,
+            PresenterRenderOutcome {
+                drew_image: true,
+                feedback: PresenterFeedback::Failed,
+                used_stale_fallback: true,
+            },
+        );
+
+        assert!(outcome.drew_image);
+        assert_eq!(outcome.feedback, PresenterFeedback::Failed);
+        assert!(outcome.used_stale_fallback);
+    }
+
+    #[test]
     fn display_decision_overlays_loading_on_pending_image() {
         let decision = decide_viewer_display(
             PresenterRenderOutcome {

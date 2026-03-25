@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use flume::{Receiver, Sender};
 use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -42,7 +43,7 @@ pub(crate) struct RenderResultEvent {
 }
 
 pub(crate) struct RenderWorker {
-    request_tx: UnboundedSender<RenderWorkerRequest>,
+    request_tx: Sender<RenderWorkerRequest>,
     result_rx: UnboundedReceiver<RenderResultEvent>,
     in_flight: HashMap<RenderedPageKey, InFlightTask>,
     _runtime: RenderWorkerRuntime,
@@ -95,14 +96,13 @@ struct InFlightTask {
 
 impl RenderWorker {
     pub(crate) fn spawn(pdf: SharedPdfBackend, worker_threads: usize) -> Self {
-        let (request_tx, request_rx) = unbounded_channel();
+        let (request_tx, request_rx) = flume::unbounded();
         let (result_tx, result_rx) = unbounded_channel();
         let runtime = RenderWorkerRuntime::new();
         let worker_threads = worker_threads.max(1);
-        let request_rx = Arc::new(Mutex::new(request_rx));
         let mut workers = Vec::with_capacity(worker_threads);
         for _ in 0..worker_threads {
-            let request_rx = Arc::clone(&request_rx);
+            let request_rx = request_rx.clone();
             let pdf = Arc::clone(&pdf);
             let result_tx = result_tx.clone();
             let worker =
@@ -305,17 +305,14 @@ impl Drop for RenderWorker {
 
 fn render_worker_main(
     doc: SharedPdfBackend,
-    request_rx: Arc<Mutex<UnboundedReceiver<RenderWorkerRequest>>>,
+    request_rx: Receiver<RenderWorkerRequest>,
     result_tx: UnboundedSender<RenderResultEvent>,
 ) {
     loop {
-        let request = match request_rx.lock() {
-            Ok(mut request_rx) => request_rx.blocking_recv(),
-            Err(_) => None,
-        };
+        let request = request_rx.recv();
         let request = match request {
-            Some(request) => request,
-            None => break,
+            Ok(request) => request,
+            Err(_) => break,
         };
 
         match request {

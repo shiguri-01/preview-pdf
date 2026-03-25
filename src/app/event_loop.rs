@@ -11,8 +11,9 @@ use crate::event::DomainEvent;
 use crate::perf::{PerfIterationSnapshot, PerfScenarioId, RedrawReason};
 use crate::presenter::{ImagePresenter, PanOffset, PresenterBackgroundEvent, Viewport};
 use crate::render::cache::RenderedPageKey;
-use crate::render::scheduler::{RenderPriority, RenderTask};
+use crate::render::scheduler::RenderTask;
 use crate::render::worker::RenderWorker;
+use crate::work::WorkClass;
 
 use super::actors::{InputActor, RenderActor, UiActor};
 use super::core::App;
@@ -318,7 +319,7 @@ impl App {
                                 doc_id: key.doc_id,
                                 page: key.page,
                                 scale: key.scale_milli as f32 / 1000.0,
-                                priority: RenderPriority::CriticalCurrent,
+                                class: WorkClass::CriticalCurrent,
                                 generation: runtime.render_actor.generation(),
                                 reason: if idx == 0 {
                                     "initial-preview"

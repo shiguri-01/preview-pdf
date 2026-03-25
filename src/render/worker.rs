@@ -10,7 +10,8 @@ use tokio::task::JoinHandle;
 use crate::backend::{RgbaFrame, SharedPdfBackend};
 use crate::error::{AppError, AppResult};
 use crate::render::cache::RenderedPageKey;
-use crate::render::scheduler::{RenderPriority, RenderTask};
+use crate::render::scheduler::RenderTask;
+use crate::work::WorkClass;
 
 enum RenderWorkerRequest {
     Task {
@@ -24,7 +25,7 @@ enum RenderWorkerRequest {
 #[derive(Debug)]
 pub(crate) struct RenderWorkerResult {
     pub(crate) key: RenderedPageKey,
-    pub(crate) priority: RenderPriority,
+    pub(crate) class: WorkClass,
     pub(crate) generation: u64,
     pub(crate) result: AppResult<RgbaFrame>,
     pub(crate) queue_wait: Duration,
@@ -35,7 +36,7 @@ pub(crate) struct RenderWorkerResult {
 pub(crate) struct RenderResultEvent {
     pub(crate) task_id: u64,
     pub(crate) key: RenderedPageKey,
-    pub(crate) priority: RenderPriority,
+    pub(crate) class: WorkClass,
     pub(crate) generation: u64,
     pub(crate) result: AppResult<RgbaFrame>,
     pub(crate) queue_wait: Duration,
@@ -89,7 +90,7 @@ impl RenderWorkerRuntime {
 #[derive(Debug, Clone, Copy)]
 struct InFlightTask {
     task_id: u64,
-    priority: RenderPriority,
+    class: WorkClass,
     generation: u64,
     canceled: bool,
 }
@@ -126,7 +127,7 @@ impl RenderWorker {
         if self.in_flight.contains_key(&key) || self.in_flight.len() >= self.worker_threads {
             return false;
         }
-        let priority = task.priority;
+        let class = task.class;
         let generation = task.generation;
         let task_id = self.next_task_id;
         self.next_task_id = self.next_task_id.saturating_add(1);
@@ -146,7 +147,7 @@ impl RenderWorker {
             key,
             InFlightTask {
                 task_id,
-                priority,
+                class,
                 generation,
                 canceled: false,
             },
@@ -195,20 +196,10 @@ impl RenderWorker {
                 if keep_keys.contains(key) {
                     return None;
                 }
-                let class_rank = match entry.priority {
-                    RenderPriority::Background => 0,
-                    RenderPriority::DirectionalLead => 1,
-                    _ => return None,
-                };
-                let stale_rank = if entry.generation < current_generation {
-                    0
-                } else {
-                    1
-                };
-                Some((
-                    (stale_rank, class_rank, entry.generation, entry.task_id),
-                    *key,
-                ))
+                let rank = entry
+                    .class
+                    .preempt_rank(current_generation, entry.generation)?;
+                Some(((rank.0, rank.1, rank.2, entry.task_id), *key))
             })
             .min_by_key(|(rank, _)| *rank)
             .map(|(_, key)| key)
@@ -234,10 +225,7 @@ impl RenderWorker {
         for (key, entry) in &mut self.in_flight {
             let stale = entry.generation < generation;
             let should_keep = keep_keys.contains(key);
-            let prefetch = matches!(
-                entry.priority,
-                RenderPriority::DirectionalLead | RenderPriority::Background
-            );
+            let prefetch = entry.class.is_prefetch();
             if stale && prefetch && !should_keep && !entry.canceled {
                 entry.canceled = true;
                 canceled += 1;
@@ -257,7 +245,7 @@ impl RenderWorker {
 
         Some(RenderWorkerResult {
             key: result.key,
-            priority: result.priority,
+            class: result.class,
             generation: result.generation,
             result: result.result,
             queue_wait: result.queue_wait,
@@ -335,7 +323,7 @@ fn render_worker_main(
                 let event = RenderResultEvent {
                     task_id,
                     key,
-                    priority: task.priority,
+                    class: task.class,
                     generation: task.generation,
                     result,
                     queue_wait: started.saturating_duration_since(enqueued_at),
@@ -361,7 +349,8 @@ mod tests {
     use super::RenderWorker;
     use crate::backend::{PdfBackend, PdfDoc, SharedPdfBackend};
     use crate::render::cache::RenderedPageKey;
-    use crate::render::scheduler::{RenderPriority, RenderTask};
+    use crate::render::scheduler::RenderTask;
+    use crate::work::WorkClass;
 
     #[test]
     fn current_enqueue_preempts_prefetch_when_worker_is_full() {
@@ -372,9 +361,9 @@ mod tests {
         let old_key = RenderedPageKey::new(doc.doc_id(), 1, 1.0);
         let current_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
 
-        assert!(worker.enqueue(render_task(doc.as_ref(), 1, RenderPriority::Background, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 1, WorkClass::Background, 1)));
         let (enqueued, preempted) = worker.enqueue_current_with_preemption(
-            render_task(doc.as_ref(), 0, RenderPriority::CriticalCurrent, 2),
+            render_task(doc.as_ref(), 0, WorkClass::CriticalCurrent, 2),
             2,
             &[current_key],
         );
@@ -391,12 +380,7 @@ mod tests {
         }
 
         assert!(!completed.contains(&old_key));
-        assert!(worker.enqueue(render_task(
-            doc.as_ref(),
-            0,
-            RenderPriority::CriticalCurrent,
-            2
-        )));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 0, WorkClass::CriticalCurrent, 2)));
         let deadline = Instant::now() + Duration::from_secs(2);
         while worker.in_flight_len() > 0 && Instant::now() < deadline {
             completed.extend(drain_render_results(&mut worker));
@@ -414,10 +398,10 @@ mod tests {
         let mut worker = spawn_worker(Arc::clone(&doc), 1);
         let keep_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
 
-        assert!(worker.enqueue(render_task(doc.as_ref(), 1, RenderPriority::Background, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 1, WorkClass::Background, 1)));
         for _ in 0..8 {
             let _ = worker.enqueue_current_with_preemption(
-                render_task(doc.as_ref(), 0, RenderPriority::CriticalCurrent, 2),
+                render_task(doc.as_ref(), 0, WorkClass::CriticalCurrent, 2),
                 2,
                 &[keep_key],
             );
@@ -435,25 +419,10 @@ mod tests {
         let mut worker = spawn_worker(Arc::clone(&doc), 4);
         let current_key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
 
-        assert!(worker.enqueue(render_task(
-            doc.as_ref(),
-            0,
-            RenderPriority::CriticalCurrent,
-            1
-        )));
-        assert!(worker.enqueue(render_task(
-            doc.as_ref(),
-            1,
-            RenderPriority::DirectionalLead,
-            1
-        )));
-        assert!(worker.enqueue(render_task(doc.as_ref(), 2, RenderPriority::Background, 1)));
-        assert!(worker.enqueue(render_task(
-            doc.as_ref(),
-            3,
-            RenderPriority::GuardReverse,
-            1
-        )));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 0, WorkClass::CriticalCurrent, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 1, WorkClass::DirectionalLead, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 2, WorkClass::Background, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 3, WorkClass::GuardReverse, 1)));
 
         let canceled = worker.cancel_stale_prefetch_except(2, &[current_key]);
         assert_eq!(canceled, 2);
@@ -475,14 +444,14 @@ mod tests {
     fn render_task(
         doc: &dyn PdfBackend,
         page: usize,
-        priority: RenderPriority,
+        class: WorkClass,
         generation: u64,
     ) -> RenderTask {
         RenderTask {
             doc_id: doc.doc_id(),
             page,
             scale: 1.0,
-            priority,
+            class,
             generation,
             reason: "test-task",
         }

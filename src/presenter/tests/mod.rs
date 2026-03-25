@@ -8,9 +8,12 @@ use tokio::runtime::Builder;
 
 use crate::backend::RgbaFrame;
 use crate::render::cache::RenderedPageKey;
-use crate::render::prefetch::{PrefetchClass, PrefetchQueue, PrefetchQueueConfig};
+use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig};
+use crate::work::WorkClass;
 
-use super::encode::{EncodeWorkerRequest, enqueue_encode_request, pop_next_encode_task};
+use super::encode::{
+    EncodeLaneKind, EncodeWorkerRequest, enqueue_encode_request, pop_next_encode_task,
+};
 use super::factory::create_presenter;
 use super::l2_cache::{L2_MAX_ENTRIES, TerminalFrameCache, TerminalFrameKey, TerminalFrameState};
 use super::ratatui::RatatuiImagePresenter;
@@ -210,7 +213,7 @@ fn prefetch_encode_advances_entry_to_ready() {
             &frame(),
             viewport,
             PanOffset::default(),
-            PrefetchClass::DirectionalLead,
+            WorkClass::DirectionalLead,
             1,
         )
         .expect("prefetch should pass");
@@ -259,7 +262,7 @@ fn prefetch_encode_does_not_change_current_key() {
             &frame(),
             viewport,
             PanOffset::default(),
-            PrefetchClass::DirectionalLead,
+            WorkClass::DirectionalLead,
             1,
         )
         .expect("prefetch should pass");
@@ -284,7 +287,7 @@ fn presenter_has_pending_work_tracks_encode_progress() {
             &frame(),
             viewport,
             PanOffset::default(),
-            PrefetchClass::DirectionalLead,
+            WorkClass::DirectionalLead,
             1,
         )
         .expect("prefetch should pass");
@@ -702,7 +705,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         frame: frame(),
         area,
         allow_upscale: false,
-        class: PrefetchClass::DirectionalLead,
+        class: WorkClass::DirectionalLead,
         generation: 1,
         enqueued_at: Instant::now(),
     };
@@ -712,7 +715,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         frame: frame(),
         area,
         allow_upscale: false,
-        class: PrefetchClass::DirectionalLead,
+        class: WorkClass::DirectionalLead,
         generation: 1,
         enqueued_at: Instant::now(),
     };
@@ -722,14 +725,26 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         frame: frame(),
         area,
         allow_upscale: false,
-        class: PrefetchClass::CriticalCurrent,
+        class: WorkClass::GuardReverse,
         generation: 1,
         enqueued_at: Instant::now(),
     };
 
-    assert!(enqueue_encode_request(low_req_1, &mut queue));
-    assert!(enqueue_encode_request(low_req_2, &mut queue));
-    assert!(enqueue_encode_request(high_req, &mut queue));
+    assert!(enqueue_encode_request(
+        EncodeLaneKind::Background,
+        low_req_1,
+        &mut queue
+    ));
+    assert!(enqueue_encode_request(
+        EncodeLaneKind::Background,
+        low_req_2,
+        &mut queue
+    ));
+    assert!(enqueue_encode_request(
+        EncodeLaneKind::Background,
+        high_req,
+        &mut queue
+    ));
 
     let first = pop_next_encode_task(&mut queue).expect("first task should exist");
     let second = pop_next_encode_task(&mut queue).expect("second task should exist");
@@ -741,7 +756,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
 }
 
 #[test]
-fn encode_queue_cancels_stale_prefetch_generation() {
+fn current_encode_queue_cancels_stale_generation() {
     let presenter = RatatuiImagePresenter::new();
     let area = Rect::new(0, 0, 12, 7);
     let viewport = Viewport {
@@ -762,7 +777,7 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         frame: frame(),
         area,
         allow_upscale: false,
-        class: PrefetchClass::DirectionalLead,
+        class: WorkClass::CriticalCurrent,
         generation: 1,
         enqueued_at: Instant::now(),
     };
@@ -776,7 +791,7 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         frame: frame(),
         area,
         allow_upscale: false,
-        class: PrefetchClass::Background,
+        class: WorkClass::CriticalCurrent,
         generation: 1,
         enqueued_at: Instant::now(),
     };
@@ -790,14 +805,26 @@ fn encode_queue_cancels_stale_prefetch_generation() {
         frame: frame(),
         area,
         allow_upscale: false,
-        class: PrefetchClass::CriticalCurrent,
+        class: WorkClass::CriticalCurrent,
         generation: 2,
         enqueued_at: Instant::now(),
     };
 
-    assert!(enqueue_encode_request(stale_prefetch, &mut queue));
-    assert!(enqueue_encode_request(stale_background, &mut queue));
-    assert!(enqueue_encode_request(current, &mut queue));
+    assert!(enqueue_encode_request(
+        EncodeLaneKind::Current,
+        stale_prefetch,
+        &mut queue
+    ));
+    assert!(enqueue_encode_request(
+        EncodeLaneKind::Current,
+        stale_background,
+        &mut queue
+    ));
+    assert!(enqueue_encode_request(
+        EncodeLaneKind::Current,
+        current,
+        &mut queue
+    ));
 
     let first = pop_next_encode_task(&mut queue).expect("current should remain");
     assert_eq!(first.key.rendered_page.page, 3);

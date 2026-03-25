@@ -51,6 +51,12 @@ Suggested direction:
 - Split current-page encode from background/prefetch encode, or
 - Allow more than one encode worker and preserve strict priority for current work.
 
+Status:
+
+- Fixed on 2026-03-25.
+- `src/presenter/encode.rs` now uses separate current/background encode lanes, so an in-flight prefetch encode no longer blocks newly queued current-page encode work.
+- Follow-up refactor completed on 2026-03-25: render/encode work classification is now shared as `WorkClass`, so queue priority, stale-generation handling, and render-to-encode routing rules are defined in one place.
+
 ### 3. Shared RGBA frames can be fully cloned before resize/encode
 
 - Non-crop prepare paths keep `RgbaFrame` shared by cloning the `Arc`.

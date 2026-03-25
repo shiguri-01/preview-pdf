@@ -12,7 +12,7 @@ Pipeline:
 3. Cache rasterized frame in L1 cache.
 4. Compose spread frame (when enabled), then crop to viewport/pan window when required.
 5. Prepare terminal frame entry in L2 cache.
-6. Encode image for terminal protocol in encode worker.
+6. Encode image for terminal protocol in encode worker lanes.
 7. Render ready protocol frame through ratatui draw path.
 
 ## Stage contracts
@@ -64,6 +64,7 @@ Requirements:
 - A fixed-size worker pool executes `RenderTask`.
 - Completed work is emitted as `RenderResultEvent` through worker result channel.
 - Capacity limits bound concurrent in-flight render tasks.
+- `RenderTask.class` uses shared `WorkClass`.
 
 Preemption rule for current-page critical tasks:
 - On saturation, stale lower-priority tasks can be canceled to admit critical work.
@@ -95,8 +96,9 @@ Queue requirements (`PrefetchQueue`):
 - Key deduplication with priority replacement.
 - Stale-generation cancellation.
 - Max depth enforcement.
+- Queue class metadata uses shared `WorkClass`.
 
-## 6. Encode worker (`presenter/encode.rs`)
+## 6. Encode worker lanes (`presenter/encode.rs`)
 
 Input:
 - `EncodeWorkerRequest::Encode { key, picker, frame, area, class, generation }`
@@ -106,7 +108,11 @@ Per-task behavior:
 2. Encode to `StatefulProtocol` with negotiated protocol picker.
 
 Requirements:
-- Stale-generation tasks are discarded before encode completion path.
+- `CriticalCurrent` tasks use the current lane.
+- `GuardReverse`, `DirectionalLead`, and `Background` tasks use the background lane.
+- Current-lane queued work drops older generations so fast page flips do not build a stale current backlog.
+- Background-lane stale-generation tasks are discarded before encode completion path.
+- Render-complete handoff keeps one explicit exception: completed `CriticalCurrent` render work is downgraded to `DirectionalLead` before presenter-side prefetch encode routing.
 - Results are returned as `EncodeWorkerResult` and drained by presenter.
 
 ## 7. L2 terminal-frame cache (`presenter/l2_cache.rs`)
@@ -168,6 +174,7 @@ The runtime tracks:
 - render/encode queue wait time (`render_queue_wait_ms`, `encode_queue_wait_ms`)
 - L1/L2 cache hit rates
 - render/encode queue depth and in-flight samples
+- presenter encode queue metrics are aggregated across the current and background lanes
 - render/encode canceled task counts
 - redraw request counts broken down by reason (`input`, `command`, `app_event`, `render_complete`, `pending_work`, `timer`, `input_error`, `state_changed`)
 

@@ -70,8 +70,11 @@ This document defines the current architecture of `pvf`.
 - `src/presenter/`
   - `mod.rs`: presenter API surface and factory.
   - `ratatui.rs`: ratatui-based presenter implementation.
-  - `encode.rs`: encode worker.
+  - `encode.rs`: current/background 2-lane encode workers.
   - `l2_cache.rs`: terminal-frame L2 cache.
+
+- `src/work.rs`
+  - `WorkClass`: shared work classification for render scheduling, prefetch queueing, and presenter encode routing.
 
 - `src/backend/`
   - `traits.rs`: `PdfBackend`, `RgbaFrame`.

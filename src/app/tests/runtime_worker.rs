@@ -18,9 +18,9 @@ use crate::presenter::{
     PresenterRenderOutcome, Viewport,
 };
 use crate::render::cache::RenderedPageKey;
-use crate::render::prefetch::PrefetchClass;
-use crate::render::scheduler::{NavDirection, NavIntent, RenderPriority, RenderTask};
+use crate::render::scheduler::{NavDirection, NavIntent, RenderTask};
 use crate::render::worker::RenderWorker;
+use crate::work::WorkClass;
 
 #[derive(Default)]
 struct TestPresenter {
@@ -66,7 +66,7 @@ impl ImagePresenter for TestPresenter {
         _frame: &RgbaFrame,
         _viewport: Viewport,
         _pan: PanOffset,
-        _class: PrefetchClass,
+        _class: WorkClass,
         _generation: u64,
     ) -> AppResult<()> {
         self.prefetch_calls += 1;
@@ -251,7 +251,7 @@ fn prefetch_encode_from_cache_invokes_presenter() {
             &mut pan,
             None,
             false,
-            PrefetchClass::DirectionalLead,
+            WorkClass::DirectionalLead,
             1,
         )
         .expect("prefetch from cache should succeed");
@@ -266,20 +266,10 @@ fn render_worker_accepts_up_to_three_inflight_tasks() {
     let doc = Arc::new(PdfDoc::open(&file).expect("pdf should open"));
     let mut worker = spawn_worker(Arc::clone(&doc), 3);
 
-    assert!(worker.enqueue(render_task(
-        doc.as_ref(),
-        0,
-        RenderPriority::CriticalCurrent,
-        1
-    )));
-    assert!(worker.enqueue(render_task(
-        doc.as_ref(),
-        1,
-        RenderPriority::DirectionalLead,
-        1
-    )));
-    assert!(worker.enqueue(render_task(doc.as_ref(), 2, RenderPriority::Background, 1)));
-    assert!(!worker.enqueue(render_task(doc.as_ref(), 3, RenderPriority::Background, 1)));
+    assert!(worker.enqueue(render_task(doc.as_ref(), 0, WorkClass::CriticalCurrent, 1)));
+    assert!(worker.enqueue(render_task(doc.as_ref(), 1, WorkClass::DirectionalLead, 1)));
+    assert!(worker.enqueue(render_task(doc.as_ref(), 2, WorkClass::Background, 1)));
+    assert!(!worker.enqueue(render_task(doc.as_ref(), 3, WorkClass::Background, 1)));
     assert_eq!(worker.in_flight_len(), 3);
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -300,19 +290,9 @@ fn render_worker_rejects_duplicate_key_while_inflight() {
     let mut worker = spawn_worker(Arc::clone(&doc), 3);
     let key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
 
-    assert!(worker.enqueue(render_task(
-        doc.as_ref(),
-        0,
-        RenderPriority::CriticalCurrent,
-        1
-    )));
+    assert!(worker.enqueue(render_task(doc.as_ref(), 0, WorkClass::CriticalCurrent, 1)));
     assert!(worker.has_in_flight(&key));
-    assert!(!worker.enqueue(render_task(
-        doc.as_ref(),
-        0,
-        RenderPriority::DirectionalLead,
-        1
-    )));
+    assert!(!worker.enqueue(render_task(doc.as_ref(), 0, WorkClass::DirectionalLead, 1)));
 
     let deadline = Instant::now() + Duration::from_secs(2);
     while worker.in_flight_len() > 0 && Instant::now() < deadline {
@@ -323,17 +303,12 @@ fn render_worker_rejects_duplicate_key_while_inflight() {
     fs::remove_file(&file).expect("test pdf should be removed");
 }
 
-fn render_task(
-    doc: &dyn PdfBackend,
-    page: usize,
-    priority: RenderPriority,
-    generation: u64,
-) -> RenderTask {
+fn render_task(doc: &dyn PdfBackend, page: usize, class: WorkClass, generation: u64) -> RenderTask {
     RenderTask {
         doc_id: doc.doc_id(),
         page,
         scale: 1.0,
-        priority,
+        class,
         generation,
         reason: "test-task",
     }

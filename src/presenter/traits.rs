@@ -8,7 +8,7 @@ use crate::backend::RgbaFrame;
 use crate::error::AppResult;
 use crate::perf::PerfStats;
 use crate::render::cache::RenderedPageKey;
-use crate::render::prefetch::PrefetchClass;
+use crate::work::WorkClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PresenterKind {
@@ -125,7 +125,7 @@ pub trait ImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
-        class: PrefetchClass,
+        class: WorkClass,
         generation: u64,
     ) -> AppResult<()> {
         let _ = (cache_key, frame, viewport, pan, class, generation);

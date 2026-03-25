@@ -14,11 +14,11 @@ use crate::backend::RgbaFrame;
 use crate::error::{AppError, AppResult};
 use crate::perf::PerfStats;
 use crate::render::cache::RenderedPageKey;
-use crate::render::prefetch::PrefetchClass;
+use crate::work::WorkClass;
 
 use super::encode::{
-    ENCODE_RESIZE_FILTER, EncodeWorkerEvent, EncodeWorkerRequest, EncodeWorkerResult,
-    EncodeWorkerRuntime, send_encode_request, spawn_encode_worker,
+    ENCODE_RESIZE_FILTER, EncodeLaneKind, EncodeWorkerEvent, EncodeWorkerRequest,
+    EncodeWorkerResult, EncodeWorkerRuntime, send_encode_request, spawn_encode_worker,
 };
 use super::image_ops::fit_downscale_dimensions;
 use super::l2_cache::{
@@ -48,17 +48,29 @@ pub(crate) struct PresenterState {
     pub(crate) current_generation: u64,
 }
 
-struct EncodeChannel {
+#[derive(Default)]
+struct EncodeLaneState {
+    depth: usize,
+    in_flight: usize,
+}
+
+struct EncodeLane {
     request_tx: Option<UnboundedSender<EncodeWorkerRequest>>,
     result_rx: UnboundedReceiver<EncodeWorkerResult>,
-    _runtime: EncodeWorkerRuntime,
     worker: Option<JoinHandle<()>>,
+    state: EncodeLaneState,
+}
+
+struct EncodeChannels {
+    _runtime: EncodeWorkerRuntime,
+    current: EncodeLane,
+    background: EncodeLane,
 }
 
 pub struct RatatuiImagePresenter {
     pub(crate) config: PresenterConfig,
     pub(crate) state: PresenterState,
-    encode: EncodeChannel,
+    encode: EncodeChannels,
 }
 
 impl Default for RatatuiImagePresenter {
@@ -70,7 +82,10 @@ impl Default for RatatuiImagePresenter {
 impl RatatuiImagePresenter {
     pub fn with_cache_limits(l2_max_entries: usize, l2_memory_budget_bytes: usize) -> Self {
         let runtime = EncodeWorkerRuntime::new();
-        let (request_tx, result_rx, worker) = spawn_encode_worker(&runtime);
+        let (current_tx, current_rx, current_worker) =
+            spawn_encode_worker(&runtime, EncodeLaneKind::Current);
+        let (background_tx, background_rx, background_worker) =
+            spawn_encode_worker(&runtime, EncodeLaneKind::Background);
         Self {
             config: PresenterConfig {
                 picker: Picker::halfblocks(),
@@ -85,11 +100,20 @@ impl RatatuiImagePresenter {
                 last_ready_key: None,
                 current_generation: 0,
             },
-            encode: EncodeChannel {
-                request_tx: Some(request_tx),
-                result_rx,
+            encode: EncodeChannels {
                 _runtime: runtime,
-                worker: Some(worker),
+                current: EncodeLane {
+                    request_tx: Some(current_tx),
+                    result_rx: current_rx,
+                    worker: Some(current_worker),
+                    state: EncodeLaneState::default(),
+                },
+                background: EncodeLane {
+                    request_tx: Some(background_tx),
+                    result_rx: background_rx,
+                    worker: Some(background_worker),
+                    state: EncodeLaneState::default(),
+                },
             },
         }
     }
@@ -106,11 +130,59 @@ impl RatatuiImagePresenter {
         self.state.l2_cache.len()
     }
 
+    fn encode_request_tx(
+        &self,
+        lane: EncodeLaneKind,
+    ) -> Option<UnboundedSender<EncodeWorkerRequest>> {
+        match lane {
+            EncodeLaneKind::Current => self.encode.current.request_tx.clone(),
+            EncodeLaneKind::Background => self.encode.background.request_tx.clone(),
+        }
+    }
+
+    fn sync_encode_perf_stats(&mut self) {
+        let depth = self.encode.current.state.depth + self.encode.background.state.depth;
+        let in_flight =
+            self.encode.current.state.in_flight + self.encode.background.state.in_flight;
+        self.state.perf_stats.set_encode_queue_depth(depth);
+        self.state.perf_stats.set_encode_in_flight(in_flight);
+    }
+
+    fn set_encode_lane_state(&mut self, lane: EncodeLaneKind, depth: usize, in_flight: usize) {
+        let state = match lane {
+            EncodeLaneKind::Current => &mut self.encode.current.state,
+            EncodeLaneKind::Background => &mut self.encode.background.state,
+        };
+        state.depth = depth;
+        state.in_flight = in_flight;
+        self.sync_encode_perf_stats();
+    }
+
+    fn drain_encode_lane(&mut self, lane: EncodeLaneKind) -> Result<bool, TryRecvError> {
+        let result = match lane {
+            EncodeLaneKind::Current => self.encode.current.result_rx.try_recv(),
+            EncodeLaneKind::Background => self.encode.background.result_rx.try_recv(),
+        };
+
+        match result {
+            Ok(done) => Ok(matches!(
+                self.handle_encode_result(done),
+                Some(PresenterBackgroundEvent::EncodeComplete {
+                    redraw_requested: true
+                })
+            )),
+            Err(err) => Err(err),
+        }
+    }
+
     fn reset_terminal_state(&mut self) {
         self.state.l2_cache.clear();
         self.state.current_key = None;
         self.state.last_ready_key = None;
         self.state.current_generation = 0;
+        self.encode.current.state = EncodeLaneState::default();
+        self.encode.background.state = EncodeLaneState::default();
+        self.sync_encode_perf_stats();
     }
 
     fn ensure_frame_entry(
@@ -154,6 +226,7 @@ impl RatatuiImagePresenter {
         done: EncodeWorkerResult,
     ) -> Option<PresenterBackgroundEvent> {
         let current_key = self.state.current_key;
+        let lane = done.lane;
         let event = match done.event {
             EncodeWorkerEvent::Completed {
                 key,
@@ -202,8 +275,7 @@ impl RatatuiImagePresenter {
                 })
             }
             EncodeWorkerEvent::QueueState { depth, in_flight } => {
-                self.state.perf_stats.set_encode_queue_depth(depth);
-                self.state.perf_stats.set_encode_in_flight(in_flight);
+                self.set_encode_lane_state(lane, depth, in_flight);
                 None
             }
         };
@@ -217,19 +289,28 @@ impl RatatuiImagePresenter {
         let mut changed = false;
 
         loop {
-            match self.encode.result_rx.try_recv() {
-                Ok(done) => {
-                    if matches!(
-                        self.handle_encode_result(done),
-                        Some(PresenterBackgroundEvent::EncodeComplete {
-                            redraw_requested: true
-                        })
-                    ) {
-                        changed = true;
-                    }
+            let mut drained_any = false;
+
+            match self.drain_encode_lane(EncodeLaneKind::Current) {
+                Ok(redraw) => {
+                    changed |= redraw;
+                    drained_any = true;
                 }
-                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => break,
+            }
+
+            match self.drain_encode_lane(EncodeLaneKind::Background) {
+                Ok(redraw) => {
+                    changed |= redraw;
+                    drained_any = true;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => break,
+            }
+
+            if !drained_any {
+                break;
             }
         }
 
@@ -237,10 +318,16 @@ impl RatatuiImagePresenter {
     }
 
     pub(crate) fn shutdown_worker(&mut self) {
-        if let Some(request_tx) = self.encode.request_tx.take() {
+        if let Some(request_tx) = self.encode.current.request_tx.take() {
             let _ = request_tx.send(EncodeWorkerRequest::Shutdown);
         }
-        if let Some(worker) = self.encode.worker.take() {
+        if let Some(request_tx) = self.encode.background.request_tx.take() {
+            let _ = request_tx.send(EncodeWorkerRequest::Shutdown);
+        }
+        if let Some(worker) = self.encode.current.worker.take() {
+            worker.abort();
+        }
+        if let Some(worker) = self.encode.background.worker.take() {
             worker.abort();
         }
     }
@@ -402,10 +489,11 @@ impl ImagePresenter for RatatuiImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
-        class: PrefetchClass,
+        class: WorkClass,
         generation: u64,
     ) -> AppResult<()> {
         self.drain_encode_results();
+        debug_assert_ne!(class, WorkClass::CriticalCurrent);
         let Some(key) = self.ensure_frame_entry(cache_key, frame, viewport, pan, false)? else {
             return Ok(());
         };
@@ -417,7 +505,7 @@ impl ImagePresenter for RatatuiImagePresenter {
             viewport.height.max(1),
         );
         let font_size = self.config.picker.font_size();
-        let request_tx = self.encode.request_tx.clone();
+        let request_tx = self.encode_request_tx(EncodeLaneKind::Background);
         let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
             self.state
                 .perf_stats
@@ -498,7 +586,7 @@ impl ImagePresenter for RatatuiImagePresenter {
                 used_stale_fallback: drew_image,
             });
         };
-        let request_tx = self.encode.request_tx.clone();
+        let request_tx = self.encode_request_tx(EncodeLaneKind::Current);
         if self.state.l2_cache.cached_mut(&key).is_none() {
             self.state
                 .perf_stats
@@ -568,7 +656,7 @@ impl ImagePresenter for RatatuiImagePresenter {
                         frame,
                         area: encode_area,
                         allow_upscale: options.is_initial_preview(),
-                        class: PrefetchClass::CriticalCurrent,
+                        class: WorkClass::CriticalCurrent,
                         generation: self.state.current_generation,
                         enqueued_at: Instant::now(),
                     };
@@ -650,7 +738,10 @@ impl ImagePresenter for RatatuiImagePresenter {
     {
         Box::pin(async move {
             loop {
-                let done = self.encode.result_rx.recv().await?;
+                let done = tokio::select! {
+                    done = self.encode.current.result_rx.recv() => done,
+                    done = self.encode.background.result_rx.recv() => done,
+                }?;
                 if let Some(event) = self.handle_encode_result(done) {
                     return Some(event);
                 }

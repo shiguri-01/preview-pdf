@@ -133,6 +133,7 @@ impl RatatuiImagePresenter {
                 frame.clone(),
                 frame.byte_len(),
                 allow_single_oversize,
+                self.state.last_ready_key,
             );
             if !inserted {
                 self.state

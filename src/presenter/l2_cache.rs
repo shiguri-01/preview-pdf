@@ -84,14 +84,28 @@ impl TerminalFrameCache {
         frame: RgbaFrame,
         approx_bytes: usize,
         allow_single_oversize: bool,
+        protected_key: Option<TerminalFrameKey>,
     ) -> bool {
         if approx_bytes > self.memory_budget_bytes {
             if !allow_single_oversize {
                 return false;
             }
 
-            self.clear();
-            self.memory_bytes = approx_bytes;
+            if let Some(prev) = self.entries.pop(&key) {
+                self.memory_bytes = self.memory_bytes.saturating_sub(prev.approx_bytes);
+            }
+
+            // Keep the visible ready frame resident while swapping in an oversize current
+            // entry. We allow this narrow over-budget state so the viewer never regresses
+            // from "image visible" back to blank while the replacement frame is pending.
+            // If the cache is configured for a single entry, honor that cap and fall back
+            // to the original replacement behavior.
+            let protected_key = (self.max_entries > 1)
+                .then_some(protected_key)
+                .flatten()
+                .filter(|protected| *protected != key);
+            self.retain_only(protected_key);
+            self.memory_bytes = self.memory_bytes.saturating_add(approx_bytes);
             self.entries.put(
                 key,
                 TerminalFrameEntry {
@@ -107,12 +121,7 @@ impl TerminalFrameCache {
         // non-oversize inserts (typically prefetch) that would evict it.
         if !allow_single_oversize
             && self.memory_bytes > self.memory_budget_bytes
-            && self.entries.len() == 1
             && self.entries.peek(&key).is_none()
-            && self
-                .entries
-                .peek_lru()
-                .is_some_and(|(_cached_key, entry)| entry.approx_bytes > self.memory_budget_bytes)
         {
             return false;
         }
@@ -141,7 +150,7 @@ impl TerminalFrameCache {
         if let Some(evicted_bytes) = implicit_evicted_bytes {
             self.memory_bytes = self.memory_bytes.saturating_sub(evicted_bytes);
         }
-        self.evict_while_needed();
+        self.evict_while_needed(protected_key);
         true
     }
 
@@ -189,16 +198,61 @@ impl TerminalFrameCache {
         true
     }
 
-    fn evict_while_needed(&mut self) {
+    fn evict_while_needed(&mut self, protected_key: Option<TerminalFrameKey>) {
         while self.entries.len() > self.max_entries || self.memory_bytes > self.memory_budget_bytes
         {
-            if self.entries.len() == 1 {
+            if self.entries.len() == 1
+                && protected_key.is_some_and(|key| self.entries.peek(&key).is_some())
+            {
                 break;
             }
-            let Some((_key, entry)) = self.entries.pop_lru() else {
+            let Some((_key, entry)) = self.pop_lru_unprotected(protected_key) else {
                 break;
             };
             self.memory_bytes = self.memory_bytes.saturating_sub(entry.approx_bytes);
+        }
+    }
+
+    fn retain_only(&mut self, protected_key: Option<TerminalFrameKey>) {
+        let doomed: Vec<_> = self
+            .entries
+            .iter()
+            .map(|(key, _)| *key)
+            .filter(|key| Some(*key) != protected_key)
+            .collect();
+
+        for key in doomed {
+            let _ = self.remove(&key);
+        }
+    }
+
+    fn pop_lru_unprotected(
+        &mut self,
+        protected_key: Option<TerminalFrameKey>,
+    ) -> Option<(TerminalFrameKey, TerminalFrameEntry)> {
+        let mut protected_entry = Vec::new();
+
+        loop {
+            match self.entries.pop_lru() {
+                Some((key, entry)) if Some(key) == protected_key => {
+                    protected_entry.push((key, entry));
+                    continue;
+                }
+                Some(pair) => {
+                    for (key, entry) in protected_entry.into_iter().rev() {
+                        let _ = self.entries.push(key, entry);
+                        let _ = self.entries.demote(&key);
+                    }
+                    return Some(pair);
+                }
+                None => {
+                    for (key, entry) in protected_entry.into_iter().rev() {
+                        let _ = self.entries.push(key, entry);
+                        let _ = self.entries.demote(&key);
+                    }
+                    return None;
+                }
+            }
         }
     }
 }

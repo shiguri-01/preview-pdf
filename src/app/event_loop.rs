@@ -288,6 +288,7 @@ impl App {
             &runtime.session,
             pdf,
             &runtime.input_actor,
+            runtime.render_actor.generation() == 0,
             runtime.prefetch_pause_after_input,
         );
         let changed = self.drain_background_and_sync_navigation(
@@ -389,6 +390,7 @@ impl App {
         session: &impl TerminalSurface,
         pdf: &dyn PdfBackend,
         input_actor: &InputActor,
+        is_cold_start: bool,
         prefetch_pause_after_input: Duration,
     ) -> LoopStep {
         let prefetch_viewport = Self::current_viewport(session, self.state.debug_status_visible);
@@ -406,11 +408,15 @@ impl App {
             .iter()
             .map(|page| RenderedPageKey::new(pdf.doc_id(), *page, current_scale))
             .collect::<Vec<_>>();
+        let current_cached = required_render_keys
+            .iter()
+            .all(|key| self.render.runtime.has_cached_frame(key));
         let presenter_layout_tag = self
             .state
             .presenter_layout_tag(visible_pages.trailing_page.is_some());
         let initial_preview = cold_start_initial_preview_plan(
-            self.render.viewer_has_image,
+            is_cold_start,
+            current_cached,
             pdf.doc_id(),
             visible_pages,
             self.state.page_layout_mode,
@@ -421,9 +427,6 @@ impl App {
         if let Some(preview_plan) = initial_preview.as_ref() {
             current_interest_keys.extend(preview_plan.page_keys.iter().copied());
         }
-        let current_cached = required_render_keys
-            .iter()
-            .all(|key| self.render.runtime.has_cached_frame(key));
         let presenter_key = RenderedPageKey::with_layout(
             pdf.doc_id(),
             visible_pages.anchor_page,
@@ -607,7 +610,10 @@ impl App {
                     current_keys.push(RenderedPageKey::new(pdf.doc_id(), trailing_page, scale));
                 }
                 if let Some(preview_plan) = cold_start_initial_preview_plan(
-                    self.render.viewer_has_image,
+                    runtime.render_actor.generation() == 0,
+                    current_keys
+                        .iter()
+                        .all(|key| self.render.runtime.has_cached_frame(key)),
                     pdf.doc_id(),
                     visible_pages,
                     self.state.page_layout_mode,
@@ -658,14 +664,15 @@ impl App {
 }
 
 fn cold_start_initial_preview_plan(
-    viewer_has_image: bool,
+    is_cold_start: bool,
+    current_cached: bool,
     doc_id: u64,
     visible_pages: super::state::VisiblePageSlots,
     page_layout_mode: super::state::PageLayoutMode,
     current_scale: f32,
     presenter_layout_tag: u16,
 ) -> Option<InitialPreviewPlan> {
-    if viewer_has_image {
+    if !is_cold_start || current_cached {
         return None;
     }
 
@@ -727,7 +734,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(true, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(true, true, 7, slots, PageLayoutMode::Single, 1.0, 0);
 
         assert_eq!(preview, None);
     }
@@ -742,8 +749,38 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
 
         assert!(preview.is_some());
+    }
+
+    #[test]
+    fn cold_start_initial_preview_plan_stays_available_until_current_frame_is_cached() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+
+        assert!(preview.is_some());
+    }
+
+    #[test]
+    fn cold_start_initial_preview_plan_is_disabled_after_navigation_begins() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(false, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+
+        assert_eq!(preview, None);
     }
 }

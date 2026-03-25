@@ -61,6 +61,7 @@ Rules:
   - L2 terminal-frame cache
   - scheduler-driven prefetch
   - cold start may show a lower-resolution preview before the full-resolution visible page or spread is ready
+  - once shown, the cold-start preview remains visible until the full-resolution current page or spread is ready
 
 - Terminal protocol handling:
   - protocol negotiation through presenter/picker flow

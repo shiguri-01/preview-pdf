@@ -12,7 +12,7 @@ mod tests;
 pub use factory::{create_presenter, create_presenter_with_cache_limits};
 pub use ratatui::RatatuiImagePresenter;
 pub use traits::{
-    ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterKind,
-    PresenterRenderMode, PresenterRenderOptions, PresenterRenderOutcome, PresenterRuntimeInfo,
-    Viewport,
+    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
+    PresenterKind, PresenterRenderMode, PresenterRenderOptions, PresenterRenderOutcome,
+    PresenterRuntimeInfo, Viewport,
 };

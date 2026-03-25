@@ -27,8 +27,8 @@ use super::l2_cache::{
 };
 use super::terminal_cell::{picker_with_resolved_cell_size, protocol_type_label};
 use super::traits::{
-    ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
-    PresenterRenderOutcome, PresenterRuntimeInfo, Viewport,
+    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
+    PresenterRenderOptions, PresenterRenderOutcome, PresenterRuntimeInfo, Viewport,
 };
 
 pub(crate) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
@@ -149,66 +149,90 @@ impl RatatuiImagePresenter {
         Ok(Some(key))
     }
 
+    fn handle_encode_result(
+        &mut self,
+        done: EncodeWorkerResult,
+    ) -> Option<PresenterBackgroundEvent> {
+        let current_key = self.state.current_key;
+        let event = match done.event {
+            EncodeWorkerEvent::Completed {
+                key,
+                protocol,
+                queue_wait,
+                elapsed,
+                succeeded,
+            } => {
+                self.state.perf_stats.record_encode_queue_wait(queue_wait);
+                if succeeded {
+                    self.state.perf_stats.record_convert(elapsed);
+                }
+
+                let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
+                    self.state
+                        .perf_stats
+                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                    return Some(PresenterBackgroundEvent::EncodeComplete {
+                        redraw_requested: Some(key) == current_key,
+                    });
+                };
+
+                if succeeded {
+                    if let Some(protocol) = protocol {
+                        entry.state = TerminalFrameState::Ready(protocol);
+                    } else {
+                        entry.state = TerminalFrameState::Failed;
+                    }
+                } else {
+                    entry.state = TerminalFrameState::Failed;
+                }
+
+                Some(PresenterBackgroundEvent::EncodeComplete {
+                    redraw_requested: Some(key) == current_key,
+                })
+            }
+            EncodeWorkerEvent::CanceledStale { key } => {
+                let removed = self.state.l2_cache.remove(&key);
+                self.state.perf_stats.add_encode_canceled_tasks(1);
+                if removed && Some(key) == self.state.last_ready_key {
+                    self.state.last_ready_key = None;
+                }
+
+                Some(PresenterBackgroundEvent::EncodeComplete {
+                    redraw_requested: removed && Some(key) == current_key,
+                })
+            }
+            EncodeWorkerEvent::QueueState { depth, in_flight } => {
+                self.state.perf_stats.set_encode_queue_depth(depth);
+                self.state.perf_stats.set_encode_in_flight(in_flight);
+                None
+            }
+        };
+        self.state
+            .perf_stats
+            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+        event
+    }
+
     fn drain_encode_results(&mut self) -> bool {
         let mut changed = false;
-        let current_key = self.state.current_key;
 
         loop {
             match self.encode.result_rx.try_recv() {
-                Ok(done) => match done.event {
-                    EncodeWorkerEvent::Completed {
-                        key,
-                        protocol,
-                        queue_wait,
-                        elapsed,
-                        succeeded,
-                    } => {
-                        self.state.perf_stats.record_encode_queue_wait(queue_wait);
-                        if succeeded {
-                            self.state.perf_stats.record_convert(elapsed);
-                        }
-
-                        let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
-                            continue;
-                        };
-
-                        if succeeded {
-                            if let Some(protocol) = protocol {
-                                entry.state = TerminalFrameState::Ready(protocol);
-                            } else {
-                                entry.state = TerminalFrameState::Failed;
-                            }
-                        } else {
-                            entry.state = TerminalFrameState::Failed;
-                        }
-
-                        if Some(key) == current_key {
-                            changed = true;
-                        }
+                Ok(done) => {
+                    if matches!(
+                        self.handle_encode_result(done),
+                        Some(PresenterBackgroundEvent::EncodeComplete {
+                            redraw_requested: true
+                        })
+                    ) {
+                        changed = true;
                     }
-                    EncodeWorkerEvent::CanceledStale { key } => {
-                        let removed = self.state.l2_cache.remove(&key);
-                        self.state.perf_stats.add_encode_canceled_tasks(1);
-                        if removed && Some(key) == self.state.last_ready_key {
-                            self.state.last_ready_key = None;
-                        }
-                        if removed && Some(key) == current_key {
-                            changed = true;
-                        }
-                    }
-                    EncodeWorkerEvent::QueueState { depth, in_flight } => {
-                        self.state.perf_stats.set_encode_queue_depth(depth);
-                        self.state.perf_stats.set_encode_in_flight(in_flight);
-                    }
-                },
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => break,
             }
         }
 
-        self.state
-            .perf_stats
-            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
         changed
     }
 
@@ -618,6 +642,20 @@ impl ImagePresenter for RatatuiImagePresenter {
 
     fn drain_background_events(&mut self) -> bool {
         self.drain_encode_results()
+    }
+
+    fn recv_background_event<'a>(
+        &'a mut self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<PresenterBackgroundEvent>> + 'a>>
+    {
+        Box::pin(async move {
+            loop {
+                let done = self.encode.result_rx.recv().await?;
+                if let Some(event) = self.handle_encode_result(done) {
+                    return Some(event);
+                }
+            }
+        })
     }
 }
 

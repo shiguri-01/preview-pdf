@@ -27,6 +27,11 @@ Suggested direction:
 - Request redraw immediately when the current presenter key finishes encoding.
 - Reduce dependence on `wake_timeout` and timer-based redraws for L2 completion.
 
+Status:
+
+- Fixed on 2026-03-25.
+- Encode completion is now awaited as a loop event and routed through `DomainEvent::EncodeComplete`, so current-frame encode completion can trigger redraw immediately without relying on wake polling.
+
 ### 2. Encode work is single-threaded and can delay current-page responsiveness
 
 - Only one encode worker is spawned.

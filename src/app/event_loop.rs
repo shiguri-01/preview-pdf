@@ -9,7 +9,7 @@ use crate::command::CommandOutcome;
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
 use crate::perf::{PerfIterationSnapshot, PerfScenarioId, RedrawReason};
-use crate::presenter::{PanOffset, Viewport};
+use crate::presenter::{ImagePresenter, PanOffset, PresenterBackgroundEvent, Viewport};
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::{RenderPriority, RenderTask};
 use crate::render::worker::RenderWorker;
@@ -376,6 +376,7 @@ impl App {
         let waited = wait_next_event(
             &mut runtime.loop_event_rx,
             &mut runtime.render_worker,
+            &mut *self.render.presenter,
             &mut runtime.prefetch_tick,
             &mut runtime.redraw_tick,
             wait_for_pending_redraw,
@@ -642,6 +643,13 @@ impl App {
                     .runtime
                     .set_queue_depth_with_inflight(runtime.render_worker.in_flight_len());
             }
+            WaitEvent::Event(DomainEvent::EncodeComplete(
+                PresenterBackgroundEvent::EncodeComplete { redraw_requested },
+            )) => {
+                if redraw_requested {
+                    self.request_redraw(runtime, RedrawReason::RenderComplete);
+                }
+            }
             WaitEvent::Event(DomainEvent::PrefetchTick) => {
                 runtime.render_actor.mark_prefetch_due();
             }
@@ -688,6 +696,7 @@ fn cold_start_initial_preview_plan(
 async fn wait_next_event(
     loop_event_rx: &mut UnboundedReceiver<DomainEvent>,
     render_worker: &mut RenderWorker,
+    presenter: &mut dyn ImagePresenter,
     prefetch_tick: &mut time::Interval,
     redraw_tick: &mut time::Interval,
     wait_for_pending_redraw: bool,
@@ -704,6 +713,12 @@ async fn wait_next_event(
         maybe_render = render_worker.recv_result() => {
             match maybe_render {
                 Some(result) => WaitEvent::Event(DomainEvent::RenderComplete(result)),
+                None => WaitEvent::Closed,
+            }
+        },
+        maybe_presenter = presenter.recv_background_event(), if presenter.has_pending_work() => {
+            match maybe_presenter {
+                Some(event) => WaitEvent::Event(DomainEvent::EncodeComplete(event)),
                 None => WaitEvent::Closed,
             }
         },

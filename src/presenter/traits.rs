@@ -1,3 +1,6 @@
+use std::future::{Future, pending};
+use std::pin::Pin;
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -84,6 +87,11 @@ pub struct PresenterRenderOutcome {
     pub used_stale_fallback: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresenterBackgroundEvent {
+    EncodeComplete { redraw_requested: bool },
+}
+
 pub trait ImagePresenter {
     fn initialize_terminal(&mut self) -> AppResult<()> {
         Ok(())
@@ -138,6 +146,12 @@ pub trait ImagePresenter {
 
     fn drain_background_events(&mut self) -> bool {
         false
+    }
+
+    fn recv_background_event<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = Option<PresenterBackgroundEvent>> + 'a>> {
+        Box::pin(pending())
     }
 
     fn perf_snapshot(&self) -> Option<PerfStats> {

@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
+use tokio::runtime::Builder;
 
 use crate::backend::RgbaFrame;
 use crate::render::cache::RenderedPageKey;
@@ -15,8 +16,8 @@ use super::l2_cache::{L2_MAX_ENTRIES, TerminalFrameCache, TerminalFrameKey, Term
 use super::ratatui::RatatuiImagePresenter;
 use super::terminal_cell::cell_size_from_window_metrics;
 use super::traits::{
-    ImagePresenter, PanOffset, PresenterFeedback, PresenterKind, PresenterRenderMode,
-    PresenterRenderOptions, Viewport,
+    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterFeedback, PresenterKind,
+    PresenterRenderMode, PresenterRenderOptions, Viewport,
 };
 
 fn frame() -> RgbaFrame {
@@ -297,6 +298,52 @@ fn presenter_has_pending_work_tracks_encode_progress() {
     }
 
     assert!(!presenter.has_pending_work());
+}
+
+#[test]
+fn recv_background_event_requests_redraw_for_current_encode_completion() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let area = Rect::new(1, 1, 12, 7);
+    presenter
+        .prepare(
+            RenderedPageKey::new(11, 0, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            1,
+        )
+        .expect("prepare should pass");
+
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    terminal
+        .draw(|frame| {
+            presenter
+                .render(frame, area, PresenterRenderOptions::default())
+                .expect("render should pass");
+        })
+        .expect("draw should pass");
+
+    let runtime = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime should build");
+    let event = runtime
+        .block_on(presenter.recv_background_event())
+        .expect("encode completion event should arrive");
+
+    assert_eq!(
+        event,
+        PresenterBackgroundEvent::EncodeComplete {
+            redraw_requested: true,
+        }
+    );
 }
 
 #[test]

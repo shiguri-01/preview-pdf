@@ -113,6 +113,7 @@ Requirements:
 - Current-lane queued work drops older generations so fast page flips do not build a stale current backlog.
 - Background-lane stale-generation tasks are discarded before encode completion path.
 - Render-complete handoff keeps one explicit exception: completed `CriticalCurrent` render work is downgraded to `DirectionalLead` before presenter-side prefetch encode routing.
+- Resize/downscale reads source RGBA bytes through an immutable image view, so shared `RgbaFrame` storage does not trigger copy-on-write cloning before the destination buffer is produced.
 - Results are returned as `EncodeWorkerResult` and drained by presenter.
 
 ## 7. L2 terminal-frame cache (`presenter/l2_cache.rs`)

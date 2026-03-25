@@ -82,6 +82,11 @@ Suggested direction:
 - Avoid copy-on-write cloning for read-only resize operations.
 - Revisit L2 ownership so encode can consume unique buffers more often.
 
+Status:
+
+- Fixed on 2026-03-25.
+- `src/presenter/image_ops.rs` now resizes through `fast_image_resize::images::ImageRef`, so shared `RgbaFrame` inputs are read immutably and no longer pay an extra full-buffer clone before downscale.
+
 ### 4. Backend render output copies the full pixmap into a new `Vec<u8>`
 
 - Hayro render output is converted with `data_as_u8_slice().to_vec()`.

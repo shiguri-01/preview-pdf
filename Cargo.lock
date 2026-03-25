@@ -1972,6 +1972,7 @@ dependencies = [
 name = "pvf"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "clap",
  "crossterm 0.28.1",
  "fast_image_resize 6.0.0",

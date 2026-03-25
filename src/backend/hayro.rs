@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bytemuck::allocation::cast_vec;
 use hayro::hayro_interpret::font::Glyph;
 use hayro::hayro_interpret::util::{PageExt, RectExt};
 use hayro::hayro_interpret::{
@@ -12,6 +13,7 @@ use hayro::hayro_interpret::{
 use hayro::hayro_syntax::Pdf;
 use hayro::hayro_syntax::page::Page;
 use hayro::vello_cpu::color::palette::css::WHITE;
+use hayro::vello_cpu::{Pixmap, color::PremulRgba8};
 use hayro::{RenderSettings, render};
 use kurbo::{Affine, BezPath, Point};
 
@@ -159,7 +161,7 @@ impl PdfDoc {
         Ok(RgbaFrame {
             width: pixmap.width() as u32,
             height: pixmap.height() as u32,
-            pixels: pixmap.data_as_u8_slice().to_vec().into(),
+            pixels: pixel_buffer_from_pixmap(pixmap).into(),
         })
     }
 
@@ -311,6 +313,15 @@ fn calculate_doc_id(path: &Path, byte_len: usize) -> u64 {
     hasher.finish()
 }
 
+fn pixel_buffer_from_pixmap(pixmap: Pixmap) -> Vec<u8> {
+    let width = pixmap.width() as usize;
+    let height = pixmap.height() as usize;
+    let pixels: Vec<PremulRgba8> = pixmap.take();
+    let bytes = cast_vec(pixels);
+    debug_assert_eq!(bytes.len(), width * height * 4);
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -318,9 +329,11 @@ mod tests {
     use std::process;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use hayro::vello_cpu::Pixmap;
+
     use crate::error::AppError;
 
-    use super::PdfDoc;
+    use super::{PdfDoc, pixel_buffer_from_pixmap};
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -441,6 +454,18 @@ mod tests {
         );
 
         fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn pixel_buffer_from_pixmap_matches_slice_copy_bytes() {
+        let mut pixmap = Pixmap::new(2, 1);
+        let expected = {
+            let bytes = pixmap.data_as_u8_slice_mut();
+            bytes.copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+            pixmap.data_as_u8_slice().to_vec()
+        };
+
+        assert_eq!(pixel_buffer_from_pixmap(pixmap), expected);
     }
 
     fn build_pdf(page_texts: &[&str]) -> Vec<u8> {

@@ -91,6 +91,11 @@ Status:
 
 - Hayro render output is converted with `data_as_u8_slice().to_vec()`.
 
+Status:
+
+- Fixed on 2026-03-25.
+- `src/backend/hayro.rs` now consumes the Hayro `Pixmap` with `Pixmap::take()` and reinterprets the owned `Vec<PremulRgba8>` as `Vec<u8>` for `RgbaFrame`, removing the extra full-frame copy before the frame enters caches.
+
 Relevant code:
 
 - `src/backend/hayro.rs`

@@ -146,8 +146,10 @@ pub(crate) fn enqueue_encode_request(
             enqueued_at,
         } => {
             let _ = cancel_stale_tasks_with_keys(lane, queue, generation);
-            if lane == EncodeLaneKind::Current && queue.contains_key(&key) {
-                let _ = queue.retain(|_, meta| meta.key != key);
+            if lane == EncodeLaneKind::Current
+                && retain_current_lane_same_key(queue, key, generation)
+            {
+                return true;
             }
 
             let task = EncodeWorkerTask {
@@ -191,6 +193,25 @@ fn cancel_stale_tasks_with_keys(
     removed
 }
 
+fn retain_current_lane_same_key(
+    queue: &mut PrefetchQueue<TerminalFrameKey, EncodeWorkerTask>,
+    key: TerminalFrameKey,
+    generation: u64,
+) -> bool {
+    let mut newer_duplicate_queued = false;
+    let _ = queue.retain(|_, meta| {
+        if meta.key != key {
+            return true;
+        }
+        if meta.generation > generation {
+            newer_duplicate_queued = true;
+            return true;
+        }
+        false
+    });
+    newer_duplicate_queued
+}
+
 fn enqueue_with_notifications(
     lane: EncodeLaneKind,
     request: EncodeWorkerRequest,
@@ -225,8 +246,10 @@ fn enqueue_with_notifications(
                     },
                 });
             }
-            if lane == EncodeLaneKind::Current && queue.contains_key(&key) {
-                let _ = queue.retain(|_, meta| meta.key != key);
+            if lane == EncodeLaneKind::Current
+                && retain_current_lane_same_key(queue, key, generation)
+            {
+                return true;
             }
 
             let task = EncodeWorkerTask {
@@ -519,5 +542,105 @@ mod tests {
         let first = super::pop_next_encode_task(&mut queue).expect("fresh current should remain");
         assert_eq!(first.key, fresh_key);
         assert!(super::pop_next_encode_task(&mut queue).is_none());
+    }
+
+    #[test]
+    fn current_lane_keeps_newer_same_key_when_older_request_arrives_late() {
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
+            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let picker = Picker::halfblocks();
+        let same_key = key(1);
+        let newer_area = Rect::new(0, 0, 10, 6);
+        let older_area = Rect::new(0, 0, 6, 4);
+
+        assert!(enqueue_encode_request(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: same_key,
+                picker: picker.clone(),
+                frame: frame(),
+                area: newer_area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 2,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue
+        ));
+
+        assert!(enqueue_encode_request(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: same_key,
+                picker,
+                frame: frame(),
+                area: older_area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 1,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue
+        ));
+
+        let task =
+            super::pop_next_encode_task(&mut queue).expect("newer current task should remain");
+        assert_eq!(task.key, same_key);
+        assert_eq!(task.area, newer_area);
+        assert!(super::pop_next_encode_task(&mut queue).is_none());
+    }
+
+    #[test]
+    fn enqueue_with_notifications_keeps_newer_same_key_when_older_request_arrives_late() {
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
+            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let picker = Picker::halfblocks();
+        let same_key = key(1);
+        let newer_area = Rect::new(0, 0, 10, 6);
+        let older_area = Rect::new(0, 0, 6, 4);
+        let (tx, mut rx) = unbounded_channel();
+
+        assert!(enqueue_with_notifications(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: same_key,
+                picker: picker.clone(),
+                frame: frame(),
+                area: newer_area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 2,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue,
+            &tx
+        ));
+
+        assert!(enqueue_with_notifications(
+            EncodeLaneKind::Current,
+            EncodeWorkerRequest::Encode {
+                key: same_key,
+                picker,
+                frame: frame(),
+                area: older_area,
+                allow_upscale: false,
+                class: WorkClass::CriticalCurrent,
+                generation: 1,
+                enqueued_at: Instant::now(),
+            },
+            &mut queue,
+            &tx
+        ));
+
+        let task =
+            super::pop_next_encode_task(&mut queue).expect("newer current task should remain");
+        assert_eq!(task.key, same_key);
+        assert_eq!(task.area, newer_area);
+        assert!(super::pop_next_encode_task(&mut queue).is_none());
+
+        let queue_state_events = std::iter::from_fn(|| rx.try_recv().ok())
+            .filter(|event| matches!(event.event, EncodeWorkerEvent::QueueState { .. }))
+            .count();
+        assert_eq!(queue_state_events, 1);
     }
 }

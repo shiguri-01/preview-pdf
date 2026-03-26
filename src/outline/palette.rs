@@ -34,7 +34,7 @@ impl PaletteProvider for OutlinePaletteProvider {
     }
 
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
-        let query = ctx.input.trim().to_ascii_lowercase();
+        let query = ctx.input.trim().to_lowercase();
 
         let mut text_matches = Vec::new();
         let mut page_text_matches = Vec::new();
@@ -119,7 +119,9 @@ fn outline_candidate(index: usize, entry: &OutlinePaletteEntry) -> PaletteCandid
             "  ".repeat(entry.depth),
             entry.title
         ))],
-        right: vec![PaletteTextPart::secondary(format_outline_page_detail(entry.page))],
+        right: vec![PaletteTextPart::secondary(format_outline_page_detail(
+            entry.page,
+        ))],
         search_texts: vec![
             PaletteSearchText::new(entry.title.clone()),
             PaletteSearchText::new(format!("page {}", entry.page + 1)),
@@ -135,7 +137,7 @@ fn format_outline_page_detail(page: usize) -> String {
 }
 
 fn text_contains(text: &str, query: &str) -> bool {
-    text.to_ascii_lowercase().contains(query)
+    text.to_lowercase().contains(query)
 }
 
 fn decode_payload(payload: &PalettePayload) -> Option<(usize, String)> {
@@ -245,10 +247,7 @@ mod tests {
 
         assert_eq!(
             titles,
-            vec![
-                "Chapter 3 overview".to_string(),
-                "Contents".to_string(),
-            ]
+            vec!["Chapter 3 overview".to_string(), "Contents".to_string(),]
         );
     }
 
@@ -287,10 +286,32 @@ mod tests {
 
         assert_eq!(
             titles,
-            vec![
-                "Section A".to_string(),
-                "Section B".to_string(),
-            ]
+            vec!["Section A".to_string(), "Section B".to_string(),]
         );
+    }
+
+    #[test]
+    fn list_matches_unicode_titles_case_insensitively() {
+        let provider = OutlinePaletteProvider;
+        let entries = vec![OutlinePaletteEntry {
+            title: "Überblick".to_string(),
+            page: 7,
+            depth: 0,
+        }];
+        let extensions = ExtensionUiSnapshot {
+            outline_entries: entries.into(),
+            ..ExtensionUiSnapshot::default()
+        };
+        let ctx = PaletteContext {
+            app: &Default::default(),
+            extensions: &extensions,
+            kind: PaletteKind::Outline,
+            input: "ÜBER",
+            seed: None,
+        };
+
+        let items = provider.list(&ctx).expect("outline list should build");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].left[0].text.trim(), "Überblick");
     }
 }

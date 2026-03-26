@@ -408,6 +408,7 @@ enum Utf16Endian {
 
 fn build_named_destination_index<'a>(root: Dict<'a>) -> HashMap<Vec<u8>, NamedDestination<'a>> {
     let mut destinations = HashMap::new();
+    let mut visited = HashSet::new();
 
     if let Some(dests) = root.get::<Dict<'_>>(DESTS) {
         collect_destination_dict(dests, &mut destinations);
@@ -416,7 +417,7 @@ fn build_named_destination_index<'a>(root: Dict<'a>) -> HashMap<Vec<u8>, NamedDe
     if let Some(names_root) = root.get::<Dict<'_>>(NAMES)
         && let Some(dests_tree) = names_root.get::<Dict<'_>>(DESTS)
     {
-        collect_name_tree_destinations(dests_tree, &mut destinations);
+        collect_name_tree_destinations(dests_tree, &mut destinations, &mut visited);
     }
     destinations
 }
@@ -436,14 +437,21 @@ fn collect_destination_dict<'a>(
 fn collect_name_tree_destinations<'a>(
     dict: Dict<'a>,
     destinations: &mut HashMap<Vec<u8>, NamedDestination<'a>>,
+    visited: &mut HashSet<ObjectIdentifier>,
 ) {
+    if let Some(id) = dict.obj_id()
+        && !visited.insert(id)
+    {
+        return;
+    }
+
     if let Some(names) = dict.get::<Array<'_>>(NAMES) {
         collect_name_tree_pairs(names, destinations);
     }
 
     if let Some(kids) = dict.get::<Array<'_>>(KIDS) {
         for child in kids.iter::<Dict<'_>>() {
-            collect_name_tree_destinations(child, destinations);
+            collect_name_tree_destinations(child, destinations, visited);
         }
     }
 }
@@ -486,7 +494,7 @@ fn resolve_named_destination<'a>(
 
 fn decode_pdf_doc_encoding_byte(byte: u8) -> char {
     match byte {
-        0x16 => '\u{0017}',
+        0x16 => '\u{0016}',
         0x18 => '\u{02D8}',
         0x19 => '\u{02C7}',
         0x1A => '\u{02C6}',
@@ -861,9 +869,33 @@ mod tests {
     }
 
     #[test]
+    fn decode_pdf_text_string_decodes_pdfdoc_encoding_control_byte_0x16() {
+        let decoded = decode_pdf_text_string(&[0x16]);
+        assert_eq!(decoded, "\u{0016}");
+    }
+
+    #[test]
     fn extract_outline_resolves_named_destinations_from_name_tree() {
         let file = unique_temp_path("outline_named_dest.pdf");
         fs::write(&file, build_pdf_with_named_outline()).expect("test file should be created");
+
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let outline = doc
+            .extract_outline()
+            .expect("outline extraction should succeed");
+
+        assert_eq!(outline.len(), 1);
+        assert_eq!(outline[0].title, "Chapter 1");
+        assert_eq!(outline[0].page, 0);
+
+        fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn extract_outline_handles_cyclic_named_destination_tree() {
+        let file = unique_temp_path("outline_named_dest_cycle.pdf");
+        fs::write(&file, build_pdf_with_cyclic_named_outline())
+            .expect("test file should be created");
 
         let doc = PdfDoc::open(&file).expect("pdf should open");
         let outline = doc
@@ -979,6 +1011,23 @@ mod tests {
             "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>".to_string(),
             "<< /Title (Chapter 1) /Parent 4 0 R /Dest (chapter-1) >>".to_string(),
             "<< /Names [(chapter-1) [5 0 R /Fit]] >>".to_string(),
+            "<< /Length 36 >>\nstream\nBT /F1 14 Tf 36 260 Td (hello) Tj ET\nendstream".to_string(),
+        ];
+
+        build_pdf_from_objects(&objects)
+    }
+
+    fn build_pdf_with_cyclic_named_outline() -> Vec<u8> {
+        let objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R /Names << /Dests 7 0 R >> >>"
+                .to_string(),
+            "<< /Type /Pages /Kids [5 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+            "<< /First 6 0 R /Last 6 0 R /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents 10 0 R >>".to_string(),
+            "<< /Title (Chapter 1) /Parent 4 0 R /Dest (chapter-1) >>".to_string(),
+            "<< /Kids [8 0 R] >>".to_string(),
+            "<< /Names [(chapter-1) [5 0 R /Fit]] /Kids [7 0 R] >>".to_string(),
             "<< /Length 36 >>\nstream\nBT /F1 14 Tf 36 260 Td (hello) Tj ET\nendstream".to_string(),
         ];
 

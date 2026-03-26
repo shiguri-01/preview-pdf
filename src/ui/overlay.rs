@@ -15,26 +15,26 @@ pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, label: &str) {
         return;
     }
 
-    let popup_width = area.width.min(34);
-    let popup_height = area.height.min(5);
+    let popup_width = area.width.min(28);
+    let popup_height = area.height.min(3);
     let popup = centered_rect(area, popup_width, popup_height);
     frame.render_widget(Clear, popup);
 
-    let block = Block::default()
-        .title("Loading")
-        .borders(Borders::ALL)
-        .style(Style::default().fg(Color::Yellow));
-    let inner = block.inner(popup);
-    frame.render_widget(block, popup);
-
-    if inner.width == 0 || inner.height == 0 {
+    if popup.width == 0 || popup.height == 0 {
         return;
     }
 
-    let message = Paragraph::new(format!("Loading... {label}"))
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::White));
-    frame.render_widget(message, inner);
+    let message = build_loading_message(label, popup.width as usize);
+    let message_area = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .split(popup)[1];
+    let message = Paragraph::new(message).style(Style::default().fg(Color::White));
+    frame.render_widget(message, message_area);
 }
 
 pub fn draw_error_overlay(frame: &mut Frame<'_>, area: Rect, message: &str) {
@@ -204,6 +204,26 @@ fn truncate_to_width(text: &str, max_width: usize) -> String {
     out
 }
 
+fn build_loading_message(label: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+
+    let text = truncate_to_width(&format!("Loading {label}"), width);
+    let text_width = UnicodeWidthStr::width(text.as_str());
+    let left_padding = width.saturating_sub(text_width) / 2;
+    let right_padding = width
+        .saturating_sub(text_width)
+        .saturating_sub(left_padding);
+
+    format!(
+        "{}{}{}",
+        " ".repeat(left_padding),
+        text,
+        " ".repeat(right_padding)
+    )
+}
+
 struct PaletteInputLineLayout {
     line: Line<'static>,
     cursor_col: u16,
@@ -293,10 +313,14 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::{Backend, TestBackend};
     use ratatui::layout::Rect;
+    use unicode_width::UnicodeWidthStr;
 
     use crate::palette::{PaletteItemView, PaletteKind, PaletteView};
 
-    use super::{build_palette_input_line, build_palette_item_line, draw_palette_overlay};
+    use super::{
+        build_loading_message, build_palette_input_line, build_palette_item_line,
+        draw_loading_overlay, draw_palette_overlay,
+    };
 
     fn rendered_input_text(layout: &super::PaletteInputLineLayout) -> String {
         layout
@@ -416,5 +440,43 @@ mod tests {
         );
 
         assert_eq!(rendered_candidate_text(&line), "goto-page <page> | Jump");
+    }
+
+    #[test]
+    fn loading_overlay_uses_fixed_width_for_short_and_long_labels() {
+        let short = build_loading_message("page 1/9", 28);
+        let long = build_loading_message("page 123456789/999999", 28);
+
+        assert_eq!(UnicodeWidthStr::width(short.as_str()), 28);
+        assert_eq!(UnicodeWidthStr::width(long.as_str()), 28);
+        assert!(short.contains("Loading page 1/9"));
+        assert!(long.contains("Loading page 123456789/999"));
+    }
+
+    #[test]
+    fn loading_overlay_keeps_message_centered_with_vertical_padding() {
+        let backend = TestBackend::new(40, 7);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| {
+                draw_loading_overlay(frame, Rect::new(0, 0, 40, 7), "page 1/9");
+            })
+            .expect("draw should pass");
+
+        let buffer = terminal.backend().buffer();
+        let message_y = 3;
+        let message = (0..buffer.area.width)
+            .map(|x| buffer[(x, message_y)].symbol())
+            .collect::<String>();
+
+        assert!(message.contains("Loading page 1/9"));
+        assert!(message.starts_with("      "));
+        assert!(message.ends_with("      "));
+
+        let blank_y = 2;
+        let blank_line = (0..buffer.area.width)
+            .map(|x| buffer[(x, blank_y)].symbol())
+            .collect::<String>();
+        assert_eq!(blank_line, " ".repeat(buffer.area.width as usize));
     }
 }

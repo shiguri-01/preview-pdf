@@ -88,9 +88,7 @@ fn decode_payload(payload: &PalettePayload) -> Option<(usize, String)> {
     let PalettePayload::Opaque(payload) = payload else {
         return None;
     };
-    let mut parts = payload.splitn(2, PAYLOAD_SEP);
-    let page = parts.next()?;
-    let title = parts.next()?;
+    let (page, title) = payload.split_once(PAYLOAD_SEP)?;
     Some((page.parse().ok()?, title.to_string()))
 }
 

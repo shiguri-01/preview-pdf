@@ -1,3 +1,6 @@
+use std::collections::VecDeque;
+use std::sync::Arc;
+
 use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
@@ -5,25 +8,30 @@ use crate::error::AppResult;
 use crate::event::AppEvent;
 use crate::history::{HistoryExtension, HistoryState};
 use crate::input::{AppInputEvent, InputHookResult};
+use crate::outline::{OutlineExtension, OutlinePaletteEntry, OutlineState};
 use crate::search::{SearchExtension, SearchRuntime};
-use std::collections::VecDeque;
 
 use super::traits::Extension;
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtensionUiSnapshot {
     pub search_active: bool,
+    pub outline_entries: Arc<[OutlinePaletteEntry]>,
 }
 
 impl ExtensionUiSnapshot {
     pub fn with_search_active(search_active: bool) -> Self {
-        Self { search_active }
+        Self {
+            search_active,
+            outline_entries: Arc::from([]),
+        }
     }
 }
 
 pub struct ExtensionHost {
     search: SearchRuntime,
     history: HistoryState,
+    outline: OutlineState,
 }
 
 impl ExtensionHost {
@@ -31,6 +39,7 @@ impl ExtensionHost {
         Self {
             search: SearchExtension::init_state(),
             history: HistoryExtension::init_state(),
+            outline: OutlineExtension::init_state(),
         }
     }
 
@@ -51,6 +60,7 @@ impl ExtensionHost {
     pub fn handle_event(&mut self, event: &AppEvent, app: &mut AppState) {
         SearchExtension::handle_event(&mut self.search, event, app);
         HistoryExtension::handle_event(&mut self.history, event, app);
+        OutlineExtension::handle_event(&mut self.outline, event, app);
     }
 
     pub fn drain_background(&mut self, app: &mut AppState) -> bool {
@@ -122,6 +132,23 @@ impl ExtensionHost {
         self.history.open_palette(app, palette_requests)
     }
 
+    pub fn open_outline_palette(
+        &mut self,
+        pdf: SharedPdfBackend,
+        palette_requests: &mut VecDeque<PaletteRequest>,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        self.outline.open_palette(pdf, palette_requests)
+    }
+
+    pub fn outline_goto(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+        page: usize,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        self.outline.goto(app, page_count, page)
+    }
+
     pub fn search_query(&self) -> &str {
         self.search.query()
     }
@@ -148,6 +175,7 @@ impl ExtensionHost {
     pub fn ui_snapshot(&self) -> ExtensionUiSnapshot {
         ExtensionUiSnapshot {
             search_active: self.search.is_active(),
+            outline_entries: self.outline.palette_entries(),
         }
     }
 }
@@ -209,6 +237,10 @@ mod tests {
 
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
+        }
+
+        fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
+            Ok(Vec::new())
         }
     }
 

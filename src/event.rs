@@ -18,6 +18,8 @@ pub enum NavReason {
     Search { query: String },
     /// History traversal (history-back, history-forward, history-goto).
     History(HistoryOp),
+    /// Navigation initiated from the PDF outline.
+    Outline,
     /// Layout-change normalization moved the anchor page.
     LayoutNormalize,
 }

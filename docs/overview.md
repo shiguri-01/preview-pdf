@@ -53,7 +53,15 @@ Rules:
 - History:
   - back/forward navigation history
   - jump-to-entry via history palette
-  - reason-based history recording (`Goto`/`Search` only)
+  - reason-based history recording (`Goto`/`Search`/`Outline`)
+
+- Outline:
+  - PDF outline/bookmark extraction
+  - command form: `outline` opens the outline palette
+  - outline palette shows a hierarchical list with indentation
+  - selecting an outline item jumps to the linked page
+  - unsupported/non-page destinations are ignored during extraction
+  - documents without usable outline entries open an empty outline palette state
 
 - Rendering and performance:
   - parallel render workers

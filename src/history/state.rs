@@ -239,6 +239,7 @@ fn format_reason(reason: &NavReason) -> String {
             HistoryOp::Forward => "History:forward".to_string(),
             HistoryOp::Goto => "History:goto".to_string(),
         },
+        NavReason::Outline => "Outline".to_string(),
         NavReason::LayoutNormalize => "LayoutNormalize".to_string(),
     }
 }
@@ -252,7 +253,7 @@ enum RecordPolicy {
 
 fn record_policy(reason: &NavReason) -> RecordPolicy {
     match reason {
-        NavReason::Goto(_) | NavReason::Search { .. } => RecordPolicy::Record,
+        NavReason::Goto(_) | NavReason::Search { .. } | NavReason::Outline => RecordPolicy::Record,
         NavReason::Step | NavReason::LayoutNormalize => RecordPolicy::SkipAndClearForward,
         NavReason::History(_) => RecordPolicy::SkipAndKeepStacks,
     }
@@ -369,6 +370,21 @@ mod tests {
             last.reason.as_ref(),
             Some(NavReason::Search { query }) if query == "needle"
         ));
+    }
+
+    #[test]
+    fn outline_navigation_is_recorded() {
+        let mut state = HistoryState::default();
+
+        state.on_event(&AppEvent::PageChanged {
+            from: 2,
+            to: 6,
+            reason: NavReason::Outline,
+        });
+
+        assert_eq!(state.back_stack.len(), 1);
+        assert_eq!(state.back_stack.back().expect("entry exists").page, 2);
+        assert!(matches!(state.current_reason, Some(NavReason::Outline)));
     }
 
     #[test]

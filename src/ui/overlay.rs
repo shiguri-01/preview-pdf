@@ -10,6 +10,10 @@ use crate::palette::{PaletteItemView, PaletteView};
 
 use super::layout::centered_rect;
 
+const PALETTE_ITEM_PREFIX_WIDTH: usize = 3;
+const MIN_LABEL_WIDTH_WITH_DETAIL: usize = 8;
+const ELLIPSIS: &str = "…";
+
 pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, label: &str) {
     if area.width == 0 || area.height == 0 {
         return;
@@ -149,6 +153,7 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
 
 fn build_palette_item_line(item: &PaletteItemView, width: usize) -> Line<'static> {
     let mut spans = Vec::new();
+    let content_width = width.saturating_sub(PALETTE_ITEM_PREFIX_WIDTH);
 
     if item.selected {
         spans.push(Span::styled(" ┃ ", Style::default().fg(Color::White)));
@@ -156,35 +161,70 @@ fn build_palette_item_line(item: &PaletteItemView, width: usize) -> Line<'static
         spans.push(Span::raw("   "));
     }
 
-    spans.push(Span::raw(item.label.clone()));
-
-    if let Some(detail) = &item.detail {
-        spans.push(Span::raw(" "));
+    let rendered = render_palette_item_content(item, content_width);
+    if !rendered.label.is_empty() {
+        spans.push(Span::raw(rendered.label));
+    }
+    if let Some(gap) = rendered.gap {
+        spans.push(Span::raw(" ".repeat(gap)));
+    }
+    if let Some(detail) = rendered.detail {
         let detail_style = if item.selected {
             Style::default()
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        spans.push(Span::styled(detail.clone(), detail_style));
+        spans.push(Span::styled(detail, detail_style));
     }
 
-    let line_style = if item.selected {
-        Style::default().add_modifier(Modifier::REVERSED)
+    let line = Line::from(spans);
+    if item.selected {
+        line.style(Style::default().add_modifier(Modifier::REVERSED))
     } else {
-        Style::default()
+        line
+    }
+}
+
+struct RenderedPaletteItemContent {
+    label: String,
+    gap: Option<usize>,
+    detail: Option<String>,
+}
+
+fn render_palette_item_content(
+    item: &PaletteItemView,
+    content_width: usize,
+) -> RenderedPaletteItemContent {
+    let label = truncate_with_ellipsis(&item.label, content_width);
+    let Some(detail) = &item.detail else {
+        return RenderedPaletteItemContent {
+            label,
+            gap: None,
+            detail: None,
+        };
     };
 
-    let label_width = UnicodeWidthStr::width(item.label.as_str());
-    let detail_width = item
-        .detail
-        .as_ref()
-        .map(|detail| 1 + UnicodeWidthStr::width(detail.as_str()))
-        .unwrap_or(0);
-    let total_width = 3 + label_width + detail_width;
-    let padding = " ".repeat(width.saturating_sub(total_width));
-    spans.push(Span::raw(padding));
+    let detail_width = UnicodeWidthStr::width(detail.as_str());
+    let reserved_width = detail_width.saturating_add(1);
+    let label_budget = content_width.saturating_sub(reserved_width);
 
-    Line::from(spans).style(line_style)
+    if label_budget < MIN_LABEL_WIDTH_WITH_DETAIL {
+        return RenderedPaletteItemContent {
+            label,
+            gap: None,
+            detail: None,
+        };
+    }
+
+    let label = truncate_with_ellipsis(&item.label, label_budget);
+    let label_width = UnicodeWidthStr::width(label.as_str());
+    let gap = content_width.saturating_sub(label_width + detail_width);
+
+    RenderedPaletteItemContent {
+        label,
+        gap: Some(gap),
+        detail: Some(detail.clone()),
+    }
 }
 
 fn truncate_to_width(text: &str, max_width: usize) -> String {
@@ -202,6 +242,23 @@ fn truncate_to_width(text: &str, max_width: usize) -> String {
         width = width.saturating_add(w);
     }
     out
+}
+
+fn truncate_with_ellipsis(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    let text_width = UnicodeWidthStr::width(text);
+    if text_width <= max_width {
+        return text.to_string();
+    }
+    let ellipsis_width = UnicodeWidthStr::width(ELLIPSIS);
+    if max_width <= ellipsis_width {
+        return ELLIPSIS.to_string();
+    }
+
+    let prefix = truncate_to_width(text, max_width - ellipsis_width);
+    format!("{prefix}{ELLIPSIS}")
 }
 
 fn build_loading_message(label: &str, width: usize) -> String {
@@ -439,7 +496,41 @@ mod tests {
             40,
         );
 
-        assert_eq!(rendered_candidate_text(&line), "goto-page <page> | Jump");
+        let rendered = rendered_candidate_text(&line);
+        assert!(rendered.starts_with("goto-page"));
+        assert!(rendered.ends_with("<page> | Jump"));
+        assert!(rendered.contains(" <page> | Jump"));
+    }
+
+    #[test]
+    fn palette_item_line_truncates_label_before_detail() {
+        let line = build_palette_item_line(
+            &PaletteItemView {
+                label: "very long outline title".to_string(),
+                detail: Some("p.12".to_string()),
+                selected: false,
+            },
+            18,
+        );
+
+        let rendered = rendered_candidate_text(&line);
+        assert!(rendered.ends_with("p.12"));
+        assert!(rendered.contains("…"));
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 15);
+    }
+
+    #[test]
+    fn palette_item_line_hides_detail_when_width_is_too_narrow() {
+        let line = build_palette_item_line(
+            &PaletteItemView {
+                label: "outline".to_string(),
+                detail: Some("p.12".to_string()),
+                selected: false,
+            },
+            8,
+        );
+
+        assert_eq!(rendered_candidate_text(&line), "outl…");
     }
 
     #[test]

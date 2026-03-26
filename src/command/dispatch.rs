@@ -108,6 +108,8 @@ pub fn dispatch(
         Command::HistoryForward => Ok(extension_host.history_forward(app, page_count)),
         Command::HistoryGoto { page } => extension_host.history_goto(app, page_count, page),
         Command::OpenHistory => Ok(extension_host.open_history_palette(app, palette_requests)),
+        Command::OpenOutline => extension_host.open_outline_palette(pdf, palette_requests),
+        Command::OutlineGoto { page, .. } => extension_host.outline_goto(app, page_count, page),
         Command::Cancel => {
             if app.mode == Mode::Palette {
                 palette_requests.push_back(PaletteRequest::Close);
@@ -154,7 +156,10 @@ fn collect_transition_events(
     let mut events = Vec::new();
     if let Some(reason) = derive_nav_reason(command, extension_host) {
         let should_emit = match reason {
-            NavReason::Search { .. } => outcome == CommandOutcome::Applied,
+            // Search/outline are intent-driven navigations. Even if layout normalization
+            // leaves the visible anchor page unchanged, history still needs the event so the
+            // attempted destination is recorded consistently.
+            NavReason::Search { .. } | NavReason::Outline => outcome == CommandOutcome::Applied,
             _ => app.current_page != prev_page,
         };
         if should_emit {
@@ -188,6 +193,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         Command::HistoryBack => Some(NavReason::History(HistoryOp::Back)),
         Command::HistoryForward => Some(NavReason::History(HistoryOp::Forward)),
         Command::HistoryGoto { .. } => Some(NavReason::History(HistoryOp::Goto)),
+        Command::OutlineGoto { .. } => Some(NavReason::Outline),
         Command::SetZoom { .. }
         | Command::ZoomIn
         | Command::ZoomOut
@@ -200,6 +206,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::OpenSearch
         | Command::SubmitSearch { .. }
         | Command::OpenHistory
+        | Command::OpenOutline
         | Command::Cancel
         | Command::Quit => None,
     }
@@ -265,6 +272,10 @@ mod tests {
 
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
+        }
+
+        fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
+            Ok(Vec::new())
         }
     }
 
@@ -431,6 +442,65 @@ mod tests {
                 from: 3,
                 to: 2,
                 reason: NavReason::LayoutNormalize
+            }
+        ));
+    }
+
+    #[test]
+    fn collect_transition_events_emits_outline_reason() {
+        let mut app = AppState {
+            current_page: 4,
+            ..AppState::default()
+        };
+        let host = ExtensionHost::default();
+        let prev_mode = app.mode;
+        let events = collect_transition_events(
+            &mut app,
+            &host,
+            1,
+            prev_mode,
+            &Command::OutlineGoto {
+                page: 4,
+                title: "Section".to_string(),
+            },
+            CommandOutcome::Applied,
+        );
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            AppEvent::PageChanged {
+                from: 1,
+                to: 4,
+                reason: NavReason::Outline
+            }
+        ));
+    }
+
+    #[test]
+    fn collect_transition_events_emits_outline_reason_when_page_is_unchanged() {
+        let mut app = AppState::default();
+        let host = ExtensionHost::default();
+        let prev_mode = app.mode;
+        let events = collect_transition_events(
+            &mut app,
+            &host,
+            0,
+            prev_mode,
+            &Command::OutlineGoto {
+                page: 0,
+                title: "Section".to_string(),
+            },
+            CommandOutcome::Applied,
+        );
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            AppEvent::PageChanged {
+                from: 0,
+                to: 0,
+                reason: NavReason::Outline
             }
         ));
     }

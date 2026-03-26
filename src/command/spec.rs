@@ -66,8 +66,20 @@ const ARGS_HISTORY_GOTO: [ArgSpec; 1] = [ArgSpec {
     kind: ArgKind::I32,
     required: true,
 }];
+const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
+    ArgSpec {
+        name: "page",
+        kind: ArgKind::I32,
+        required: true,
+    },
+    ArgSpec {
+        name: "title",
+        kind: ArgKind::String,
+        required: true,
+    },
+];
 
-const COMMAND_SPECS: [CommandSpec; 26] = [
+const COMMAND_SPECS: [CommandSpec; 28] = [
     CommandSpec {
         id: "next-page",
         title: "Next Page",
@@ -258,6 +270,22 @@ const COMMAND_SPECS: [CommandSpec; 26] = [
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::Always,
+    },
+    CommandSpec {
+        id: "outline",
+        title: "Open Outline",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::Always,
+    },
+    CommandSpec {
+        id: "outline-goto",
+        title: "Outline Go to Page",
+        args: &ARGS_OUTLINE_GOTO,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::InternalOnly,
         availability: CommandAvailability::Always,
     },
     CommandSpec {

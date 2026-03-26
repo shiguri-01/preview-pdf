@@ -7,6 +7,7 @@ pub mod event;
 pub mod extension;
 pub mod history;
 pub mod input;
+pub mod outline;
 pub mod palette;
 pub mod perf;
 pub mod presenter;

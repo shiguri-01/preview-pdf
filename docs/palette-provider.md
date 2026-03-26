@@ -122,3 +122,13 @@ This document defines the palette provider contract in `pvf`.
 - Candidates include back stack, current page, and forward stack (newest first).
 - Current page is marked and not jump-targetable.
 - Enter dispatches internal history-goto behavior with selected page and closes.
+
+## Outline palette (`PaletteKind::Outline`)
+
+- Open via command palette command: `outline`
+- Input mode: `FilterCandidates`
+- Candidate source is extension-owned cached outline data, not palette seed serialization.
+- Candidates are flattened depth-first for display only.
+- Hierarchy is represented with indentation in the label; detail shows the page number in loading-overlay format (`p.12`).
+- Enter dispatches internal outline-goto behavior with the resolved page and closes.
+- Empty outline state is valid and shows assistive text indicating that the document has no usable outline entries.

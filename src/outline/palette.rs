@@ -2,7 +2,7 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect,
+    PalettePostAction, PaletteProvider, PaletteSubmitEffect, PaletteTextPart, PaletteTextTone,
 };
 
 const PAYLOAD_SEP: char = '\u{1f}';
@@ -37,8 +37,12 @@ impl PaletteProvider for OutlinePaletteProvider {
             .enumerate()
             .map(|(index, entry)| PaletteCandidate {
                 id: format!("outline-{index}"),
-                label: format!("{}{}", "  ".repeat(entry.depth), entry.title),
-                detail: Some(format_outline_page_detail(entry.page)),
+                left: vec![primary(format!(
+                    "{}{}",
+                    "  ".repeat(entry.depth),
+                    entry.title
+                ))],
+                right: vec![secondary(format_outline_page_detail(entry.page))],
                 payload: PalettePayload::Opaque(encode_payload(entry.page, &entry.title)),
             })
             .collect())
@@ -147,6 +151,21 @@ mod tests {
 
         let items = provider.list(&ctx).expect("outline list should build");
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].detail.as_deref(), Some("p.12"));
+        assert_eq!(items[0].right.len(), 1);
+        assert_eq!(items[0].right[0].text, "p.12");
+    }
+}
+
+fn primary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Primary,
+    }
+}
+
+fn secondary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Secondary,
     }
 }

@@ -8,7 +8,8 @@ use crate::command::{CommandConditionContext, CommandInvocationSource};
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect, PaletteTabEffect,
+    PalettePostAction, PaletteProvider, PaletteSubmitEffect, PaletteTabEffect, PaletteTextPart,
+    PaletteTextTone,
 };
 
 pub struct CommandPaletteProvider;
@@ -43,8 +44,8 @@ impl PaletteProvider for CommandPaletteProvider {
             })
             .map(|spec| PaletteCandidate {
                 id: spec.id.to_string(),
-                label: spec.id.to_string(),
-                detail: Some(format_detail(spec.title, spec.args)),
+                left: format_left(spec.id, spec.args),
+                right: vec![secondary(spec.title)],
                 payload: PalettePayload::Opaque(spec.id.to_string()),
             })
             .collect::<Vec<_>>();
@@ -122,7 +123,7 @@ impl PaletteProvider for CommandPaletteProvider {
 
         let value = match &candidate.payload {
             PalettePayload::Opaque(value) => value.clone(),
-            PalettePayload::None => candidate.label.clone(),
+            PalettePayload::None => candidate.plain_left_text(),
         };
 
         Ok(PaletteTabEffect::SetInput {
@@ -170,13 +171,14 @@ impl PaletteProvider for CommandPaletteProvider {
     }
 }
 
-fn format_detail(title: &str, args: &[crate::command::ArgSpec]) -> String {
+fn format_left(command_id: &str, args: &[crate::command::ArgSpec]) -> Vec<PaletteTextPart> {
     let usage = usage_text(args);
-    if usage.is_empty() {
-        format!("| {title}")
-    } else {
-        format!("{usage} | {title}")
+    let mut parts = vec![primary(command_id)];
+    if !usage.is_empty() {
+        parts.push(primary(" "));
+        parts.push(secondary(usage));
     }
+    parts
 }
 
 fn usage_text(args: &[crate::command::ArgSpec]) -> String {
@@ -259,7 +261,7 @@ fn rank_command_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) 
 
 fn score_command_candidate(query: &str, candidate: &PaletteCandidate) -> Option<CandidateScore> {
     let id = candidate.id.to_ascii_lowercase();
-    let title = extract_title(candidate).to_ascii_lowercase();
+    let title = candidate.plain_right_text().to_ascii_lowercase();
 
     let id_score = score_id(query, &id);
     let title_score = score_title(query, &title);
@@ -272,16 +274,6 @@ fn score_command_candidate(query: &str, candidate: &PaletteCandidate) -> Option<
         score,
         tie_len: id.len(),
     })
-}
-
-fn extract_title(candidate: &PaletteCandidate) -> &str {
-    let Some(detail) = candidate.detail.as_deref() else {
-        return "";
-    };
-    let Some((_, title)) = detail.split_once('|') else {
-        return "";
-    };
-    title.trim()
 }
 
 fn score_id(query: &str, id: &str) -> i32 {
@@ -354,6 +346,20 @@ fn is_subsequence(query: &str, text: &str) -> bool {
     }
 
     false
+}
+
+fn primary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Primary,
+    }
+}
+
+fn secondary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Secondary,
+    }
 }
 
 #[cfg(test)]

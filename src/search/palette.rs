@@ -2,7 +2,7 @@ use crate::command::{Command, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect,
+    PalettePostAction, PaletteProvider, PaletteSubmitEffect, PaletteTextPart, PaletteTextTone,
 };
 
 pub struct SearchPaletteProvider;
@@ -24,16 +24,16 @@ impl PaletteProvider for SearchPaletteProvider {
         Ok(vec![
             PaletteCandidate {
                 id: SearchMatcherKind::ContainsInsensitive.id().to_string(),
-                label: "Contains (case insensitive)".to_string(),
-                detail: None,
+                left: vec![primary("Contains (case insensitive)")],
+                right: Vec::new(),
                 payload: PalettePayload::Opaque(
                     SearchMatcherKind::ContainsInsensitive.id().to_string(),
                 ),
             },
             PaletteCandidate {
                 id: SearchMatcherKind::ContainsSensitive.id().to_string(),
-                label: "Contains (case sensitive)".to_string(),
-                detail: None,
+                left: vec![primary("Contains (case sensitive)")],
+                right: Vec::new(),
                 payload: PalettePayload::Opaque(
                     SearchMatcherKind::ContainsSensitive.id().to_string(),
                 ),
@@ -76,5 +76,12 @@ impl PaletteProvider for SearchPaletteProvider {
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
         Some("Enter: search  [up/down]: select matcher".to_string())
+    }
+}
+
+fn primary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Primary,
     }
 }

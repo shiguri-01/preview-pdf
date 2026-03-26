@@ -2,7 +2,7 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect,
+    PalettePostAction, PaletteProvider, PaletteSubmitEffect, PaletteTextPart, PaletteTextTone,
 };
 
 pub struct HistoryPaletteProvider;
@@ -29,26 +29,20 @@ impl PaletteProvider for HistoryPaletteProvider {
             .map(|(i, entry)| {
                 let idx = i + 1;
                 let page_1indexed = entry.page + 1;
-                let reason_tag = if entry.reason.is_empty() {
-                    String::new()
+                let reason_detail = if entry.reason.is_empty() {
+                    None
                 } else {
-                    format!(" [{}]", entry.reason)
+                    Some(format!("[{}]", entry.reason))
                 };
-                let (label, id) = if entry.is_current {
-                    (
-                        format!("{idx:2}  > Page {page_1indexed} (current){reason_tag}"),
-                        format!("current-{}", entry.page),
-                    )
+                let id = if entry.is_current {
+                    format!("current-{}", entry.page)
                 } else {
-                    (
-                        format!("{idx:2}  Page {page_1indexed}{reason_tag}"),
-                        format!("page-{}", entry.page),
-                    )
+                    format!("page-{}", entry.page)
                 };
                 PaletteCandidate {
                     id,
-                    label,
-                    detail: None,
+                    left: history_left_parts(idx, page_1indexed, entry.is_current),
+                    right: reason_detail.into_iter().map(secondary).collect(),
                     payload: PalettePayload::Opaque(page_1indexed.to_string()),
                 }
             })
@@ -92,6 +86,31 @@ impl PaletteProvider for HistoryPaletteProvider {
 
     fn initial_input(&self, _seed: Option<&str>) -> String {
         String::new()
+    }
+}
+
+fn history_left_parts(idx: usize, page_1indexed: usize, is_current: bool) -> Vec<PaletteTextPart> {
+    let mut parts = Vec::new();
+    parts.push(primary(format!("{idx:2}")));
+    parts.push(primary("  "));
+    if is_current {
+        parts.push(secondary("> "));
+    }
+    parts.push(primary(format!("Page {page_1indexed}")));
+    parts
+}
+
+fn primary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Primary,
+    }
+}
+
+fn secondary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Secondary,
     }
 }
 

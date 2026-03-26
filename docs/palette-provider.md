@@ -29,6 +29,16 @@ This document defines the palette provider contract in `pvf`.
 
 `selected` is the currently highlighted visible candidate, if any.
 
+`PaletteCandidate` carries display segments for the candidate row:
+
+- `left`: primary row content, rendered from one or more text segments
+- `right`: trailing detail content, rendered from one or more text segments
+- each text segment has a tone, currently `Primary` or `Secondary`
+
+The palette renderer is responsible for laying out both sides, reserving the
+trailing padding space, and applying selection highlighting to the whole row.
+Selection highlighting is palette-wide and does not vary by palette kind.
+
 ## Input modes
 
 - `FilterCandidates`
@@ -90,6 +100,7 @@ This document defines the palette provider contract in `pvf`.
   3. Else if selected candidate requires args, reopen with `seed = "{command-id} "`.
   4. Otherwise reopen preserving input.
 - `Tab` autocompletes from selected candidate and always appends one trailing space.
+- Candidate rows render command `id` and `usage` on the left, with the command title on the right in secondary color.
 - If input includes whitespace (argument phase), candidate list is hidden.
 - Candidate ranking uses command-aware scoring:
   - command `id` (hyphen-separated lowercase) is the primary target.
@@ -129,6 +140,6 @@ This document defines the palette provider contract in `pvf`.
 - Input mode: `FilterCandidates`
 - Candidate source is extension-owned cached outline data, not palette seed serialization.
 - Candidates are flattened depth-first for display only.
-- Hierarchy is represented with indentation in the label; detail shows the page number in loading-overlay format (`p.12`).
+- Hierarchy is represented with indentation in the left-side title; detail shows the page number in loading-overlay format (`p.12`).
 - Enter dispatches internal outline-goto behavior with the resolved page and closes.
 - Empty outline state is valid and shows assistive text indicating that the document has no usable outline entries.

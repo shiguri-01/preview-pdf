@@ -17,12 +17,46 @@ pub enum PalettePayload {
     Opaque(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteTextTone {
+    Primary,
+    Secondary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteTextPart {
+    pub text: String,
+    pub tone: PaletteTextTone,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteCandidate {
     pub id: String,
-    pub label: String,
-    pub detail: Option<String>,
+    pub left: Vec<PaletteTextPart>,
+    pub right: Vec<PaletteTextPart>,
     pub payload: PalettePayload,
+}
+
+impl PaletteCandidate {
+    pub fn plain_left_text(&self) -> String {
+        join_palette_text_parts(&self.left)
+    }
+
+    pub fn plain_right_text(&self) -> String {
+        join_palette_text_parts(&self.right)
+    }
+
+    pub fn plain_text(&self) -> String {
+        let left = self.plain_left_text();
+        let right = self.plain_right_text();
+        if left.is_empty() {
+            right
+        } else if right.is_empty() {
+            left
+        } else {
+            format!("{left} {right}")
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,8 +133,8 @@ pub trait PaletteProvider: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteItemView {
-    pub label: String,
-    pub detail: Option<String>,
+    pub left: Vec<PaletteTextPart>,
+    pub right: Vec<PaletteTextPart>,
     pub selected: bool,
 }
 
@@ -127,4 +161,12 @@ pub enum PaletteKeyResult {
     Consumed { redraw: bool },
     CloseRequested { session_id: u64 },
     Submit(PaletteSubmitAction),
+}
+
+fn join_palette_text_parts(parts: &[PaletteTextPart]) -> String {
+    let mut text = String::new();
+    for part in parts {
+        text.push_str(&part.text);
+    }
+    text
 }

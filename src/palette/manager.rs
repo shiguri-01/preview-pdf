@@ -197,8 +197,8 @@ impl PaletteManager {
         for (idx_in_visible, candidate_idx) in session.visible.iter().enumerate() {
             if let Some(candidate) = session.candidates.get(*candidate_idx) {
                 items.push(PaletteItemView {
-                    label: candidate.label.clone(),
-                    detail: candidate.detail.clone(),
+                    left: candidate.left.clone(),
+                    right: candidate.right.clone(),
                     selected: idx_in_visible == session.selected,
                 });
             }

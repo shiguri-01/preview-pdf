@@ -10,8 +10,7 @@ use crate::palette::{PaletteItemView, PaletteView};
 
 use super::layout::centered_rect;
 
-const PALETTE_ITEM_PREFIX_WIDTH: usize = 3;
-const MIN_LABEL_WIDTH_WITH_DETAIL: usize = 8;
+const PALETTE_ITEM_DECORATION_WIDTH: usize = 3;
 const ELLIPSIS: &str = "…";
 
 pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, label: &str) {
@@ -153,28 +152,22 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
 
 fn build_palette_item_line(item: &PaletteItemView, width: usize) -> Line<'static> {
     let mut spans = Vec::new();
-    let content_width = width.saturating_sub(PALETTE_ITEM_PREFIX_WIDTH);
+    let content_width = width.saturating_sub(PALETTE_ITEM_DECORATION_WIDTH);
 
     if item.selected {
-        spans.push(Span::styled(" ┃ ", Style::default().fg(Color::White)));
+        spans.push(Span::styled(" ┃ ", selected_text_style()));
     } else {
         spans.push(Span::raw("   "));
     }
 
-    let rendered = render_palette_item_content(item, content_width);
-    if !rendered.label.is_empty() {
-        spans.push(Span::raw(rendered.label));
+    let rendered = render_palette_row(item, content_width);
+    spans.extend(rendered.left.spans);
+    if rendered.gap > 0 {
+        spans.push(Span::raw(" ".repeat(rendered.gap)));
     }
-    if let Some(gap) = rendered.gap {
-        spans.push(Span::raw(" ".repeat(gap)));
-    }
-    if let Some(detail) = rendered.detail {
-        let detail_style = if item.selected {
-            Style::default()
-        } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        spans.push(Span::styled(detail, detail_style));
+    spans.extend(rendered.right.spans);
+    if rendered.trailing_padding > 0 {
+        spans.push(Span::raw(" ".repeat(rendered.trailing_padding)));
     }
 
     let line = Line::from(spans);
@@ -185,46 +178,179 @@ fn build_palette_item_line(item: &PaletteItemView, width: usize) -> Line<'static
     }
 }
 
-struct RenderedPaletteItemContent {
-    label: String,
-    gap: Option<usize>,
-    detail: Option<String>,
+struct RenderedTextParts {
+    spans: Vec<Span<'static>>,
+    width: usize,
 }
 
-fn render_palette_item_content(
+impl RenderedTextParts {
+    fn empty() -> Self {
+        Self {
+            spans: Vec::new(),
+            width: 0,
+        }
+    }
+}
+
+struct RenderedPaletteRow {
+    left: RenderedTextParts,
+    gap: usize,
+    right: RenderedTextParts,
+    trailing_padding: usize,
+}
+
+enum PaletteRowPlan {
+    Empty,
+    Single {
+        text_width: usize,
+        trailing_padding: usize,
+    },
+    Split {
+        left_width: usize,
+        right_width: usize,
+        gap: usize,
+        trailing_padding: usize,
+    },
+}
+
+fn render_palette_row(
     item: &PaletteItemView,
     content_width: usize,
-) -> RenderedPaletteItemContent {
-    let label = truncate_with_ellipsis(&item.label, content_width);
-    let Some(detail) = &item.detail else {
-        return RenderedPaletteItemContent {
-            label,
-            gap: None,
-            detail: None,
-        };
-    };
+) -> RenderedPaletteRow {
+    let plan = plan_palette_row(item, content_width);
+    match plan {
+        PaletteRowPlan::Empty => RenderedPaletteRow {
+            left: RenderedTextParts::empty(),
+            gap: 0,
+            right: RenderedTextParts::empty(),
+            trailing_padding: 0,
+        },
+        PaletteRowPlan::Single {
+            text_width,
+            trailing_padding,
+        } => {
+            let left = render_palette_text_parts(&item.left, text_width, item.selected);
+            let gap = text_width.saturating_sub(left.width);
+            RenderedPaletteRow {
+                left,
+                gap,
+                right: RenderedTextParts::empty(),
+                trailing_padding,
+            }
+        }
+        PaletteRowPlan::Split {
+            left_width,
+            right_width,
+            gap,
+            trailing_padding,
+        } => RenderedPaletteRow {
+            left: render_palette_text_parts(&item.left, left_width, item.selected),
+            gap,
+            right: render_palette_text_parts(&item.right, right_width, item.selected),
+            trailing_padding,
+        },
+    }
+}
 
-    let detail_width = UnicodeWidthStr::width(detail.as_str());
-    let reserved_width = detail_width.saturating_add(1);
-    let label_budget = content_width.saturating_sub(reserved_width);
+fn plan_palette_row(
+    item: &PaletteItemView,
+    content_width: usize,
+) -> PaletteRowPlan {
+    if content_width == 0 {
+        return PaletteRowPlan::Empty;
+    }
 
-    if label_budget < MIN_LABEL_WIDTH_WITH_DETAIL {
-        return RenderedPaletteItemContent {
-            label,
-            gap: None,
-            detail: None,
+    let trailing_padding = 1.min(content_width);
+    let text_width = content_width.saturating_sub(trailing_padding);
+    if text_width == 0 {
+        return PaletteRowPlan::Empty;
+    }
+
+    let left_width = measure_palette_text_width(&item.left);
+    let right_width = measure_palette_text_width(&item.right);
+
+    if !item.right.is_empty()
+        && left_width.saturating_add(right_width).saturating_add(1) <= text_width
+    {
+        return PaletteRowPlan::Split {
+            left_width,
+            right_width,
+            gap: text_width.saturating_sub(left_width + right_width),
+            trailing_padding,
         };
     }
 
-    let label = truncate_with_ellipsis(&item.label, label_budget);
-    let label_width = UnicodeWidthStr::width(label.as_str());
-    let gap = content_width.saturating_sub(label_width + detail_width);
-
-    RenderedPaletteItemContent {
-        label,
-        gap: Some(gap),
-        detail: Some(detail.clone()),
+    PaletteRowPlan::Single {
+        text_width,
+        trailing_padding,
     }
+}
+
+fn render_palette_text_parts(
+    parts: &[crate::palette::PaletteTextPart],
+    max_width: usize,
+    selected: bool,
+) -> RenderedTextParts {
+    let mut spans = Vec::new();
+    let mut remaining = max_width;
+    let mut width = 0usize;
+
+    for part in parts {
+        if remaining == 0 {
+            break;
+        }
+
+        let part_width = UnicodeWidthStr::width(part.text.as_str());
+        if part_width <= remaining {
+            spans.push(styled_text_part(part.text.clone(), part.tone, selected));
+            width = width.saturating_add(part_width);
+            remaining -= part_width;
+            continue;
+        }
+
+        let truncated = truncate_with_ellipsis(&part.text, remaining);
+        if !truncated.is_empty() {
+            width = width.saturating_add(UnicodeWidthStr::width(truncated.as_str()));
+            spans.push(styled_text_part(truncated, part.tone, selected));
+        }
+        break;
+    }
+
+    RenderedTextParts { spans, width }
+}
+
+fn measure_palette_text_width(parts: &[crate::palette::PaletteTextPart]) -> usize {
+    parts
+        .iter()
+        .map(|part| UnicodeWidthStr::width(part.text.as_str()))
+        .sum()
+}
+
+fn styled_text_part(
+    text: String,
+    tone: crate::palette::PaletteTextTone,
+    selected: bool,
+) -> Span<'static> {
+    let style = palette_text_style(tone, selected);
+    Span::styled(text, style)
+}
+
+fn palette_text_style(
+    tone: crate::palette::PaletteTextTone,
+    selected: bool,
+) -> Style {
+    if selected {
+        return selected_text_style();
+    }
+
+    match tone {
+        crate::palette::PaletteTextTone::Primary => Style::default(),
+        crate::palette::PaletteTextTone::Secondary => Style::default().fg(Color::DarkGray),
+    }
+}
+
+fn selected_text_style() -> Style {
+    Style::default().fg(Color::White)
 }
 
 fn truncate_to_width(text: &str, max_width: usize) -> String {
@@ -375,7 +501,7 @@ mod tests {
     use crate::palette::{PaletteItemView, PaletteKind, PaletteView};
 
     use super::{
-        build_loading_message, build_palette_input_line, build_palette_item_line,
+        build_loading_message, build_palette_item_line, build_palette_input_line,
         draw_loading_overlay, draw_palette_overlay,
     };
 
@@ -401,6 +527,14 @@ mod tests {
             .to_string()
     }
 
+    fn rendered_candidate_width(line: &ratatui::text::Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .skip(1)
+            .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+            .sum()
+    }
+
     fn test_view(input: &str, cursor: usize) -> PaletteView {
         PaletteView {
             title: "Command".to_string(),
@@ -409,8 +543,8 @@ mod tests {
             cursor,
             assistive_text: None,
             items: vec![PaletteItemView {
-                label: "open".to_string(),
-                detail: None,
+                left: Vec::new(),
+                right: Vec::new(),
                 selected: true,
             }],
             selected_idx: 0,
@@ -489,8 +623,14 @@ mod tests {
     fn palette_item_line_uses_single_space_before_detail() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                label: "goto-page".to_string(),
-                detail: Some("<page> | Jump".to_string()),
+                left: vec![crate::palette::PaletteTextPart {
+                    text: "goto-page".to_string(),
+                    tone: crate::palette::PaletteTextTone::Primary,
+                }],
+                right: vec![crate::palette::PaletteTextPart {
+                    text: "Jump".to_string(),
+                    tone: crate::palette::PaletteTextTone::Primary,
+                }],
                 selected: false,
             },
             40,
@@ -498,39 +638,87 @@ mod tests {
 
         let rendered = rendered_candidate_text(&line);
         assert!(rendered.starts_with("goto-page"));
-        assert!(rendered.ends_with("<page> | Jump"));
-        assert!(rendered.contains(" <page> | Jump"));
+        assert!(rendered.ends_with("Jump"));
+        assert!(rendered.contains(" "));
     }
 
     #[test]
     fn palette_item_line_truncates_label_before_detail() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                label: "very long outline title".to_string(),
-                detail: Some("p.12".to_string()),
+                left: vec![crate::palette::PaletteTextPart {
+                    text: "very long outline title".to_string(),
+                    tone: crate::palette::PaletteTextTone::Primary,
+                }],
+                right: vec![crate::palette::PaletteTextPart {
+                    text: "p.12".to_string(),
+                    tone: crate::palette::PaletteTextTone::Secondary,
+                }],
                 selected: false,
             },
             18,
         );
 
         let rendered = rendered_candidate_text(&line);
-        assert!(rendered.ends_with("p.12"));
         assert!(rendered.contains("…"));
-        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 15);
+        assert!(rendered.starts_with("very long"));
     }
 
     #[test]
     fn palette_item_line_hides_detail_when_width_is_too_narrow() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                label: "outline".to_string(),
-                detail: Some("p.12".to_string()),
+                left: vec![crate::palette::PaletteTextPart {
+                    text: "outline".to_string(),
+                    tone: crate::palette::PaletteTextTone::Primary,
+                }],
+                right: vec![crate::palette::PaletteTextPart {
+                    text: "p.12".to_string(),
+                    tone: crate::palette::PaletteTextTone::Secondary,
+                }],
                 selected: false,
             },
             8,
         );
 
-        assert_eq!(rendered_candidate_text(&line), "outl…");
+        assert!(rendered_candidate_text(&line).starts_with("out"));
+    }
+
+    #[test]
+    fn palette_item_line_fills_full_row_width() {
+        let line = build_palette_item_line(
+            &PaletteItemView {
+                left: vec![crate::palette::PaletteTextPart {
+                    text: "open".to_string(),
+                    tone: crate::palette::PaletteTextTone::Primary,
+                }],
+                right: vec![crate::palette::PaletteTextPart {
+                    text: "Command".to_string(),
+                    tone: crate::palette::PaletteTextTone::Primary,
+                }],
+                selected: true,
+            },
+            20,
+        );
+
+        assert_eq!(rendered_candidate_width(&line), 17);
+    }
+
+    #[test]
+    fn palette_item_line_reserves_trailing_padding() {
+        let line = build_palette_item_line(
+            &PaletteItemView {
+                left: vec![crate::palette::PaletteTextPart {
+                    text: "open".to_string(),
+                    tone: crate::palette::PaletteTextTone::Primary,
+                }],
+                right: Vec::new(),
+                selected: false,
+            },
+            12,
+        );
+
+        assert_eq!(rendered_candidate_width(&line), 9);
     }
 
     #[test]

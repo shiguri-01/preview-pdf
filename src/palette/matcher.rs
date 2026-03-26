@@ -19,10 +19,10 @@ impl CandidateMatcher for ContainsMatcher {
         let mut contains = Vec::new();
 
         for (idx, candidate) in candidates.iter().enumerate() {
-            let label = candidate.label.to_ascii_lowercase();
-            if label.starts_with(&query) {
+            let text = candidate.plain_text().to_ascii_lowercase();
+            if text.starts_with(&query) {
                 prefix.push(idx);
-            } else if label.contains(&query) {
+            } else if text.contains(&query) {
                 contains.push(idx);
             }
         }
@@ -34,15 +34,18 @@ impl CandidateMatcher for ContainsMatcher {
 
 #[cfg(test)]
 mod tests {
-    use crate::palette::{PaletteCandidate, PalettePayload};
+    use crate::palette::{PaletteCandidate, PalettePayload, PaletteTextPart, PaletteTextTone};
 
     use super::{CandidateMatcher, ContainsMatcher};
 
     fn candidate(label: &str) -> PaletteCandidate {
         PaletteCandidate {
             id: label.to_string(),
-            label: label.to_string(),
-            detail: None,
+            left: vec![PaletteTextPart {
+                text: label.to_string(),
+                tone: PaletteTextTone::Primary,
+            }],
+            right: Vec::new(),
             payload: PalettePayload::None,
         }
     }

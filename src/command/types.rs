@@ -341,6 +341,14 @@ mod tests {
         assert_eq!(Command::OpenHistory.action_id(), ActionId::History);
         assert_eq!(Command::OpenOutline.action_id(), ActionId::Outline);
         assert_eq!(
+            Command::OutlineGoto {
+                page: 5,
+                title: "Section".to_string(),
+            }
+            .action_id(),
+            ActionId::OutlineGoto
+        );
+        assert_eq!(
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Spread,
                 direction: Some(SpreadDirectionArg::Rtl),

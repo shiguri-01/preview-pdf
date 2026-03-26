@@ -78,13 +78,25 @@ impl OutlineState {
 }
 
 fn flatten_outline(nodes: &[OutlineNode], depth: usize, entries: &mut Vec<OutlinePaletteEntry>) {
-    for node in nodes {
+    let mut stack = nodes
+        .iter()
+        .rev()
+        .map(|node| (node, depth))
+        .collect::<Vec<_>>();
+
+    while let Some((node, node_depth)) = stack.pop() {
         entries.push(OutlinePaletteEntry {
             title: node.title.clone(),
             page: node.page,
-            depth,
+            depth: node_depth,
         });
-        flatten_outline(&node.children, depth + 1, entries);
+
+        stack.extend(
+            node.children
+                .iter()
+                .rev()
+                .map(|child| (child, node_depth + 1)),
+        );
     }
 }
 
@@ -166,6 +178,51 @@ mod tests {
         assert_eq!(entries[0].depth, 0);
         assert_eq!(entries[1].title, "Child");
         assert_eq!(entries[1].depth, 1);
+    }
+
+    #[test]
+    fn palette_entries_preserve_depth_first_sibling_order() {
+        let pdf = Arc::new(StubPdf {
+            path: PathBuf::from("outline.pdf"),
+            doc_id: 8,
+            outline: vec![
+                OutlineNode {
+                    title: "Root".to_string(),
+                    page: 0,
+                    children: vec![
+                        OutlineNode {
+                            title: "Child A".to_string(),
+                            page: 1,
+                            children: Vec::new(),
+                        },
+                        OutlineNode {
+                            title: "Child B".to_string(),
+                            page: 2,
+                            children: Vec::new(),
+                        },
+                    ],
+                },
+                OutlineNode {
+                    title: "Second Root".to_string(),
+                    page: 3,
+                    children: Vec::new(),
+                },
+            ],
+        }) as SharedPdfBackend;
+        let mut state = OutlineState::default();
+        let mut pending = VecDeque::new();
+
+        state
+            .open_palette(pdf, &mut pending)
+            .expect("outline open should succeed");
+        let entries = state.palette_entries();
+
+        let titles = entries
+            .iter()
+            .map(|entry| entry.title.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(titles, vec!["Root", "Child A", "Child B", "Second Root"]);
+        assert_eq!(entries[3].depth, 0);
     }
 
     #[test]

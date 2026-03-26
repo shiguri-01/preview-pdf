@@ -88,7 +88,9 @@ fn decode_payload(payload: &PalettePayload) -> Option<(usize, String)> {
     let PalettePayload::Opaque(payload) = payload else {
         return None;
     };
-    let (page, title) = payload.split_once(PAYLOAD_SEP)?;
+    let mut parts = payload.splitn(2, PAYLOAD_SEP);
+    let page = parts.next()?;
+    let title = parts.next()?;
     Some((page.parse().ok()?, title.to_string()))
 }
 
@@ -115,6 +117,14 @@ mod tests {
         let decoded =
             decode_payload(&PalettePayload::Opaque(encoded)).expect("payload should decode");
         assert_eq!(decoded, (11, "Section 2".to_string()));
+    }
+
+    #[test]
+    fn payload_round_trip_preserves_separator_in_title() {
+        let encoded = encode_payload(11, "Section\u{1f}2");
+        let decoded =
+            decode_payload(&PalettePayload::Opaque(encoded)).expect("payload should decode");
+        assert_eq!(decoded, (11, "Section\u{1f}2".to_string()));
     }
 
     #[test]

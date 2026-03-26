@@ -213,7 +213,7 @@ fn extract_outline_nodes(pdf: &Pdf) -> AppResult<Vec<OutlineNode>> {
         .enumerate()
         .filter_map(|(page, pdf_page)| pdf_page.raw().obj_id().map(|id| (id, page)))
         .collect::<HashMap<_, _>>();
-    let named_destinations = build_named_destination_index(root, xref);
+    let named_destinations = build_named_destination_index(root);
     let mut visited = HashSet::new();
 
     Ok(read_outline_siblings(
@@ -406,10 +406,7 @@ enum Utf16Endian {
     Little,
 }
 
-fn build_named_destination_index<'a>(
-    root: Dict<'a>,
-    xref: &'a hayro::hayro_syntax::xref::XRef,
-) -> HashMap<Vec<u8>, NamedDestination<'a>> {
+fn build_named_destination_index<'a>(root: Dict<'a>) -> HashMap<Vec<u8>, NamedDestination<'a>> {
     let mut destinations = HashMap::new();
 
     if let Some(dests) = root.get::<Dict<'_>>(DESTS) {
@@ -421,9 +418,6 @@ fn build_named_destination_index<'a>(
     {
         collect_name_tree_destinations(dests_tree, &mut destinations);
     }
-
-    // Touch xref to keep the builder signature aligned with future callers that may need it.
-    let _ = xref;
     destinations
 }
 

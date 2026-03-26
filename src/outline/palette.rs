@@ -2,7 +2,8 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect, PaletteTextPart, PaletteTextTone,
+    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
+    PaletteTextTone,
 };
 
 const PAYLOAD_SEP: char = '\u{1f}';
@@ -43,6 +44,11 @@ impl PaletteProvider for OutlinePaletteProvider {
                     entry.title
                 ))],
                 right: vec![secondary(format_outline_page_detail(entry.page))],
+                search_texts: vec![
+                    search(entry.title.clone()),
+                    search(format!("page {}", entry.page + 1)),
+                    search((entry.page + 1).to_string()),
+                ],
                 payload: PalettePayload::Opaque(encode_payload(entry.page, &entry.title)),
             })
             .collect())
@@ -168,4 +174,8 @@ fn secondary(text: impl Into<String>) -> PaletteTextPart {
         text: text.into(),
         tone: PaletteTextTone::Secondary,
     }
+}
+
+fn search(text: impl Into<String>) -> PaletteSearchText {
+    PaletteSearchText { text: text.into() }
 }

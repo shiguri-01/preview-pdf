@@ -213,10 +213,7 @@ enum PaletteRowPlan {
     },
 }
 
-fn render_palette_row(
-    item: &PaletteItemView,
-    content_width: usize,
-) -> RenderedPaletteRow {
+fn render_palette_row(item: &PaletteItemView, content_width: usize) -> RenderedPaletteRow {
     let plan = plan_palette_row(item, content_width);
     match plan {
         PaletteRowPlan::Empty => RenderedPaletteRow {
@@ -252,10 +249,7 @@ fn render_palette_row(
     }
 }
 
-fn plan_palette_row(
-    item: &PaletteItemView,
-    content_width: usize,
-) -> PaletteRowPlan {
+fn plan_palette_row(item: &PaletteItemView, content_width: usize) -> PaletteRowPlan {
     if content_width == 0 {
         return PaletteRowPlan::Empty;
     }
@@ -335,10 +329,7 @@ fn styled_text_part(
     Span::styled(text, style)
 }
 
-fn palette_text_style(
-    tone: crate::palette::PaletteTextTone,
-    selected: bool,
-) -> Style {
+fn palette_text_style(tone: crate::palette::PaletteTextTone, selected: bool) -> Style {
     if selected {
         return selected_text_style();
     }
@@ -501,7 +492,7 @@ mod tests {
     use crate::palette::{PaletteItemView, PaletteKind, PaletteView};
 
     use super::{
-        build_loading_message, build_palette_item_line, build_palette_input_line,
+        build_loading_message, build_palette_input_line, build_palette_item_line,
         draw_loading_overlay, draw_palette_overlay,
     };
 

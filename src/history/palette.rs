@@ -2,7 +2,8 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect, PaletteTextPart, PaletteTextTone,
+    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
+    PaletteTextTone,
 };
 
 pub struct HistoryPaletteProvider;
@@ -43,6 +44,11 @@ impl PaletteProvider for HistoryPaletteProvider {
                     id,
                     left: history_left_parts(idx, page_1indexed, entry.is_current),
                     right: reason_detail.into_iter().map(secondary).collect(),
+                    search_texts: history_search_texts(
+                        page_1indexed,
+                        entry.reason.as_str(),
+                        entry.is_current,
+                    ),
                     payload: PalettePayload::Opaque(page_1indexed.to_string()),
                 }
             })
@@ -112,6 +118,28 @@ fn secondary(text: impl Into<String>) -> PaletteTextPart {
         text: text.into(),
         tone: PaletteTextTone::Secondary,
     }
+}
+
+fn search(text: impl Into<String>) -> PaletteSearchText {
+    PaletteSearchText { text: text.into() }
+}
+
+fn history_search_texts(
+    page_1indexed: usize,
+    reason: &str,
+    is_current: bool,
+) -> Vec<PaletteSearchText> {
+    let mut texts = vec![
+        search(format!("page {page_1indexed}")),
+        search(page_1indexed.to_string()),
+    ];
+    if !reason.is_empty() {
+        texts.push(search(reason.to_string()));
+    }
+    if is_current {
+        texts.push(search("current"));
+    }
+    texts
 }
 
 struct SeedEntry {

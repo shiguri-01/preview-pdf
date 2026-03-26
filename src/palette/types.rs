@@ -24,6 +24,11 @@ pub enum PaletteTextTone {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteSearchText {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteTextPart {
     pub text: String,
     pub tone: PaletteTextTone,
@@ -34,6 +39,7 @@ pub struct PaletteCandidate {
     pub id: String,
     pub left: Vec<PaletteTextPart>,
     pub right: Vec<PaletteTextPart>,
+    pub search_texts: Vec<PaletteSearchText>,
     pub payload: PalettePayload,
 }
 
@@ -55,6 +61,15 @@ impl PaletteCandidate {
             left
         } else {
             format!("{left} {right}")
+        }
+    }
+
+    pub fn search_text(&self) -> String {
+        let search = join_palette_search_text_parts(&self.search_texts);
+        if search.is_empty() {
+            self.plain_text()
+        } else {
+            search
         }
     }
 }
@@ -166,6 +181,17 @@ pub enum PaletteKeyResult {
 fn join_palette_text_parts(parts: &[PaletteTextPart]) -> String {
     let mut text = String::new();
     for part in parts {
+        text.push_str(&part.text);
+    }
+    text
+}
+
+fn join_palette_search_text_parts(parts: &[PaletteSearchText]) -> String {
+    let mut text = String::new();
+    for part in parts {
+        if !text.is_empty() {
+            text.push(' ');
+        }
         text.push_str(&part.text);
     }
     text

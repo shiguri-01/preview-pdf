@@ -34,6 +34,11 @@ This document defines the palette provider contract in `pvf`.
 - `left`: primary row content, rendered from one or more text segments
 - `right`: trailing detail content, rendered from one or more text segments
 - each text segment has a tone, currently `Primary` or `Secondary`
+- `search_texts`: structured search inputs used by the shared matcher
+
+`search_texts` is independent from the rendered row content. Providers should
+populate it from the candidate's existing structured data so matching can use
+values that are not shown directly in the UI.
 
 The palette renderer is responsible for laying out both sides, reserving the
 trailing padding space, and applying selection highlighting to the whole row.
@@ -101,6 +106,8 @@ Selection highlighting is palette-wide and does not vary by palette kind.
   4. Otherwise reopen preserving input.
 - `Tab` autocompletes from selected candidate and always appends one trailing space.
 - Candidate rows render command `id` and `usage` on the left, with the command title on the right in secondary color.
+- Candidate search also uses command metadata beyond the rendered row, so ids,
+  titles, and argument-related text all participate in filtering/ranking.
 - If input includes whitespace (argument phase), candidate list is hidden.
 - Candidate ranking uses command-aware scoring:
   - command `id` (hyphen-separated lowercase) is the primary target.
@@ -132,6 +139,8 @@ Selection highlighting is palette-wide and does not vary by palette kind.
 - `initial_input` returns empty text; seed is used as serialized context.
 - Candidates include back stack, current page, and forward stack (newest first).
 - Current page is marked and not jump-targetable.
+- Candidate matching uses page numbers and navigation reason text, not only the
+  rendered row label.
 - Enter dispatches internal history-goto behavior with selected page and closes.
 
 ## Outline palette (`PaletteKind::Outline`)
@@ -141,5 +150,6 @@ Selection highlighting is palette-wide and does not vary by palette kind.
 - Candidate source is extension-owned cached outline data, not palette seed serialization.
 - Candidates are flattened depth-first for display only.
 - Hierarchy is represented with indentation in the left-side title; detail shows the page number in loading-overlay format (`p.12`).
+- Candidate matching uses outline title and page metadata.
 - Enter dispatches internal outline-goto behavior with the resolved page and closes.
 - Empty outline state is valid and shows assistive text indicating that the document has no usable outline entries.

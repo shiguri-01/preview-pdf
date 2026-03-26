@@ -19,7 +19,7 @@ impl CandidateMatcher for ContainsMatcher {
         let mut contains = Vec::new();
 
         for (idx, candidate) in candidates.iter().enumerate() {
-            let text = candidate.plain_text().to_ascii_lowercase();
+            let text = candidate.search_text().to_ascii_lowercase();
             if text.starts_with(&query) {
                 prefix.push(idx);
             } else if text.contains(&query) {
@@ -34,7 +34,9 @@ impl CandidateMatcher for ContainsMatcher {
 
 #[cfg(test)]
 mod tests {
-    use crate::palette::{PaletteCandidate, PalettePayload, PaletteTextPart, PaletteTextTone};
+    use crate::palette::{
+        PaletteCandidate, PalettePayload, PaletteSearchText, PaletteTextPart, PaletteTextTone,
+    };
 
     use super::{CandidateMatcher, ContainsMatcher};
 
@@ -46,6 +48,9 @@ mod tests {
                 tone: PaletteTextTone::Primary,
             }],
             right: Vec::new(),
+            search_texts: vec![PaletteSearchText {
+                text: label.to_string(),
+            }],
             payload: PalettePayload::None,
         }
     }
@@ -61,5 +66,28 @@ mod tests {
 
         let selected = matcher.select("in", &all);
         assert_eq!(selected, vec![1, 0]);
+    }
+
+    #[test]
+    fn contains_matcher_uses_structured_search_texts() {
+        let matcher = ContainsMatcher;
+        let all = vec![
+            PaletteCandidate {
+                id: "alpha".to_string(),
+                left: vec![PaletteTextPart {
+                    text: "visible".to_string(),
+                    tone: PaletteTextTone::Primary,
+                }],
+                right: Vec::new(),
+                search_texts: vec![PaletteSearchText {
+                    text: "structured-match".to_string(),
+                }],
+                payload: PalettePayload::None,
+            },
+            candidate("beta"),
+        ];
+
+        let selected = matcher.select("structured", &all);
+        assert_eq!(selected, vec![0]);
     }
 }

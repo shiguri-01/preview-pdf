@@ -132,6 +132,13 @@ impl RgbaFrame {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutlineNode {
+    pub title: String,
+    pub page: usize,
+    pub children: Vec<OutlineNode>,
+}
+
 pub trait PdfBackend: Send + Sync {
     fn path(&self) -> &Path;
     fn doc_id(&self) -> u64;
@@ -139,6 +146,7 @@ pub trait PdfBackend: Send + Sync {
     fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)>;
     fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>;
     fn extract_text(&self, page: usize) -> AppResult<String>;
+    fn extract_outline(&self) -> AppResult<Vec<OutlineNode>>;
 }
 
 #[cfg(test)]

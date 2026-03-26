@@ -48,6 +48,8 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         "history-forward" => parse_no_args(id, args_text, Command::HistoryForward),
         "history-goto" => parse_history_goto(args_text),
         "history" => parse_no_args(id, args_text, Command::OpenHistory),
+        "outline" => parse_no_args(id, args_text, Command::OpenOutline),
+        "outline-goto" => parse_outline_goto(args_text),
         "cancel" => parse_no_args(id, args_text, Command::Cancel),
         "quit" => parse_no_args(id, args_text, Command::Quit),
         _ => Err(AppError::unsupported(
@@ -108,6 +110,7 @@ fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResult<Command> 
         "history-back" => "history-back does not accept arguments",
         "history-forward" => "history-forward does not accept arguments",
         "history" => "history does not accept arguments",
+        "outline" => "outline does not accept arguments",
         "cancel" => "cancel does not accept arguments",
         "quit" => "quit does not accept arguments",
         _ => "command does not accept arguments",
@@ -331,6 +334,40 @@ fn parse_history_goto(args_text: &str) -> AppResult<Command> {
     })
 }
 
+fn parse_outline_goto(args_text: &str) -> AppResult<Command> {
+    let trimmed = args_text.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::invalid_argument(
+            "outline-goto requires 2 arguments: page title",
+        ));
+    }
+
+    let Some((page_text, title)) = trimmed.split_once(char::is_whitespace) else {
+        return Err(AppError::invalid_argument(
+            "outline-goto requires 2 arguments: page title",
+        ));
+    };
+
+    let page = page_text
+        .parse::<i32>()
+        .map_err(|_| AppError::invalid_argument("outline-goto page must be an integer"))?;
+    if page < 1 {
+        return Err(AppError::invalid_argument("page number must be >= 1"));
+    }
+
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(AppError::invalid_argument(
+            "outline-goto requires 2 arguments: page title",
+        ));
+    }
+
+    Ok(Command::OutlineGoto {
+        page: (page - 1) as usize,
+        title: title.to_string(),
+    })
+}
+
 fn split_last_token(input: &str) -> Option<(&str, &str)> {
     let trimmed = input.trim_end();
     if trimmed.is_empty() {
@@ -377,6 +414,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_outline_without_args_opens_outline_palette() {
+        assert_eq!(
+            parse_command_text("outline").expect("parse should succeed"),
+            Command::OpenOutline
+        );
+    }
+
+    #[test]
     fn parse_submit_search_accepts_optional_matcher() {
         assert_eq!(
             parse_command_text("submit-search hello world").expect("parse should succeed"),
@@ -391,6 +436,17 @@ mod tests {
             Command::SubmitSearch {
                 query: "hello".to_string(),
                 matcher: SearchMatcherKind::ContainsSensitive,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_outline_goto_accepts_page_and_title() {
+        assert_eq!(
+            parse_command_text("outline-goto 3 Chapter 1").expect("parse should succeed"),
+            Command::OutlineGoto {
+                page: 2,
+                title: "Chapter 1".to_string(),
             }
         );
     }

@@ -44,6 +44,11 @@ This document defines the current architecture of `pvf`.
   - `host.rs`: concrete extension ownership and dispatch chain.
   - `events.rs`, `input.rs`: shared extension event/input types.
 
+- `src/outline/`
+  - `state.rs`: lazy outline loading, per-document cache, outline jump behavior.
+  - `palette.rs`: outline palette candidate projection and submit behavior.
+  - `mod.rs`: `OutlineExtension` wiring.
+
 - `src/search/`
   - `state.rs`: search state and background result application (search UI state lives here, not in `AppState`).
   - `engine.rs`: async search worker and job lifecycle.
@@ -77,8 +82,8 @@ This document defines the current architecture of `pvf`.
   - `WorkClass`: shared work classification for render scheduling, prefetch queueing, and presenter encode routing.
 
 - `src/backend/`
-  - `traits.rs`: `PdfBackend`, `RgbaFrame`.
-  - `hayro.rs`: default backend implementation and factory.
+  - `traits.rs`: `PdfBackend`, `RgbaFrame`, `OutlineNode`.
+  - `hayro.rs`: default backend implementation, factory, and PDF-outline extraction over `hayro_syntax`.
 
 - `src/config.rs`
   - `Config`, `RenderConfig`, `CacheConfig`, `KeymapConfig`.

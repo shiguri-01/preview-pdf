@@ -1,5 +1,5 @@
 use crate::error::AppResult;
-use crate::extension::{HistoryPaletteProvider, SearchPaletteProvider};
+use crate::extension::{HistoryPaletteProvider, OutlinePaletteProvider, SearchPaletteProvider};
 
 use super::providers::CommandPaletteProvider;
 use super::{
@@ -11,12 +11,14 @@ pub struct PaletteRegistry {
     command: CommandPaletteProvider,
     search: SearchPaletteProvider,
     history: HistoryPaletteProvider,
+    outline: OutlinePaletteProvider,
 }
 
 pub enum PaletteProviderRef<'a> {
     Command(&'a CommandPaletteProvider),
     Search(&'a SearchPaletteProvider),
     History(&'a HistoryPaletteProvider),
+    Outline(&'a OutlinePaletteProvider),
 }
 
 impl Default for PaletteRegistry {
@@ -25,6 +27,7 @@ impl Default for PaletteRegistry {
             command: CommandPaletteProvider,
             search: SearchPaletteProvider,
             history: HistoryPaletteProvider,
+            outline: OutlinePaletteProvider,
         }
     }
 }
@@ -35,6 +38,7 @@ impl PaletteRegistry {
             PaletteKind::Command => PaletteProviderRef::Command(&self.command),
             PaletteKind::Search => PaletteProviderRef::Search(&self.search),
             PaletteKind::History => PaletteProviderRef::History(&self.history),
+            PaletteKind::Outline => PaletteProviderRef::Outline(&self.outline),
         }
     }
 }
@@ -45,6 +49,7 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Command(provider) => provider.kind(),
             Self::Search(provider) => provider.kind(),
             Self::History(provider) => provider.kind(),
+            Self::Outline(provider) => provider.kind(),
         }
     }
 
@@ -53,6 +58,7 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Command(provider) => provider.title(ctx),
             Self::Search(provider) => provider.title(ctx),
             Self::History(provider) => provider.title(ctx),
+            Self::Outline(provider) => provider.title(ctx),
         }
     }
 
@@ -61,6 +67,7 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Command(provider) => provider.input_mode(),
             Self::Search(provider) => provider.input_mode(),
             Self::History(provider) => provider.input_mode(),
+            Self::Outline(provider) => provider.input_mode(),
         }
     }
 
@@ -69,6 +76,7 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Command(provider) => provider.list(ctx),
             Self::Search(provider) => provider.list(ctx),
             Self::History(provider) => provider.list(ctx),
+            Self::Outline(provider) => provider.list(ctx),
         }
     }
 
@@ -81,6 +89,7 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Command(provider) => provider.on_tab(ctx, selected),
             Self::Search(provider) => provider.on_tab(ctx, selected),
             Self::History(provider) => provider.on_tab(ctx, selected),
+            Self::Outline(provider) => provider.on_tab(ctx, selected),
         }
     }
 
@@ -93,6 +102,7 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Command(provider) => provider.on_submit(ctx, selected),
             Self::Search(provider) => provider.on_submit(ctx, selected),
             Self::History(provider) => provider.on_submit(ctx, selected),
+            Self::Outline(provider) => provider.on_submit(ctx, selected),
         }
     }
 
@@ -105,6 +115,7 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Command(provider) => provider.assistive_text(ctx, selected),
             Self::Search(provider) => provider.assistive_text(ctx, selected),
             Self::History(provider) => provider.assistive_text(ctx, selected),
+            Self::Outline(provider) => provider.assistive_text(ctx, selected),
         }
     }
 
@@ -113,6 +124,7 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Command(provider) => provider.initial_input(seed),
             Self::Search(provider) => provider.initial_input(seed),
             Self::History(provider) => provider.initial_input(seed),
+            Self::Outline(provider) => provider.initial_input(seed),
         }
     }
 }
@@ -147,6 +159,10 @@ mod tests {
         assert_eq!(
             registry.get(PaletteKind::History).kind(),
             PaletteKind::History
+        );
+        assert_eq!(
+            registry.get(PaletteKind::Outline).kind(),
+            PaletteKind::Outline
         );
         assert!(!registry.get(PaletteKind::Command).title(&ctx).is_empty());
     }

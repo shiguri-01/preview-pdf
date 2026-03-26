@@ -112,6 +112,11 @@ pub enum Command {
         page: usize,
     },
     OpenHistory,
+    OpenOutline,
+    OutlineGoto {
+        page: usize,
+        title: String,
+    },
     Cancel,
     Quit,
 }
@@ -145,6 +150,8 @@ impl Command {
             Self::HistoryForward => "history-forward",
             Self::HistoryGoto { .. } => "history-goto",
             Self::OpenHistory => "history",
+            Self::OpenOutline => "outline",
+            Self::OutlineGoto { .. } => "outline-goto",
             Self::Cancel => "cancel",
             Self::Quit => "quit",
         }
@@ -219,6 +226,8 @@ pub enum ActionId {
     HistoryForward,
     HistoryGoto,
     History,
+    Outline,
+    OutlineGoto,
     Cancel,
     Quit,
     RenderQueue,
@@ -259,6 +268,8 @@ impl ActionId {
             Self::HistoryForward => "history-forward",
             Self::HistoryGoto => "history-goto",
             Self::History => "history",
+            Self::Outline => "outline",
+            Self::OutlineGoto => "outline-goto",
             Self::Cancel => "cancel",
             Self::Quit => "quit",
             Self::RenderQueue => "render-queue",
@@ -301,6 +312,8 @@ impl Command {
             Self::HistoryForward => ActionId::HistoryForward,
             Self::HistoryGoto { .. } => ActionId::HistoryGoto,
             Self::OpenHistory => ActionId::History,
+            Self::OpenOutline => ActionId::Outline,
+            Self::OutlineGoto { .. } => ActionId::OutlineGoto,
             Self::Cancel => ActionId::Cancel,
             Self::Quit => ActionId::Quit,
         }
@@ -326,6 +339,7 @@ mod tests {
         );
         assert_eq!(Command::HistoryBack.action_id(), ActionId::HistoryBack);
         assert_eq!(Command::OpenHistory.action_id(), ActionId::History);
+        assert_eq!(Command::OpenOutline.action_id(), ActionId::Outline);
         assert_eq!(
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Spread,

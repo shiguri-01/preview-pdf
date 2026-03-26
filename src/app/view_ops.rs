@@ -624,6 +624,10 @@ mod tests {
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
         }
+
+        fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
+            Ok(Vec::new())
+        }
     }
 
     #[test]

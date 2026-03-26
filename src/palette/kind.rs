@@ -3,6 +3,7 @@ pub enum PaletteKind {
     Command,
     Search,
     History,
+    Outline,
 }
 
 impl PaletteKind {
@@ -11,6 +12,7 @@ impl PaletteKind {
             Self::Command => "command",
             Self::Search => "search",
             Self::History => "history",
+            Self::Outline => "outline",
         }
     }
 
@@ -19,6 +21,7 @@ impl PaletteKind {
             "command" => Some(Self::Command),
             "search" => Some(Self::Search),
             "history" => Some(Self::History),
+            "outline" => Some(Self::Outline),
             _ => None,
         }
     }

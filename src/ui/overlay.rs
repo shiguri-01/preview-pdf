@@ -81,6 +81,7 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
     let block = Block::default()
         .title(format!(" {} ", view.title))
         .borders(Borders::ALL)
+        .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(Style::default().fg(Color::DarkGray));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);

@@ -552,8 +552,8 @@ pub(super) fn compute_initial_preview_plan(
 
 fn format_loading_target(slots: VisiblePageSlots) -> String {
     match slots.trailing_page {
-        Some(trailing) => format!("pages {}-{}", slots.anchor_page + 1, trailing + 1),
-        None => format!("page {}", slots.anchor_page + 1),
+        Some(trailing) => format!("pp.{}-{}", slots.anchor_page + 1, trailing + 1),
+        None => format!("p.{}", slots.anchor_page + 1),
     }
 }
 
@@ -571,8 +571,8 @@ mod tests {
 
     use super::{
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
-        decide_viewer_display, normalize_render_outcome, presenter_render_options,
-        resolve_layout_dimensions, sync_render_notice,
+        decide_viewer_display, format_loading_target, normalize_render_outcome,
+        presenter_render_options, resolve_layout_dimensions, sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
@@ -920,5 +920,29 @@ mod tests {
                 presenter_key: RenderedPageKey::with_layout(7, 2, 0.25, 3),
             })
         );
+    }
+
+    #[test]
+    fn loading_target_formats_single_page_with_p_prefix() {
+        let label = format_loading_target(VisiblePageSlots {
+            anchor_page: 11,
+            trailing_page: None,
+            left_page: Some(11),
+            right_page: None,
+        });
+
+        assert_eq!(label, "p.12");
+    }
+
+    #[test]
+    fn loading_target_formats_spread_with_pp_prefix() {
+        let label = format_loading_target(VisiblePageSlots {
+            anchor_page: 11,
+            trailing_page: Some(12),
+            left_page: Some(11),
+            right_page: Some(12),
+        });
+
+        assert_eq!(label, "pp.12-13");
     }
 }

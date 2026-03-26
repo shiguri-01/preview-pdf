@@ -147,12 +147,18 @@ from the current input.
 ## History palette (`PaletteKind::History`)
 
 - Open via command palette command: `history`
-- Input mode: `FilterCandidates`
+- Input mode: `Custom`
 - `initial_input` returns empty text; seed is used as serialized context.
 - Candidates include back stack, current page, and forward stack (newest first).
-- Current page is marked and not jump-targetable.
-- Candidate matching uses page numbers and navigation reason text, not only the
-  rendered row label.
+- Left side shows the index and either a prefixed intent label (`/query`, `#title`),
+  a goto label (`first-page`, `last-page`), or a page label when the entry has no
+  readable intent label.
+- Right side always shows the page label as `p.N` in secondary tone.
+- Current page is implied by being the first entry, so it does not need a separate marker.
+- Candidate matching uses three stable buckets in this order: signed index matches first,
+  formatted reason text matches second, page-label matches third. The index is a signed
+  offset from the current page (`0` for current, negative for back, positive for forward).
+  The original history order is preserved within each bucket.
 - Enter dispatches internal history-goto behavior with selected page and closes.
 
 ## Outline palette (`PaletteKind::Outline`)

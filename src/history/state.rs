@@ -239,7 +239,7 @@ fn format_reason(reason: &NavReason) -> String {
             HistoryOp::Forward => "History:forward".to_string(),
             HistoryOp::Goto => "History:goto".to_string(),
         },
-        NavReason::Outline => "Outline".to_string(),
+        NavReason::Outline { title } => format!("Outline: {title}"),
         NavReason::LayoutNormalize => "LayoutNormalize".to_string(),
     }
 }
@@ -253,7 +253,9 @@ enum RecordPolicy {
 
 fn record_policy(reason: &NavReason) -> RecordPolicy {
     match reason {
-        NavReason::Goto(_) | NavReason::Search { .. } | NavReason::Outline => RecordPolicy::Record,
+        NavReason::Goto(_) | NavReason::Search { .. } | NavReason::Outline { .. } => {
+            RecordPolicy::Record
+        }
         NavReason::Step | NavReason::LayoutNormalize => RecordPolicy::SkipAndClearForward,
         NavReason::History(_) => RecordPolicy::SkipAndKeepStacks,
     }
@@ -379,12 +381,17 @@ mod tests {
         state.on_event(&AppEvent::PageChanged {
             from: 2,
             to: 6,
-            reason: NavReason::Outline,
+            reason: NavReason::Outline {
+                title: "Section".to_string(),
+            },
         });
 
         assert_eq!(state.back_stack.len(), 1);
         assert_eq!(state.back_stack.back().expect("entry exists").page, 2);
-        assert!(matches!(state.current_reason, Some(NavReason::Outline)));
+        assert!(matches!(
+            state.current_reason,
+            Some(NavReason::Outline { title }) if title == "Section"
+        ));
     }
 
     #[test]

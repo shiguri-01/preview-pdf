@@ -158,10 +158,11 @@ from the current input.
 ## Outline palette (`PaletteKind::Outline`)
 
 - Open via command palette command: `outline`
-- Input mode: `FilterCandidates`
+- Input mode: `Custom`
 - Candidate source is extension-owned cached outline data, not palette seed serialization.
 - Candidates are flattened depth-first for display only.
 - Hierarchy is represented with indentation in the left-side title; detail shows the page number in loading-overlay format (`p.12`).
-- Candidate matching uses outline title and page metadata.
+- Candidate matching uses two buckets in this order: outline-title text matches first, then page-label text matches; each bucket is sorted by page so the list stays readable.
+- Queries are matched as plain text, so page labels like `p.1` can also match `p.10` or `p.123`.
 - Enter dispatches internal outline-goto behavior with the resolved page and closes.
 - Empty outline state is valid and shows assistive text indicating that the document has no usable outline entries.

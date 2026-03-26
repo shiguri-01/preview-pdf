@@ -280,6 +280,7 @@ fn resolve_outline_page<'a>(
             page_index,
             named_destinations,
             &mut HashSet::new(),
+            &mut HashSet::new(),
         );
     }
 
@@ -296,6 +297,7 @@ fn resolve_outline_page<'a>(
         page_index,
         named_destinations,
         &mut HashSet::new(),
+        &mut HashSet::new(),
     )
 }
 
@@ -305,6 +307,7 @@ fn resolve_destination<'a>(
     page_index: &HashMap<ObjectIdentifier, usize>,
     named_destinations: &HashMap<Vec<u8>, NamedDestination<'a>>,
     visited: &mut HashSet<ObjectIdentifier>,
+    visited_names: &mut HashSet<Vec<u8>>,
 ) -> Option<usize> {
     let object = match value {
         MaybeRef::Ref(obj_ref) => {
@@ -320,17 +323,30 @@ fn resolve_destination<'a>(
     match object {
         Object::Array(array) => resolve_destination_array(&array, page_index),
         Object::Dict(dict) => dict.get_raw::<Object<'_>>(D).and_then(|dest| {
-            resolve_destination(dest, xref, page_index, named_destinations, visited)
+            resolve_destination(
+                dest,
+                xref,
+                page_index,
+                named_destinations,
+                visited,
+                visited_names,
+            )
         }),
-        Object::Name(name) => {
-            resolve_named_destination(name.as_ref(), xref, page_index, named_destinations, visited)
-        }
+        Object::Name(name) => resolve_named_destination(
+            name.as_ref(),
+            xref,
+            page_index,
+            named_destinations,
+            visited,
+            visited_names,
+        ),
         Object::String(string) => resolve_named_destination(
             string.get().as_ref(),
             xref,
             page_index,
             named_destinations,
             visited,
+            visited_names,
         ),
         Object::Null(_) | Object::Boolean(_) | Object::Number(_) | Object::Stream(_) => None,
     }
@@ -487,9 +503,20 @@ fn resolve_named_destination<'a>(
     page_index: &HashMap<ObjectIdentifier, usize>,
     named_destinations: &HashMap<Vec<u8>, NamedDestination<'a>>,
     visited: &mut HashSet<ObjectIdentifier>,
+    visited_names: &mut HashSet<Vec<u8>>,
 ) -> Option<usize> {
+    if !visited_names.insert(name.to_vec()) {
+        return None;
+    }
     let dest = named_destinations.get(name)?.to_maybe_ref();
-    resolve_destination(dest, xref, page_index, named_destinations, visited)
+    resolve_destination(
+        dest,
+        xref,
+        page_index,
+        named_destinations,
+        visited,
+        visited_names,
+    )
 }
 
 fn decode_pdf_doc_encoding_byte(byte: u8) -> char {
@@ -909,6 +936,22 @@ mod tests {
         fs::remove_file(&file).expect("test file should be removed");
     }
 
+    #[test]
+    fn extract_outline_handles_named_destination_alias_cycles() {
+        let file = unique_temp_path("outline_named_dest_alias_cycle.pdf");
+        fs::write(&file, build_pdf_with_cyclic_named_outline_aliases())
+            .expect("test file should be created");
+
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let outline = doc
+            .extract_outline()
+            .expect("outline extraction should succeed");
+
+        assert!(outline.is_empty());
+
+        fs::remove_file(&file).expect("test file should be removed");
+    }
+
     fn build_pdf(page_texts: &[&str]) -> Vec<u8> {
         let page_texts = if page_texts.is_empty() {
             vec!["".to_string()]
@@ -1024,10 +1067,26 @@ mod tests {
             "<< /Type /Pages /Kids [5 0 R] /Count 1 >>".to_string(),
             "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
             "<< /First 6 0 R /Last 6 0 R /Count 1 >>".to_string(),
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents 10 0 R >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents 9 0 R >>".to_string(),
             "<< /Title (Chapter 1) /Parent 4 0 R /Dest (chapter-1) >>".to_string(),
             "<< /Kids [8 0 R] >>".to_string(),
             "<< /Names [(chapter-1) [5 0 R /Fit]] /Kids [7 0 R] >>".to_string(),
+            "<< /Length 36 >>\nstream\nBT /F1 14 Tf 36 260 Td (hello) Tj ET\nendstream".to_string(),
+        ];
+
+        build_pdf_from_objects(&objects)
+    }
+
+    fn build_pdf_with_cyclic_named_outline_aliases() -> Vec<u8> {
+        let objects = vec![
+            "<< /Type /Catalog /Pages 2 0 R /Outlines 4 0 R /Names << /Dests 7 0 R >> >>"
+                .to_string(),
+            "<< /Type /Pages /Kids [5 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+            "<< /First 6 0 R /Last 6 0 R /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>".to_string(),
+            "<< /Title (Loop) /Parent 4 0 R /Dest (A) >>".to_string(),
+            "<< /Names [(A) (B) (B) (A)] >>".to_string(),
             "<< /Length 36 >>\nstream\nBT /F1 14 Tf 36 260 Td (hello) Tj ET\nendstream".to_string(),
         ];
 

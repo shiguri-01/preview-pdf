@@ -106,6 +106,24 @@ fn decode_payload(payload: &PalettePayload) -> Option<(usize, String)> {
     Some((page.parse().ok()?, title.to_string()))
 }
 
+fn primary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Primary,
+    }
+}
+
+fn secondary(text: impl Into<String>) -> PaletteTextPart {
+    PaletteTextPart {
+        text: text.into(),
+        tone: PaletteTextTone::Secondary,
+    }
+}
+
+fn search(text: impl Into<String>) -> PaletteSearchText {
+    PaletteSearchText { text: text.into() }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -164,22 +182,4 @@ mod tests {
         assert_eq!(items[0].right.len(), 1);
         assert_eq!(items[0].right[0].text, "p.12");
     }
-}
-
-fn primary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Primary,
-    }
-}
-
-fn secondary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Secondary,
-    }
-}
-
-fn search(text: impl Into<String>) -> PaletteSearchText {
-    PaletteSearchText { text: text.into() }
 }

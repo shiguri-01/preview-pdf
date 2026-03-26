@@ -24,6 +24,16 @@ impl PaletteProvider for HistoryPaletteProvider {
         true
     }
 
+    fn initial_selected_candidate(
+        &self,
+        _ctx: &PaletteContext<'_>,
+        candidates: &[PaletteCandidate],
+    ) -> Option<usize> {
+        candidates
+            .iter()
+            .position(|candidate| candidate.id.starts_with("current-"))
+    }
+
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
         let seed = ctx.seed.unwrap_or("");
         let parsed = parse_seed(seed, ctx.app.current_page);
@@ -354,7 +364,7 @@ fn parse_seed(seed: &str, fallback_current: usize) -> Vec<SeedEntry> {
     }
 
     let mut entries = Vec::new();
-    for (i, entry) in forward_entries.into_iter().enumerate() {
+    for (i, entry) in forward_entries.into_iter().enumerate().rev() {
         entries.push(SeedEntry {
             page: entry.page,
             reason: entry.reason,
@@ -516,6 +526,32 @@ mod tests {
         assert_eq!(items[0].left[0].text, "1");
         assert_eq!(items[1].left[0].text, "0");
         assert_eq!(items[2].left[0].text, "-1");
+    }
+
+    #[test]
+    fn list_orders_forward_entries_before_current_in_reverse_stack_order() {
+        let provider = HistoryPaletteProvider;
+        let seed = "b:11|c:12|f:13,Search: one;14,Search: two;15,Search: three;16,Search: four";
+        let app = AppState {
+            current_page: 12,
+            ..AppState::default()
+        };
+        let extensions = ExtensionUiSnapshot::default();
+
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: crate::palette::PaletteKind::History,
+            input: "",
+            seed: Some(seed),
+        };
+
+        let items = provider.list(&ctx).expect("history list should build");
+        let labels: Vec<_> = items
+            .iter()
+            .map(|item| item.left[0].text.as_str())
+            .collect();
+        assert_eq!(labels, vec!["4", "3", "2", "1", "0", "-1"]);
     }
 
     #[test]

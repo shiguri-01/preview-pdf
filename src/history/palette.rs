@@ -21,6 +21,10 @@ impl PaletteProvider for HistoryPaletteProvider {
         PaletteInputMode::FilterCandidates
     }
 
+    fn reset_selection_on_input_change(&self) -> bool {
+        true
+    }
+
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
         let seed = ctx.seed.unwrap_or("");
         let parsed = parse_seed(seed, ctx.app.current_page);

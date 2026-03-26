@@ -142,6 +142,7 @@ impl PaletteManager {
             KeyCode::Tab => {
                 let provider = registry.get(session.kind);
                 let selected = selected_candidate(session);
+                let previous_input = session.input.value().to_string();
                 let ctx = PaletteContext {
                     app,
                     extensions,
@@ -158,7 +159,7 @@ impl PaletteManager {
                         session.input = Input::new(value);
                     }
                 }
-                self.rebuild(registry, app, extensions)?;
+                self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
                 return Ok(PaletteKeyResult::Consumed { redraw: true });
             }
             KeyCode::Enter => {
@@ -186,8 +187,9 @@ impl PaletteManager {
             _ => {}
         }
 
+        let previous_input = session.input.value().to_string();
         session.input.handle_event(&Event::Key(key));
-        self.rebuild(registry, app, extensions)?;
+        self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
         Ok(PaletteKeyResult::Consumed { redraw: true })
     }
 
@@ -219,6 +221,7 @@ impl PaletteManager {
         registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
+        previous_input: Option<&str>,
     ) -> AppResult<()> {
         let Some(existing) = self.active.as_ref() else {
             return Ok(());
@@ -241,7 +244,9 @@ impl PaletteManager {
         let title = provider.title(&ctx);
         let candidates = provider.list(&ctx)?;
         let visible = self.visible_candidates(input_mode, &input_text, &candidates);
-        let selected = if visible.is_empty() {
+        let input_changed = previous_input.is_some_and(|input| input != input_text);
+        let reset_selection = input_changed && provider.reset_selection_on_input_change();
+        let selected = if reset_selection || visible.is_empty() {
             0
         } else {
             current_selected.min(visible.len().saturating_sub(1))
@@ -326,4 +331,90 @@ fn selected_candidate_for<'a>(
     selected: usize,
 ) -> Option<&'a PaletteCandidate> {
     visible.get(selected).and_then(|idx| candidates.get(*idx))
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use crate::{
+        app::AppState,
+        extension::ExtensionUiSnapshot,
+        palette::{PaletteKind, PaletteRegistry},
+    };
+
+    use super::PaletteManager;
+
+    #[test]
+    fn command_palette_resets_selection_when_input_changes() {
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let mut app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        manager
+            .open(&registry, &app, &extensions, PaletteKind::Command, None)
+            .expect("command palette should open");
+
+        let initial_view = manager.view().expect("palette should be visible");
+        assert!(initial_view.items.len() > 1);
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            )
+            .expect("selection move should succeed");
+        let selected_view = manager.view().expect("palette should be visible");
+        assert_eq!(selected_view.selected_idx, 1);
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE),
+            )
+            .expect("typing should succeed");
+        let filtered_view = manager.view().expect("palette should be visible");
+        assert_eq!(filtered_view.selected_idx, 0);
+        assert_eq!(filtered_view.input, "p");
+    }
+
+    #[test]
+    fn search_palette_keeps_selection_when_input_changes() {
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let mut app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        manager
+            .open(&registry, &app, &extensions, PaletteKind::Search, None)
+            .expect("search palette should open");
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            )
+            .expect("selection move should succeed");
+        let selected_view = manager.view().expect("palette should be visible");
+        assert_eq!(selected_view.selected_idx, 1);
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+            )
+            .expect("typing should succeed");
+        let updated_view = manager.view().expect("palette should be visible");
+        assert_eq!(updated_view.selected_idx, 1);
+        assert_eq!(updated_view.input, "a");
+    }
 }

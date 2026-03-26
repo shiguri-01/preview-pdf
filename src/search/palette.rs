@@ -21,6 +21,10 @@ impl PaletteProvider for SearchPaletteProvider {
         PaletteInputMode::FreeText
     }
 
+    fn reset_selection_on_input_change(&self) -> bool {
+        false
+    }
+
     fn list(&self, _ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
         Ok(vec![
             PaletteCandidate {

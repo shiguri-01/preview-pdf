@@ -30,6 +30,10 @@ impl PaletteProvider for OutlinePaletteProvider {
         PaletteInputMode::FilterCandidates
     }
 
+    fn reset_selection_on_input_change(&self) -> bool {
+        true
+    }
+
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
         Ok(ctx
             .extensions

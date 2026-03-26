@@ -27,6 +27,10 @@ impl PaletteProvider for CommandPaletteProvider {
         PaletteInputMode::Custom
     }
 
+    fn reset_selection_on_input_change(&self) -> bool {
+        true
+    }
+
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
         if has_argument_phase(ctx.input) {
             return Ok(Vec::new());

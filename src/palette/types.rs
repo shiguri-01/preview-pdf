@@ -137,6 +137,13 @@ pub trait PaletteProvider: Send + Sync {
     ) -> Option<String> {
         None
     }
+    /// Returns whether a changed input should reset the selected candidate to the first item.
+    ///
+    /// Defaults to `false` so providers that do not filter or reorder candidates by input keep
+    /// their selection stable while typing.
+    fn reset_selection_on_input_change(&self) -> bool {
+        false
+    }
     /// Returns the initial input text when the palette opens.
     ///
     /// Defaults to the seed value. Override to decouple seed (data) from

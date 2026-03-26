@@ -19,6 +19,7 @@ This document defines the palette provider contract in `pvf`.
 - `on_tab(ctx, selected) -> PaletteTabEffect` (default: `Noop`)
 - `on_submit(ctx, selected) -> PaletteSubmitEffect`
 - `assistive_text(ctx, selected) -> Option<String>` (default: `None`)
+- `reset_selection_on_input_change() -> bool` (default: `false`)
 - `initial_input(seed) -> String` (default: `seed` passthrough)
 
 `PaletteContext` contains:
@@ -52,6 +53,11 @@ Selection highlighting is palette-wide and does not vary by palette kind.
   - Input is provider-owned command/query text.
 - `Custom`
   - Provider defines its own list/input strategy in `list()`.
+
+When `reset_selection_on_input_change()` returns `true`, the palette manager
+resets the highlighted candidate to the first visible row whenever the input
+text changes. Providers should opt in only when the candidate list is derived
+from the current input.
 
 ## Keyboard semantics
 

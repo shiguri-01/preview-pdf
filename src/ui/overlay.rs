@@ -163,19 +163,28 @@ fn build_palette_item_line(item: &PaletteItemView, width: usize) -> Line<'static
     let rendered = render_palette_row(item, content_width);
     spans.extend(rendered.left.spans);
     if rendered.gap > 0 {
-        spans.push(Span::raw(" ".repeat(rendered.gap)));
+        if item.selected {
+            spans.push(Span::styled(
+                " ".repeat(rendered.gap),
+                selected_text_style(),
+            ));
+        } else {
+            spans.push(Span::raw(" ".repeat(rendered.gap)));
+        }
     }
     spans.extend(rendered.right.spans);
     if rendered.trailing_padding > 0 {
-        spans.push(Span::raw(" ".repeat(rendered.trailing_padding)));
+        if item.selected {
+            spans.push(Span::styled(
+                " ".repeat(rendered.trailing_padding),
+                selected_text_style(),
+            ));
+        } else {
+            spans.push(Span::raw(" ".repeat(rendered.trailing_padding)));
+        }
     }
 
-    let line = Line::from(spans);
-    if item.selected {
-        line.style(Style::default().add_modifier(Modifier::REVERSED))
-    } else {
-        line
-    }
+    Line::from(spans)
 }
 
 struct RenderedTextParts {
@@ -341,7 +350,7 @@ fn palette_text_style(tone: crate::palette::PaletteTextTone, selected: bool) -> 
 }
 
 fn selected_text_style() -> Style {
-    Style::default().fg(Color::White)
+    Style::default().add_modifier(Modifier::REVERSED)
 }
 
 fn truncate_to_width(text: &str, max_width: usize) -> String {
@@ -693,6 +702,33 @@ mod tests {
         );
 
         assert_eq!(rendered_candidate_width(&line), 17);
+    }
+
+    #[test]
+    fn palette_item_line_selected_uses_uniform_style() {
+        let line = build_palette_item_line(
+            &PaletteItemView {
+                left: vec![
+                    crate::palette::PaletteTextPart {
+                        text: "open".to_string(),
+                        tone: crate::palette::PaletteTextTone::Primary,
+                    },
+                    crate::palette::PaletteTextPart {
+                        text: " now".to_string(),
+                        tone: crate::palette::PaletteTextTone::Secondary,
+                    },
+                ],
+                right: vec![crate::palette::PaletteTextPart {
+                    text: "Command".to_string(),
+                    tone: crate::palette::PaletteTextTone::Secondary,
+                }],
+                selected: true,
+            },
+            24,
+        );
+
+        let expected = super::selected_text_style();
+        assert!(line.spans.iter().all(|span| span.style == expected));
     }
 
     #[test]

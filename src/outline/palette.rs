@@ -3,7 +3,6 @@ use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
-    PaletteTextTone,
 };
 
 const PAYLOAD_SEP: char = '\u{1f}';
@@ -42,16 +41,18 @@ impl PaletteProvider for OutlinePaletteProvider {
             .enumerate()
             .map(|(index, entry)| PaletteCandidate {
                 id: format!("outline-{index}"),
-                left: vec![primary(format!(
+                left: vec![PaletteTextPart::primary(format!(
                     "{}{}",
                     "  ".repeat(entry.depth),
                     entry.title
                 ))],
-                right: vec![secondary(format_outline_page_detail(entry.page))],
+                right: vec![PaletteTextPart::secondary(format_outline_page_detail(
+                    entry.page,
+                ))],
                 search_texts: vec![
-                    search(entry.title.clone()),
-                    search(format!("page {}", entry.page + 1)),
-                    search((entry.page + 1).to_string()),
+                    PaletteSearchText::new(entry.title.clone()),
+                    PaletteSearchText::new(format!("page {}", entry.page + 1)),
+                    PaletteSearchText::new((entry.page + 1).to_string()),
                 ],
                 payload: PalettePayload::Opaque(encode_payload(entry.page, &entry.title)),
             })
@@ -104,24 +105,6 @@ fn decode_payload(payload: &PalettePayload) -> Option<(usize, String)> {
     };
     let (page, title) = payload.split_once(PAYLOAD_SEP)?;
     Some((page.parse().ok()?, title.to_string()))
-}
-
-fn primary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Primary,
-    }
-}
-
-fn secondary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Secondary,
-    }
-}
-
-fn search(text: impl Into<String>) -> PaletteSearchText {
-    PaletteSearchText { text: text.into() }
 }
 
 #[cfg(test)]

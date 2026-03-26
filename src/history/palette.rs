@@ -3,7 +3,6 @@ use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
-    PaletteTextTone,
 };
 
 pub struct HistoryPaletteProvider;
@@ -40,14 +39,17 @@ impl PaletteProvider for HistoryPaletteProvider {
                     Some(format!("[{}]", entry.reason))
                 };
                 let id = if entry.is_current {
-                    format!("current-{}", entry.page)
+                    format!("current-{}-{}", entry.page, i)
                 } else {
-                    format!("page-{}", entry.page)
+                    format!("page-{}-{}", entry.page, i)
                 };
                 PaletteCandidate {
                     id,
                     left: history_left_parts(idx, page_1indexed, entry.is_current),
-                    right: reason_detail.into_iter().map(secondary).collect(),
+                    right: reason_detail
+                        .into_iter()
+                        .map(PaletteTextPart::secondary)
+                        .collect(),
                     search_texts: history_search_texts(
                         page_1indexed,
                         entry.reason.as_str(),
@@ -101,31 +103,17 @@ impl PaletteProvider for HistoryPaletteProvider {
 
 fn history_left_parts(idx: usize, page_1indexed: usize, is_current: bool) -> Vec<PaletteTextPart> {
     let mut parts = Vec::new();
-    parts.push(primary(format!("{idx:2}")));
-    parts.push(primary("  "));
+    parts.push(PaletteTextPart::primary(format!("{idx:2}")));
+    parts.push(PaletteTextPart::primary("  "));
     if is_current {
-        parts.push(secondary("> "));
+        parts.push(PaletteTextPart::secondary("> "));
     }
-    parts.push(primary(format!("Page {page_1indexed}")));
+    parts.push(PaletteTextPart::primary(format!("Page {page_1indexed}")));
     parts
 }
 
-fn primary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Primary,
-    }
-}
-
-fn secondary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Secondary,
-    }
-}
-
 fn search(text: impl Into<String>) -> PaletteSearchText {
-    PaletteSearchText { text: text.into() }
+    PaletteSearchText::new(text)
 }
 
 fn history_search_texts(

@@ -9,7 +9,7 @@ use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTabEffect,
-    PaletteTextPart, PaletteTextTone,
+    PaletteTextPart,
 };
 
 pub struct CommandPaletteProvider;
@@ -49,7 +49,7 @@ impl PaletteProvider for CommandPaletteProvider {
             .map(|spec| PaletteCandidate {
                 id: spec.id.to_string(),
                 left: format_left(spec.id, spec.args),
-                right: vec![secondary(spec.title)],
+                right: vec![PaletteTextPart::secondary(spec.title)],
                 search_texts: format_search_texts(spec.id, spec.title, spec.args),
                 payload: PalettePayload::Opaque(spec.id.to_string()),
             })
@@ -178,10 +178,10 @@ impl PaletteProvider for CommandPaletteProvider {
 
 fn format_left(command_id: &str, args: &[crate::command::ArgSpec]) -> Vec<PaletteTextPart> {
     let usage = usage_text(args);
-    let mut parts = vec![primary(command_id)];
+    let mut parts = vec![PaletteTextPart::primary(command_id)];
     if !usage.is_empty() {
-        parts.push(primary(" "));
-        parts.push(secondary(usage));
+        parts.push(PaletteTextPart::primary(" "));
+        parts.push(PaletteTextPart::secondary(usage));
     }
     parts
 }
@@ -353,35 +353,17 @@ fn is_subsequence(query: &str, text: &str) -> bool {
     false
 }
 
-fn primary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Primary,
-    }
-}
-
-fn secondary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Secondary,
-    }
-}
-
-fn search(text: impl Into<String>) -> PaletteSearchText {
-    PaletteSearchText { text: text.into() }
-}
-
 fn format_search_texts(
     command_id: &str,
     title: &str,
     args: &[crate::command::ArgSpec],
 ) -> Vec<PaletteSearchText> {
     let usage = usage_text(args);
-    let mut parts = vec![search(title)];
+    let mut parts = vec![PaletteSearchText::new(title)];
     if !usage.is_empty() {
-        parts.push(search(usage));
+        parts.push(PaletteSearchText::new(usage));
     }
-    parts.push(search(command_id));
+    parts.push(PaletteSearchText::new(command_id));
     parts
 }
 

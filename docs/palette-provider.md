@@ -44,6 +44,12 @@ values that are not shown directly in the UI.
 The palette renderer is responsible for laying out both sides, reserving the
 trailing padding space, and applying selection highlighting to the whole row.
 Selection highlighting is palette-wide and does not vary by palette kind.
+When a palette row becomes too narrow, the renderer should prefer preserving
+the row's meaning over preserving a strict left/right split: if both sides can
+fit, show both; if not, trim the weaker side first, but keep enough of the
+other side to avoid turning the row into noise. This is why structured
+candidate parts are exposed separately instead of forcing every provider to
+pre-flatten text into one label string.
 
 ## Input modes
 

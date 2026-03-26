@@ -11,6 +11,7 @@ use crate::palette::{PaletteItemView, PaletteView};
 use super::layout::centered_rect;
 
 const PALETTE_ITEM_DECORATION_WIDTH: usize = 3;
+const MIN_VISIBLE_SIDE_WIDTH: usize = 4;
 const ELLIPSIS: &str = "…";
 
 pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, label: &str) {
@@ -273,19 +274,67 @@ fn plan_palette_row(item: &PaletteItemView, content_width: usize) -> PaletteRowP
     let left_width = measure_palette_text_width(&item.left);
     let right_width = measure_palette_text_width(&item.right);
 
-    if !item.right.is_empty()
-        && left_width.saturating_add(right_width).saturating_add(1) <= text_width
-    {
-        return PaletteRowPlan::Split {
-            left_width,
-            right_width,
-            gap: text_width.saturating_sub(left_width + right_width),
+    if item.right.is_empty() {
+        return PaletteRowPlan::Single {
+            text_width,
             trailing_padding,
         };
     }
 
-    PaletteRowPlan::Single {
-        text_width,
+    if left_width.saturating_add(right_width) <= text_width {
+        // Keep both sides when they fit naturally; only collapse to single-side
+        // rendering when the row is too narrow to keep both fragments legible.
+        let gap = text_width.saturating_sub(left_width + right_width);
+        return PaletteRowPlan::Split {
+            left_width,
+            right_width,
+            gap,
+            trailing_padding,
+        };
+    }
+
+    if text_width < MIN_VISIBLE_SIDE_WIDTH * 2 {
+        return PaletteRowPlan::Single {
+            text_width,
+            trailing_padding,
+        };
+    }
+
+    let gap = 1.min(text_width);
+    let available = text_width.saturating_sub(gap);
+    if available < MIN_VISIBLE_SIDE_WIDTH * 2 {
+        return PaletteRowPlan::Single {
+            text_width,
+            trailing_padding,
+        };
+    }
+
+    let mut right_target = right_width
+        .min((available / 3).max(MIN_VISIBLE_SIDE_WIDTH))
+        .min(available.saturating_sub(MIN_VISIBLE_SIDE_WIDTH));
+    let mut left_target = available.saturating_sub(right_target);
+
+    if left_target < MIN_VISIBLE_SIDE_WIDTH {
+        left_target = MIN_VISIBLE_SIDE_WIDTH;
+        right_target = available.saturating_sub(left_target);
+    }
+
+    if right_target < MIN_VISIBLE_SIDE_WIDTH {
+        right_target = MIN_VISIBLE_SIDE_WIDTH.min(available.saturating_sub(MIN_VISIBLE_SIDE_WIDTH));
+        left_target = available.saturating_sub(right_target);
+    }
+
+    if left_target == 0 || right_target == 0 {
+        return PaletteRowPlan::Single {
+            text_width,
+            trailing_padding,
+        };
+    }
+
+    PaletteRowPlan::Split {
+        left_width: left_target,
+        right_width: right_target,
+        gap,
         trailing_padding,
     }
 }
@@ -644,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_item_line_truncates_label_before_detail() {
+    fn palette_item_line_keeps_right_fragment_when_left_is_long() {
         let line = build_palette_item_line(
             &PaletteItemView {
                 left: vec![crate::palette::PaletteTextPart {
@@ -662,11 +711,11 @@ mod tests {
 
         let rendered = rendered_candidate_text(&line);
         assert!(rendered.contains("…"));
-        assert!(rendered.starts_with("very long"));
+        assert!(rendered.ends_with("p.12"));
     }
 
     #[test]
-    fn palette_item_line_hides_detail_when_width_is_too_narrow() {
+    fn palette_item_line_hides_right_fragment_when_space_is_tight() {
         let line = build_palette_item_line(
             &PaletteItemView {
                 left: vec![crate::palette::PaletteTextPart {
@@ -682,7 +731,9 @@ mod tests {
             8,
         );
 
-        assert!(rendered_candidate_text(&line).starts_with("out"));
+        let rendered = rendered_candidate_text(&line);
+        assert!(rendered.contains("…"));
+        assert!(!rendered.contains("p.12"));
     }
 
     #[test]

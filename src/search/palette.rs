@@ -3,7 +3,6 @@ use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
-    PaletteTextTone,
 };
 
 pub struct SearchPaletteProvider;
@@ -29,12 +28,12 @@ impl PaletteProvider for SearchPaletteProvider {
         Ok(vec![
             PaletteCandidate {
                 id: SearchMatcherKind::ContainsInsensitive.id().to_string(),
-                left: vec![primary("Contains (case insensitive)")],
+                left: vec![PaletteTextPart::primary("Contains (case insensitive)")],
                 right: Vec::new(),
                 search_texts: vec![
-                    search("contains insensitive"),
-                    search("contains case insensitive"),
-                    search(SearchMatcherKind::ContainsInsensitive.id()),
+                    PaletteSearchText::new("contains insensitive"),
+                    PaletteSearchText::new("contains case insensitive"),
+                    PaletteSearchText::new(SearchMatcherKind::ContainsInsensitive.id()),
                 ],
                 payload: PalettePayload::Opaque(
                     SearchMatcherKind::ContainsInsensitive.id().to_string(),
@@ -42,12 +41,12 @@ impl PaletteProvider for SearchPaletteProvider {
             },
             PaletteCandidate {
                 id: SearchMatcherKind::ContainsSensitive.id().to_string(),
-                left: vec![primary("Contains (case sensitive)")],
+                left: vec![PaletteTextPart::primary("Contains (case sensitive)")],
                 right: Vec::new(),
                 search_texts: vec![
-                    search("contains sensitive"),
-                    search("contains case sensitive"),
-                    search(SearchMatcherKind::ContainsSensitive.id()),
+                    PaletteSearchText::new("contains sensitive"),
+                    PaletteSearchText::new("contains case sensitive"),
+                    PaletteSearchText::new(SearchMatcherKind::ContainsSensitive.id()),
                 ],
                 payload: PalettePayload::Opaque(
                     SearchMatcherKind::ContainsSensitive.id().to_string(),
@@ -92,15 +91,4 @@ impl PaletteProvider for SearchPaletteProvider {
     ) -> Option<String> {
         Some("Enter: search  [up/down]: select matcher".to_string())
     }
-}
-
-fn primary(text: impl Into<String>) -> PaletteTextPart {
-    PaletteTextPart {
-        text: text.into(),
-        tone: PaletteTextTone::Primary,
-    }
-}
-
-fn search(text: impl Into<String>) -> PaletteSearchText {
-    PaletteSearchText { text: text.into() }
 }

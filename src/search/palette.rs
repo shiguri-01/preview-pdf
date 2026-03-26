@@ -2,7 +2,7 @@ use crate::command::{Command, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect,
+    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
 };
 
 pub struct SearchPaletteProvider;
@@ -20,20 +20,34 @@ impl PaletteProvider for SearchPaletteProvider {
         PaletteInputMode::FreeText
     }
 
+    fn reset_selection_on_input_change(&self) -> bool {
+        false
+    }
+
     fn list(&self, _ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
         Ok(vec![
             PaletteCandidate {
                 id: SearchMatcherKind::ContainsInsensitive.id().to_string(),
-                label: "Contains (case insensitive)".to_string(),
-                detail: None,
+                left: vec![PaletteTextPart::primary("Contains (case insensitive)")],
+                right: Vec::new(),
+                search_texts: vec![
+                    PaletteSearchText::new("contains insensitive"),
+                    PaletteSearchText::new("contains case insensitive"),
+                    PaletteSearchText::new(SearchMatcherKind::ContainsInsensitive.id()),
+                ],
                 payload: PalettePayload::Opaque(
                     SearchMatcherKind::ContainsInsensitive.id().to_string(),
                 ),
             },
             PaletteCandidate {
                 id: SearchMatcherKind::ContainsSensitive.id().to_string(),
-                label: "Contains (case sensitive)".to_string(),
-                detail: None,
+                left: vec![PaletteTextPart::primary("Contains (case sensitive)")],
+                right: Vec::new(),
+                search_texts: vec![
+                    PaletteSearchText::new("contains sensitive"),
+                    PaletteSearchText::new("contains case sensitive"),
+                    PaletteSearchText::new(SearchMatcherKind::ContainsSensitive.id()),
+                ],
                 payload: PalettePayload::Opaque(
                     SearchMatcherKind::ContainsSensitive.id().to_string(),
                 ),

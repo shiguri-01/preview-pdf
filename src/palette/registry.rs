@@ -119,6 +119,15 @@ impl<'a> PaletteProviderRef<'a> {
         }
     }
 
+    pub fn reset_selection_on_input_change(&self) -> bool {
+        match self {
+            Self::Command(provider) => provider.reset_selection_on_input_change(),
+            Self::Search(provider) => provider.reset_selection_on_input_change(),
+            Self::History(provider) => provider.reset_selection_on_input_change(),
+            Self::Outline(provider) => provider.reset_selection_on_input_change(),
+        }
+    }
+
     pub fn initial_input(&self, seed: Option<&str>) -> String {
         match self {
             Self::Command(provider) => provider.initial_input(seed),

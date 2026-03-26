@@ -2,7 +2,7 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect,
+    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
 };
 
 const PAYLOAD_SEP: char = '\u{1f}';
@@ -29,6 +29,10 @@ impl PaletteProvider for OutlinePaletteProvider {
         PaletteInputMode::FilterCandidates
     }
 
+    fn reset_selection_on_input_change(&self) -> bool {
+        true
+    }
+
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
         Ok(ctx
             .extensions
@@ -37,8 +41,19 @@ impl PaletteProvider for OutlinePaletteProvider {
             .enumerate()
             .map(|(index, entry)| PaletteCandidate {
                 id: format!("outline-{index}"),
-                label: format!("{}{}", "  ".repeat(entry.depth), entry.title),
-                detail: Some(format_outline_page_detail(entry.page)),
+                left: vec![PaletteTextPart::primary(format!(
+                    "{}{}",
+                    "  ".repeat(entry.depth),
+                    entry.title
+                ))],
+                right: vec![PaletteTextPart::secondary(format_outline_page_detail(
+                    entry.page,
+                ))],
+                search_texts: vec![
+                    PaletteSearchText::new(entry.title.clone()),
+                    PaletteSearchText::new(format!("page {}", entry.page + 1)),
+                    PaletteSearchText::new((entry.page + 1).to_string()),
+                ],
                 payload: PalettePayload::Opaque(encode_payload(entry.page, &entry.title)),
             })
             .collect())
@@ -147,6 +162,7 @@ mod tests {
 
         let items = provider.list(&ctx).expect("outline list should build");
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].detail.as_deref(), Some("p.12"));
+        assert_eq!(items[0].right.len(), 1);
+        assert_eq!(items[0].right[0].text, "p.12");
     }
 }

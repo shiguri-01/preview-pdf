@@ -65,6 +65,7 @@ This document defines the current architecture of `pvf`.
   - `provider.rs`: `PaletteProvider` contract.
   - `registry.rs`: static provider wiring by `PaletteKind`.
   - `manager.rs`: palette UI state machine.
+  - candidate display data and structured search metadata are both carried on `PaletteCandidate`.
 
 - `src/render/`
   - `cache.rs`: L1 rendered-page cache.

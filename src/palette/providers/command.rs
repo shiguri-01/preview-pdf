@@ -8,7 +8,8 @@ use crate::command::{CommandConditionContext, CommandInvocationSource};
 use crate::error::AppResult;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSubmitEffect, PaletteTabEffect,
+    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTabEffect,
+    PaletteTextPart,
 };
 
 pub struct CommandPaletteProvider;
@@ -24,6 +25,10 @@ impl PaletteProvider for CommandPaletteProvider {
 
     fn input_mode(&self) -> PaletteInputMode {
         PaletteInputMode::Custom
+    }
+
+    fn reset_selection_on_input_change(&self) -> bool {
+        true
     }
 
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
@@ -43,8 +48,9 @@ impl PaletteProvider for CommandPaletteProvider {
             })
             .map(|spec| PaletteCandidate {
                 id: spec.id.to_string(),
-                label: spec.id.to_string(),
-                detail: Some(format_detail(spec.title, spec.args)),
+                left: format_left(spec.id, spec.args),
+                right: vec![PaletteTextPart::secondary(spec.title)],
+                search_texts: format_search_texts(spec.id, spec.title, spec.args),
                 payload: PalettePayload::Opaque(spec.id.to_string()),
             })
             .collect::<Vec<_>>();
@@ -122,7 +128,7 @@ impl PaletteProvider for CommandPaletteProvider {
 
         let value = match &candidate.payload {
             PalettePayload::Opaque(value) => value.clone(),
-            PalettePayload::None => candidate.label.clone(),
+            PalettePayload::None => candidate.plain_left_text(),
         };
 
         Ok(PaletteTabEffect::SetInput {
@@ -170,13 +176,14 @@ impl PaletteProvider for CommandPaletteProvider {
     }
 }
 
-fn format_detail(title: &str, args: &[crate::command::ArgSpec]) -> String {
+fn format_left(command_id: &str, args: &[crate::command::ArgSpec]) -> Vec<PaletteTextPart> {
     let usage = usage_text(args);
-    if usage.is_empty() {
-        format!("| {title}")
-    } else {
-        format!("{usage} | {title}")
+    let mut parts = vec![PaletteTextPart::primary(command_id)];
+    if !usage.is_empty() {
+        parts.push(PaletteTextPart::primary(" "));
+        parts.push(PaletteTextPart::secondary(usage));
     }
+    parts
 }
 
 fn usage_text(args: &[crate::command::ArgSpec]) -> String {
@@ -219,8 +226,8 @@ const SCORE_ID_TOKEN_PREFIX: i32 = 8_000;
 const SCORE_ID_ACRONYM: i32 = 7_000;
 const SCORE_ID_CONTAINS: i32 = 6_000;
 const SCORE_ID_SUBSEQUENCE: i32 = 5_000;
-const SCORE_TITLE_PREFIX: i32 = 800;
-const SCORE_TITLE_CONTAINS: i32 = 700;
+const SCORE_SEARCH_TEXT_PREFIX: i32 = 800;
+const SCORE_SEARCH_TEXT_CONTAINS: i32 = 700;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CandidateScore {
@@ -259,11 +266,11 @@ fn rank_command_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) 
 
 fn score_command_candidate(query: &str, candidate: &PaletteCandidate) -> Option<CandidateScore> {
     let id = candidate.id.to_ascii_lowercase();
-    let title = extract_title(candidate).to_ascii_lowercase();
+    let search_text = candidate.search_text().to_ascii_lowercase();
 
     let id_score = score_id(query, &id);
-    let title_score = score_title(query, &title);
-    let score = id_score.max(title_score);
+    let search_text_score = score_search_text(query, &search_text);
+    let score = id_score.max(search_text_score);
     if score <= 0 {
         return None;
     }
@@ -272,16 +279,6 @@ fn score_command_candidate(query: &str, candidate: &PaletteCandidate) -> Option<
         score,
         tie_len: id.len(),
     })
-}
-
-fn extract_title(candidate: &PaletteCandidate) -> &str {
-    let Some(detail) = candidate.detail.as_deref() else {
-        return "";
-    };
-    let Some((_, title)) = detail.split_once('|') else {
-        return "";
-    };
-    title.trim()
 }
 
 fn score_id(query: &str, id: &str) -> i32 {
@@ -306,15 +303,15 @@ fn score_id(query: &str, id: &str) -> i32 {
     0
 }
 
-fn score_title(query: &str, title: &str) -> i32 {
-    if title.is_empty() {
+fn score_search_text(query: &str, search_text: &str) -> i32 {
+    if search_text.is_empty() {
         return 0;
     }
-    if title.starts_with(query) {
-        return SCORE_TITLE_PREFIX;
+    if search_text.starts_with(query) {
+        return SCORE_SEARCH_TEXT_PREFIX;
     }
-    if title.contains(query) {
-        return SCORE_TITLE_CONTAINS;
+    if search_text.contains(query) {
+        return SCORE_SEARCH_TEXT_CONTAINS;
     }
     0
 }
@@ -354,6 +351,20 @@ fn is_subsequence(query: &str, text: &str) -> bool {
     }
 
     false
+}
+
+fn format_search_texts(
+    command_id: &str,
+    title: &str,
+    args: &[crate::command::ArgSpec],
+) -> Vec<PaletteSearchText> {
+    let usage = usage_text(args);
+    let mut parts = vec![PaletteSearchText::new(title)];
+    if !usage.is_empty() {
+        parts.push(PaletteSearchText::new(usage));
+    }
+    parts.push(PaletteSearchText::new(command_id));
+    parts
 }
 
 #[cfg(test)]

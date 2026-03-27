@@ -50,6 +50,11 @@ Rules:
   - command form: `search` opens the dedicated search palette
   - `next-search-hit` / `prev-search-hit` are available only while search is active
 
+- Help:
+  - `?` opens a modal shortcut help overlay
+  - the overlay shows the effective shortcuts for the active keymap preset
+  - `Esc` closes the help overlay
+
 - History:
   - back/forward navigation history
   - jump-to-entry via history palette
@@ -91,6 +96,7 @@ Rules:
 | `N`      | Previous search hit |
 | `Ctrl+O` | History back |
 | `Ctrl+I` | History forward |
+| `?`      | Open shortcut help |
 | `q`      | Quit |
 | `Esc`    | Cancel / close current interactive surface |
 

@@ -6,6 +6,7 @@ use crate::command::parse_command_text;
 use crate::command::parse_invocable_command_text;
 use crate::command::{CommandConditionContext, CommandInvocationSource};
 use crate::error::AppResult;
+use crate::input::shortcut::{ShortcutKey, format_shortcut_sequence};
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTabEffect,
@@ -143,9 +144,11 @@ impl PaletteProvider for CommandPaletteProvider {
         ctx: &PaletteContext<'_>,
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
+        let enter = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Enter)]);
+        let tab = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Tab)]);
         let trimmed = ctx.input.trim();
         if trimmed.is_empty() {
-            return Some("Enter: run  Tab: complete".to_string());
+            return Some(format!("{enter}: run  {tab}: complete"));
         }
 
         if has_argument_phase(ctx.input) {
@@ -159,7 +162,7 @@ impl PaletteProvider for CommandPaletteProvider {
                         Some(format!("{} {} | {}", spec.id, usage, spec.title))
                     }
                 }
-                None => Some("Enter: run  Tab: complete".to_string()),
+                None => Some(format!("{enter}: run  {tab}: complete")),
             };
         }
 
@@ -172,7 +175,7 @@ impl PaletteProvider for CommandPaletteProvider {
             }
         }
 
-        Some("Enter: run  Tab: complete".to_string())
+        Some(format!("{enter}: run  {tab}: complete"))
     }
 }
 

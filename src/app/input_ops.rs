@@ -1,4 +1,4 @@
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
@@ -60,6 +60,24 @@ impl InteractionSubsystem {
             };
         }
 
+        if state.mode == Mode::Help {
+            return Ok(self.handle_help_key_event(state, key));
+        }
+
+        if matches!(key.code, KeyCode::Char('?'))
+            || (matches!(key.code, KeyCode::Char('/'))
+                && key.modifiers.contains(KeyModifiers::SHIFT))
+        {
+            state.mode = Mode::Help;
+            state.reset_help_scroll();
+            return Ok(KeyEventOutcome {
+                redraw: true,
+                clear_terminal: true,
+                quit_requested: false,
+                command: None,
+            });
+        }
+
         let mut command = None;
         match self.handle_extension_input(state, AppInputEvent::Key(key)) {
             InputHookResult::Ignored => {}
@@ -103,6 +121,74 @@ impl InteractionSubsystem {
                 CommandInvocationSource::Keymap,
             )),
         })
+    }
+
+    fn handle_help_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
+        const HELP_PAGE_STEP: isize = 10;
+
+        if matches!(key.code, KeyCode::Char('?'))
+            || (matches!(key.code, KeyCode::Char('/'))
+                && key.modifiers.contains(KeyModifiers::SHIFT))
+        {
+            state.mode = Mode::Normal;
+            state.reset_help_scroll();
+            return KeyEventOutcome {
+                redraw: true,
+                clear_terminal: true,
+                quit_requested: false,
+                command: None,
+            };
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                state.mode = Mode::Normal;
+                state.reset_help_scroll();
+                KeyEventOutcome {
+                    redraw: true,
+                    clear_terminal: true,
+                    quit_requested: false,
+                    command: None,
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                state.scroll_help_by(1);
+                KeyEventOutcome {
+                    redraw: true,
+                    clear_terminal: false,
+                    quit_requested: false,
+                    command: None,
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                state.scroll_help_by(-1);
+                KeyEventOutcome {
+                    redraw: true,
+                    clear_terminal: false,
+                    quit_requested: false,
+                    command: None,
+                }
+            }
+            KeyCode::PageDown => {
+                state.scroll_help_by(HELP_PAGE_STEP);
+                KeyEventOutcome {
+                    redraw: true,
+                    clear_terminal: false,
+                    quit_requested: false,
+                    command: None,
+                }
+            }
+            KeyCode::PageUp => {
+                state.scroll_help_by(-HELP_PAGE_STEP);
+                KeyEventOutcome {
+                    redraw: true,
+                    clear_terminal: false,
+                    quit_requested: false,
+                    command: None,
+                }
+            }
+            _ => KeyEventOutcome::default(),
+        }
     }
 
     pub(crate) fn drain_background_events(&mut self, state: &mut AppState) -> bool {
@@ -266,5 +352,54 @@ mod tests {
         assert!(outcome.command.is_none());
         assert!(!outcome.redraw);
         assert!(!outcome.clear_terminal);
+    }
+
+    #[test]
+    fn help_key_opens_help_mode_without_command_requeue() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState::default();
+
+        let outcome = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+                "default",
+            )
+            .expect("help key should be handled");
+
+        assert_eq!(state.mode, crate::app::Mode::Help);
+        assert!(outcome.command.is_none());
+        assert!(outcome.redraw);
+        assert!(outcome.clear_terminal);
+    }
+
+    #[test]
+    fn help_mode_scrolls_and_closes() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState::default();
+        state.mode = crate::app::Mode::Help;
+
+        let down = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+                "default",
+            )
+            .expect("help scroll should be handled");
+        assert_eq!(state.help_scroll, 1);
+        assert!(down.redraw);
+        assert!(!down.clear_terminal);
+
+        let closed = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+                "default",
+            )
+            .expect("help close should be handled");
+        assert_eq!(state.mode, crate::app::Mode::Normal);
+        assert_eq!(state.help_scroll, 0);
+        assert!(closed.redraw);
+        assert!(closed.clear_terminal);
     }
 }

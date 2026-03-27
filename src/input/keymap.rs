@@ -11,6 +11,13 @@ pub enum KeymapPreset {
 }
 
 impl KeymapPreset {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Emacs => "emacs",
+        }
+    }
+
     pub fn parse(value: &str) -> Self {
         match value {
             "default" => Self::Default,
@@ -34,7 +41,7 @@ pub fn map_key_to_command_with_preset(
             KeymapPreset::Default => map_normal_mode_key_default(key),
             KeymapPreset::Emacs => map_normal_mode_key_emacs(key),
         },
-        Mode::Palette => None,
+        Mode::Palette | Mode::Help => None,
     }
 }
 

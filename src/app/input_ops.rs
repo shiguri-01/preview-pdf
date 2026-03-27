@@ -189,7 +189,6 @@ impl InteractionSubsystem {
             return false;
         }
 
-        state.mode = Mode::Normal;
         state.reset_help_scroll();
         true
     }
@@ -424,7 +423,7 @@ mod tests {
                 "default",
             )
             .expect("help close should be handled");
-        assert_eq!(state.mode, crate::app::Mode::Normal);
+        assert_eq!(state.mode, crate::app::Mode::Help);
         assert_eq!(state.help_scroll, 0);
         assert!(matches!(
             closed.command,
@@ -476,7 +475,7 @@ mod tests {
         .expect("help close should be handled");
 
         assert_eq!(session.clear_count, 1);
-        assert_eq!(app.state.mode, Mode::Normal);
+        assert_eq!(app.state.mode, Mode::Help);
         assert_eq!(app.state.help_scroll, 0);
         assert!(needs_redraw);
     }

@@ -49,13 +49,17 @@ pub fn draw_help_overlay(
     }
 
     let lines = build_help_lines(preset);
-    let scroll = scroll_offset.min(lines.len().saturating_sub(content_area.height as usize)) as u16;
-
+    let scroll = scroll_offset.min(help_rendered_height(
+        &lines,
+        content_area.width,
+        content_area.height,
+    )) as u16;
     let content = Paragraph::new(lines)
         .style(primary_text())
         .wrap(Wrap { trim: false })
         .alignment(Alignment::Left)
         .scroll((scroll, 0));
+
     frame.render_widget(content, content_area);
 }
 
@@ -298,11 +302,31 @@ fn render_help_row(row: &HelpRow) -> Line<'static> {
     Line::from(vec![key_span, Span::raw(row.description.to_string())])
 }
 
+fn help_rendered_height(lines: &[Line<'static>], width: u16, height: u16) -> usize {
+    if width == 0 {
+        return 0;
+    }
+
+    let rendered_lines: usize = lines
+        .iter()
+        .map(|line| {
+            let line_width = line.width();
+            if line_width == 0 {
+                1
+            } else {
+                line_width.div_ceil(usize::from(width))
+            }
+        })
+        .sum();
+
+    rendered_lines.saturating_sub(usize::from(height))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::input::keymap::KeymapPreset;
 
-    use super::build_help_lines;
+    use super::{build_help_lines, help_rendered_height};
 
     #[test]
     fn help_lines_include_current_preset_bindings() {
@@ -334,5 +358,16 @@ mod tests {
         assert!(emacs_text.contains("Ctrl+N"));
         assert!(emacs_text.contains("Alt+X"));
         assert!(emacs_text.contains("PgDn"));
+    }
+
+    #[test]
+    fn help_scroll_limit_accounts_for_wrapping() {
+        let raw_limit = build_help_lines(KeymapPreset::Default)
+            .len()
+            .saturating_sub(5);
+        let wrapped_limit = help_rendered_height(&build_help_lines(KeymapPreset::Default), 20, 5);
+
+        assert!(wrapped_limit > raw_limit);
+        assert!(wrapped_limit > 0);
     }
 }

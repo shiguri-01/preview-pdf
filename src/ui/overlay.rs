@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
@@ -9,6 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::palette::{PaletteItemView, PaletteView};
 
 use super::layout::centered_rect;
+use super::{border, error_text, primary_text, secondary_text};
 
 const PALETTE_ITEM_DECORATION_WIDTH: usize = 3;
 const MIN_VISIBLE_SIDE_WIDTH: usize = 4;
@@ -37,7 +38,7 @@ pub fn draw_loading_overlay(frame: &mut Frame<'_>, area: Rect, label: &str) {
             Constraint::Fill(1),
         ])
         .split(popup)[1];
-    let message = Paragraph::new(message).style(Style::default().fg(Color::White));
+    let message = Paragraph::new(message).style(primary_text());
     frame.render_widget(message, message_area);
 }
 
@@ -54,7 +55,7 @@ pub fn draw_error_overlay(frame: &mut Frame<'_>, area: Rect, message: &str) {
     let block = Block::default()
         .title("Render Error")
         .borders(Borders::ALL)
-        .style(Style::default().fg(Color::Red));
+        .style(error_text());
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -65,7 +66,7 @@ pub fn draw_error_overlay(frame: &mut Frame<'_>, area: Rect, message: &str) {
     let text = truncate_to_width(message, inner.width as usize);
     let paragraph = Paragraph::new(text)
         .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::White));
+        .style(error_text());
     frame.render_widget(paragraph, inner);
 }
 
@@ -83,7 +84,7 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
         .title(format!(" {} ", view.title))
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(border());
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -106,7 +107,7 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
     frame.set_cursor_position((chunks[0].x + input_layout.cursor_col, chunks[0].y));
 
     // 2. Separator
-    let sep_style = Style::default().fg(Color::DarkGray);
+    let sep_style = secondary_text();
     let sep_char = "─";
     frame.render_widget(
         Paragraph::new(sep_char.repeat(inner.width as usize)).style(sep_style),
@@ -124,7 +125,7 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
     {
         lines.push(Line::from(vec![
             Span::raw("   "),
-            Span::styled(assistive, Style::default().fg(Color::DarkGray)),
+            Span::styled(assistive, secondary_text()),
         ]));
         overhead_lines += 1;
     }
@@ -394,13 +395,13 @@ fn palette_text_style(tone: crate::palette::PaletteTextTone, selected: bool) -> 
     }
 
     match tone {
-        crate::palette::PaletteTextTone::Primary => Style::default(),
-        crate::palette::PaletteTextTone::Secondary => Style::default().fg(Color::DarkGray),
+        crate::palette::PaletteTextTone::Primary => primary_text(),
+        crate::palette::PaletteTextTone::Secondary => secondary_text(),
     }
 }
 
 fn selected_text_style() -> Style {
-    Style::default().add_modifier(Modifier::REVERSED)
+    primary_text().add_modifier(Modifier::REVERSED)
 }
 
 fn truncate_to_width(text: &str, max_width: usize) -> String {
@@ -465,7 +466,7 @@ struct PaletteInputLineLayout {
 fn build_palette_input_line(input: &str, cursor: usize, width: usize) -> PaletteInputLineLayout {
     let prefix_spans = vec![
         Span::raw(" ".to_string()),
-        Span::styled("> ".to_string(), Style::default().fg(Color::White)),
+        Span::styled("> ".to_string(), primary_text()),
     ];
     let prefix_width = 3;
     let max_text_width = width.saturating_sub(prefix_width);

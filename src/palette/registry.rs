@@ -128,6 +128,19 @@ impl<'a> PaletteProviderRef<'a> {
         }
     }
 
+    pub fn initial_selected_candidate(
+        &self,
+        ctx: &PaletteContext<'_>,
+        candidates: &[PaletteCandidate],
+    ) -> Option<usize> {
+        match self {
+            Self::Command(provider) => provider.initial_selected_candidate(ctx, candidates),
+            Self::Search(provider) => provider.initial_selected_candidate(ctx, candidates),
+            Self::History(provider) => provider.initial_selected_candidate(ctx, candidates),
+            Self::Outline(provider) => provider.initial_selected_candidate(ctx, candidates),
+        }
+    }
+
     pub fn initial_input(&self, seed: Option<&str>) -> String {
         match self {
             Self::Command(provider) => provider.initial_input(seed),

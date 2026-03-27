@@ -8,6 +8,7 @@ use crate::extension::ExtensionUiSnapshot;
 
 use super::kind::PaletteKind;
 use super::matcher::{CandidateMatcher, ContainsMatcher};
+use super::registry::PaletteProviderRef;
 use super::registry::PaletteRegistry;
 use super::types::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView, PaletteKeyResult,
@@ -68,7 +69,8 @@ impl PaletteManager {
         let candidates = provider.list(&ctx)?;
         let input_mode = provider.input_mode();
         let visible = self.visible_candidates(input_mode, input.value(), &candidates);
-        let selected = 0;
+        let selected =
+            initial_visible_selection(&provider, &ctx, &candidates, &visible).unwrap_or(0);
         let selected_candidate = selected_candidate_for(&candidates, &visible, selected);
         let assistive_text = provider.assistive_text(&ctx, selected_candidate);
 
@@ -325,6 +327,18 @@ fn selected_candidate(session: &PaletteSession) -> Option<&PaletteCandidate> {
     selected_candidate_for(&session.candidates, &session.visible, session.selected)
 }
 
+fn initial_visible_selection(
+    provider: &PaletteProviderRef<'_>,
+    ctx: &PaletteContext<'_>,
+    candidates: &[PaletteCandidate],
+    visible: &[usize],
+) -> Option<usize> {
+    let selected_candidate_idx = provider.initial_selected_candidate(ctx, candidates)?;
+    visible
+        .iter()
+        .position(|candidate_idx| *candidate_idx == selected_candidate_idx)
+}
+
 fn selected_candidate_for<'a>(
     candidates: &'a [PaletteCandidate],
     visible: &[usize],
@@ -416,5 +430,27 @@ mod tests {
         let updated_view = manager.view().expect("palette should be visible");
         assert_eq!(updated_view.selected_idx, 1);
         assert_eq!(updated_view.input, "a");
+    }
+
+    #[test]
+    fn history_palette_selects_current_candidate_on_open() {
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        manager
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::History,
+                Some("f:5,Search: later|c:4|b:3,Search: earlier".to_string()),
+            )
+            .expect("history palette should open");
+
+        let view = manager.view().expect("palette should be visible");
+        assert_eq!(view.selected_idx, 1);
+        assert!(view.items[1].selected);
     }
 }

@@ -166,6 +166,16 @@ pub trait PaletteProvider: Send + Sync {
     fn reset_selection_on_input_change(&self) -> bool {
         false
     }
+    /// Returns the initially selected candidate index within `candidates`.
+    ///
+    /// Defaults to `None`, which keeps the manager's normal first-item selection.
+    fn initial_selected_candidate(
+        &self,
+        _ctx: &PaletteContext<'_>,
+        _candidates: &[PaletteCandidate],
+    ) -> Option<usize> {
+        None
+    }
     /// Returns the initial input text when the palette opens.
     ///
     /// Defaults to the seed value. Override to decouple seed (data) from

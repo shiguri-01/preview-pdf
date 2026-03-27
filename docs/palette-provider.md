@@ -20,6 +20,7 @@ This document defines the palette provider contract in `pvf`.
 - `on_submit(ctx, selected) -> PaletteSubmitEffect`
 - `assistive_text(ctx, selected) -> Option<String>` (default: `None`)
 - `reset_selection_on_input_change() -> bool` (default: `false`)
+- `initial_selected_candidate(ctx, candidates) -> Option<usize>` (default: `None`)
 - `initial_input(seed) -> String` (default: `seed` passthrough)
 
 `PaletteContext` contains:
@@ -64,6 +65,12 @@ When `reset_selection_on_input_change()` returns `true`, the palette manager
 resets the highlighted candidate to the first visible row whenever the input
 text changes. Providers should opt in only when the candidate list is derived
 from the current input.
+
+When `initial_selected_candidate(ctx, candidates)` returns `Some(idx)`, the
+palette manager uses that candidate index as the initial highlight after the
+list is built and filtered. Providers can use this hook to control the default
+selection for buckets of candidates that have a meaningful "current" item.
+Return `None` to keep the manager's normal first-item behavior.
 
 ## Keyboard semantics
 
@@ -147,12 +154,21 @@ from the current input.
 ## History palette (`PaletteKind::History`)
 
 - Open via command palette command: `history`
-- Input mode: `FilterCandidates`
+- Input mode: `Custom`
 - `initial_input` returns empty text; seed is used as serialized context.
-- Candidates include back stack, current page, and forward stack (newest first).
-- Current page is marked and not jump-targetable.
-- Candidate matching uses page numbers and navigation reason text, not only the
-  rendered row label.
+- Candidates are shown in navigation order around the current page.
+- Left side shows the index and either a prefixed intent label (`/query`, `#title`),
+  a goto label (`first-page`, `last-page`), or a page label when the entry has no
+  readable intent label.
+- Right side always shows the page label as `p.N` in secondary tone.
+- Current page is initially selected, even when forward history entries appear before it.
+- The provider hook `initial_selected_candidate(...)` in `PaletteProvider`
+  controls that initial highlight; the history provider uses it to select the
+  candidate whose id starts with `current-`.
+- Candidate matching uses three stable buckets in this order: signed index matches first,
+  formatted reason text matches second, page-label matches third. The index is a signed
+  offset from the current page (`0` for current, negative for back, positive for forward).
+  The display order follows the candidate index sequence used by the history palette.
 - Enter dispatches internal history-goto behavior with selected page and closes.
 
 ## Outline palette (`PaletteKind::Outline`)

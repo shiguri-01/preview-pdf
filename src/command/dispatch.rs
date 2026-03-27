@@ -159,7 +159,9 @@ fn collect_transition_events(
             // Search/outline are intent-driven navigations. Even if layout normalization
             // leaves the visible anchor page unchanged, history still needs the event so the
             // attempted destination is recorded consistently.
-            NavReason::Search { .. } | NavReason::Outline => outcome == CommandOutcome::Applied,
+            NavReason::Search { .. } | NavReason::Outline { .. } => {
+                outcome == CommandOutcome::Applied
+            }
             _ => app.current_page != prev_page,
         };
         if should_emit {
@@ -193,7 +195,9 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         Command::HistoryBack => Some(NavReason::History(HistoryOp::Back)),
         Command::HistoryForward => Some(NavReason::History(HistoryOp::Forward)),
         Command::HistoryGoto { .. } => Some(NavReason::History(HistoryOp::Goto)),
-        Command::OutlineGoto { .. } => Some(NavReason::Outline),
+        Command::OutlineGoto { title, .. } => Some(NavReason::Outline {
+            title: title.clone(),
+        }),
         Command::SetZoom { .. }
         | Command::ZoomIn
         | Command::ZoomOut
@@ -468,12 +472,12 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert!(matches!(
-            events[0],
+            &events[0],
             AppEvent::PageChanged {
                 from: 1,
                 to: 4,
-                reason: NavReason::Outline
-            }
+                reason: NavReason::Outline { title }
+            } if title == "Section"
         ));
     }
 
@@ -496,12 +500,12 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert!(matches!(
-            events[0],
+            &events[0],
             AppEvent::PageChanged {
                 from: 0,
                 to: 0,
-                reason: NavReason::Outline
-            }
+                reason: NavReason::Outline { title }
+            } if title == "Section"
         ));
     }
 

@@ -14,6 +14,7 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 - Full-text search with next/previous hit navigation
 - Page history (back/forward)
 - Command palette for actions like `goto-page` and `page-layout-spread`
+- Help overlay via `help`
 
 ## Keys (default)
 
@@ -26,6 +27,7 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 | `/` | Open search palette |
 | `n` / `N` | Next search hit / Previous search hit |
 | `Ctrl+O` / `Ctrl+I` | History back / History forward |
+| `?` | Open help overlay |
 | `:` | Open command palette |
 | `Esc` | Cancel current interactive state |
 | `q` | Quit |
@@ -37,6 +39,7 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 - `zoom <value>`
 - `search`
 - `history`
+- `help`
 ## Configuration (optional)
 
 `pvf` loads `config.toml` from:

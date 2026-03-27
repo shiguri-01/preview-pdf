@@ -49,6 +49,7 @@ const ARGS_OPEN_PALETTE: [ArgSpec; 2] = [
         required: false,
     },
 ];
+const NO_ARGS_HELP: [ArgSpec; 0] = [];
 const ARGS_SUBMIT_SEARCH: [ArgSpec; 2] = [
     ArgSpec {
         name: "query",
@@ -79,7 +80,7 @@ const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
     },
 ];
 
-const COMMAND_SPECS: [CommandSpec; 28] = [
+const COMMAND_SPECS: [CommandSpec; 30] = [
     CommandSpec {
         id: "next-page",
         title: "Next Page",
@@ -206,6 +207,22 @@ const COMMAND_SPECS: [CommandSpec; 28] = [
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
+        availability: CommandAvailability::Always,
+    },
+    CommandSpec {
+        id: "help",
+        title: "Open Help",
+        args: &NO_ARGS_HELP,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::Always,
+    },
+    CommandSpec {
+        id: "close-help",
+        title: "Close Help",
+        args: &NO_ARGS_HELP,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::KeymapOnly,
         availability: CommandAvailability::Always,
     },
     CommandSpec {
@@ -506,5 +523,19 @@ mod tests {
         let err = validate_command_id_for_source("open-palette", &palette_input_ctx)
             .expect_err("command palette input should be rejected");
         assert!(err.to_string().contains("internal command"));
+    }
+
+    #[test]
+    fn keymap_only_close_help_is_hidden_from_palette() {
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = CommandConditionContext {
+            app: &app,
+            extensions: &extensions,
+            source: CommandInvocationSource::CommandPaletteInput,
+        };
+
+        let spec = find_command_spec("close-help").expect("spec should exist");
+        assert!(!is_command_visible_in_palette(spec, &ctx));
     }
 }

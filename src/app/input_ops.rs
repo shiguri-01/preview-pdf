@@ -64,17 +64,15 @@ impl InteractionSubsystem {
             return Ok(self.handle_help_key_event(state, key));
         }
 
-        if matches!(key.code, KeyCode::Char('?'))
-            || (matches!(key.code, KeyCode::Char('/'))
-                && key.modifiers.contains(KeyModifiers::SHIFT))
-        {
-            state.mode = Mode::Help;
-            state.reset_help_scroll();
+        if is_help_toggle_key(key) {
             return Ok(KeyEventOutcome {
                 redraw: true,
                 clear_terminal: true,
                 quit_requested: false,
-                command: None,
+                command: Some(CommandRequest::new(
+                    Command::OpenHelp,
+                    CommandInvocationSource::Keymap,
+                )),
             });
         }
 
@@ -124,34 +122,20 @@ impl InteractionSubsystem {
     }
 
     fn handle_help_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
-        const HELP_PAGE_STEP: isize = 10;
-
-        if matches!(key.code, KeyCode::Char('?'))
-            || (matches!(key.code, KeyCode::Char('/'))
-                && key.modifiers.contains(KeyModifiers::SHIFT))
-        {
-            state.mode = Mode::Normal;
-            state.reset_help_scroll();
-            return KeyEventOutcome {
-                redraw: true,
-                clear_terminal: true,
-                quit_requested: false,
-                command: None,
-            };
-        }
-
         match key.code {
             KeyCode::Esc => {
-                state.mode = Mode::Normal;
-                state.reset_help_scroll();
+                let closed = self.close_help_session(state);
                 KeyEventOutcome {
-                    redraw: true,
-                    clear_terminal: true,
+                    redraw: closed,
+                    clear_terminal: closed,
                     quit_requested: false,
-                    command: None,
+                    command: Some(CommandRequest::new(
+                        Command::CloseHelp,
+                        CommandInvocationSource::Keymap,
+                    )),
                 }
             }
-            KeyCode::Char('j') | KeyCode::Down => {
+            KeyCode::Char('j') => {
                 state.scroll_help_by(1);
                 KeyEventOutcome {
                     redraw: true,
@@ -160,26 +144,8 @@ impl InteractionSubsystem {
                     command: None,
                 }
             }
-            KeyCode::Char('k') | KeyCode::Up => {
+            KeyCode::Char('k') => {
                 state.scroll_help_by(-1);
-                KeyEventOutcome {
-                    redraw: true,
-                    clear_terminal: false,
-                    quit_requested: false,
-                    command: None,
-                }
-            }
-            KeyCode::PageDown => {
-                state.scroll_help_by(HELP_PAGE_STEP);
-                KeyEventOutcome {
-                    redraw: true,
-                    clear_terminal: false,
-                    quit_requested: false,
-                    command: None,
-                }
-            }
-            KeyCode::PageUp => {
-                state.scroll_help_by(-HELP_PAGE_STEP);
                 KeyEventOutcome {
                     redraw: true,
                     clear_terminal: false,
@@ -215,6 +181,16 @@ impl InteractionSubsystem {
             return false;
         }
         state.mode = Mode::Normal;
+        true
+    }
+
+    pub(crate) fn close_help_session(&mut self, state: &mut AppState) -> bool {
+        if state.mode != Mode::Help {
+            return false;
+        }
+
+        state.mode = Mode::Normal;
+        state.reset_help_scroll();
         true
     }
 
@@ -327,13 +303,58 @@ impl InteractionSubsystem {
     }
 }
 
+fn is_help_toggle_key(key: KeyEvent) -> bool {
+    matches!(key.code, KeyCode::Char('?'))
+        || (matches!(key.code, KeyCode::Char('/')) && key.modifiers.contains(KeyModifiers::SHIFT))
+}
+
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::layout::Size;
 
-    use crate::app::AppState;
+    use crate::app::terminal_session::TerminalSurface;
+    use crate::app::{AppState, Mode};
+    use crate::command::{Command, CommandInvocationSource};
+    use crate::config::Config;
+    use crate::presenter::PresenterKind;
 
+    use super::super::App;
     use super::super::core::InteractionSubsystem;
+
+    struct MockSession {
+        clear_count: usize,
+        size: Size,
+    }
+
+    impl MockSession {
+        fn new(width: u16, height: u16) -> Self {
+            Self {
+                clear_count: 0,
+                size: Size::new(width, height),
+            }
+        }
+    }
+
+    impl TerminalSurface for MockSession {
+        fn size(&self) -> io::Result<Size> {
+            Ok(self.size)
+        }
+
+        fn clear(&mut self) -> io::Result<()> {
+            self.clear_count += 1;
+            Ok(())
+        }
+
+        fn draw<F>(&mut self, _render: F) -> io::Result<()>
+        where
+            F: FnOnce(&mut ratatui::Frame<'_>),
+        {
+            Ok(())
+        }
+    }
 
     #[test]
     fn quit_key_requests_immediate_quit_without_command_requeue() {
@@ -355,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn help_key_opens_help_mode_without_command_requeue() {
+    fn help_key_requests_open_help_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
 
@@ -367,14 +388,19 @@ mod tests {
             )
             .expect("help key should be handled");
 
-        assert_eq!(state.mode, crate::app::Mode::Help);
-        assert!(outcome.command.is_none());
+        assert_eq!(state.mode, crate::app::Mode::Normal);
+        assert!(matches!(
+            outcome.command,
+            Some(ref request)
+                if request.command == Command::OpenHelp
+                    && request.source == CommandInvocationSource::Keymap
+        ));
         assert!(outcome.redraw);
         assert!(outcome.clear_terminal);
     }
 
     #[test]
-    fn help_mode_scrolls_and_closes() {
+    fn help_mode_scrolls_and_requests_close_help() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
         state.mode = crate::app::Mode::Help;
@@ -389,6 +415,7 @@ mod tests {
         assert_eq!(state.help_scroll, 1);
         assert!(down.redraw);
         assert!(!down.clear_terminal);
+        assert!(down.command.is_none());
 
         let closed = interaction
             .handle_key_event(
@@ -399,7 +426,37 @@ mod tests {
             .expect("help close should be handled");
         assert_eq!(state.mode, crate::app::Mode::Normal);
         assert_eq!(state.help_scroll, 0);
+        assert!(matches!(
+            closed.command,
+            Some(ref request)
+                if request.command == Command::CloseHelp
+                    && request.source == CommandInvocationSource::Keymap
+        ));
         assert!(closed.redraw);
         assert!(closed.clear_terminal);
+    }
+
+    #[test]
+    fn help_close_requests_viewer_area_clear() {
+        let mut app = App::new_with_config(PresenterKind::RatatuiImage, Config::default())
+            .expect("app should initialize");
+        app.state.mode = Mode::Help;
+        let mut session = MockSession::new(80, 24);
+        let mut needs_redraw = false;
+        let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let mut last_input_at = std::time::Instant::now();
+
+        app.handle_input_event(
+            crossterm::event::Event::Key(key),
+            &mut session,
+            &mut needs_redraw,
+            &mut last_input_at,
+        )
+        .expect("help close should be handled");
+
+        assert_eq!(session.clear_count, 1);
+        assert_eq!(app.state.mode, Mode::Normal);
+        assert_eq!(app.state.help_scroll, 0);
+        assert!(needs_redraw);
     }
 }

@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
@@ -19,13 +19,13 @@ pub fn draw_help_overlay(
         return;
     }
 
-    let popup_width = area.width.min(84);
+    let popup_width = area.width.min(72);
     let popup_height = area.height.clamp(10, 28);
     let popup = centered_rect(area, popup_width, popup_height);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title(format!(" Help · {} ", preset.id()))
+        .title(" Help ")
         .borders(Borders::ALL)
         .border_type(ratatui::widgets::BorderType::Rounded)
         .border_style(border());
@@ -36,15 +36,27 @@ pub fn draw_help_overlay(
         return;
     }
 
+    let content_area = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(1),
+            Constraint::Length(1),
+        ])
+        .split(inner)[1];
+    if content_area.width == 0 || content_area.height == 0 {
+        return;
+    }
+
     let lines = build_help_lines(preset);
-    let scroll = scroll_offset.min(lines.len().saturating_sub(inner.height as usize)) as u16;
+    let scroll = scroll_offset.min(lines.len().saturating_sub(content_area.height as usize)) as u16;
 
     let content = Paragraph::new(lines)
         .style(primary_text())
         .wrap(Wrap { trim: false })
         .alignment(Alignment::Left)
         .scroll((scroll, 0));
-    frame.render_widget(content, inner);
+    frame.render_widget(content, content_area);
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -116,7 +128,7 @@ const DEFAULT_SECTIONS: &[HelpSection] = &[
         rows: &[
             HelpRow {
                 keys: &[ShortcutKey::char('/')],
-                description: "Open search",
+                description: "Search",
             },
             HelpRow {
                 keys: &[ShortcutKey::char('n')],
@@ -137,7 +149,7 @@ const DEFAULT_SECTIONS: &[HelpSection] = &[
             },
             HelpRow {
                 keys: &[ShortcutKey::char('?')],
-                description: "Open help",
+                description: "Help",
             },
             HelpRow {
                 keys: &[ShortcutKey::char('q')],
@@ -145,7 +157,7 @@ const DEFAULT_SECTIONS: &[HelpSection] = &[
             },
             HelpRow {
                 keys: &[ShortcutKey::key(crossterm::event::KeyCode::Esc)],
-                description: "Close help or cancel",
+                description: "Cancel / Close",
             },
         ],
     },
@@ -220,7 +232,7 @@ const EMACS_SECTIONS: &[HelpSection] = &[
         rows: &[
             HelpRow {
                 keys: &[ShortcutKey::ctrl('s')],
-                description: "Open search",
+                description: "Search",
             },
             HelpRow {
                 keys: &[ShortcutKey::char('n')],
@@ -241,7 +253,7 @@ const EMACS_SECTIONS: &[HelpSection] = &[
             },
             HelpRow {
                 keys: &[ShortcutKey::char('?')],
-                description: "Open help",
+                description: "Help",
             },
             HelpRow {
                 keys: &[ShortcutKey::char('q')],
@@ -249,24 +261,21 @@ const EMACS_SECTIONS: &[HelpSection] = &[
             },
             HelpRow {
                 keys: &[ShortcutKey::key(crossterm::event::KeyCode::Esc)],
-                description: "Close help or cancel",
+                description: "Cancel / Close",
             },
         ],
     },
 ];
 
 fn build_help_lines(preset: KeymapPreset) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(vec![Span::styled("Basic shortcuts", heading_text())]),
-        Line::from(""),
-    ];
+    let mut lines = Vec::new();
 
     let sections = match preset {
         KeymapPreset::Default => DEFAULT_SECTIONS,
         KeymapPreset::Emacs => EMACS_SECTIONS,
     };
 
-    for section in sections {
+    for (i, section) in sections.iter().enumerate() {
         lines.push(Line::from(vec![Span::styled(
             section.title,
             heading_text(),
@@ -274,20 +283,18 @@ fn build_help_lines(preset: KeymapPreset) -> Vec<Line<'static>> {
         for row in section.rows {
             lines.push(render_help_row(row));
         }
-        lines.push(Line::from(""));
-    }
 
-    lines.push(Line::from(vec![Span::styled(
-        "j/k scroll  PgUp/PgDn page  Esc close",
-        secondary_text(),
-    )]));
+        if i + 1 < sections.len() {
+            lines.push(Line::from(""));
+        }
+    }
 
     lines
 }
 
 fn render_help_row(row: &HelpRow) -> Line<'static> {
     let key_text = format_shortcut_sequence(row.keys);
-    let key_span = Span::styled(format!("{key_text:<18}"), heading_text());
+    let key_span = Span::styled(format!("{key_text:<18}"), secondary_text());
     Line::from(vec![key_span, Span::raw(row.description.to_string())])
 }
 
@@ -311,7 +318,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(default_text.contains("Ctrl+O"));
-        assert!(default_text.contains("Open help"));
+        assert!(default_text.contains("Help"));
 
         let emacs_lines = build_help_lines(KeymapPreset::Emacs);
         let emacs_text = emacs_lines

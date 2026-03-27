@@ -51,7 +51,8 @@ Rules:
   - `next-search-hit` / `prev-search-hit` are available only while search is active
 
 - Help:
-  - `?` opens a modal shortcut help overlay
+  - command form: `help` opens the modal shortcut help overlay
+  - `?` opens the modal shortcut help overlay
   - the overlay shows the effective shortcuts for the active keymap preset
   - `Esc` closes the help overlay
 

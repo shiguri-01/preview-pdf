@@ -1,5 +1,4 @@
 use ratatui::Frame;
-use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
@@ -7,6 +6,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
 
 use super::layout::UiLayout;
+use super::{border, error_text, primary_text, warning_text};
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw_chrome(
@@ -28,11 +28,11 @@ pub fn draw_chrome(
     );
     let primary = if let Some(notice) = app.notice.as_ref() {
         Paragraph::new(stylize_notice_line(notice, layout.status.width as usize))
-            .style(Style::default())
+            .style(primary_text())
             .wrap(Wrap { trim: true })
     } else {
         Paragraph::new(stylize_status_line(&status_text))
-            .style(Style::default())
+            .style(primary_text())
             .wrap(Wrap { trim: true })
     };
     if app.debug_status_visible && layout.status.height >= 2 {
@@ -52,7 +52,7 @@ pub fn draw_chrome(
             layout.status.height.saturating_sub(1).max(1),
         );
         let debug = Paragraph::new(presenter_path_text)
-            .style(Style::default())
+            .style(primary_text())
             .wrap(Wrap { trim: true });
         frame.render_widget(debug, bottom);
         return;
@@ -158,12 +158,9 @@ fn stylize_status_line(text: &str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (idx, part) in text.split(" | ").enumerate() {
         if idx > 0 {
-            spans.push(Span::styled(
-                " | ".to_string(),
-                Style::default().fg(Color::DarkGray),
-            ));
+            spans.push(Span::styled(" | ".to_string(), border()));
         }
-        spans.push(Span::raw(part.to_string()));
+        spans.push(Span::styled(part.to_string(), primary_text()));
     }
     Line::from(spans)
 }
@@ -174,11 +171,11 @@ fn stylize_notice_line(notice: &Notice, max_width: usize) -> Line<'static> {
         NoticeLevel::Error => "error",
     };
     let accent = match notice.level {
-        NoticeLevel::Warning => Color::Yellow,
-        NoticeLevel::Error => Color::Red,
+        NoticeLevel::Warning => warning_text(),
+        NoticeLevel::Error => error_text(),
     };
     let text = truncate_right_by_width(&format!("{label}: {}", notice.message), max_width);
-    Line::from(vec![Span::styled(text, Style::default().fg(accent))])
+    Line::from(vec![Span::styled(text, accent)])
 }
 
 fn display_width(text: &str) -> usize {

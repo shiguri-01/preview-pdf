@@ -1,4 +1,4 @@
-use crate::app::{AppState, NoticeAction, PageLayoutMode, SpreadDirection};
+use crate::app::{AppState, Mode, NoticeAction, PageLayoutMode, SpreadDirection};
 use crate::error::{AppError, AppResult};
 
 use super::types::{CommandOutcome, PageLayoutModeArg, SpreadDirectionArg};
@@ -154,6 +154,27 @@ pub(crate) fn set_debug_status_visible(
     }
 
     app.debug_status_visible = visible;
+    Ok(applied())
+}
+
+pub(crate) fn open_help(app: &mut AppState) -> AppResult<CommandNoticeResult> {
+    let changed = app.mode != Mode::Help || app.help_scroll != 0;
+    if !changed {
+        return Ok(noop());
+    }
+
+    app.mode = Mode::Help;
+    app.reset_help_scroll();
+    Ok(applied())
+}
+
+pub(crate) fn close_help(app: &mut AppState) -> AppResult<CommandNoticeResult> {
+    if app.mode != Mode::Help {
+        return Ok(noop());
+    }
+
+    app.mode = Mode::Normal;
+    app.reset_help_scroll();
     Ok(applied())
 }
 

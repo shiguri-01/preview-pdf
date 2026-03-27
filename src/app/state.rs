@@ -58,6 +58,7 @@ impl VisiblePageSlots {
 pub enum Mode {
     Normal,
     Palette,
+    Help,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +124,7 @@ pub struct AppState {
     pub zoom: f32,
     pub scroll_x: i32,
     pub scroll_y: i32,
+    pub help_scroll: usize,
     pub debug_status_visible: bool,
     pub mode: Mode,
     pub notice: Option<Notice>,
@@ -138,6 +140,7 @@ impl Default for AppState {
             zoom: 1.0,
             scroll_x: 0,
             scroll_y: 0,
+            help_scroll: 0,
             debug_status_visible: false,
             mode: Mode::Normal,
             notice: None,
@@ -174,6 +177,18 @@ impl AppState {
 
     pub fn clear_notice(&mut self) {
         self.notice = None;
+    }
+
+    pub fn reset_help_scroll(&mut self) {
+        self.help_scroll = 0;
+    }
+
+    pub fn scroll_help_by(&mut self, delta: isize) {
+        if delta >= 0 {
+            self.help_scroll = self.help_scroll.saturating_add(delta as usize);
+        } else {
+            self.help_scroll = self.help_scroll.saturating_sub(delta.unsigned_abs());
+        }
     }
 
     pub fn clear_render_notice(&mut self) {

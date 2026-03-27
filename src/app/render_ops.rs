@@ -335,11 +335,7 @@ mod tests {
     }
 
     fn subsystem() -> RenderSubsystem {
-        RenderSubsystem {
-            presenter: Box::<StubPresenter>::default(),
-            runtime: RenderRuntime::default(),
-            viewer_has_image: false,
-        }
+        RenderSubsystem::new(Box::<StubPresenter>::default(), RenderRuntime::default())
     }
 
     fn failed_result(key: RenderedPageKey, class: WorkClass) -> RenderWorkerResult {

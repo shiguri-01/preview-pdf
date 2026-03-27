@@ -15,6 +15,16 @@ pub struct RenderSubsystem {
     pub viewer_has_image: bool,
 }
 
+impl RenderSubsystem {
+    pub(crate) fn new(presenter: Box<dyn ImagePresenter>, runtime: RenderRuntime) -> Self {
+        Self {
+            presenter,
+            runtime,
+            viewer_has_image: false,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct ExtensionSubsystem {
     pub host: ExtensionHost,
@@ -66,11 +76,10 @@ impl App {
 
         Ok(Self {
             state,
-            render: RenderSubsystem {
+            render: RenderSubsystem::new(
                 presenter,
-                runtime: RenderRuntime::from_cache_config(&config.cache),
-                viewer_has_image: false,
-            },
+                RenderRuntime::from_cache_config(&config.cache),
+            ),
             interaction: InteractionSubsystem::default(),
             config,
         })

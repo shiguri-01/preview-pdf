@@ -99,6 +99,8 @@ pub enum Command {
         seed: Option<String>,
     },
     ClosePalette,
+    OpenHelp,
+    CloseHelp,
     OpenSearch,
     SubmitSearch {
         query: String,
@@ -142,6 +144,8 @@ impl Command {
             Self::DebugStatusToggle => "debug-status-toggle",
             Self::OpenPalette { .. } => "open-palette",
             Self::ClosePalette => "close-palette",
+            Self::OpenHelp => "help",
+            Self::CloseHelp => "close-help",
             Self::OpenSearch => "search",
             Self::SubmitSearch { .. } => "submit-search",
             Self::NextSearchHit => "next-search-hit",
@@ -218,6 +222,8 @@ pub enum ActionId {
     DebugStatusToggle,
     OpenPalette,
     ClosePalette,
+    Help,
+    CloseHelp,
     Search,
     SubmitSearch,
     NextSearchHit,
@@ -260,6 +266,8 @@ impl ActionId {
             Self::DebugStatusToggle => "debug-status-toggle",
             Self::OpenPalette => "open-palette",
             Self::ClosePalette => "close-palette",
+            Self::Help => "help",
+            Self::CloseHelp => "close-help",
             Self::Search => "search",
             Self::SubmitSearch => "submit-search",
             Self::NextSearchHit => "next-search-hit",
@@ -304,6 +312,8 @@ impl Command {
             Self::DebugStatusToggle => ActionId::DebugStatusToggle,
             Self::OpenPalette { .. } => ActionId::OpenPalette,
             Self::ClosePalette => ActionId::ClosePalette,
+            Self::OpenHelp => ActionId::Help,
+            Self::CloseHelp => ActionId::CloseHelp,
             Self::OpenSearch => ActionId::Search,
             Self::SubmitSearch { .. } => ActionId::SubmitSearch,
             Self::NextSearchHit => ActionId::NextSearchHit,
@@ -340,6 +350,8 @@ mod tests {
         assert_eq!(Command::HistoryBack.action_id(), ActionId::HistoryBack);
         assert_eq!(Command::OpenHistory.action_id(), ActionId::History);
         assert_eq!(Command::OpenOutline.action_id(), ActionId::Outline);
+        assert_eq!(Command::OpenHelp.action_id(), ActionId::Help);
+        assert_eq!(Command::CloseHelp.action_id(), ActionId::CloseHelp);
         assert_eq!(
             Command::OutlineGoto {
                 page: 5,

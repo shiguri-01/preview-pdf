@@ -8,8 +8,8 @@ use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::extension::ExtensionHost;
 
 use super::core::{
-    first_page, goto_page, last_page, next_page, prev_page, set_debug_status_visible,
-    set_page_layout, set_zoom,
+    close_help, first_page, goto_page, last_page, next_page, open_help, prev_page,
+    set_debug_status_visible, set_page_layout, set_zoom,
 };
 use super::spec::{CommandConditionContext, rejection_message_for_command};
 use super::types::{Command, CommandInvocationSource, CommandOutcome};
@@ -98,6 +98,8 @@ pub fn dispatch(
             palette_requests.push_back(PaletteRequest::Close);
             Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
+        Command::OpenHelp => open_help(app),
+        Command::CloseHelp => close_help(app),
         Command::OpenSearch => Ok(extension_host.open_search_palette(app, palette_requests)),
         Command::SubmitSearch { query, matcher } => {
             extension_host.submit_search(app, Arc::clone(&pdf), query, matcher)
@@ -207,6 +209,8 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::DebugStatusToggle
         | Command::OpenPalette { .. }
         | Command::ClosePalette
+        | Command::OpenHelp
+        | Command::CloseHelp
         | Command::OpenSearch
         | Command::SubmitSearch { .. }
         | Command::OpenHistory
@@ -342,6 +346,83 @@ mod tests {
             result.emitted_events[0],
             AppEvent::CommandExecuted {
                 id: ActionId::ClosePalette,
+                outcome: CommandOutcome::Applied
+            }
+        ));
+    }
+
+    #[test]
+    fn dispatch_open_help_changes_mode_and_emits_mode_event() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::OpenHelp,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.mode, crate::app::Mode::Help);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(result.emitted_events.len(), 2);
+        assert!(matches!(
+            result.emitted_events[0],
+            AppEvent::ModeChanged {
+                from: crate::app::Mode::Normal,
+                to: crate::app::Mode::Help
+            }
+        ));
+        assert!(matches!(
+            result.emitted_events[1],
+            AppEvent::CommandExecuted {
+                id: ActionId::Help,
+                outcome: CommandOutcome::Applied
+            }
+        ));
+    }
+
+    #[test]
+    fn dispatch_close_help_returns_to_normal_mode() {
+        let mut app = AppState {
+            mode: crate::app::Mode::Help,
+            help_scroll: 3,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::CloseHelp,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.mode, crate::app::Mode::Normal);
+        assert_eq!(app.help_scroll, 0);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(result.emitted_events.len(), 2);
+        assert!(matches!(
+            result.emitted_events[0],
+            AppEvent::ModeChanged {
+                from: crate::app::Mode::Help,
+                to: crate::app::Mode::Normal
+            }
+        ));
+        assert!(matches!(
+            result.emitted_events[1],
+            AppEvent::CommandExecuted {
+                id: ActionId::CloseHelp,
                 outcome: CommandOutcome::Applied
             }
         ));

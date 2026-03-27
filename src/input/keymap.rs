@@ -11,6 +11,13 @@ pub enum KeymapPreset {
 }
 
 impl KeymapPreset {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Emacs => "emacs",
+        }
+    }
+
     pub fn parse(value: &str) -> Self {
         match value {
             "default" => Self::Default,
@@ -35,6 +42,7 @@ pub fn map_key_to_command_with_preset(
             KeymapPreset::Emacs => map_normal_mode_key_emacs(key),
         },
         Mode::Palette => None,
+        Mode::Help => map_help_mode_key(key),
     }
 }
 
@@ -53,6 +61,7 @@ fn map_normal_mode_key_default(key: KeyEvent) -> Option<Command> {
             seed: None,
         }),
         KeyCode::Char('/') => Some(Command::OpenSearch),
+        KeyCode::Char('?') => Some(Command::OpenHelp),
         KeyCode::Char('H') => Some(Command::Scroll { dx: -1, dy: 0 }),
         KeyCode::Char('J') => Some(Command::Scroll { dx: 0, dy: 1 }),
         KeyCode::Char('K') => Some(Command::Scroll { dx: 0, dy: -1 }),
@@ -103,6 +112,13 @@ fn map_normal_mode_key_emacs(key: KeyEvent) -> Option<Command> {
     }
 }
 
+fn map_help_mode_key(key: KeyEvent) -> Option<Command> {
+    match key.code {
+        KeyCode::Esc => Some(Command::CloseHelp),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -145,5 +161,29 @@ mod tests {
         );
 
         assert_eq!(search, Some(Command::OpenSearch));
+    }
+
+    #[test]
+    fn default_preset_maps_question_mark_to_help_and_help_escape_to_close_help() {
+        let open_help = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+            Mode::Normal,
+            KeymapPreset::Default,
+        );
+        assert_eq!(open_help, Some(Command::OpenHelp));
+
+        let close_help = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            Mode::Help,
+            KeymapPreset::Default,
+        );
+        assert_eq!(close_help, Some(Command::CloseHelp));
+
+        let question_mark_in_help = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+            Mode::Help,
+            KeymapPreset::Default,
+        );
+        assert_eq!(question_mark_in_help, None);
     }
 }

@@ -49,7 +49,6 @@ const ARGS_OPEN_PALETTE: [ArgSpec; 2] = [
         required: false,
     },
 ];
-const NO_ARGS_HELP: [ArgSpec; 0] = [];
 const ARGS_SUBMIT_SEARCH: [ArgSpec; 2] = [
     ArgSpec {
         name: "query",
@@ -212,7 +211,7 @@ const COMMAND_SPECS: [CommandSpec; 30] = [
     CommandSpec {
         id: "help",
         title: "Open Help",
-        args: &NO_ARGS_HELP,
+        args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
         availability: CommandAvailability::Always,
@@ -220,7 +219,7 @@ const COMMAND_SPECS: [CommandSpec; 30] = [
     CommandSpec {
         id: "close-help",
         title: "Close Help",
-        args: &NO_ARGS_HELP,
+        args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::KeymapOnly,
         availability: CommandAvailability::Always,

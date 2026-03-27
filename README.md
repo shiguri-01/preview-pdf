@@ -39,7 +39,7 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 - `zoom <value>`
 - `search`
 - `history`
-- `help`
+
 ## Configuration (optional)
 
 `pvf` loads `config.toml` from:

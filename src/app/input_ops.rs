@@ -303,6 +303,8 @@ impl InteractionSubsystem {
 }
 
 fn is_help_toggle_key(key: KeyEvent) -> bool {
+    // Some terminals report Shift+/ as `?`, while others keep the key code as `/`
+    // and set the Shift modifier. Accept both so help remains accessible.
     matches!(key.code, KeyCode::Char('?'))
         || (matches!(key.code, KeyCode::Char('/')) && key.modifiers.contains(KeyModifiers::SHIFT))
 }
@@ -399,10 +401,36 @@ mod tests {
     }
 
     #[test]
-    fn help_mode_scrolls_and_requests_close_help() {
+    fn help_key_requests_open_help_command_with_shift_slash() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
-        state.mode = crate::app::Mode::Help;
+
+        let outcome = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT),
+                "default",
+            )
+            .expect("help key should be handled");
+
+        assert_eq!(state.mode, crate::app::Mode::Normal);
+        assert!(matches!(
+            outcome.command,
+            Some(ref request)
+                if request.command == Command::OpenHelp
+                    && request.source == CommandInvocationSource::Keymap
+        ));
+        assert!(outcome.redraw);
+        assert!(outcome.clear_terminal);
+    }
+
+    #[test]
+    fn help_mode_scrolls_and_requests_close_help() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState {
+            mode: crate::app::Mode::Help,
+            ..AppState::default()
+        };
 
         let down = interaction
             .handle_key_event(
@@ -438,8 +466,10 @@ mod tests {
     #[test]
     fn help_mode_ignores_question_mark_key() {
         let mut interaction = InteractionSubsystem::default();
-        let mut state = AppState::default();
-        state.mode = crate::app::Mode::Help;
+        let mut state = AppState {
+            mode: crate::app::Mode::Help,
+            ..AppState::default()
+        };
 
         let outcome = interaction
             .handle_key_event(

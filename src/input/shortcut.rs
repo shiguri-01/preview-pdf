@@ -63,7 +63,8 @@ pub fn format_shortcut_key(key: ShortcutKey) -> String {
         KeyCode::F(n) => format!("F{n}"),
         KeyCode::Char(ch) => {
             if (key.modifiers.contains(KeyModifiers::CONTROL)
-                || key.modifiers.contains(KeyModifiers::ALT))
+                || key.modifiers.contains(KeyModifiers::ALT)
+                || key.modifiers.contains(KeyModifiers::SHIFT))
                 && ch.is_ascii_alphabetic()
             {
                 ch.to_ascii_uppercase().to_string()
@@ -101,6 +102,7 @@ mod tests {
     fn formats_regular_and_modified_keys() {
         assert_eq!(format_shortcut_key(ShortcutKey::ctrl('o')), "Ctrl+O");
         assert_eq!(format_shortcut_key(ShortcutKey::char('?')), "?");
+        assert_eq!(format_shortcut_key(ShortcutKey::shift('a')), "Shift+A");
         assert_eq!(
             format_shortcut_key(ShortcutKey::key(KeyCode::PageDown)),
             "PgDn"

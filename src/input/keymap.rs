@@ -115,7 +115,6 @@ fn map_normal_mode_key_emacs(key: KeyEvent) -> Option<Command> {
 fn map_help_mode_key(key: KeyEvent) -> Option<Command> {
     match key.code {
         KeyCode::Esc => Some(Command::CloseHelp),
-        KeyCode::Char('?') => Some(Command::CloseHelp),
         _ => None,
     }
 }
@@ -179,5 +178,12 @@ mod tests {
             KeymapPreset::Default,
         );
         assert_eq!(close_help, Some(Command::CloseHelp));
+
+        let question_mark_in_help = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+            Mode::Help,
+            KeymapPreset::Default,
+        );
+        assert_eq!(question_mark_in_help, None);
     }
 }

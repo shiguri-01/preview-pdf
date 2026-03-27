@@ -437,6 +437,27 @@ mod tests {
     }
 
     #[test]
+    fn help_mode_ignores_question_mark_key() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState::default();
+        state.mode = crate::app::Mode::Help;
+
+        let outcome = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+                "default",
+            )
+            .expect("help key should be handled");
+
+        assert_eq!(state.mode, crate::app::Mode::Help);
+        assert_eq!(state.help_scroll, 0);
+        assert!(!outcome.redraw);
+        assert!(!outcome.clear_terminal);
+        assert!(outcome.command.is_none());
+    }
+
+    #[test]
     fn help_close_requests_viewer_area_clear() {
         let mut app = App::new_with_config(PresenterKind::RatatuiImage, Config::default())
             .expect("app should initialize");

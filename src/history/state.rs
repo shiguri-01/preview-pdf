@@ -233,15 +233,29 @@ fn format_reason(reason: &NavReason) -> String {
             GotoKind::SpecificPage => "Goto:goto-page".to_string(),
         },
         NavReason::Search { query } if query.is_empty() => "Search".to_string(),
-        NavReason::Search { query } => format!("Search: {query}"),
+        NavReason::Search { query } => format!("Search:~{}", encode_seed_component(query)),
         NavReason::History(op) => match op {
             HistoryOp::Back => "History:back".to_string(),
             HistoryOp::Forward => "History:forward".to_string(),
             HistoryOp::Goto => "History:goto".to_string(),
         },
-        NavReason::Outline { title } => format!("Outline: {title}"),
+        NavReason::Outline { title } => format!("Outline:~{}", encode_seed_component(title)),
         NavReason::LayoutNormalize => "LayoutNormalize".to_string(),
     }
+}
+
+fn encode_seed_component(value: &str) -> String {
+    const UNRESERVED: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~";
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if UNRESERVED.contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push_str(&format!("{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,6 +280,9 @@ mod tests {
     use super::{HistoryEntry, HistoryState};
     use crate::app::{AppState, PageLayoutMode};
     use crate::event::{AppEvent, GotoKind, NavReason};
+    use crate::extension::ExtensionUiSnapshot;
+    use crate::history::palette::HistoryPaletteProvider;
+    use crate::palette::{PaletteContext, PaletteKind, PaletteProvider};
 
     #[test]
     fn destination_reason_is_stored_on_the_destination_page() {
@@ -392,6 +409,37 @@ mod tests {
             state.current_reason,
             Some(NavReason::Outline { title }) if title == "Section"
         ));
+    }
+
+    #[test]
+    fn serialize_seed_escapes_outline_titles() {
+        let state = HistoryState {
+            current_reason: Some(NavReason::Outline {
+                title: "A | B; C".to_string(),
+            }),
+            ..HistoryState::default()
+        };
+        let seed = state.serialize_seed(6);
+        assert!(seed.contains("%7C"));
+        assert!(seed.contains("%3B"));
+
+        let provider = HistoryPaletteProvider;
+        let app = AppState {
+            current_page: 6,
+            ..AppState::default()
+        };
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::History,
+            input: "",
+            seed: Some(&seed),
+        };
+
+        let items = provider.list(&ctx).expect("history list should build");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].left[3].text, "A | B; C");
     }
 
     #[test]

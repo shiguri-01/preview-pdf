@@ -29,6 +29,9 @@ impl PaletteProvider for HistoryPaletteProvider {
         _ctx: &PaletteContext<'_>,
         candidates: &[PaletteCandidate],
     ) -> Option<usize> {
+        // Open the palette anchored on the current page so the user can keep
+        // navigating from their present location; Enter still uses the normal
+        // history-jump path for every row.
         candidates
             .iter()
             .position(|candidate| candidate.id.starts_with("current-"))
@@ -75,10 +78,6 @@ impl PaletteProvider for HistoryPaletteProvider {
         let Some(candidate) = selected else {
             return Ok(PaletteSubmitEffect::Close);
         };
-
-        if candidate.id.starts_with("current-") {
-            return Ok(PaletteSubmitEffect::Close);
-        }
 
         let page = match &candidate.payload {
             PalettePayload::Opaque(val) => val.parse::<usize>().ok(),
@@ -169,13 +168,57 @@ fn page_text(page_1indexed: usize) -> String {
     format!("p.{page_1indexed}")
 }
 
+fn decode_seed_component(value: &str) -> String {
+    let mut bytes = Vec::with_capacity(value.len());
+    let mut i = 0;
+    let raw = value.as_bytes();
+    while i < raw.len() {
+        if raw[i] == b'%'
+            && i + 2 < raw.len()
+            && let (Some(hi), Some(lo)) = (hex_value(raw[i + 1]), hex_value(raw[i + 2]))
+        {
+            bytes.push((hi << 4) | lo);
+            i += 3;
+            continue;
+        }
+
+        bytes.push(raw[i]);
+        i += 1;
+    }
+
+    String::from_utf8(bytes).unwrap_or_else(|_| value.to_string())
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
 impl HistoryReasonLabel {
     fn parse(reason: &str) -> Self {
-        if let Some(query) = reason.strip_prefix("Search: ") {
+        if let Some(query) = reason.strip_prefix("Search:~") {
+            let query = decode_seed_component(query);
+            if query.is_empty() {
+                HistoryReasonLabel::PageOnly
+            } else {
+                HistoryReasonLabel::Search(query)
+            }
+        } else if let Some(query) = reason.strip_prefix("Search: ") {
             if query.is_empty() {
                 HistoryReasonLabel::PageOnly
             } else {
                 HistoryReasonLabel::Search(query.to_string())
+            }
+        } else if let Some(title) = reason.strip_prefix("Outline:~") {
+            let title = decode_seed_component(title);
+            if title.is_empty() {
+                HistoryReasonLabel::PageOnly
+            } else {
+                HistoryReasonLabel::Outline(title)
             }
         } else if let Some(title) = reason.strip_prefix("Outline: ") {
             if title.is_empty() {
@@ -413,7 +456,7 @@ mod tests {
     use crate::{
         app::AppState,
         extension::ExtensionUiSnapshot,
-        palette::{PaletteContext, PaletteProvider},
+        palette::{PaletteCandidate, PaletteContext, PalettePayload, PaletteProvider},
     };
 
     use super::{
@@ -487,6 +530,48 @@ mod tests {
         assert_eq!(search_texts[1].text, "last-page");
         assert_eq!(search_texts[2].text, "p.9");
         assert_eq!(search_texts.len(), 3);
+    }
+
+    #[test]
+    fn assistive_text_reflects_selected_candidate() {
+        let provider = HistoryPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: crate::palette::PaletteKind::History,
+            input: "",
+            seed: None,
+        };
+
+        let current = PaletteCandidate {
+            id: "current-0-0".to_string(),
+            left: Vec::new(),
+            right: Vec::new(),
+            search_texts: Vec::new(),
+            payload: PalettePayload::None,
+        };
+        let other = PaletteCandidate {
+            id: "page-1-0".to_string(),
+            left: Vec::new(),
+            right: Vec::new(),
+            search_texts: Vec::new(),
+            payload: PalettePayload::None,
+        };
+
+        assert_eq!(
+            provider.assistive_text(&ctx, Some(&current)),
+            Some("Enter: jump to page".to_string())
+        );
+        assert_eq!(
+            provider.assistive_text(&ctx, Some(&other)),
+            Some("Enter: jump to page".to_string())
+        );
+        assert_eq!(
+            provider.assistive_text(&ctx, None),
+            Some("Enter: jump to page".to_string())
+        );
     }
 
     #[test]
@@ -586,5 +671,17 @@ mod tests {
             "first-page"
         );
         assert_eq!(history_reason_display_text(5, ""), "p.5");
+    }
+
+    #[test]
+    fn reason_display_text_decodes_escaped_components() {
+        assert_eq!(
+            history_reason_display_text(12, "Search:~needle%7Ctwo"),
+            "/needle|two"
+        );
+        assert_eq!(
+            history_reason_display_text(8, "Outline:~Chapter%3B%201"),
+            "#Chapter; 1"
+        );
     }
 }

@@ -137,7 +137,7 @@ pub(crate) fn set_zoom(app: &mut AppState, value: f32) -> AppResult<CommandNotic
     }
 
     let clamped = value.clamp(ZOOM_MIN, ZOOM_MAX);
-    let notice = if zoom_eq(value, clamped) {
+    let notice = if value == clamped {
         NoticeAction::Clear
     } else if value > clamped {
         NoticeAction::warning(format!("maximum zoom is {ZOOM_MAX:.2}x"))
@@ -145,7 +145,7 @@ pub(crate) fn set_zoom(app: &mut AppState, value: f32) -> AppResult<CommandNotic
         NoticeAction::warning(format!("minimum zoom is {ZOOM_MIN:.2}x"))
     };
 
-    if zoom_eq(app.zoom, clamped) {
+    if app.zoom == clamped {
         return Ok((CommandOutcome::Noop, notice));
     }
 
@@ -203,8 +203,4 @@ fn resolve_page_count(page_count: usize) -> AppResult<usize> {
     }
 
     Err(AppError::unsupported("pdf has no pages"))
-}
-
-fn zoom_eq(left: f32, right: f32) -> bool {
-    (left - right).abs() <= 0.0005
 }

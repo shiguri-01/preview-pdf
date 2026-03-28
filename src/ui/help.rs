@@ -225,6 +225,10 @@ const EMACS_SECTIONS: &[HelpSection] = &[
                 description: "Zoom out",
             },
             HelpRow {
+                keys: &[ShortcutKey::char('0')],
+                description: "Reset zoom",
+            },
+            HelpRow {
                 keys: &[
                     ShortcutKey::char('H'),
                     ShortcutKey::char('J'),
@@ -362,6 +366,7 @@ mod tests {
             .join("\n");
         assert!(emacs_text.contains("Ctrl+N"));
         assert!(emacs_text.contains("Alt+X"));
+        assert!(emacs_text.contains("Reset zoom"));
         assert!(emacs_text.contains("PgDn"));
     }
 

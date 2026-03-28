@@ -431,6 +431,34 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_set_zoom_warns_when_input_is_slightly_above_maximum() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetZoom { value: 4.0004 },
+            CommandInvocationSource::CommandPaletteInput,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.zoom, 4.0);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "maximum zoom is 4.00x".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn dispatch_set_zoom_warns_when_input_is_below_minimum() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
@@ -440,6 +468,34 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::SetZoom { value: 0.1 },
+            CommandInvocationSource::CommandPaletteInput,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.zoom, 0.25);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "minimum zoom is 0.25x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_set_zoom_warns_when_input_is_slightly_below_minimum() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetZoom { value: 0.2497 },
             CommandInvocationSource::CommandPaletteInput,
             pdf,
             &mut host,

@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::app::scale::{ZOOM_MAX, ZOOM_MIN, next_zoom_step, prev_zoom_step, zoom_eq};
+use crate::app::scale::{ZOOM_MAX, ZOOM_MIN, next_zoom_step, prev_zoom_step};
 use crate::app::{AppState, Mode, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::error::AppResult;
@@ -74,20 +74,22 @@ pub fn dispatch(
         Command::GotoPage { page } => goto_page(app, page_count, page),
         Command::SetZoom { value } => set_zoom(app, value),
         Command::ZoomIn => {
-            let notice = if zoom_eq(app.zoom, ZOOM_MAX) {
+            let next = next_zoom_step(app.zoom);
+            let notice = if next <= app.zoom {
                 NoticeAction::warning(format!("maximum zoom is {ZOOM_MAX:.2}x"))
             } else {
                 NoticeAction::Clear
             };
-            set_zoom_with_notice(app, next_zoom_step(app.zoom), notice)
+            set_zoom_with_notice(app, next, notice)
         }
         Command::ZoomOut => {
-            let notice = if zoom_eq(app.zoom, ZOOM_MIN) {
+            let prev = prev_zoom_step(app.zoom);
+            let notice = if prev >= app.zoom {
                 NoticeAction::warning(format!("minimum zoom is {ZOOM_MIN:.2}x"))
             } else {
                 NoticeAction::Clear
             };
-            set_zoom_with_notice(app, prev_zoom_step(app.zoom), notice)
+            set_zoom_with_notice(app, prev, notice)
         }
         Command::ZoomReset => reset_zoom(app),
         Command::Scroll { dx, dy } => {
@@ -591,6 +593,56 @@ mod tests {
                 message: "minimum zoom is 0.25x".to_string(),
             })
         );
+    }
+
+    #[test]
+    fn dispatch_zoom_in_near_maximum_advances_without_boundary_warning() {
+        let mut app = AppState {
+            zoom: 3.9997,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomIn,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 4.0));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(app.notice, None);
+    }
+
+    #[test]
+    fn dispatch_zoom_out_near_minimum_advances_without_boundary_warning() {
+        let mut app = AppState {
+            zoom: 0.2503,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomOut,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 0.25));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(app.notice, None);
     }
 
     #[test]

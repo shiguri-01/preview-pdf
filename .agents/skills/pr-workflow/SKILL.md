@@ -15,8 +15,9 @@ description: Create and review GitHub pull requests with a consistent workflow. 
 
 1. Create a short branch-appropriate PR title.
 2. Write a concise PR body tailored to the change's scope:
+   - Always include the rationale for the change.
    - Small/obvious changes: verification results + one-line rationale
-   - Larger changes: problem, solution approach, risk/impact, verification.
+   - Larger changes: problem, rationale, solution approach, risk/impact, verification.
    - Omit sections that add no information for this specific change.
    - Linked issue (if already known; do not search for it)
 3. Create PR with `gh pr create` using title/body prepared above.

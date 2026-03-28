@@ -145,6 +145,17 @@ pub(crate) fn set_zoom(app: &mut AppState, value: f32) -> AppResult<CommandNotic
     Ok(applied())
 }
 
+pub(crate) fn reset_zoom(app: &mut AppState) -> AppResult<CommandNoticeResult> {
+    if app.zoom == 1.0 && app.scroll_x == 0 && app.scroll_y == 0 {
+        return Ok(noop());
+    }
+
+    app.zoom = 1.0;
+    app.scroll_x = 0;
+    app.scroll_y = 0;
+    Ok(applied())
+}
+
 pub(crate) fn set_debug_status_visible(
     app: &mut AppState,
     visible: bool,

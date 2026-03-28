@@ -83,6 +83,7 @@ pub enum Command {
     },
     ZoomIn,
     ZoomOut,
+    ZoomReset,
     Scroll {
         dx: i32,
         dy: i32,
@@ -134,6 +135,7 @@ impl Command {
             Self::SetZoom { .. } => "zoom",
             Self::ZoomIn => "zoom-in",
             Self::ZoomOut => "zoom-out",
+            Self::ZoomReset => "zoom-reset",
             Self::Scroll { .. } => "scroll",
             Self::SetPageLayout { mode, .. } => match mode {
                 PageLayoutModeArg::Single => "page-layout-single",
@@ -215,6 +217,7 @@ pub enum ActionId {
     SetZoom,
     ZoomIn,
     ZoomOut,
+    ZoomReset,
     Scroll,
     SetPageLayout,
     DebugStatusShow,
@@ -259,6 +262,7 @@ impl ActionId {
             Self::SetZoom => "zoom",
             Self::ZoomIn => "zoom-in",
             Self::ZoomOut => "zoom-out",
+            Self::ZoomReset => "zoom-reset",
             Self::Scroll => "scroll",
             Self::SetPageLayout => "page-layout",
             Self::DebugStatusShow => "debug-status-show",
@@ -305,6 +309,7 @@ impl Command {
             Self::SetZoom { .. } => ActionId::SetZoom,
             Self::ZoomIn => ActionId::ZoomIn,
             Self::ZoomOut => ActionId::ZoomOut,
+            Self::ZoomReset => ActionId::ZoomReset,
             Self::Scroll { .. } => ActionId::Scroll,
             Self::SetPageLayout { .. } => ActionId::SetPageLayout,
             Self::DebugStatusShow => ActionId::DebugStatusShow,
@@ -347,6 +352,7 @@ mod tests {
             .action_id(),
             ActionId::SubmitSearch
         );
+        assert_eq!(Command::ZoomReset.action_id(), ActionId::ZoomReset);
         assert_eq!(Command::HistoryBack.action_id(), ActionId::HistoryBack);
         assert_eq!(Command::OpenHistory.action_id(), ActionId::History);
         assert_eq!(Command::OpenOutline.action_id(), ActionId::Outline);

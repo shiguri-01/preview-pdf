@@ -117,6 +117,10 @@ const DEFAULT_SECTIONS: &[HelpSection] = &[
                 description: "Zoom out",
             },
             HelpRow {
+                keys: &[ShortcutKey::char('0')],
+                description: "Reset zoom",
+            },
+            HelpRow {
                 keys: &[
                     ShortcutKey::char('H'),
                     ShortcutKey::char('J'),
@@ -343,6 +347,7 @@ mod tests {
             .join("\n");
         assert!(default_text.contains("Ctrl+O"));
         assert!(default_text.contains("Help"));
+        assert!(default_text.contains("Reset zoom"));
 
         let emacs_lines = build_help_lines(KeymapPreset::Emacs);
         let emacs_text = emacs_lines

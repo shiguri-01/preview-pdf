@@ -8,13 +8,12 @@ use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::extension::ExtensionHost;
 
 use super::core::{
-    close_help, first_page, goto_page, last_page, next_page, open_help, prev_page,
+    close_help, first_page, goto_page, last_page, next_page, open_help, prev_page, reset_zoom,
     set_debug_status_visible, set_page_layout, set_zoom,
 };
 use super::spec::{CommandConditionContext, rejection_message_for_command};
 use super::types::{Command, CommandInvocationSource, CommandOutcome};
-
-const ZOOM_STEP: f32 = 0.1;
+use crate::app::scale::{next_zoom_step, prev_zoom_step};
 
 #[derive(Debug, Clone)]
 pub struct CommandDispatchResult {
@@ -74,8 +73,9 @@ pub fn dispatch(
         Command::LastPage => last_page(app, page_count),
         Command::GotoPage { page } => goto_page(app, page_count, page),
         Command::SetZoom { value } => set_zoom(app, value),
-        Command::ZoomIn => set_zoom(app, app.zoom + ZOOM_STEP),
-        Command::ZoomOut => set_zoom(app, app.zoom - ZOOM_STEP),
+        Command::ZoomIn => set_zoom(app, next_zoom_step(app.zoom)),
+        Command::ZoomOut => set_zoom(app, prev_zoom_step(app.zoom)),
+        Command::ZoomReset => reset_zoom(app),
         Command::Scroll { dx, dy } => {
             app.scroll_x = app.scroll_x.saturating_add(dx);
             app.scroll_y = app.scroll_y.saturating_add(dy);
@@ -203,6 +203,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         Command::SetZoom { .. }
         | Command::ZoomIn
         | Command::ZoomOut
+        | Command::ZoomReset
         | Command::Scroll { .. }
         | Command::DebugStatusShow
         | Command::DebugStatusHide
@@ -320,6 +321,81 @@ mod tests {
                 id: ActionId::NextPage,
                 outcome: CommandOutcome::Applied
             }
+        ));
+    }
+
+    #[test]
+    fn dispatch_zoom_in_and_out_follow_the_zoom_ladder() {
+        let mut app = AppState {
+            zoom: 1.0,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomIn,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.zoom, 1.1);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+        let result = dispatch(
+            &mut app,
+            Command::ZoomOut,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.zoom, 1.0);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+    }
+
+    #[test]
+    fn dispatch_zoom_reset_restores_default_zoom_and_scroll() {
+        let mut app = AppState {
+            zoom: 2.0,
+            scroll_x: 4,
+            scroll_y: -3,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomReset,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.zoom, 1.0);
+        assert_eq!(app.scroll_x, 0);
+        assert_eq!(app.scroll_y, 0);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert!(matches!(
+            result.emitted_events.last(),
+            Some(AppEvent::CommandExecuted {
+                id: ActionId::ZoomReset,
+                outcome: CommandOutcome::Applied
+            })
         ));
     }
 

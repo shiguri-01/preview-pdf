@@ -2,7 +2,10 @@ use crate::presenter::Viewport;
 
 use super::constants::{DEFAULT_CELL_SIZE_PX, MIN_RENDER_SCALE, SCALE_QUANTUM};
 
-const ZOOM_STEPS: [f32; 10] = [0.25, 0.5, 0.75, 1.0, 1.1, 1.25, 1.5, 2.0, 3.0, 4.0];
+pub(crate) const ZOOM_MIN: f32 = 0.25;
+pub(crate) const ZOOM_MAX: f32 = 4.0;
+
+const ZOOM_STEPS: [f32; 10] = [ZOOM_MIN, 0.5, 0.75, 1.0, 1.1, 1.25, 1.5, 2.0, 3.0, ZOOM_MAX];
 
 pub(crate) fn zoom_eq(left: f32, right: f32) -> bool {
     (left - right).abs() <= 0.0005
@@ -257,14 +260,14 @@ mod tests {
 
     #[test]
     fn zoom_steps_move_to_the_next_or_previous_ladder_entry() {
-        assert_eq!(next_zoom_step(1.0), 1.1);
-        assert_eq!(next_zoom_step(1.05), 1.1);
-        assert_eq!(next_zoom_step(1.1), 1.25);
-        assert_eq!(next_zoom_step(0.83), 1.0);
-        assert_eq!(prev_zoom_step(1.0), 0.75);
-        assert_eq!(prev_zoom_step(1.05), 1.0);
-        assert_eq!(prev_zoom_step(0.83), 0.75);
-        assert_eq!(prev_zoom_step(0.25), 0.25);
-        assert_eq!(next_zoom_step(4.0), 4.0);
+        assert!(scale_eq(next_zoom_step(1.0), 1.1));
+        assert!(scale_eq(next_zoom_step(1.05), 1.1));
+        assert!(scale_eq(next_zoom_step(1.1), 1.25));
+        assert!(scale_eq(next_zoom_step(0.83), 1.0));
+        assert!(scale_eq(prev_zoom_step(1.0), 0.75));
+        assert!(scale_eq(prev_zoom_step(1.05), 1.0));
+        assert!(scale_eq(prev_zoom_step(0.83), 0.75));
+        assert!(scale_eq(prev_zoom_step(0.25), 0.25));
+        assert!(scale_eq(next_zoom_step(4.0), 4.0));
     }
 }

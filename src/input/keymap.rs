@@ -196,5 +196,12 @@ mod tests {
             KeymapPreset::Default,
         );
         assert_eq!(reset, Some(Command::ZoomReset));
+
+        let emacs_reset = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+            Mode::Normal,
+            KeymapPreset::Emacs,
+        );
+        assert_eq!(emacs_reset, Some(Command::ZoomReset));
     }
 }

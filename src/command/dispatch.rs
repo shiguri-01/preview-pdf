@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use crate::app::scale::{ZOOM_MAX, ZOOM_MIN, next_zoom_step, prev_zoom_step, zoom_eq};
 use crate::app::{AppState, Mode, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::error::AppResult;
@@ -9,11 +10,10 @@ use crate::extension::ExtensionHost;
 
 use super::core::{
     close_help, first_page, goto_page, last_page, next_page, open_help, prev_page, reset_zoom,
-    set_debug_status_visible, set_page_layout, set_zoom,
+    set_debug_status_visible, set_page_layout, set_zoom, set_zoom_with_notice,
 };
 use super::spec::{CommandConditionContext, rejection_message_for_command};
 use super::types::{Command, CommandInvocationSource, CommandOutcome};
-use crate::app::scale::{next_zoom_step, prev_zoom_step};
 
 #[derive(Debug, Clone)]
 pub struct CommandDispatchResult {
@@ -73,8 +73,22 @@ pub fn dispatch(
         Command::LastPage => last_page(app, page_count),
         Command::GotoPage { page } => goto_page(app, page_count, page),
         Command::SetZoom { value } => set_zoom(app, value),
-        Command::ZoomIn => set_zoom(app, next_zoom_step(app.zoom)),
-        Command::ZoomOut => set_zoom(app, prev_zoom_step(app.zoom)),
+        Command::ZoomIn => {
+            let notice = if zoom_eq(app.zoom, ZOOM_MAX) {
+                NoticeAction::warning(format!("maximum zoom is {ZOOM_MAX:.2}x"))
+            } else {
+                NoticeAction::Clear
+            };
+            set_zoom_with_notice(app, next_zoom_step(app.zoom), notice)
+        }
+        Command::ZoomOut => {
+            let notice = if zoom_eq(app.zoom, ZOOM_MIN) {
+                NoticeAction::warning(format!("minimum zoom is {ZOOM_MIN:.2}x"))
+            } else {
+                NoticeAction::Clear
+            };
+            set_zoom_with_notice(app, prev_zoom_step(app.zoom), notice)
+        }
         Command::ZoomReset => reset_zoom(app),
         Command::Scroll { dx, dy } => {
             app.scroll_x = app.scroll_x.saturating_add(dx);
@@ -227,6 +241,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
+    use crate::app::scale::zoom_eq;
     use crate::app::{AppState, Notice, NoticeLevel};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{
@@ -237,6 +252,8 @@ mod tests {
     use crate::extension::ExtensionHost;
 
     use super::{collect_transition_events, dispatch};
+
+    const ZOOM_EPSILON: f32 = 0.0005;
 
     struct StubPdf {
         path: PathBuf,
@@ -344,7 +361,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(app.zoom, 1.1);
+        assert!((app.zoom - 1.1).abs() <= ZOOM_EPSILON);
         assert_eq!(result.outcome, CommandOutcome::Applied);
 
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
@@ -360,7 +377,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(app.zoom, 1.0);
+        assert!((app.zoom - 1.0).abs() <= ZOOM_EPSILON);
         assert_eq!(result.outcome, CommandOutcome::Applied);
     }
 
@@ -386,7 +403,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(app.zoom, 1.0);
+        assert!((app.zoom - 1.0).abs() <= ZOOM_EPSILON);
         assert_eq!(app.scroll_x, 0);
         assert_eq!(app.scroll_y, 0);
         assert_eq!(result.outcome, CommandOutcome::Applied);
@@ -419,7 +436,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(app.zoom, 4.0);
+        assert!(zoom_eq(app.zoom, 4.0));
         assert_eq!(result.outcome, CommandOutcome::Noop);
         assert_eq!(
             app.notice,
@@ -447,7 +464,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(app.zoom, 4.0);
+        assert!(zoom_eq(app.zoom, 4.0));
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(
             app.notice,
@@ -475,7 +492,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(app.zoom, 0.25);
+        assert!(zoom_eq(app.zoom, 0.25));
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(
             app.notice,
@@ -503,8 +520,70 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(app.zoom, 0.25);
+        assert!(zoom_eq(app.zoom, 0.25));
         assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "minimum zoom is 0.25x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_zoom_in_at_maximum_keeps_the_boundary_warning() {
+        let mut app = AppState {
+            zoom: 4.0,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomIn,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 4.0));
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "maximum zoom is 4.00x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_zoom_out_at_minimum_keeps_the_boundary_warning() {
+        let mut app = AppState {
+            zoom: 0.25,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomOut,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 0.25));
+        assert_eq!(result.outcome, CommandOutcome::Noop);
         assert_eq!(
             app.notice,
             Some(Notice {

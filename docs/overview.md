@@ -37,6 +37,7 @@ Rules:
 
 - Zoom and viewport:
   - zoom in/out with a discrete ladder and bounded scale
+  - `zoom <value>` clamps out-of-range values to the configured bounds and shows a warning notice
   - reset zoom to the fit baseline
   - fit-to-viewport behavior
   - scroll when rendered content exceeds viewport bounds

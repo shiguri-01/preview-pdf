@@ -137,12 +137,20 @@ pub(crate) fn set_zoom(app: &mut AppState, value: f32) -> AppResult<CommandNotic
     }
 
     let clamped = value.clamp(ZOOM_MIN, ZOOM_MAX);
+    let notice = if zoom_eq(value, clamped) {
+        NoticeAction::Clear
+    } else if value > clamped {
+        NoticeAction::warning(format!("maximum zoom is {ZOOM_MAX:.2}x"))
+    } else {
+        NoticeAction::warning(format!("minimum zoom is {ZOOM_MIN:.2}x"))
+    };
+
     if zoom_eq(app.zoom, clamped) {
-        return Ok(noop());
+        return Ok((CommandOutcome::Noop, notice));
     }
 
     app.zoom = clamped;
-    Ok(applied())
+    Ok((CommandOutcome::Applied, notice))
 }
 
 pub(crate) fn reset_zoom(app: &mut AppState) -> AppResult<CommandNoticeResult> {

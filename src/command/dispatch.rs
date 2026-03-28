@@ -227,7 +227,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::AppState;
+    use crate::app::{AppState, Notice, NoticeLevel};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{
         ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg,
@@ -397,6 +397,65 @@ mod tests {
                 outcome: CommandOutcome::Applied
             })
         ));
+    }
+
+    #[test]
+    fn dispatch_set_zoom_warns_when_input_is_clamped() {
+        let mut app = AppState {
+            zoom: 4.0,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetZoom { value: 10.0 },
+            CommandInvocationSource::CommandPaletteInput,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.zoom, 4.0);
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "maximum zoom is 4.00x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_set_zoom_warns_when_input_is_below_minimum() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetZoom { value: 0.1 },
+            CommandInvocationSource::CommandPaletteInput,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.zoom, 0.25);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "minimum zoom is 0.25x".to_string(),
+            })
+        );
     }
 
     #[test]

@@ -1,3 +1,5 @@
+use std::num::IntErrorKind;
+
 use crate::app::AppState;
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
@@ -223,20 +225,31 @@ fn parse_pan_direction(parts: &[&str]) -> AppResult<Option<(i32, i32)>> {
     };
 
     let amount = match parts.get(1) {
-        Some(value_text) => value_text
-            .parse::<i32>()
-            .map_err(|_| AppError::invalid_argument("pan amount must be i32"))?,
+        Some(value_text) => parse_pan_amount(value_text)?,
         None => 1,
     };
 
     let delta = match direction {
-        "left" => (-amount, 0),
+        "left" => (amount.saturating_neg(), 0),
         "right" => (amount, 0),
-        "up" => (0, -amount),
+        "up" => (0, amount.saturating_neg()),
         "down" => (0, amount),
         _ => unreachable!("parse_pan_direction_token limits values"),
     };
     Ok(Some(delta))
+}
+
+fn parse_pan_amount(value_text: &str) -> AppResult<i32> {
+    match value_text.parse::<i32>() {
+        Ok(amount) => Ok(amount),
+        Err(err) => match err.kind() {
+            // Treat numeric overflow as a silent clamp so huge pan inputs behave like
+            // ordinary edge-limited movement instead of surfacing an implementation limit.
+            IntErrorKind::PosOverflow => Ok(i32::MAX),
+            IntErrorKind::NegOverflow => Ok(i32::MIN),
+            _ => Err(AppError::invalid_argument("pan amount must be an integer")),
+        },
+    }
 }
 
 fn parse_pan_direction_token(value: &str) -> Option<&'static str> {
@@ -505,6 +518,83 @@ mod tests {
         assert!(
             parse_command_text("pan -2 4").is_err(),
             "raw dx dy form should be rejected"
+        );
+    }
+
+    #[test]
+    fn parse_pan_clamps_i32_min_for_left_and_up() {
+        assert_eq!(
+            parse_command_text("pan left -2147483648").expect("parse should succeed"),
+            Command::Pan {
+                dx: i32::MAX,
+                dy: 0
+            }
+        );
+        assert_eq!(
+            parse_command_text("pan up -2147483648").expect("parse should succeed"),
+            Command::Pan {
+                dx: 0,
+                dy: i32::MAX
+            }
+        );
+    }
+
+    #[test]
+    fn parse_pan_allows_i32_min_for_right_and_down() {
+        assert_eq!(
+            parse_command_text("pan right -2147483648").expect("parse should succeed"),
+            Command::Pan {
+                dx: i32::MIN,
+                dy: 0,
+            }
+        );
+        assert_eq!(
+            parse_command_text("pan down -2147483648").expect("parse should succeed"),
+            Command::Pan {
+                dx: 0,
+                dy: i32::MIN,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_pan_clamps_out_of_i32_range_values() {
+        assert_eq!(
+            parse_command_text("pan right 999999999999").expect("parse should succeed"),
+            Command::Pan {
+                dx: i32::MAX,
+                dy: 0,
+            }
+        );
+        assert_eq!(
+            parse_command_text("pan down -999999999999").expect("parse should succeed"),
+            Command::Pan {
+                dx: 0,
+                dy: i32::MIN,
+            }
+        );
+        assert_eq!(
+            parse_command_text("pan left 999999999999").expect("parse should succeed"),
+            Command::Pan {
+                dx: -i32::MAX,
+                dy: 0,
+            }
+        );
+        assert_eq!(
+            parse_command_text("pan up -999999999999").expect("parse should succeed"),
+            Command::Pan {
+                dx: 0,
+                dy: i32::MAX,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_pan_rejects_non_integer_amounts() {
+        let err = parse_command_text("pan right nope").expect_err("parse should fail");
+        assert_eq!(
+            err.to_string(),
+            "invalid argument: pan amount must be an integer"
         );
     }
 

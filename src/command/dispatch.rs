@@ -244,7 +244,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::app::scale::zoom_eq;
-    use crate::app::{AppState, Notice, NoticeLevel};
+    use crate::app::{AppState, Notice, NoticeLevel, PaletteRequest};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{
         ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg,
@@ -305,6 +305,14 @@ mod tests {
         }
     }
 
+    fn new_zoom_test_fixture() -> (SharedPdfBackend, ExtensionHost, VecDeque<PaletteRequest>) {
+        (
+            Arc::new(StubPdf::new(3)) as SharedPdfBackend,
+            ExtensionHost::default(),
+            VecDeque::new(),
+        )
+    }
+
     #[test]
     fn dispatch_next_page_emits_page_changed_and_command_executed() {
         let mut app = AppState::default();
@@ -347,9 +355,7 @@ mod tests {
             zoom: 1.0,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -364,9 +370,7 @@ mod tests {
         assert!(zoom_eq(app.zoom, 1.1));
         assert_eq!(result.outcome, CommandOutcome::Applied);
 
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
@@ -389,9 +393,7 @@ mod tests {
             scroll_y: -3,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -407,12 +409,13 @@ mod tests {
         assert_eq!(app.scroll_x, 0);
         assert_eq!(app.scroll_y, 0);
         assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(result.emitted_events.len(), 1);
         assert!(matches!(
-            result.emitted_events.last(),
-            Some(AppEvent::CommandExecuted {
+            result.emitted_events[0],
+            AppEvent::CommandExecuted {
                 id: ActionId::ZoomReset,
                 outcome: CommandOutcome::Applied
-            })
+            }
         ));
     }
 
@@ -422,9 +425,7 @@ mod tests {
             zoom: 4.0,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -450,9 +451,7 @@ mod tests {
     #[test]
     fn dispatch_set_zoom_warns_when_input_is_slightly_above_maximum() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -478,9 +477,7 @@ mod tests {
     #[test]
     fn dispatch_set_zoom_warns_when_input_is_below_minimum() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -506,9 +503,7 @@ mod tests {
     #[test]
     fn dispatch_set_zoom_warns_when_input_is_slightly_below_minimum() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -537,9 +532,7 @@ mod tests {
             zoom: 4.0,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -568,9 +561,7 @@ mod tests {
             zoom: 0.25,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -599,9 +590,7 @@ mod tests {
             zoom: 3.9997,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -624,9 +613,7 @@ mod tests {
             zoom: 0.2503,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
-        let mut palette_requests = VecDeque::new();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,

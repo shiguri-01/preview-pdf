@@ -122,8 +122,8 @@ pub(crate) fn set_page_layout(
         app.spread_direction = next_direction;
     }
     app.normalize_current_page(page_count);
-    app.scroll_x = 0;
-    app.scroll_y = 0;
+    app.pan_x = 0;
+    app.pan_y = 0;
     Ok(applied())
 }
 
@@ -160,13 +160,13 @@ pub(crate) fn set_zoom_with_notice(
 }
 
 pub(crate) fn reset_zoom(app: &mut AppState) -> AppResult<CommandNoticeResult> {
-    if app.zoom == 1.0 && app.scroll_x == 0 && app.scroll_y == 0 {
+    if app.zoom == 1.0 && app.pan_x == 0 && app.pan_y == 0 {
         return Ok(noop());
     }
 
     app.zoom = 1.0;
-    app.scroll_x = 0;
-    app.scroll_y = 0;
+    app.pan_x = 0;
+    app.pan_y = 0;
     Ok(applied())
 }
 
@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn reset_zoom_reports_noop_only_when_zoom_and_scroll_are_already_reset() {
+    fn reset_zoom_reports_noop_only_when_zoom_and_pan_are_already_reset() {
         let mut app = AppState::default();
 
         let (outcome, notice) = reset_zoom(&mut app).expect("reset_zoom should succeed");
@@ -275,15 +275,15 @@ mod tests {
 
         let mut app = AppState {
             zoom: 1.0,
-            scroll_x: 3,
-            scroll_y: -2,
+            pan_x: 3,
+            pan_y: -2,
             ..AppState::default()
         };
         let (outcome, notice) = reset_zoom(&mut app).expect("reset_zoom should succeed");
         assert_eq!(outcome, CommandOutcome::Applied);
         assert_eq!(notice, NoticeAction::Clear);
         assert_eq!(app.zoom, 1.0);
-        assert_eq!(app.scroll_x, 0);
-        assert_eq!(app.scroll_y, 0);
+        assert_eq!(app.pan_x, 0);
+        assert_eq!(app.pan_y, 0);
     }
 }

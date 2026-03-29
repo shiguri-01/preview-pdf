@@ -58,11 +58,7 @@ mod tests {
     #[test]
     fn contains_matcher_prioritizes_prefix_hits() {
         let matcher = ContainsMatcher;
-        let all = vec![
-            candidate("zoom-in"),
-            candidate("inbox"),
-            candidate("scroll"),
-        ];
+        let all = vec![candidate("zoom-in"), candidate("inbox"), candidate("pan")];
 
         let selected = matcher.select("in", &all);
         assert_eq!(selected, vec![1, 0]);

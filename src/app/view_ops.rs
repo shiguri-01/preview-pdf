@@ -93,8 +93,8 @@ impl App {
 
     pub(super) fn current_pan(&self) -> PanOffset {
         PanOffset {
-            cells_x: self.state.scroll_x,
-            cells_y: self.state.scroll_y,
+            cells_x: self.state.pan_x,
+            cells_y: self.state.pan_y,
         }
     }
 }
@@ -234,8 +234,8 @@ impl RenderSubsystem {
         let help_preset = KeymapPreset::parse(&config.keymap.preset);
         let enable_crop = state.zoom > 1.0;
         let mut pan = PanOffset {
-            cells_x: state.scroll_x,
-            cells_y: state.scroll_y,
+            cells_x: state.pan_x,
+            cells_y: state.pan_y,
         };
         let mut render_error: Option<String> = None;
         let mut render_feedback = PresenterFeedback::None;
@@ -380,8 +380,8 @@ impl RenderSubsystem {
                 ui::draw_help_overlay(frame, image_area, help_preset, state.help_scroll);
             }
         })?;
-        state.scroll_x = pan.cells_x;
-        state.scroll_y = pan.cells_y;
+        state.pan_x = pan.cells_x;
+        state.pan_y = pan.cells_y;
         self.runtime.sync_presenter_metrics(self.presenter.as_ref());
         self.viewer_has_image = viewer_has_image;
 

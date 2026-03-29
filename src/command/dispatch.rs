@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use crate::app::scale::{ZOOM_MAX, ZOOM_MIN, next_zoom_step, prev_zoom_step};
 use crate::app::{AppState, Mode, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::error::AppResult;
@@ -8,13 +9,11 @@ use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::extension::ExtensionHost;
 
 use super::core::{
-    close_help, first_page, goto_page, last_page, next_page, open_help, prev_page,
-    set_debug_status_visible, set_page_layout, set_zoom,
+    close_help, first_page, goto_page, last_page, next_page, open_help, prev_page, reset_zoom,
+    set_debug_status_visible, set_page_layout, set_zoom, set_zoom_with_notice,
 };
 use super::spec::{CommandConditionContext, rejection_message_for_command};
 use super::types::{Command, CommandInvocationSource, CommandOutcome};
-
-const ZOOM_STEP: f32 = 0.1;
 
 #[derive(Debug, Clone)]
 pub struct CommandDispatchResult {
@@ -74,8 +73,25 @@ pub fn dispatch(
         Command::LastPage => last_page(app, page_count),
         Command::GotoPage { page } => goto_page(app, page_count, page),
         Command::SetZoom { value } => set_zoom(app, value),
-        Command::ZoomIn => set_zoom(app, app.zoom + ZOOM_STEP),
-        Command::ZoomOut => set_zoom(app, app.zoom - ZOOM_STEP),
+        Command::ZoomIn => {
+            let next = next_zoom_step(app.zoom);
+            let notice = if next <= app.zoom {
+                NoticeAction::warning(format!("maximum zoom is {ZOOM_MAX:.2}x"))
+            } else {
+                NoticeAction::Clear
+            };
+            set_zoom_with_notice(app, next, notice)
+        }
+        Command::ZoomOut => {
+            let prev = prev_zoom_step(app.zoom);
+            let notice = if prev >= app.zoom {
+                NoticeAction::warning(format!("minimum zoom is {ZOOM_MIN:.2}x"))
+            } else {
+                NoticeAction::Clear
+            };
+            set_zoom_with_notice(app, prev, notice)
+        }
+        Command::ZoomReset => reset_zoom(app),
         Command::Scroll { dx, dy } => {
             app.scroll_x = app.scroll_x.saturating_add(dx);
             app.scroll_y = app.scroll_y.saturating_add(dy);
@@ -203,6 +219,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         Command::SetZoom { .. }
         | Command::ZoomIn
         | Command::ZoomOut
+        | Command::ZoomReset
         | Command::Scroll { .. }
         | Command::DebugStatusShow
         | Command::DebugStatusHide
@@ -226,7 +243,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::AppState;
+    use crate::app::scale::zoom_eq;
+    use crate::app::{AppState, Notice, NoticeLevel, PaletteRequest};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{
         ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg,
@@ -287,6 +305,14 @@ mod tests {
         }
     }
 
+    fn new_zoom_test_fixture() -> (SharedPdfBackend, ExtensionHost, VecDeque<PaletteRequest>) {
+        (
+            Arc::new(StubPdf::new(3)) as SharedPdfBackend,
+            ExtensionHost::default(),
+            VecDeque::new(),
+        )
+    }
+
     #[test]
     fn dispatch_next_page_emits_page_changed_and_command_executed() {
         let mut app = AppState::default();
@@ -321,6 +347,287 @@ mod tests {
                 outcome: CommandOutcome::Applied
             }
         ));
+    }
+
+    #[test]
+    fn dispatch_zoom_in_and_out_follow_the_zoom_ladder() {
+        let mut app = AppState {
+            zoom: 1.0,
+            ..AppState::default()
+        };
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomIn,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 1.1));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let result = dispatch(
+            &mut app,
+            Command::ZoomOut,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 1.0));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+    }
+
+    #[test]
+    fn dispatch_zoom_reset_restores_default_zoom_and_scroll() {
+        let mut app = AppState {
+            zoom: 2.0,
+            scroll_x: 4,
+            scroll_y: -3,
+            ..AppState::default()
+        };
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomReset,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 1.0));
+        assert_eq!(app.scroll_x, 0);
+        assert_eq!(app.scroll_y, 0);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(result.emitted_events.len(), 1);
+        assert!(matches!(
+            result.emitted_events[0],
+            AppEvent::CommandExecuted {
+                id: ActionId::ZoomReset,
+                outcome: CommandOutcome::Applied
+            }
+        ));
+    }
+
+    #[test]
+    fn dispatch_set_zoom_warns_when_input_is_clamped() {
+        let mut app = AppState {
+            zoom: 4.0,
+            ..AppState::default()
+        };
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetZoom { value: 10.0 },
+            CommandInvocationSource::CommandPaletteInput,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 4.0));
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "maximum zoom is 4.00x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_set_zoom_warns_when_input_is_slightly_above_maximum() {
+        let mut app = AppState::default();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetZoom { value: 4.0004 },
+            CommandInvocationSource::CommandPaletteInput,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 4.0));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "maximum zoom is 4.00x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_set_zoom_warns_when_input_is_below_minimum() {
+        let mut app = AppState::default();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetZoom { value: 0.1 },
+            CommandInvocationSource::CommandPaletteInput,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 0.25));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "minimum zoom is 0.25x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_set_zoom_warns_when_input_is_slightly_below_minimum() {
+        let mut app = AppState::default();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetZoom { value: 0.2497 },
+            CommandInvocationSource::CommandPaletteInput,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 0.25));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "minimum zoom is 0.25x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_zoom_in_at_maximum_keeps_the_boundary_warning() {
+        let mut app = AppState {
+            zoom: 4.0,
+            ..AppState::default()
+        };
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomIn,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 4.0));
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "maximum zoom is 4.00x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_zoom_out_at_minimum_keeps_the_boundary_warning() {
+        let mut app = AppState {
+            zoom: 0.25,
+            ..AppState::default()
+        };
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomOut,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 0.25));
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "minimum zoom is 0.25x".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_zoom_in_near_maximum_advances_without_boundary_warning() {
+        let mut app = AppState {
+            zoom: 3.9997,
+            ..AppState::default()
+        };
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomIn,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 4.0));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(app.notice, None);
+    }
+
+    #[test]
+    fn dispatch_zoom_out_near_minimum_advances_without_boundary_warning() {
+        let mut app = AppState {
+            zoom: 0.2503,
+            ..AppState::default()
+        };
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::ZoomOut,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert!(zoom_eq(app.zoom, 0.25));
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(app.notice, None);
     }
 
     #[test]

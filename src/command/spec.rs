@@ -79,7 +79,7 @@ const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
     },
 ];
 
-const COMMAND_SPECS: [CommandSpec; 30] = [
+const COMMAND_SPECS: [CommandSpec; 31] = [
     CommandSpec {
         id: "next-page",
         title: "Next Page",
@@ -139,6 +139,14 @@ const COMMAND_SPECS: [CommandSpec; 30] = [
     CommandSpec {
         id: "zoom-out",
         title: "Zoom Out",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::Always,
+    },
+    CommandSpec {
+        id: "zoom-reset",
+        title: "Reset Zoom",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,

@@ -1,10 +1,8 @@
+use crate::app::scale::{ZOOM_MAX, ZOOM_MIN};
 use crate::app::{AppState, Mode, NoticeAction, PageLayoutMode, SpreadDirection};
 use crate::error::{AppError, AppResult};
 
 use super::types::{CommandOutcome, PageLayoutModeArg, SpreadDirectionArg};
-
-const ZOOM_MIN: f32 = 0.25;
-const ZOOM_MAX: f32 = 4.0;
 
 pub(crate) type CommandNoticeResult = (CommandOutcome, NoticeAction);
 
@@ -130,6 +128,14 @@ pub(crate) fn set_page_layout(
 }
 
 pub(crate) fn set_zoom(app: &mut AppState, value: f32) -> AppResult<CommandNoticeResult> {
+    set_zoom_with_notice(app, value, NoticeAction::Clear)
+}
+
+pub(crate) fn set_zoom_with_notice(
+    app: &mut AppState,
+    value: f32,
+    unclamped_notice: NoticeAction,
+) -> AppResult<CommandNoticeResult> {
     if !value.is_finite() || value <= 0.0 {
         return Err(AppError::invalid_argument(
             "zoom must be a positive finite value",
@@ -137,11 +143,30 @@ pub(crate) fn set_zoom(app: &mut AppState, value: f32) -> AppResult<CommandNotic
     }
 
     let clamped = value.clamp(ZOOM_MIN, ZOOM_MAX);
-    if zoom_eq(app.zoom, clamped) {
-        return Ok(noop());
+    let notice = if value == clamped {
+        unclamped_notice
+    } else if value > clamped {
+        NoticeAction::warning(format!("maximum zoom is {ZOOM_MAX:.2}x"))
+    } else {
+        NoticeAction::warning(format!("minimum zoom is {ZOOM_MIN:.2}x"))
+    };
+
+    if app.zoom == clamped {
+        return Ok((CommandOutcome::Noop, notice));
     }
 
     app.zoom = clamped;
+    Ok((CommandOutcome::Applied, notice))
+}
+
+pub(crate) fn reset_zoom(app: &mut AppState) -> AppResult<CommandNoticeResult> {
+    if app.zoom == 1.0 && app.scroll_x == 0 && app.scroll_y == 0 {
+        return Ok(noop());
+    }
+
+    app.zoom = 1.0;
+    app.scroll_x = 0;
+    app.scroll_y = 0;
     Ok(applied())
 }
 
@@ -186,6 +211,79 @@ fn resolve_page_count(page_count: usize) -> AppResult<usize> {
     Err(AppError::unsupported("pdf has no pages"))
 }
 
-fn zoom_eq(left: f32, right: f32) -> bool {
-    (left - right).abs() <= 0.0005
+#[cfg(test)]
+mod tests {
+    use crate::app::{AppState, NoticeAction, NoticeLevel};
+
+    use super::{ZOOM_MAX, ZOOM_MIN, reset_zoom, set_zoom};
+    use crate::command::types::CommandOutcome;
+
+    #[test]
+    fn set_zoom_accepts_exact_bounds_without_warning() {
+        let mut app = AppState {
+            zoom: 1.0,
+            ..AppState::default()
+        };
+
+        let (outcome, notice) = set_zoom(&mut app, ZOOM_MIN).expect("set_zoom should succeed");
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(app.zoom, ZOOM_MIN);
+
+        let (outcome, notice) = set_zoom(&mut app, ZOOM_MAX).expect("set_zoom should succeed");
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(app.zoom, ZOOM_MAX);
+    }
+
+    #[test]
+    fn set_zoom_clamps_out_of_range_values_with_warnings() {
+        let mut app = AppState::default();
+
+        let (outcome, notice) =
+            set_zoom(&mut app, ZOOM_MIN - 0.0003).expect("set_zoom should succeed");
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(
+            notice,
+            NoticeAction::Show {
+                level: NoticeLevel::Warning,
+                message: format!("minimum zoom is {ZOOM_MIN:.2}x"),
+            }
+        );
+        assert_eq!(app.zoom, ZOOM_MIN);
+
+        let (outcome, notice) =
+            set_zoom(&mut app, ZOOM_MAX + 0.0004).expect("set_zoom should succeed");
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(
+            notice,
+            NoticeAction::Show {
+                level: NoticeLevel::Warning,
+                message: format!("maximum zoom is {ZOOM_MAX:.2}x"),
+            }
+        );
+        assert_eq!(app.zoom, ZOOM_MAX);
+    }
+
+    #[test]
+    fn reset_zoom_reports_noop_only_when_zoom_and_scroll_are_already_reset() {
+        let mut app = AppState::default();
+
+        let (outcome, notice) = reset_zoom(&mut app).expect("reset_zoom should succeed");
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert_eq!(notice, NoticeAction::Clear);
+
+        let mut app = AppState {
+            zoom: 1.0,
+            scroll_x: 3,
+            scroll_y: -2,
+            ..AppState::default()
+        };
+        let (outcome, notice) = reset_zoom(&mut app).expect("reset_zoom should succeed");
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(app.zoom, 1.0);
+        assert_eq!(app.scroll_x, 0);
+        assert_eq!(app.scroll_y, 0);
+    }
 }

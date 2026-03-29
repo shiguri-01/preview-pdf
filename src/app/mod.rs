@@ -9,7 +9,7 @@ mod nav;
 mod perf_runner;
 mod render_ops;
 mod runtime;
-mod scale;
+pub(crate) mod scale;
 mod state;
 pub(crate) mod terminal_session;
 mod view_ops;

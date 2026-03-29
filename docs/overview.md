@@ -36,10 +36,12 @@ Rules:
   - runtime switch via commands: `page-layout-single`, `page-layout-spread [ltr|rtl]`
 
 - Zoom and viewport:
-  - zoom in/out with bounded scale
+  - zoom in/out with a discrete ladder and bounded scale
+  - `zoom <value>` clamps out-of-range values to the configured bounds and shows a warning notice
+  - reset zoom to the fit baseline
   - fit-to-viewport behavior
   - scroll when rendered content exceeds viewport bounds
-  - command forms: `zoom <value>`, `scroll <left|right|up|down> [amount]`
+  - command forms: `zoom <value>`, `zoom-reset`, `scroll <left|right|up|down> [amount]`
 
 - Search:
   - full-text substring search
@@ -91,6 +93,7 @@ Rules:
 | `G`      | Last page |
 | `+`      | Zoom in |
 | `-`      | Zoom out |
+| `0`      | Reset zoom |
 | `H` / `J` / `K` / `L` | Scroll |
 | `/`      | Open search palette |
 | `n`      | Next search hit |

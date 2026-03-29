@@ -72,6 +72,7 @@ fn map_normal_mode_key_default(key: KeyEvent) -> Option<Command> {
         KeyCode::Char('G') => Some(Command::LastPage),
         KeyCode::Char('+') => Some(Command::ZoomIn),
         KeyCode::Char('-') => Some(Command::ZoomOut),
+        KeyCode::Char('0') => Some(Command::ZoomReset),
         KeyCode::Char('n') => Some(Command::NextSearchHit),
         KeyCode::Char('N') => Some(Command::PrevSearchHit),
         KeyCode::Char('q') => Some(Command::Quit),
@@ -185,5 +186,22 @@ mod tests {
             KeymapPreset::Default,
         );
         assert_eq!(question_mark_in_help, None);
+    }
+
+    #[test]
+    fn default_preset_maps_zero_to_zoom_reset() {
+        let reset = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+            Mode::Normal,
+            KeymapPreset::Default,
+        );
+        assert_eq!(reset, Some(Command::ZoomReset));
+
+        let emacs_reset = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
+            Mode::Normal,
+            KeymapPreset::Emacs,
+        );
+        assert_eq!(emacs_reset, Some(Command::ZoomReset));
     }
 }

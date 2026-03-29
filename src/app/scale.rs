@@ -2,6 +2,11 @@ use crate::presenter::Viewport;
 
 use super::constants::{DEFAULT_CELL_SIZE_PX, MIN_RENDER_SCALE, SCALE_QUANTUM};
 
+pub(crate) const ZOOM_MIN: f32 = 0.25;
+pub(crate) const ZOOM_MAX: f32 = 4.0;
+
+const ZOOM_STEPS: [f32; 10] = [ZOOM_MIN, 0.5, 0.75, 1.0, 1.1, 1.25, 1.5, 2.0, 3.0, ZOOM_MAX];
+
 pub(crate) fn zoom_eq(left: f32, right: f32) -> bool {
     (left - right).abs() <= 0.0005
 }
@@ -78,6 +83,23 @@ pub(crate) fn quantize_scale(scale: f32) -> f32 {
     ((scale / SCALE_QUANTUM).round() * SCALE_QUANTUM).max(SCALE_QUANTUM)
 }
 
+pub(crate) fn next_zoom_step(current: f32) -> f32 {
+    ZOOM_STEPS
+        .iter()
+        .copied()
+        .find(|step| *step > current)
+        .unwrap_or(*ZOOM_STEPS.last().expect("zoom ladder must not be empty"))
+}
+
+pub(crate) fn prev_zoom_step(current: f32) -> f32 {
+    ZOOM_STEPS
+        .iter()
+        .rev()
+        .copied()
+        .find(|step| *step < current)
+        .unwrap_or(ZOOM_STEPS[0])
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -85,7 +107,8 @@ mod tests {
     use crate::presenter::Viewport;
 
     use super::{
-        compute_render_scale, compute_scale, quantize_scale, scale_eq, select_input_poll_timeout,
+        compute_render_scale, compute_scale, next_zoom_step, prev_zoom_step, quantize_scale,
+        scale_eq, select_input_poll_timeout,
     };
 
     const DEFAULT_MAX_RENDER_SCALE: f32 = 2.5;
@@ -233,5 +256,18 @@ mod tests {
             scale <= halfblocks_cap + f32::EPSILON,
             "scale {scale} exceeded cap {halfblocks_cap}"
         );
+    }
+
+    #[test]
+    fn zoom_steps_move_to_the_next_or_previous_ladder_entry() {
+        assert!(scale_eq(next_zoom_step(1.0), 1.1));
+        assert!(scale_eq(next_zoom_step(1.05), 1.1));
+        assert!(scale_eq(next_zoom_step(1.1), 1.25));
+        assert!(scale_eq(next_zoom_step(0.83), 1.0));
+        assert!(scale_eq(prev_zoom_step(1.0), 0.75));
+        assert!(scale_eq(prev_zoom_step(1.05), 1.0));
+        assert!(scale_eq(prev_zoom_step(0.83), 0.75));
+        assert!(scale_eq(prev_zoom_step(0.25), 0.25));
+        assert!(scale_eq(next_zoom_step(4.0), 4.0));
     }
 }

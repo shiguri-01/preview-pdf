@@ -32,6 +32,7 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         "zoom" => parse_zoom(args_text),
         "zoom-in" => parse_no_args(id, args_text, Command::ZoomIn),
         "zoom-out" => parse_no_args(id, args_text, Command::ZoomOut),
+        "zoom-reset" => parse_no_args(id, args_text, Command::ZoomReset),
         "scroll" => parse_scroll(args_text),
         "page-layout-single" => parse_page_layout_single(args_text),
         "page-layout-spread" => parse_page_layout_spread(args_text),
@@ -102,6 +103,7 @@ fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResult<Command> 
         "page-layout-single" => "page-layout-single does not accept arguments",
         "zoom-in" => "zoom-in does not accept arguments",
         "zoom-out" => "zoom-out does not accept arguments",
+        "zoom-reset" => "zoom-reset does not accept arguments",
         "debug-status-show" => "debug-status-show does not accept arguments",
         "debug-status-hide" => "debug-status-hide does not accept arguments",
         "debug-status-toggle" => "debug-status-toggle does not accept arguments",
@@ -399,6 +401,10 @@ mod tests {
         assert_eq!(
             parse_command_text("zoom 1.25").expect("parse should succeed"),
             Command::SetZoom { value: 1.25 }
+        );
+        assert_eq!(
+            parse_command_text("zoom-reset").expect("parse should succeed"),
+            Command::ZoomReset
         );
         assert_eq!(
             parse_command_text("open-palette command").expect("parse should succeed"),

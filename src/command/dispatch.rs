@@ -255,8 +255,6 @@ mod tests {
 
     use super::{collect_transition_events, dispatch};
 
-    const ZOOM_EPSILON: f32 = 0.0005;
-
     struct StubPdf {
         path: PathBuf,
         doc_id: u64,
@@ -363,7 +361,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert!((app.zoom - 1.1).abs() <= ZOOM_EPSILON);
+        assert!(zoom_eq(app.zoom, 1.1));
         assert_eq!(result.outcome, CommandOutcome::Applied);
 
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
@@ -379,7 +377,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert!((app.zoom - 1.0).abs() <= ZOOM_EPSILON);
+        assert!(zoom_eq(app.zoom, 1.0));
         assert_eq!(result.outcome, CommandOutcome::Applied);
     }
 
@@ -405,7 +403,7 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert!((app.zoom - 1.0).abs() <= ZOOM_EPSILON);
+        assert!(zoom_eq(app.zoom, 1.0));
         assert_eq!(app.scroll_x, 0);
         assert_eq!(app.scroll_y, 0);
         assert_eq!(result.outcome, CommandOutcome::Applied);

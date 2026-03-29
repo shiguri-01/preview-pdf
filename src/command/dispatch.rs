@@ -92,9 +92,9 @@ pub fn dispatch(
             set_zoom_with_notice(app, prev, notice)
         }
         Command::ZoomReset => reset_zoom(app),
-        Command::Scroll { dx, dy } => {
-            app.scroll_x = app.scroll_x.saturating_add(dx);
-            app.scroll_y = app.scroll_y.saturating_add(dy);
+        Command::Pan { dx, dy } => {
+            app.pan_x = app.pan_x.saturating_add(dx);
+            app.pan_y = app.pan_y.saturating_add(dy);
             Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
         Command::SetPageLayout { mode, direction } => {
@@ -220,7 +220,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::ZoomIn
         | Command::ZoomOut
         | Command::ZoomReset
-        | Command::Scroll { .. }
+        | Command::Pan { .. }
         | Command::DebugStatusShow
         | Command::DebugStatusHide
         | Command::DebugStatusToggle
@@ -386,11 +386,11 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_zoom_reset_restores_default_zoom_and_scroll() {
+    fn dispatch_zoom_reset_restores_default_zoom_and_pan() {
         let mut app = AppState {
             zoom: 2.0,
-            scroll_x: 4,
-            scroll_y: -3,
+            pan_x: 4,
+            pan_y: -3,
             ..AppState::default()
         };
         let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
@@ -406,8 +406,8 @@ mod tests {
         .expect("dispatch should succeed");
 
         assert!(zoom_eq(app.zoom, 1.0));
-        assert_eq!(app.scroll_x, 0);
-        assert_eq!(app.scroll_y, 0);
+        assert_eq!(app.pan_x, 0);
+        assert_eq!(app.pan_y, 0);
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(result.emitted_events.len(), 1);
         assert!(matches!(

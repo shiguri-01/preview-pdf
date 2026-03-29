@@ -33,7 +33,7 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         "zoom-in" => parse_no_args(id, args_text, Command::ZoomIn),
         "zoom-out" => parse_no_args(id, args_text, Command::ZoomOut),
         "zoom-reset" => parse_no_args(id, args_text, Command::ZoomReset),
-        "scroll" => parse_scroll(args_text),
+        "pan" => parse_pan(args_text),
         "page-layout-single" => parse_page_layout_single(args_text),
         "page-layout-spread" => parse_page_layout_spread(args_text),
         "debug-status-show" => parse_no_args(id, args_text, Command::DebugStatusShow),
@@ -196,38 +196,36 @@ fn parse_zoom(args_text: &str) -> AppResult<Command> {
     Ok(Command::SetZoom { value })
 }
 
-fn parse_scroll(args_text: &str) -> AppResult<Command> {
+fn parse_pan(args_text: &str) -> AppResult<Command> {
     let parts = args_text.split_whitespace().collect::<Vec<_>>();
     if parts.is_empty() {
         return Err(AppError::invalid_argument(
-            "scroll requires direction [amount]",
+            "pan requires direction [amount]",
         ));
     }
 
     if parts.len() > 2 {
-        return Err(AppError::invalid_argument(
-            "scroll accepts direction [amount]",
-        ));
+        return Err(AppError::invalid_argument("pan accepts direction [amount]"));
     }
 
-    let Some((dx, dy)) = parse_scroll_direction(&parts)? else {
+    let Some((dx, dy)) = parse_pan_direction(&parts)? else {
         return Err(AppError::invalid_argument(
-            "scroll direction must be one of: left, right, up, down",
+            "pan direction must be one of: left, right, up, down",
         ));
     };
 
-    Ok(Command::Scroll { dx, dy })
+    Ok(Command::Pan { dx, dy })
 }
 
-fn parse_scroll_direction(parts: &[&str]) -> AppResult<Option<(i32, i32)>> {
-    let Some(direction) = parse_scroll_direction_token(parts[0]) else {
+fn parse_pan_direction(parts: &[&str]) -> AppResult<Option<(i32, i32)>> {
+    let Some(direction) = parse_pan_direction_token(parts[0]) else {
         return Ok(None);
     };
 
     let amount = match parts.get(1) {
         Some(value_text) => value_text
             .parse::<i32>()
-            .map_err(|_| AppError::invalid_argument("scroll amount must be i32"))?,
+            .map_err(|_| AppError::invalid_argument("pan amount must be i32"))?,
         None => 1,
     };
 
@@ -236,12 +234,12 @@ fn parse_scroll_direction(parts: &[&str]) -> AppResult<Option<(i32, i32)>> {
         "right" => (amount, 0),
         "up" => (0, -amount),
         "down" => (0, amount),
-        _ => unreachable!("parse_scroll_direction_token limits values"),
+        _ => unreachable!("parse_pan_direction_token limits values"),
     };
     Ok(Some(delta))
 }
 
-fn parse_scroll_direction_token(value: &str) -> Option<&'static str> {
+fn parse_pan_direction_token(value: &str) -> Option<&'static str> {
     match value {
         "left" => Some("left"),
         "right" => Some("right"),
@@ -487,25 +485,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_scroll_supports_directional_form_only() {
+    fn parse_pan_supports_directional_form_only() {
         assert_eq!(
-            parse_command_text("scroll down").expect("parse should succeed"),
-            Command::Scroll { dx: 0, dy: 1 }
+            parse_command_text("pan down").expect("parse should succeed"),
+            Command::Pan { dx: 0, dy: 1 }
         );
         assert_eq!(
-            parse_command_text("scroll left 3").expect("parse should succeed"),
-            Command::Scroll { dx: -3, dy: 0 }
+            parse_command_text("pan left 3").expect("parse should succeed"),
+            Command::Pan { dx: -3, dy: 0 }
         );
         assert_eq!(
-            parse_command_text("scroll down 0").expect("parse should succeed"),
-            Command::Scroll { dx: 0, dy: 0 }
+            parse_command_text("pan down 0").expect("parse should succeed"),
+            Command::Pan { dx: 0, dy: 0 }
         );
         assert_eq!(
-            parse_command_text("scroll left -3").expect("parse should succeed"),
-            Command::Scroll { dx: 3, dy: 0 }
+            parse_command_text("pan left -3").expect("parse should succeed"),
+            Command::Pan { dx: 3, dy: 0 }
         );
         assert!(
-            parse_command_text("scroll -2 4").is_err(),
+            parse_command_text("pan -2 4").is_err(),
             "raw dx dy form should be rejected"
         );
     }

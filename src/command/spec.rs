@@ -20,7 +20,7 @@ const ARGS_ZOOM: [ArgSpec; 1] = [ArgSpec {
     kind: ArgKind::F32,
     required: true,
 }];
-const ARGS_SCROLL: [ArgSpec; 2] = [
+const ARGS_PAN: [ArgSpec; 2] = [
     ArgSpec {
         name: "direction",
         kind: ArgKind::String,
@@ -153,9 +153,9 @@ const COMMAND_SPECS: [CommandSpec; 31] = [
         availability: CommandAvailability::Always,
     },
     CommandSpec {
-        id: "scroll",
-        title: "Scroll",
-        args: &ARGS_SCROLL,
+        id: "pan",
+        title: "Pan",
+        args: &ARGS_PAN,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
         availability: CommandAvailability::Always,

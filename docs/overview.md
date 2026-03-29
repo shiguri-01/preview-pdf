@@ -40,8 +40,8 @@ Rules:
   - `zoom <value>` clamps out-of-range values to the configured bounds and shows a warning notice
   - reset zoom to the fit baseline
   - fit-to-viewport behavior
-  - scroll when rendered content exceeds viewport bounds
-  - command forms: `zoom <value>`, `zoom-reset`, `scroll <left|right|up|down> [amount]`
+  - pan when rendered content exceeds viewport bounds
+  - command forms: `zoom <value>`, `zoom-reset`, `pan <left|right|up|down> [amount]`
 
 - Search:
   - full-text substring search
@@ -94,7 +94,7 @@ Rules:
 | `+`      | Zoom in |
 | `-`      | Zoom out |
 | `0`      | Reset zoom |
-| `H` / `J` / `K` / `L` | Scroll |
+| `H` / `J` / `K` / `L` | Pan |
 | `/`      | Open search palette |
 | `n`      | Next search hit |
 | `N`      | Previous search hit |

@@ -237,11 +237,11 @@ impl RenderSubsystem {
             cells_x: state.pan_x,
             cells_y: state.pan_y,
         };
-        let mut render_error: Option<String> = None;
+        let mut render_failed = false;
         let mut render_feedback = PresenterFeedback::None;
         let mut viewer_has_image = self.viewer_has_image;
         let loading_label = format_loading_target(visible_pages);
-        let render_target = format_render_target(visible_pages, page_count);
+        let render_target = format_render_target(visible_pages);
         let spread_gap_px = u32::from(
             resolved_cell_size_px(presenter_caps.cell_px)
                 .0
@@ -321,8 +321,8 @@ impl RenderSubsystem {
                         );
                     }
                     Err(err) => {
-                        let message = err.to_string();
-                        render_error = Some(message.clone());
+                        let _ = err;
+                        render_failed = true;
                         let outcome = PresenterRenderOutcome {
                             drew_image: false,
                             feedback: PresenterFeedback::Failed,
@@ -355,8 +355,8 @@ impl RenderSubsystem {
                     );
                 }
                 Err(err) => {
-                    let message = err.to_string();
-                    render_error = Some(message.clone());
+                    let _ = err;
+                    render_failed = true;
                     let outcome = PresenterRenderOutcome {
                         drew_image: false,
                         feedback: PresenterFeedback::Failed,
@@ -385,12 +385,7 @@ impl RenderSubsystem {
         self.runtime.sync_presenter_metrics(self.presenter.as_ref());
         self.viewer_has_image = viewer_has_image;
 
-        sync_render_notice(
-            state,
-            render_error.is_some(),
-            render_feedback,
-            &render_target,
-        );
+        sync_render_notice(state, render_failed, render_feedback, &render_target);
 
         Ok(())
     }
@@ -563,12 +558,8 @@ fn format_loading_target(slots: VisiblePageSlots) -> String {
     }
 }
 
-fn format_render_target(slots: VisiblePageSlots, page_count: usize) -> String {
-    let total = page_count.max(1);
-    match slots.trailing_page {
-        Some(trailing) => format!("pages {}-{}/{}", slots.anchor_page + 1, trailing + 1, total),
-        None => format!("page {}/{}", slots.anchor_page + 1, total),
-    }
+fn format_render_target(slots: VisiblePageSlots) -> String {
+    format_loading_target(slots)
 }
 
 #[cfg(test)]
@@ -577,9 +568,9 @@ mod tests {
 
     use super::{
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
-        decide_viewer_display, format_loading_target, normalize_render_outcome,
-        presenter_render_options, render_failure_message, resolve_layout_dimensions,
-        sync_render_notice,
+        decide_viewer_display, format_loading_target, format_render_target,
+        normalize_render_outcome, presenter_render_options, render_failure_message,
+        resolve_layout_dimensions, sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
@@ -972,6 +963,18 @@ mod tests {
     #[test]
     fn loading_target_formats_spread_with_pp_prefix() {
         let label = format_loading_target(VisiblePageSlots {
+            anchor_page: 11,
+            trailing_page: Some(12),
+            left_page: Some(11),
+            right_page: Some(12),
+        });
+
+        assert_eq!(label, "pp.12-13");
+    }
+
+    #[test]
+    fn render_target_uses_loading_label_convention() {
+        let label = format_render_target(VisiblePageSlots {
             anchor_page: 11,
             trailing_page: Some(12),
             left_page: Some(11),

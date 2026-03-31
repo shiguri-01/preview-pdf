@@ -53,7 +53,7 @@ pub fn draw_error_overlay(frame: &mut Frame<'_>, area: Rect, message: &str) {
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
-        .title("Render Error")
+        .title("Unable to display")
         .borders(Borders::ALL)
         .style(error_text());
     let inner = block.inner(popup);
@@ -553,7 +553,7 @@ mod tests {
 
     use super::{
         build_loading_message, build_palette_input_line, build_palette_item_line,
-        draw_loading_overlay, draw_palette_overlay,
+        draw_error_overlay, draw_loading_overlay, draw_palette_overlay,
     };
 
     fn rendered_input_text(layout: &super::PaletteInputLineLayout) -> String {
@@ -837,5 +837,29 @@ mod tests {
             .map(|x| buffer[(x, blank_y)].symbol())
             .collect::<String>();
         assert_eq!(blank_line, " ".repeat(buffer.area.width as usize));
+    }
+
+    #[test]
+    fn error_overlay_uses_friendly_title_and_message() {
+        let backend = TestBackend::new(40, 7);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| {
+                draw_error_overlay(frame, Rect::new(0, 0, 40, 7), "Could not render p.12.");
+            })
+            .expect("draw should pass");
+
+        let buffer = terminal.backend().buffer();
+        let rendered = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(rendered.contains("Unable to display"));
+        assert!(rendered.contains("Could not render p.12."));
     }
 }

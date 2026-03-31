@@ -333,7 +333,7 @@ impl RenderSubsystem {
                             image_area,
                             outcome,
                             loading_label.as_str(),
-                            Some(&message),
+                            Some(render_target.as_str()),
                             viewer_has_image,
                         );
                     }
@@ -367,7 +367,7 @@ impl RenderSubsystem {
                         image_area,
                         outcome,
                         loading_label.as_str(),
-                        Some(&message),
+                        Some(render_target.as_str()),
                         viewer_has_image,
                     );
                 }
@@ -387,7 +387,7 @@ impl RenderSubsystem {
 
         sync_render_notice(
             state,
-            render_error.as_deref(),
+            render_error.is_some(),
             render_feedback,
             &render_target,
         );
@@ -444,7 +444,7 @@ fn draw_viewer_outcome(
     image_area: ratatui::layout::Rect,
     outcome: PresenterRenderOutcome,
     loading_label: &str,
-    error_message: Option<&str>,
+    render_target: Option<&str>,
     viewer_has_image: bool,
 ) {
     let decision = decide_viewer_display(outcome, viewer_has_image);
@@ -455,25 +455,26 @@ fn draw_viewer_outcome(
         ui::draw_loading_overlay(frame, image_area, loading_label);
     }
     if decision.show_error {
-        let message = error_message
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| format!("Failed to render {loading_label}"));
+        let message = render_failure_message(render_target);
         ui::draw_error_overlay(frame, image_area, &message);
+    }
+}
+
+fn render_failure_message(render_target: Option<&str>) -> String {
+    match render_target {
+        Some(target) => format!("Could not render {target}."),
+        None => "Could not render the current page.".to_string(),
     }
 }
 
 fn sync_render_notice(
     state: &mut AppState,
-    render_error: Option<&str>,
+    render_failed: bool,
     render_feedback: PresenterFeedback,
     render_target: &str,
 ) {
-    if let Some(err) = render_error {
-        state.set_error_notice(format!("render error: {err}"));
-        return;
-    }
-    if render_feedback == PresenterFeedback::Failed {
-        state.set_error_notice(format!("render error: failed to render {render_target}"));
+    if render_failed || render_feedback == PresenterFeedback::Failed {
+        state.set_error_notice(render_failure_message(Some(render_target)));
         return;
     }
     state.clear_render_notice();
@@ -577,7 +578,8 @@ mod tests {
     use super::{
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
         decide_viewer_display, format_loading_target, normalize_render_outcome,
-        presenter_render_options, resolve_layout_dimensions, sync_render_notice,
+        presenter_render_options, render_failure_message, resolve_layout_dimensions,
+        sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
@@ -790,9 +792,9 @@ mod tests {
     #[test]
     fn sync_render_notice_clears_stale_render_error_after_success() {
         let mut app = AppState::default();
-        app.set_error_notice("render error: decode failed");
+        app.set_error_notice("Could not render p.12.");
 
-        sync_render_notice(&mut app, None, PresenterFeedback::None, "page 1/10");
+        sync_render_notice(&mut app, false, PresenterFeedback::None, "p.12");
 
         assert!(app.notice.is_none());
     }
@@ -800,9 +802,9 @@ mod tests {
     #[test]
     fn sync_render_notice_clears_stale_render_error_while_pending() {
         let mut app = AppState::default();
-        app.set_error_notice("render error: decode failed");
+        app.set_error_notice("Could not render p.12.");
 
-        sync_render_notice(&mut app, None, PresenterFeedback::Pending, "page 1/10");
+        sync_render_notice(&mut app, false, PresenterFeedback::Pending, "p.12");
 
         assert!(app.notice.is_none());
     }
@@ -812,11 +814,32 @@ mod tests {
         let mut app = AppState::default();
         app.set_error_notice("search failed: backend failed");
 
-        sync_render_notice(&mut app, None, PresenterFeedback::None, "page 1/10");
+        sync_render_notice(&mut app, false, PresenterFeedback::None, "p.12");
 
         assert_eq!(
             app.notice.as_ref().map(|notice| notice.message.as_str()),
             Some("search failed: backend failed")
+        );
+    }
+
+    #[test]
+    fn render_failure_message_uses_single_page_label() {
+        assert_eq!(render_failure_message(Some("p.12")), "Could not render p.12.");
+    }
+
+    #[test]
+    fn render_failure_message_uses_spread_label() {
+        assert_eq!(
+            render_failure_message(Some("pp.12-13")),
+            "Could not render pp.12-13."
+        );
+    }
+
+    #[test]
+    fn render_failure_message_falls_back_to_current_page() {
+        assert_eq!(
+            render_failure_message(None),
+            "Could not render the current page."
         );
     }
 

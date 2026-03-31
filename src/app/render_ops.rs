@@ -88,7 +88,8 @@ impl RenderSubsystem {
                     // Only surface failures for pages the user is actively waiting on.
                     // Prefetch can fail for off-screen pages, but notifying that background
                     // work would surface a problem the user cannot act on yet.
-                    state.set_error_notice(format!("render error: {err}"));
+                    let _ = err;
+                    state.set_error_notice("Could not render the current page.");
                 }
                 is_current
             }
@@ -371,7 +372,7 @@ mod tests {
         assert!(redraw);
         let notice = state.notice.expect("visible failure should set notice");
         assert_eq!(notice.level, NoticeLevel::Error);
-        assert_eq!(notice.message, "render error: PDF render failed for page 2");
+        assert_eq!(notice.message, "Could not render the current page.");
     }
 
     #[test]

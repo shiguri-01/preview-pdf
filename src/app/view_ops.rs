@@ -824,7 +824,10 @@ mod tests {
 
     #[test]
     fn render_failure_message_uses_single_page_label() {
-        assert_eq!(render_failure_message(Some("p.12")), "Could not render p.12.");
+        assert_eq!(
+            render_failure_message(Some("p.12")),
+            "Could not render p.12."
+        );
     }
 
     #[test]

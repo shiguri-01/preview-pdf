@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::Mode;
-use crate::command::Command;
+use crate::command::{Command, PanAmount, PanDirection};
 use crate::palette::PaletteKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,10 +62,22 @@ fn map_normal_mode_key_default(key: KeyEvent) -> Option<Command> {
         }),
         KeyCode::Char('/') => Some(Command::OpenSearch),
         KeyCode::Char('?') => Some(Command::OpenHelp),
-        KeyCode::Char('H') => Some(Command::Pan { dx: -1, dy: 0 }),
-        KeyCode::Char('J') => Some(Command::Pan { dx: 0, dy: 1 }),
-        KeyCode::Char('K') => Some(Command::Pan { dx: 0, dy: -1 }),
-        KeyCode::Char('L') => Some(Command::Pan { dx: 1, dy: 0 }),
+        KeyCode::Char('H') => Some(Command::Pan {
+            direction: PanDirection::Left,
+            amount: PanAmount::DefaultStep,
+        }),
+        KeyCode::Char('J') => Some(Command::Pan {
+            direction: PanDirection::Down,
+            amount: PanAmount::DefaultStep,
+        }),
+        KeyCode::Char('K') => Some(Command::Pan {
+            direction: PanDirection::Up,
+            amount: PanAmount::DefaultStep,
+        }),
+        KeyCode::Char('L') => Some(Command::Pan {
+            direction: PanDirection::Right,
+            amount: PanAmount::DefaultStep,
+        }),
         KeyCode::Char('j') => Some(Command::NextPage),
         KeyCode::Char('k') => Some(Command::PrevPage),
         KeyCode::Char('g') => Some(Command::FirstPage),
@@ -125,7 +137,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use crate::app::Mode;
-    use crate::command::Command;
+    use crate::command::{Command, PanAmount, PanDirection};
 
     use super::{KeymapPreset, map_key_to_command_with_preset};
 
@@ -203,5 +215,34 @@ mod tests {
             KeymapPreset::Emacs,
         );
         assert_eq!(emacs_reset, Some(Command::ZoomReset));
+    }
+
+    #[test]
+    fn default_preset_maps_pan_keys_to_default_step_commands() {
+        let left = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('H'), KeyModifiers::NONE),
+            Mode::Normal,
+            KeymapPreset::Default,
+        );
+        assert_eq!(
+            left,
+            Some(Command::Pan {
+                direction: PanDirection::Left,
+                amount: PanAmount::DefaultStep,
+            })
+        );
+
+        let down = map_key_to_command_with_preset(
+            KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE),
+            Mode::Normal,
+            KeymapPreset::Default,
+        );
+        assert_eq!(
+            down,
+            Some(Command::Pan {
+                direction: PanDirection::Down,
+                amount: PanAmount::DefaultStep,
+            })
+        );
     }
 }

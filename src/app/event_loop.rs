@@ -5,7 +5,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::{self, MissedTickBehavior};
 
 use crate::backend::{PdfBackend, SharedPdfBackend};
-use crate::command::CommandOutcome;
+use crate::command::{Command, CommandOutcome, CommandRequest, PanAmount};
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
 use crate::perf::{PerfIterationSnapshot, PerfScenarioId, RedrawReason};
@@ -85,6 +85,38 @@ impl SessionRestore for HeadlessTerminalSession {
 }
 
 impl App {
+    fn resolve_command_request<S: TerminalSurface>(
+        &self,
+        session: &S,
+        request: CommandRequest,
+    ) -> CommandRequest {
+        CommandRequest {
+            command: self.resolve_command(session, request.command),
+            source: request.source,
+        }
+    }
+
+    fn resolve_command<S: TerminalSurface>(&self, session: &S, command: Command) -> Command {
+        match command {
+            Command::Pan {
+                direction,
+                amount: PanAmount::DefaultStep,
+            } => Command::Pan {
+                direction,
+                amount: PanAmount::Cells(self.default_pan_step_cells(session)),
+            },
+            _ => command,
+        }
+    }
+
+    fn default_pan_step_cells<S: TerminalSurface>(&self, session: &S) -> i32 {
+        let Some(viewport) = Self::current_viewport(session, self.state.debug_status_visible)
+        else {
+            return 1;
+        };
+        i32::from((viewport.width.min(viewport.height) / 5).max(1))
+    }
+
     fn terminate_process_now<S>(runtime: &mut LoopRuntime<S>) -> !
     where
         S: TerminalSurface + SessionRestore,
@@ -573,6 +605,7 @@ impl App {
                 self.request_redraw(runtime, RedrawReason::InputError);
             }
             WaitEvent::Event(DomainEvent::Command(request)) => {
+                let request = self.resolve_command_request(&runtime.session, request);
                 let dispatch = self.interaction.dispatch_command(
                     &mut self.state,
                     request,
@@ -767,19 +800,26 @@ mod tests {
     use std::collections::VecDeque;
     use std::fs;
     use std::future::Future;
+    use std::io;
     use std::path::PathBuf;
     use std::pin::Pin;
     use std::process;
     use std::sync::Arc;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    use ratatui::layout::Size;
     use tokio::runtime::Builder;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::{WaitEvent, cold_start_initial_preview_plan, wait_next_event};
+    use crate::app::App;
     use crate::app::state::{PageLayoutMode, VisiblePageSlots};
+    use crate::app::terminal_session::TerminalSurface;
     use crate::backend::{PdfDoc, SharedPdfBackend};
+    use crate::command::{Command, CommandRequest, PanAmount, PanDirection};
+    use crate::config::Config;
     use crate::event::DomainEvent;
+    use crate::presenter::PresenterKind;
     use crate::presenter::{
         ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
         PresenterRenderOptions, PresenterRenderOutcome, PresenterRuntimeInfo, Viewport,
@@ -847,6 +887,35 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = Option<PresenterBackgroundEvent>> + 'a>> {
             let event = self.events.pop_front().flatten();
             Box::pin(async move { event })
+        }
+    }
+
+    struct StubSession {
+        size: Size,
+    }
+
+    impl StubSession {
+        fn new(width: u16, height: u16) -> Self {
+            Self {
+                size: Size::new(width, height),
+            }
+        }
+    }
+
+    impl TerminalSurface for StubSession {
+        fn size(&self) -> io::Result<Size> {
+            Ok(self.size)
+        }
+
+        fn clear(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+
+        fn draw<F>(&mut self, _render: F) -> io::Result<()>
+        where
+            F: FnOnce(&mut ratatui::Frame<'_>),
+        {
+            Ok(())
         }
     }
 
@@ -928,6 +997,80 @@ mod tests {
         fs::remove_file(&file).expect("test pdf should be removed");
         let shared: SharedPdfBackend = Arc::new(doc);
         RenderWorker::spawn(shared, 1)
+    }
+
+    #[test]
+    fn resolve_command_uses_short_edge_fifth_for_default_pan_step() {
+        let app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let session = StubSession::new(80, 24);
+        let short_edge_cells = 23_u16;
+        let expected_step = i32::from((short_edge_cells / 5).max(1));
+
+        let resolved = app.resolve_command(
+            &session,
+            Command::Pan {
+                direction: PanDirection::Right,
+                amount: PanAmount::DefaultStep,
+            },
+        );
+
+        assert_eq!(
+            resolved,
+            Command::Pan {
+                direction: PanDirection::Right,
+                amount: PanAmount::Cells(expected_step),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_command_clamps_default_pan_step_to_at_least_one_cell() {
+        let app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let session = StubSession::new(20, 5);
+
+        let resolved = app.resolve_command(
+            &session,
+            Command::Pan {
+                direction: PanDirection::Down,
+                amount: PanAmount::DefaultStep,
+            },
+        );
+
+        assert_eq!(
+            resolved,
+            Command::Pan {
+                direction: PanDirection::Down,
+                amount: PanAmount::Cells(1),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_command_request_preserves_explicit_pan_amounts() {
+        let app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let session = StubSession::new(80, 24);
+
+        let resolved = app.resolve_command_request(
+            &session,
+            CommandRequest::new(
+                Command::Pan {
+                    direction: PanDirection::Left,
+                    amount: PanAmount::Cells(3),
+                },
+                crate::command::CommandInvocationSource::CommandPaletteInput,
+            ),
+        );
+
+        assert_eq!(
+            resolved.command,
+            Command::Pan {
+                direction: PanDirection::Left,
+                amount: PanAmount::Cells(3),
+            }
+        );
     }
 
     #[test]

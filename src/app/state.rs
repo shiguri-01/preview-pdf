@@ -150,7 +150,7 @@ impl Default for AppState {
 }
 
 impl AppState {
-    const RENDER_NOTICE_PREFIX: &str = "render error: ";
+    const RENDER_NOTICE_PREFIX: &str = "Could not render";
 
     pub fn apply_notice_action(&mut self, action: NoticeAction) {
         match action {

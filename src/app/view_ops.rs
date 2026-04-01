@@ -237,11 +237,11 @@ impl RenderSubsystem {
             cells_x: state.pan_x,
             cells_y: state.pan_y,
         };
-        let mut render_error: Option<String> = None;
+        let mut render_failed = false;
         let mut render_feedback = PresenterFeedback::None;
         let mut viewer_has_image = self.viewer_has_image;
         let loading_label = format_loading_target(visible_pages);
-        let render_target = format_render_target(visible_pages, page_count);
+        let render_target = format_render_target(visible_pages);
         let spread_gap_px = u32::from(
             resolved_cell_size_px(presenter_caps.cell_px)
                 .0
@@ -321,8 +321,8 @@ impl RenderSubsystem {
                         );
                     }
                     Err(err) => {
-                        let message = err.to_string();
-                        render_error = Some(message.clone());
+                        let _ = err;
+                        render_failed = true;
                         let outcome = PresenterRenderOutcome {
                             drew_image: false,
                             feedback: PresenterFeedback::Failed,
@@ -333,7 +333,7 @@ impl RenderSubsystem {
                             image_area,
                             outcome,
                             loading_label.as_str(),
-                            Some(&message),
+                            Some(render_target.as_str()),
                             viewer_has_image,
                         );
                     }
@@ -355,8 +355,8 @@ impl RenderSubsystem {
                     );
                 }
                 Err(err) => {
-                    let message = err.to_string();
-                    render_error = Some(message.clone());
+                    let _ = err;
+                    render_failed = true;
                     let outcome = PresenterRenderOutcome {
                         drew_image: false,
                         feedback: PresenterFeedback::Failed,
@@ -367,7 +367,7 @@ impl RenderSubsystem {
                         image_area,
                         outcome,
                         loading_label.as_str(),
-                        Some(&message),
+                        Some(render_target.as_str()),
                         viewer_has_image,
                     );
                 }
@@ -385,12 +385,7 @@ impl RenderSubsystem {
         self.runtime.sync_presenter_metrics(self.presenter.as_ref());
         self.viewer_has_image = viewer_has_image;
 
-        sync_render_notice(
-            state,
-            render_error.as_deref(),
-            render_feedback,
-            &render_target,
-        );
+        sync_render_notice(state, render_failed, render_feedback, &render_target);
 
         Ok(())
     }
@@ -444,7 +439,7 @@ fn draw_viewer_outcome(
     image_area: ratatui::layout::Rect,
     outcome: PresenterRenderOutcome,
     loading_label: &str,
-    error_message: Option<&str>,
+    render_target: Option<&str>,
     viewer_has_image: bool,
 ) {
     let decision = decide_viewer_display(outcome, viewer_has_image);
@@ -455,25 +450,26 @@ fn draw_viewer_outcome(
         ui::draw_loading_overlay(frame, image_area, loading_label);
     }
     if decision.show_error {
-        let message = error_message
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| format!("Failed to render {loading_label}"));
+        let message = render_failure_message(render_target);
         ui::draw_error_overlay(frame, image_area, &message);
+    }
+}
+
+fn render_failure_message(render_target: Option<&str>) -> String {
+    match render_target {
+        Some(target) => format!("Could not render {target}."),
+        None => "Could not render the current page.".to_string(),
     }
 }
 
 fn sync_render_notice(
     state: &mut AppState,
-    render_error: Option<&str>,
+    render_failed: bool,
     render_feedback: PresenterFeedback,
     render_target: &str,
 ) {
-    if let Some(err) = render_error {
-        state.set_error_notice(format!("render error: {err}"));
-        return;
-    }
-    if render_feedback == PresenterFeedback::Failed {
-        state.set_error_notice(format!("render error: failed to render {render_target}"));
+    if render_failed || render_feedback == PresenterFeedback::Failed {
+        state.set_error_notice(render_failure_message(Some(render_target)));
         return;
     }
     state.clear_render_notice();
@@ -562,12 +558,8 @@ fn format_loading_target(slots: VisiblePageSlots) -> String {
     }
 }
 
-fn format_render_target(slots: VisiblePageSlots, page_count: usize) -> String {
-    let total = page_count.max(1);
-    match slots.trailing_page {
-        Some(trailing) => format!("pages {}-{}/{}", slots.anchor_page + 1, trailing + 1, total),
-        None => format!("page {}/{}", slots.anchor_page + 1, total),
-    }
+fn format_render_target(slots: VisiblePageSlots) -> String {
+    format_loading_target(slots)
 }
 
 #[cfg(test)]
@@ -576,8 +568,9 @@ mod tests {
 
     use super::{
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
-        decide_viewer_display, format_loading_target, normalize_render_outcome,
-        presenter_render_options, resolve_layout_dimensions, sync_render_notice,
+        decide_viewer_display, format_loading_target, format_render_target,
+        normalize_render_outcome, presenter_render_options, render_failure_message,
+        resolve_layout_dimensions, sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame};
@@ -790,9 +783,9 @@ mod tests {
     #[test]
     fn sync_render_notice_clears_stale_render_error_after_success() {
         let mut app = AppState::default();
-        app.set_error_notice("render error: decode failed");
+        app.set_error_notice("Could not render p.12.");
 
-        sync_render_notice(&mut app, None, PresenterFeedback::None, "page 1/10");
+        sync_render_notice(&mut app, false, PresenterFeedback::None, "p.12");
 
         assert!(app.notice.is_none());
     }
@@ -800,9 +793,9 @@ mod tests {
     #[test]
     fn sync_render_notice_clears_stale_render_error_while_pending() {
         let mut app = AppState::default();
-        app.set_error_notice("render error: decode failed");
+        app.set_error_notice("Could not render p.12.");
 
-        sync_render_notice(&mut app, None, PresenterFeedback::Pending, "page 1/10");
+        sync_render_notice(&mut app, false, PresenterFeedback::Pending, "p.12");
 
         assert!(app.notice.is_none());
     }
@@ -812,11 +805,35 @@ mod tests {
         let mut app = AppState::default();
         app.set_error_notice("search failed: backend failed");
 
-        sync_render_notice(&mut app, None, PresenterFeedback::None, "page 1/10");
+        sync_render_notice(&mut app, false, PresenterFeedback::None, "p.12");
 
         assert_eq!(
             app.notice.as_ref().map(|notice| notice.message.as_str()),
             Some("search failed: backend failed")
+        );
+    }
+
+    #[test]
+    fn render_failure_message_uses_single_page_label() {
+        assert_eq!(
+            render_failure_message(Some("p.12")),
+            "Could not render p.12."
+        );
+    }
+
+    #[test]
+    fn render_failure_message_uses_spread_label() {
+        assert_eq!(
+            render_failure_message(Some("pp.12-13")),
+            "Could not render pp.12-13."
+        );
+    }
+
+    #[test]
+    fn render_failure_message_falls_back_to_current_page() {
+        assert_eq!(
+            render_failure_message(None),
+            "Could not render the current page."
         );
     }
 
@@ -946,6 +963,18 @@ mod tests {
     #[test]
     fn loading_target_formats_spread_with_pp_prefix() {
         let label = format_loading_target(VisiblePageSlots {
+            anchor_page: 11,
+            trailing_page: Some(12),
+            left_page: Some(11),
+            right_page: Some(12),
+        });
+
+        assert_eq!(label, "pp.12-13");
+    }
+
+    #[test]
+    fn render_target_uses_loading_label_convention() {
+        let label = format_render_target(VisiblePageSlots {
             anchor_page: 11,
             trailing_page: Some(12),
             left_page: Some(11),

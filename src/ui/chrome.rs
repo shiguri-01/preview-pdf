@@ -397,13 +397,22 @@ mod tests {
 
     #[test]
     fn format_filename_segment_drops_long_name_below_elision_threshold() {
-        assert_eq!(format_filename_segment("very-long-document-name.pdf", 5), "");
-        assert_eq!(format_filename_segment("very-long-document-name.pdf", 6), "");
+        assert_eq!(
+            format_filename_segment("very-long-document-name.pdf", 5),
+            ""
+        );
+        assert_eq!(
+            format_filename_segment("very-long-document-name.pdf", 6),
+            ""
+        );
     }
 
     #[test]
     fn format_filename_segment_elides_long_name_at_threshold() {
-        assert_eq!(format_filename_segment("very-long-document-name.pdf", 7), "ve….pdf");
+        assert_eq!(
+            format_filename_segment("very-long-document-name.pdf", 7),
+            "ve….pdf"
+        );
     }
 
     #[test]

@@ -96,11 +96,9 @@ fn build_status_text(
             let with_filename_fixed = fixed_with_ext + display_width(sep);
             if with_filename_fixed < max_width {
                 let filename_budget = max_width - with_filename_fixed;
-                if filename_budget > 0 {
-                    let filename = elide_middle_by_width(file_name, filename_budget);
-                    if !filename.is_empty() {
-                        return format!("{base}{sep}{filename}{sep}{ext_text}");
-                    }
+                let filename = format_filename_segment(file_name, filename_budget);
+                if !filename.is_empty() {
+                    return format!("{base}{sep}{filename}{sep}{ext_text}");
                 }
             }
             return format!("{base}{sep}{ext_text}");
@@ -110,7 +108,7 @@ fn build_status_text(
     let fixed_with_filename = display_width(&base) + display_width(sep);
     if fixed_with_filename < max_width {
         let filename_budget = max_width - fixed_with_filename;
-        let filename = elide_middle_by_width(file_name, filename_budget);
+        let filename = format_filename_segment(file_name, filename_budget);
         if !filename.is_empty() {
             return format!("{base}{sep}{filename}");
         }
@@ -219,8 +217,22 @@ fn suffix_by_width(input: &str, max_width: usize) -> (&str, usize) {
     (&input[start..], width)
 }
 
+fn format_filename_segment(input: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if display_width(input) <= max_width {
+        return input.to_string();
+    }
+    if max_width < 7 {
+        return String::new();
+    }
+
+    elide_middle_by_width(input, max_width)
+}
+
 fn elide_middle_by_width(input: &str, max_width: usize) -> String {
-    const ELLIPSIS: &str = "...";
+    const ELLIPSIS: &str = "…";
     let ellipsis_width = display_width(ELLIPSIS);
     if max_width == 0 {
         return String::new();
@@ -251,7 +263,10 @@ fn elide_middle_by_width(input: &str, max_width: usize) -> String {
 mod tests {
     use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
 
-    use super::{build_presenter_path_text, build_status_text, display_width, stylize_notice_line};
+    use super::{
+        build_presenter_path_text, build_status_text, display_width, format_filename_segment,
+        stylize_notice_line,
+    };
 
     #[test]
     fn build_status_text_includes_page_zoom_and_file() {
@@ -327,7 +342,7 @@ mod tests {
             &[String::from("SEARCH 10/100")],
             38,
         );
-        assert_eq!(text, "p.1/7 | zoom 1.00x | v | SEARCH 10/100");
+        assert_eq!(text, "p.1/7 | zoom 1.00x | SEARCH 10/100");
     }
 
     #[test]
@@ -367,6 +382,22 @@ mod tests {
             target_width,
         );
         assert_eq!(text, expected);
+    }
+
+    #[test]
+    fn format_filename_segment_keeps_short_name_when_it_fits_under_threshold() {
+        assert_eq!(format_filename_segment("a.pdf", 5), "a.pdf");
+    }
+
+    #[test]
+    fn format_filename_segment_drops_long_name_below_elision_threshold() {
+        assert_eq!(format_filename_segment("very-long-document-name.pdf", 5), "");
+        assert_eq!(format_filename_segment("very-long-document-name.pdf", 6), "");
+    }
+
+    #[test]
+    fn format_filename_segment_elides_long_name_at_threshold() {
+        assert_eq!(format_filename_segment("very-long-document-name.pdf", 7), "ve….pdf");
     }
 
     #[test]

@@ -69,6 +69,32 @@ impl SpreadDirectionArg {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanDirection {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl PanDirection {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "left" => Some(Self::Left),
+            "right" => Some(Self::Right),
+            "up" => Some(Self::Up),
+            "down" => Some(Self::Down),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanAmount {
+    DefaultStep,
+    Cells(i32),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     NextPage,
@@ -85,8 +111,8 @@ pub enum Command {
     ZoomOut,
     ZoomReset,
     Pan {
-        dx: i32,
-        dy: i32,
+        direction: PanDirection,
+        amount: PanAmount,
     },
     SetPageLayout {
         mode: PageLayoutModeArg,
@@ -339,7 +365,10 @@ impl Command {
 mod tests {
     use crate::palette::PaletteKind;
 
-    use super::{ActionId, Command, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg};
+    use super::{
+        ActionId, Command, PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind,
+        SpreadDirectionArg,
+    };
 
     #[test]
     fn command_action_id_maps_search_and_history_variants() {
@@ -358,6 +387,14 @@ mod tests {
         assert_eq!(Command::OpenOutline.action_id(), ActionId::Outline);
         assert_eq!(Command::OpenHelp.action_id(), ActionId::Help);
         assert_eq!(Command::CloseHelp.action_id(), ActionId::CloseHelp);
+        assert_eq!(
+            Command::Pan {
+                direction: PanDirection::Right,
+                amount: PanAmount::DefaultStep,
+            }
+            .action_id(),
+            ActionId::Pan
+        );
         assert_eq!(
             Command::OutlineGoto {
                 page: 5,

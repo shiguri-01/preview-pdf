@@ -13,7 +13,7 @@ use super::core::{
     set_debug_status_visible, set_page_layout, set_zoom, set_zoom_with_notice,
 };
 use super::spec::{CommandConditionContext, rejection_message_for_command};
-use super::types::{Command, CommandInvocationSource, CommandOutcome};
+use super::types::{Command, CommandInvocationSource, CommandOutcome, PanAmount, PanDirection};
 
 #[derive(Debug, Clone)]
 pub struct CommandDispatchResult {
@@ -92,7 +92,12 @@ pub fn dispatch(
             set_zoom_with_notice(app, prev, notice)
         }
         Command::ZoomReset => reset_zoom(app),
-        Command::Pan { dx, dy } => {
+        Command::Pan { direction, amount } => {
+            let cells = match amount {
+                PanAmount::DefaultStep => 1,
+                PanAmount::Cells(cells) => cells,
+            };
+            let (dx, dy) = pan_delta(direction, cells);
             app.pan_x = app.pan_x.saturating_add(dx);
             app.pan_y = app.pan_y.saturating_add(dy);
             Ok((CommandOutcome::Applied, NoticeAction::Clear))
@@ -157,6 +162,15 @@ pub fn dispatch(
         outcome,
         emitted_events,
     })
+}
+
+fn pan_delta(direction: PanDirection, cells: i32) -> (i32, i32) {
+    match direction {
+        PanDirection::Left => (cells.saturating_neg(), 0),
+        PanDirection::Right => (cells, 0),
+        PanDirection::Up => (0, cells.saturating_neg()),
+        PanDirection::Down => (0, cells),
+    }
 }
 
 pub fn drain_background_events(app: &mut AppState, extension_host: &mut ExtensionHost) -> bool {
@@ -247,8 +261,8 @@ mod tests {
     use crate::app::{AppState, Notice, NoticeLevel, PaletteRequest};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
     use crate::command::{
-        ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg,
-        SearchMatcherKind,
+        ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg, PanAmount,
+        PanDirection, SearchMatcherKind,
     };
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
@@ -417,6 +431,29 @@ mod tests {
                 outcome: CommandOutcome::Applied
             }
         ));
+    }
+
+    #[test]
+    fn dispatch_pan_applies_explicit_cell_amount() {
+        let mut app = AppState::default();
+        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+
+        let result = dispatch(
+            &mut app,
+            Command::Pan {
+                direction: PanDirection::Right,
+                amount: PanAmount::Cells(3),
+            },
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.pan_x, 3);
+        assert_eq!(app.pan_y, 0);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
     }
 
     #[test]

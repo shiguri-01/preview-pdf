@@ -42,6 +42,8 @@ Rules:
   - fit-to-viewport behavior
   - pan when rendered content exceeds viewport bounds
   - command forms: `zoom <value>`, `zoom-reset`, `pan <left|right|up|down> [amount]`
+  - bare `pan <direction>` uses a viewport-relative default step based on one fifth of the visible short edge
+  - explicit `pan <direction> <amount>` keeps `amount` as an exact cell count
 
 - Search:
   - full-text substring search

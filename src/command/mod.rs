@@ -14,5 +14,5 @@ pub use spec::{
 pub use types::{
     ActionId, ArgKind, ArgSpec, Command, CommandAvailability, CommandCondition, CommandExposure,
     CommandInvocationPolicy, CommandInvocationSource, CommandOutcome, CommandRequest, CommandSpec,
-    PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg,
+    PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind, SpreadDirectionArg,
 };

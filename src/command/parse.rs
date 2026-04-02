@@ -7,7 +7,8 @@ use crate::palette::PaletteKind;
 
 use super::spec::{CommandConditionContext, find_command_spec, validate_command_id_for_source};
 use super::types::{
-    Command, CommandInvocationSource, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg,
+    Command, CommandInvocationSource, PageLayoutModeArg, PanAmount, PanDirection,
+    SearchMatcherKind, SpreadDirectionArg,
 };
 
 pub fn parse_command_text(input: &str) -> AppResult<Command> {
@@ -210,33 +211,25 @@ fn parse_pan(args_text: &str) -> AppResult<Command> {
         return Err(AppError::invalid_argument("pan accepts direction [amount]"));
     }
 
-    let Some((dx, dy)) = parse_pan_direction(&parts)? else {
+    let Some((direction, amount)) = parse_pan_direction(&parts)? else {
         return Err(AppError::invalid_argument(
             "pan direction must be one of: left, right, up, down",
         ));
     };
 
-    Ok(Command::Pan { dx, dy })
+    Ok(Command::Pan { direction, amount })
 }
 
-fn parse_pan_direction(parts: &[&str]) -> AppResult<Option<(i32, i32)>> {
+fn parse_pan_direction(parts: &[&str]) -> AppResult<Option<(PanDirection, PanAmount)>> {
     let Some(direction) = parse_pan_direction_token(parts[0]) else {
         return Ok(None);
     };
 
     let amount = match parts.get(1) {
-        Some(value_text) => parse_pan_amount(value_text)?,
-        None => 1,
+        Some(value_text) => PanAmount::Cells(parse_pan_amount(value_text)?),
+        None => PanAmount::DefaultStep,
     };
-
-    let delta = match direction {
-        "left" => (amount.saturating_neg(), 0),
-        "right" => (amount, 0),
-        "up" => (0, amount.saturating_neg()),
-        "down" => (0, amount),
-        _ => unreachable!("parse_pan_direction_token limits values"),
-    };
-    Ok(Some(delta))
+    Ok(Some((direction, amount)))
 }
 
 fn parse_pan_amount(value_text: &str) -> AppResult<i32> {
@@ -252,14 +245,8 @@ fn parse_pan_amount(value_text: &str) -> AppResult<i32> {
     }
 }
 
-fn parse_pan_direction_token(value: &str) -> Option<&'static str> {
-    match value {
-        "left" => Some("left"),
-        "right" => Some("right"),
-        "up" => Some("up"),
-        "down" => Some("down"),
-        _ => None,
-    }
+fn parse_pan_direction_token(value: &str) -> Option<PanDirection> {
+    PanDirection::parse(value)
 }
 
 fn parse_page_layout_single(args_text: &str) -> AppResult<Command> {
@@ -400,7 +387,9 @@ fn split_last_token(input: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::{first_token, parse_command_text};
-    use crate::command::{Command, PageLayoutModeArg, SearchMatcherKind, SpreadDirectionArg};
+    use crate::command::{
+        Command, PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind, SpreadDirectionArg,
+    };
     use crate::palette::PaletteKind;
 
     #[test]
@@ -501,19 +490,31 @@ mod tests {
     fn parse_pan_supports_directional_form_only() {
         assert_eq!(
             parse_command_text("pan down").expect("parse should succeed"),
-            Command::Pan { dx: 0, dy: 1 }
+            Command::Pan {
+                direction: PanDirection::Down,
+                amount: PanAmount::DefaultStep,
+            }
         );
         assert_eq!(
             parse_command_text("pan left 3").expect("parse should succeed"),
-            Command::Pan { dx: -3, dy: 0 }
+            Command::Pan {
+                direction: PanDirection::Left,
+                amount: PanAmount::Cells(3),
+            }
         );
         assert_eq!(
             parse_command_text("pan down 0").expect("parse should succeed"),
-            Command::Pan { dx: 0, dy: 0 }
+            Command::Pan {
+                direction: PanDirection::Down,
+                amount: PanAmount::Cells(0),
+            }
         );
         assert_eq!(
             parse_command_text("pan left -3").expect("parse should succeed"),
-            Command::Pan { dx: 3, dy: 0 }
+            Command::Pan {
+                direction: PanDirection::Left,
+                amount: PanAmount::Cells(-3),
+            }
         );
         assert!(
             parse_command_text("pan -2 4").is_err(),
@@ -526,15 +527,15 @@ mod tests {
         assert_eq!(
             parse_command_text("pan left -2147483648").expect("parse should succeed"),
             Command::Pan {
-                dx: i32::MAX,
-                dy: 0
+                direction: PanDirection::Left,
+                amount: PanAmount::Cells(i32::MIN),
             }
         );
         assert_eq!(
             parse_command_text("pan up -2147483648").expect("parse should succeed"),
             Command::Pan {
-                dx: 0,
-                dy: i32::MAX
+                direction: PanDirection::Up,
+                amount: PanAmount::Cells(i32::MIN),
             }
         );
     }
@@ -544,15 +545,15 @@ mod tests {
         assert_eq!(
             parse_command_text("pan right -2147483648").expect("parse should succeed"),
             Command::Pan {
-                dx: i32::MIN,
-                dy: 0,
+                direction: PanDirection::Right,
+                amount: PanAmount::Cells(i32::MIN),
             }
         );
         assert_eq!(
             parse_command_text("pan down -2147483648").expect("parse should succeed"),
             Command::Pan {
-                dx: 0,
-                dy: i32::MIN,
+                direction: PanDirection::Down,
+                amount: PanAmount::Cells(i32::MIN),
             }
         );
     }
@@ -562,29 +563,29 @@ mod tests {
         assert_eq!(
             parse_command_text("pan right 999999999999").expect("parse should succeed"),
             Command::Pan {
-                dx: i32::MAX,
-                dy: 0,
+                direction: PanDirection::Right,
+                amount: PanAmount::Cells(i32::MAX),
             }
         );
         assert_eq!(
             parse_command_text("pan down -999999999999").expect("parse should succeed"),
             Command::Pan {
-                dx: 0,
-                dy: i32::MIN,
+                direction: PanDirection::Down,
+                amount: PanAmount::Cells(i32::MIN),
             }
         );
         assert_eq!(
             parse_command_text("pan left 999999999999").expect("parse should succeed"),
             Command::Pan {
-                dx: -i32::MAX,
-                dy: 0,
+                direction: PanDirection::Left,
+                amount: PanAmount::Cells(i32::MAX),
             }
         );
         assert_eq!(
             parse_command_text("pan up -999999999999").expect("parse should succeed"),
             Command::Pan {
-                dx: 0,
-                dy: i32::MAX,
+                direction: PanDirection::Up,
+                amount: PanAmount::Cells(i32::MIN),
             }
         );
     }

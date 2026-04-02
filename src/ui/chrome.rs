@@ -8,6 +8,8 @@ use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
 use super::layout::UiLayout;
 use super::{border, error_text, primary_text, warning_text};
 
+const MIN_FILENAME_ELISION_WIDTH: usize = 7;
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw_chrome(
     frame: &mut Frame<'_>,
@@ -70,7 +72,7 @@ fn build_status_text(
 ) -> String {
     let page_total = page_count.max(1);
     let base = format!(
-        "{} | Zoom {:.2}x",
+        "{} | zoom {:.2}x",
         format_page_segment(app, page_total),
         app.zoom
     );
@@ -81,7 +83,7 @@ fn build_status_text(
     }
 
     if display_width(&base) >= max_width {
-        return truncate_right_by_width(&base, max_width);
+        return trim_trailing_whitespace(truncate_right_by_width(&base, max_width));
     }
 
     let ext = extension_status_segments
@@ -96,11 +98,9 @@ fn build_status_text(
             let with_filename_fixed = fixed_with_ext + display_width(sep);
             if with_filename_fixed < max_width {
                 let filename_budget = max_width - with_filename_fixed;
-                if filename_budget > 0 {
-                    let filename = elide_middle_by_width(file_name, filename_budget);
-                    if !filename.is_empty() {
-                        return format!("{base}{sep}{filename}{sep}{ext_text}");
-                    }
+                let filename = format_filename_segment(file_name, filename_budget);
+                if !filename.is_empty() {
+                    return format!("{base}{sep}{filename}{sep}{ext_text}");
                 }
             }
             return format!("{base}{sep}{ext_text}");
@@ -110,14 +110,14 @@ fn build_status_text(
     let fixed_with_filename = display_width(&base) + display_width(sep);
     if fixed_with_filename < max_width {
         let filename_budget = max_width - fixed_with_filename;
-        let filename = elide_middle_by_width(file_name, filename_budget);
+        let filename = format_filename_segment(file_name, filename_budget);
         if !filename.is_empty() {
             return format!("{base}{sep}{filename}");
         }
         return base;
     }
 
-    truncate_right_by_width(&base, max_width)
+    trim_trailing_whitespace(truncate_right_by_width(&base, max_width))
 }
 
 fn format_page_segment(app: &AppState, page_total: usize) -> String {
@@ -126,17 +126,17 @@ fn format_page_segment(app: &AppState, page_total: usize) -> String {
     match app.page_layout_mode {
         PageLayoutMode::Single => {
             let page_now = slots.anchor_page.saturating_add(1).min(page_total);
-            format!("p. {:>page_width$}/{:>page_width$}", page_now, page_total)
+            format!("p.{:>page_width$}/{:>page_width$}", page_now, page_total)
         }
         PageLayoutMode::Spread => match slots.trailing_page {
             Some(trailing) => format!(
-                "pp. {:>page_width$}-{:>page_width$}/{:>page_width$}",
+                "pp.{:>page_width$}-{:>page_width$}/{:>page_width$}",
                 slots.anchor_page + 1,
                 trailing + 1,
                 page_total
             ),
             None => format!(
-                "pp. {:>page_width$}/{:>page_width$}",
+                "pp.{:>page_width$}/{:>page_width$}",
                 slots.anchor_page + 1,
                 page_total
             ),
@@ -182,6 +182,12 @@ fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
 
+fn trim_trailing_whitespace(mut input: String) -> String {
+    let trimmed_len = input.trim_end().len();
+    input.truncate(trimmed_len);
+    input
+}
+
 fn truncate_right_by_width(input: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -219,8 +225,22 @@ fn suffix_by_width(input: &str, max_width: usize) -> (&str, usize) {
     (&input[start..], width)
 }
 
+fn format_filename_segment(input: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+    if display_width(input) <= max_width {
+        return input.to_string();
+    }
+    if max_width < MIN_FILENAME_ELISION_WIDTH {
+        return String::new();
+    }
+
+    elide_middle_by_width(input, max_width)
+}
+
 fn elide_middle_by_width(input: &str, max_width: usize) -> String {
-    const ELLIPSIS: &str = "...";
+    const ELLIPSIS: &str = "…";
     let ellipsis_width = display_width(ELLIPSIS);
     if max_width == 0 {
         return String::new();
@@ -251,7 +271,10 @@ fn elide_middle_by_width(input: &str, max_width: usize) -> String {
 mod tests {
     use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
 
-    use super::{build_presenter_path_text, build_status_text, display_width, stylize_notice_line};
+    use super::{
+        build_presenter_path_text, build_status_text, display_width, format_filename_segment,
+        stylize_notice_line,
+    };
 
     #[test]
     fn build_status_text_includes_page_zoom_and_file() {
@@ -262,7 +285,7 @@ mod tests {
         };
 
         let text = build_status_text(&app, "sample.pdf", 10, &[], 80);
-        assert_eq!(text, "p.  3/10 | Zoom 1.50x | sample.pdf");
+        assert_eq!(text, "p. 3/10 | zoom 1.50x | sample.pdf");
     }
 
     #[test]
@@ -306,14 +329,14 @@ mod tests {
             ],
             120,
         );
-        assert_eq!(text, "p. 1/5 | Zoom 1.00x | sample.pdf | HISTORY 1/3");
+        assert_eq!(text, "p.1/5 | zoom 1.00x | sample.pdf | HISTORY 1/3");
     }
 
     #[test]
     fn build_status_text_elides_filename_in_middle_on_tight_width() {
         let app = AppState::default();
         let text = build_status_text(&app, "very-long-document-name.pdf", 7, &[], 28);
-        assert!(text.starts_with("p. 1/7 | Zoom 1.00x |"));
+        assert!(text.starts_with("p.1/7 | zoom 1.00x |"));
         assert!(display_width(&text) <= 28);
     }
 
@@ -327,14 +350,14 @@ mod tests {
             &[String::from("SEARCH 10/100")],
             38,
         );
-        assert_eq!(text, "p. 1/7 | Zoom 1.00x | SEARCH 10/100");
+        assert_eq!(text, "p.1/7 | zoom 1.00x | SEARCH 10/100");
     }
 
     #[test]
     fn build_status_text_handles_very_narrow_width() {
         let app = AppState::default();
         let text = build_status_text(&app, "sample.pdf", 10, &[String::from("SEARCH 1/1")], 8);
-        assert_eq!(text, "p.  1/10");
+        assert_eq!(text, "p. 1/10");
     }
 
     #[test]
@@ -350,14 +373,14 @@ mod tests {
         let text9 = build_status_text(&app9, "sample.pdf", 120, &[], 120);
         let text10 = build_status_text(&app10, "sample.pdf", 120, &[], 120);
         assert_eq!(display_width(&text9), display_width(&text10));
-        assert!(text9.starts_with("p.   9/120 | Zoom 1.00x"));
-        assert!(text10.starts_with("p.  10/120 | Zoom 1.00x"));
+        assert!(text9.starts_with("p.  9/120 | zoom 1.00x"));
+        assert!(text10.starts_with("p. 10/120 | zoom 1.00x"));
     }
 
     #[test]
     fn build_status_text_skips_empty_elided_filename_segment() {
         let app = AppState::default();
-        let expected = "p. 1/7 | Zoom 1.00x | SEARCH 10/100";
+        let expected = "p.1/7 | zoom 1.00x | SEARCH 10/100";
         let target_width = display_width(expected) + display_width(" | ") + 1;
         let text = build_status_text(
             &app,
@@ -370,6 +393,31 @@ mod tests {
     }
 
     #[test]
+    fn format_filename_segment_keeps_short_name_when_it_fits_under_threshold() {
+        assert_eq!(format_filename_segment("a.pdf", 5), "a.pdf");
+    }
+
+    #[test]
+    fn format_filename_segment_drops_long_name_below_elision_threshold() {
+        assert_eq!(
+            format_filename_segment("very-long-document-name.pdf", 5),
+            ""
+        );
+        assert_eq!(
+            format_filename_segment("very-long-document-name.pdf", 6),
+            ""
+        );
+    }
+
+    #[test]
+    fn format_filename_segment_elides_long_name_at_threshold() {
+        assert_eq!(
+            format_filename_segment("very-long-document-name.pdf", 7),
+            "ve….pdf"
+        );
+    }
+
+    #[test]
     fn build_status_text_uses_spread_page_segment() {
         let app = AppState {
             current_page: 2,
@@ -377,6 +425,6 @@ mod tests {
             ..AppState::default()
         };
         let text = build_status_text(&app, "sample.pdf", 10, &[], 120);
-        assert_eq!(text, "pp.  3- 4/10 | Zoom 1.00x | sample.pdf");
+        assert_eq!(text, "pp. 3- 4/10 | zoom 1.00x | sample.pdf");
     }
 }

@@ -8,6 +8,8 @@ use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
 use super::layout::UiLayout;
 use super::{border, error_text, primary_text, warning_text};
 
+const MIN_FILENAME_ELISION_WIDTH: usize = 7;
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw_chrome(
     frame: &mut Frame<'_>,
@@ -81,7 +83,7 @@ fn build_status_text(
     }
 
     if display_width(&base) >= max_width {
-        return truncate_right_by_width(&base, max_width);
+        return trim_trailing_whitespace(truncate_right_by_width(&base, max_width));
     }
 
     let ext = extension_status_segments
@@ -115,7 +117,7 @@ fn build_status_text(
         return base;
     }
 
-    truncate_right_by_width(&base, max_width)
+    trim_trailing_whitespace(truncate_right_by_width(&base, max_width))
 }
 
 fn format_page_segment(app: &AppState, page_total: usize) -> String {
@@ -180,6 +182,10 @@ fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
 
+fn trim_trailing_whitespace(input: String) -> String {
+    input.trim_end().to_string()
+}
+
 fn truncate_right_by_width(input: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -224,7 +230,7 @@ fn format_filename_segment(input: &str, max_width: usize) -> String {
     if display_width(input) <= max_width {
         return input.to_string();
     }
-    if max_width < 7 {
+    if max_width < MIN_FILENAME_ELISION_WIDTH {
         return String::new();
     }
 
@@ -349,7 +355,7 @@ mod tests {
     fn build_status_text_handles_very_narrow_width() {
         let app = AppState::default();
         let text = build_status_text(&app, "sample.pdf", 10, &[String::from("SEARCH 1/1")], 8);
-        assert_eq!(text, "p. 1/10 ");
+        assert_eq!(text, "p. 1/10");
     }
 
     #[test]

@@ -182,8 +182,10 @@ fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
 }
 
-fn trim_trailing_whitespace(input: String) -> String {
-    input.trim_end().to_string()
+fn trim_trailing_whitespace(mut input: String) -> String {
+    let trimmed_len = input.trim_end().len();
+    input.truncate(trimmed_len);
+    input
 }
 
 fn truncate_right_by_width(input: &str, max_width: usize) -> String {

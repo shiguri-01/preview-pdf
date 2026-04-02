@@ -70,7 +70,7 @@ fn build_status_text(
 ) -> String {
     let page_total = page_count.max(1);
     let base = format!(
-        "{} | Zoom {:.2}x",
+        "{} | zoom {:.2}x",
         format_page_segment(app, page_total),
         app.zoom
     );
@@ -126,17 +126,17 @@ fn format_page_segment(app: &AppState, page_total: usize) -> String {
     match app.page_layout_mode {
         PageLayoutMode::Single => {
             let page_now = slots.anchor_page.saturating_add(1).min(page_total);
-            format!("p. {:>page_width$}/{:>page_width$}", page_now, page_total)
+            format!("p.{:>page_width$}/{:>page_width$}", page_now, page_total)
         }
         PageLayoutMode::Spread => match slots.trailing_page {
             Some(trailing) => format!(
-                "pp. {:>page_width$}-{:>page_width$}/{:>page_width$}",
+                "pp.{:>page_width$}-{:>page_width$}/{:>page_width$}",
                 slots.anchor_page + 1,
                 trailing + 1,
                 page_total
             ),
             None => format!(
-                "pp. {:>page_width$}/{:>page_width$}",
+                "pp.{:>page_width$}/{:>page_width$}",
                 slots.anchor_page + 1,
                 page_total
             ),
@@ -262,7 +262,7 @@ mod tests {
         };
 
         let text = build_status_text(&app, "sample.pdf", 10, &[], 80);
-        assert_eq!(text, "p.  3/10 | Zoom 1.50x | sample.pdf");
+        assert_eq!(text, "p. 3/10 | zoom 1.50x | sample.pdf");
     }
 
     #[test]
@@ -306,14 +306,14 @@ mod tests {
             ],
             120,
         );
-        assert_eq!(text, "p. 1/5 | Zoom 1.00x | sample.pdf | HISTORY 1/3");
+        assert_eq!(text, "p.1/5 | zoom 1.00x | sample.pdf | HISTORY 1/3");
     }
 
     #[test]
     fn build_status_text_elides_filename_in_middle_on_tight_width() {
         let app = AppState::default();
         let text = build_status_text(&app, "very-long-document-name.pdf", 7, &[], 28);
-        assert!(text.starts_with("p. 1/7 | Zoom 1.00x |"));
+        assert!(text.starts_with("p.1/7 | zoom 1.00x |"));
         assert!(display_width(&text) <= 28);
     }
 
@@ -327,14 +327,14 @@ mod tests {
             &[String::from("SEARCH 10/100")],
             38,
         );
-        assert_eq!(text, "p. 1/7 | Zoom 1.00x | SEARCH 10/100");
+        assert_eq!(text, "p.1/7 | zoom 1.00x | v | SEARCH 10/100");
     }
 
     #[test]
     fn build_status_text_handles_very_narrow_width() {
         let app = AppState::default();
         let text = build_status_text(&app, "sample.pdf", 10, &[String::from("SEARCH 1/1")], 8);
-        assert_eq!(text, "p.  1/10");
+        assert_eq!(text, "p. 1/10 ");
     }
 
     #[test]
@@ -350,14 +350,14 @@ mod tests {
         let text9 = build_status_text(&app9, "sample.pdf", 120, &[], 120);
         let text10 = build_status_text(&app10, "sample.pdf", 120, &[], 120);
         assert_eq!(display_width(&text9), display_width(&text10));
-        assert!(text9.starts_with("p.   9/120 | Zoom 1.00x"));
-        assert!(text10.starts_with("p.  10/120 | Zoom 1.00x"));
+        assert!(text9.starts_with("p.  9/120 | zoom 1.00x"));
+        assert!(text10.starts_with("p. 10/120 | zoom 1.00x"));
     }
 
     #[test]
     fn build_status_text_skips_empty_elided_filename_segment() {
         let app = AppState::default();
-        let expected = "p. 1/7 | Zoom 1.00x | SEARCH 10/100";
+        let expected = "p.1/7 | zoom 1.00x | SEARCH 10/100";
         let target_width = display_width(expected) + display_width(" | ") + 1;
         let text = build_status_text(
             &app,
@@ -377,6 +377,6 @@ mod tests {
             ..AppState::default()
         };
         let text = build_status_text(&app, "sample.pdf", 10, &[], 120);
-        assert_eq!(text, "pp.  3- 4/10 | Zoom 1.00x | sample.pdf");
+        assert_eq!(text, "pp. 3- 4/10 | zoom 1.00x | sample.pdf");
     }
 }

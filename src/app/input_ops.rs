@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
@@ -64,18 +64,6 @@ impl InteractionSubsystem {
         if state.mode == Mode::Help {
             self.sequences.resolver.clear();
             return Ok(self.handle_help_key_event(state, key));
-        }
-
-        if !self.sequences.resolver.has_pending() && is_help_toggle_key(key) {
-            return Ok(KeyEventOutcome {
-                redraw: true,
-                clear_terminal: true,
-                quit_requested: false,
-                commands: vec![CommandRequest::new(
-                    Command::OpenHelp,
-                    CommandInvocationSource::Keymap,
-                )],
-            });
         }
 
         // Once a sequence has started, keep routing keys through the resolver until it
@@ -299,8 +287,8 @@ impl InteractionSubsystem {
                 outcome
             }
             SequenceResolution::Dispatch(command) => KeyEventOutcome {
-                redraw: redraw_on_dispatch,
-                clear_terminal: false,
+                redraw: redraw_on_dispatch || matches!(command, Command::OpenHelp),
+                clear_terminal: matches!(command, Command::OpenHelp),
                 quit_requested: false,
                 commands: vec![CommandRequest::new(
                     command,
@@ -351,13 +339,6 @@ impl InteractionSubsystem {
         }
         Ok((changed, pending_command))
     }
-}
-
-fn is_help_toggle_key(key: KeyEvent) -> bool {
-    // Some terminals report Shift+/ as `?`, while others keep the key code as `/`
-    // and set the Shift modifier. Accept both so help remains accessible.
-    matches!(key.code, KeyCode::Char('?'))
-        || (matches!(key.code, KeyCode::Char('/')) && key.modifiers.contains(KeyModifiers::SHIFT))
 }
 
 #[cfg(test)]
@@ -438,29 +419,6 @@ mod tests {
             .handle_key_event(
                 &mut state,
                 KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
-            )
-            .expect("help key should be handled");
-
-        assert_eq!(state.mode, crate::app::Mode::Normal);
-        assert!(matches!(
-            outcome.commands.as_slice(),
-            [request]
-                if request.command == Command::OpenHelp
-                    && request.source == CommandInvocationSource::Keymap
-        ));
-        assert!(outcome.redraw);
-        assert!(outcome.clear_terminal);
-    }
-
-    #[test]
-    fn help_key_requests_open_help_command_with_shift_slash() {
-        let mut interaction = InteractionSubsystem::default();
-        let mut state = AppState::default();
-
-        let outcome = interaction
-            .handle_key_event(
-                &mut state,
-                KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT),
             )
             .expect("help key should be handled");
 

@@ -164,6 +164,10 @@ impl InteractionSubsystem {
         self.apply_sequence_resolution(resolution, true)
     }
 
+    pub(crate) fn drain_queued_commands(&mut self) -> Vec<CommandRequest> {
+        self.queued_commands.drain(..).collect()
+    }
+
     pub(crate) fn handle_palette_key(
         &mut self,
         state: &mut AppState,
@@ -278,6 +282,19 @@ impl InteractionSubsystem {
                 quit_requested: true,
                 command: None,
             },
+            SequenceResolution::DispatchThen { first, next } => {
+                if matches!(first, Command::Quit) {
+                    return KeyEventOutcome {
+                        redraw: false,
+                        clear_terminal: false,
+                        quit_requested: true,
+                        command: None,
+                    };
+                }
+                self.queued_commands
+                    .push_back(CommandRequest::new(first, CommandInvocationSource::Keymap));
+                self.apply_sequence_resolution(*next, redraw_on_dispatch)
+            }
             SequenceResolution::Dispatch(command) => KeyEventOutcome {
                 redraw: redraw_on_dispatch,
                 clear_terminal: false,
@@ -350,7 +367,7 @@ mod tests {
 
     use crate::app::terminal_session::TerminalSurface;
     use crate::app::{AppState, Mode};
-    use crate::command::{Command, CommandInvocationSource};
+    use crate::command::{Command, CommandInvocationSource, CommandRequest};
     use crate::config::Config;
     use crate::input::sequence::{SequenceRegistry, SequenceResolver};
     use crate::input::shortcut::ShortcutKey;
@@ -640,5 +657,54 @@ mod tests {
         ));
         assert!(flushed.redraw);
         assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn timed_out_sequence_queues_expired_command_before_processing_new_key() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .expect("single-key binding should register");
+        let mut interaction = InteractionSubsystem::with_sequence_registry(registry.clone());
+        interaction.sequences.resolver = SequenceResolver::new(registry, Duration::ZERO);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let next = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            )
+            .expect("next key should dispatch after queuing the expired command");
+        let queued = interaction.drain_queued_commands();
+
+        assert_eq!(
+            queued,
+            vec![CommandRequest::new(
+                Command::FirstPage,
+                CommandInvocationSource::Keymap,
+            )]
+        );
+        assert!(matches!(
+            next.command,
+            Some(ref request)
+                if request.command == Command::NextPage
+                    && request.source == CommandInvocationSource::Keymap
+        ));
     }
 }

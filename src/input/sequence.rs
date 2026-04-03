@@ -113,6 +113,10 @@ pub enum SequenceResolution {
     Pending,
     Cleared,
     Dispatch(Command),
+    DispatchThen {
+        first: Command,
+        next: Box<SequenceResolution>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -172,10 +176,28 @@ impl SequenceResolver {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> SequenceResolution {
-        let key = normalize_key(key);
+        self.handle_normalized_key(normalize_key(key))
+    }
+
+    fn handle_normalized_key(&mut self, key: ShortcutKey) -> SequenceResolution {
         let had_pending = !self.state.is_empty();
 
         if had_pending {
+            if self.state.is_timed_out() {
+                return match self.confirm_pending() {
+                    SequenceResolution::Dispatch(command) => SequenceResolution::DispatchThen {
+                        first: command,
+                        next: Box::new(self.handle_normalized_key(key)),
+                    },
+                    SequenceResolution::Cleared | SequenceResolution::Noop => {
+                        self.handle_normalized_key(key)
+                    }
+                    SequenceResolution::Pending | SequenceResolution::DispatchThen { .. } => {
+                        unreachable!("confirming a timed out sequence cannot remain pending")
+                    }
+                };
+            }
+
             if key.code == KeyCode::Esc {
                 self.state.clear();
                 return SequenceResolution::Cleared;
@@ -307,14 +329,14 @@ fn normalize_key(key: KeyEvent) -> ShortcutKey {
             let mut modifiers = key.modifiers;
             modifiers.remove(KeyModifiers::SHIFT);
 
-            let normalized_char =
-                if (modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::ALT))
-                    && ch.is_ascii_alphabetic()
-                {
-                    ch.to_ascii_lowercase()
-                } else {
-                    ch
-                };
+            let normalized_char = if (modifiers.contains(KeyModifiers::CONTROL)
+                || modifiers.contains(KeyModifiers::ALT))
+                && ch.is_ascii_alphabetic()
+            {
+                ch.to_ascii_lowercase()
+            } else {
+                ch
+            };
 
             ShortcutKey::new(KeyCode::Char(normalized_char), modifiers)
         }
@@ -418,6 +440,38 @@ mod tests {
 
         let confirm = resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(confirm, SequenceResolution::Dispatch(Command::FirstPage));
+    }
+
+    #[test]
+    fn expired_pending_sequence_dispatches_before_consuming_next_key() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .expect("single-key binding should register");
+        let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+
+        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(
+            resolution,
+            SequenceResolution::DispatchThen {
+                first: Command::FirstPage,
+                next: Box::new(SequenceResolution::Dispatch(Command::NextPage)),
+            }
+        );
     }
 
     #[test]

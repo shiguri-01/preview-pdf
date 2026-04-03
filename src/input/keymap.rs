@@ -157,12 +157,10 @@ mod tests {
         let registry = build_builtin_sequence_registry();
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let last_page =
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        let last_page = resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
         assert_eq!(last_page, SequenceResolution::Dispatch(Command::LastPage));
 
-        let pan_down =
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
+        let pan_down = resolver.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
         assert_eq!(
             pan_down,
             SequenceResolution::Dispatch(Command::Pan {

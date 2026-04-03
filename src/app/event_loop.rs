@@ -584,6 +584,20 @@ impl App {
     where
         S: TerminalSurface + SessionRestore,
     {
+        let timeout_outcome = self.interaction.flush_sequence_timeout();
+        if timeout_outcome.quit_requested {
+            Self::terminate_process_now(runtime);
+        }
+        if timeout_outcome.redraw {
+            self.request_redraw(runtime, RedrawReason::Input);
+        }
+        for request in self.interaction.drain_queued_commands() {
+            let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
+        }
+        if let Some(request) = timeout_outcome.command {
+            let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
+        }
+
         match waited {
             WaitEvent::Event(DomainEvent::Input(event)) => {
                 let input_outcome = self.handle_input_event(
@@ -597,6 +611,9 @@ impl App {
                 }
                 if input_outcome.redraw_requested {
                     self.request_redraw(runtime, RedrawReason::Input);
+                }
+                for request in self.interaction.drain_queued_commands() {
+                    let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
                 }
                 if let Some(request) = input_outcome.command {
                     let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
@@ -693,18 +710,7 @@ impl App {
             WaitEvent::Event(DomainEvent::RedrawTick) => {
                 self.request_redraw(runtime, RedrawReason::Timer);
             }
-            WaitEvent::Event(DomainEvent::Wake) => {
-                let timeout_outcome = self.interaction.flush_sequence_timeout();
-                if timeout_outcome.quit_requested {
-                    Self::terminate_process_now(runtime);
-                }
-                if timeout_outcome.redraw {
-                    self.request_redraw(runtime, RedrawReason::Input);
-                }
-                if let Some(request) = timeout_outcome.command {
-                    let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
-                }
-            }
+            WaitEvent::Event(DomainEvent::Wake) => {}
             WaitEvent::Closed => return Ok(LoopControl::Break),
         }
         Ok(LoopControl::Continue)

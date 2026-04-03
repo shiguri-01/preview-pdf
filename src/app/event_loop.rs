@@ -586,7 +586,7 @@ impl App {
     {
         // Wake events are not guaranteed to arrive before the next input event, so the
         // loop checks for timed-out sequences at the start of every iteration as well.
-        let timeout_outcome = self.interaction.flush_sequence_timeout();
+        let timeout_outcome = self.interaction.flush_sequence_timeout(self.state.mode);
         if timeout_outcome.quit_requested {
             Self::terminate_process_now(runtime);
         }

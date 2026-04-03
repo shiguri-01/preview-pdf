@@ -43,17 +43,6 @@ pub struct SequenceSubsystem {
     pub resolver: SequenceResolver,
 }
 
-impl Default for SequenceSubsystem {
-    fn default() -> Self {
-        Self {
-            resolver: SequenceResolver::new(
-                build_builtin_sequence_registry(),
-                DEFAULT_SEQUENCE_TIMEOUT,
-            ),
-        }
-    }
-}
-
 pub struct InteractionSubsystem {
     pub extensions: ExtensionSubsystem,
     pub palette: PaletteSubsystem,

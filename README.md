@@ -16,7 +16,7 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 - Command palette for actions like `goto-page` and `page-layout-spread`
 - Help overlay via `help`
 
-## Keys (default)
+## Keys
 
 | Key | Action |
 |---|---|
@@ -40,21 +40,6 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 - `zoom <value>`
 - `search`
 - `history`
-
-## Configuration (optional)
-
-`pvf` loads `config.toml` from:
-1. `PVF_CONFIG_PATH`
-2. `XDG_CONFIG_HOME/pvf/config.toml`
-3. `HOME/.config/pvf/config.toml`
-4. `APPDATA/pvf/config.toml`
-
-Minimal example:
-
-```toml
-[keymap]
-preset = "default" # or "emacs"
-```
 
 ## Note
 

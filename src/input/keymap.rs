@@ -4,49 +4,15 @@ use crate::app::Mode;
 use crate::command::{Command, PanAmount, PanDirection};
 use crate::palette::PaletteKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeymapPreset {
-    Default,
-    Emacs,
-}
-
-impl KeymapPreset {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Default => "default",
-            Self::Emacs => "emacs",
-        }
-    }
-
-    pub fn parse(value: &str) -> Self {
-        match value {
-            "default" => Self::Default,
-            "emacs" => Self::Emacs,
-            _ => Self::Default,
-        }
-    }
-}
-
 pub fn map_key_to_command(key: KeyEvent, mode: Mode) -> Option<Command> {
-    map_key_to_command_with_preset(key, mode, KeymapPreset::Default)
-}
-
-pub fn map_key_to_command_with_preset(
-    key: KeyEvent,
-    mode: Mode,
-    preset: KeymapPreset,
-) -> Option<Command> {
     match mode {
-        Mode::Normal => match preset {
-            KeymapPreset::Default => map_normal_mode_key_default(key),
-            KeymapPreset::Emacs => map_normal_mode_key_emacs(key),
-        },
+        Mode::Normal => map_normal_mode_key(key),
         Mode::Palette => None,
         Mode::Help => map_help_mode_key(key),
     }
 }
 
-fn map_normal_mode_key_default(key: KeyEvent) -> Option<Command> {
+fn map_normal_mode_key(key: KeyEvent) -> Option<Command> {
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         return match key.code {
             KeyCode::Char('o') => Some(Command::HistoryBack),
@@ -93,38 +59,6 @@ fn map_normal_mode_key_default(key: KeyEvent) -> Option<Command> {
     }
 }
 
-fn map_normal_mode_key_emacs(key: KeyEvent) -> Option<Command> {
-    if key.modifiers.contains(KeyModifiers::ALT) {
-        return match key.code {
-            KeyCode::Char('x') => Some(Command::OpenPalette {
-                kind: PaletteKind::Command,
-                seed: None,
-            }),
-            KeyCode::Char('v') => Some(Command::PrevPage),
-            _ => None,
-        };
-    }
-
-    if key.modifiers.contains(KeyModifiers::CONTROL) {
-        return match key.code {
-            KeyCode::Char('n') => Some(Command::NextPage),
-            KeyCode::Char('p') => Some(Command::PrevPage),
-            KeyCode::Char('s') => Some(Command::OpenSearch),
-            KeyCode::Char('g') => Some(Command::Cancel),
-            KeyCode::Char('o') => Some(Command::HistoryBack),
-            KeyCode::Char('i') => Some(Command::HistoryForward),
-            KeyCode::Char('q') => Some(Command::Quit),
-            _ => None,
-        };
-    }
-
-    match key.code {
-        KeyCode::PageDown => Some(Command::NextPage),
-        KeyCode::PageUp => Some(Command::PrevPage),
-        _ => map_normal_mode_key_default(key),
-    }
-}
-
 fn map_help_mode_key(key: KeyEvent) -> Option<Command> {
     match key.code {
         KeyCode::Esc => Some(Command::CloseHelp),
@@ -139,90 +73,60 @@ mod tests {
     use crate::app::Mode;
     use crate::command::{Command, PanAmount, PanDirection};
 
-    use super::{KeymapPreset, map_key_to_command_with_preset};
+    use super::map_key_to_command;
 
     #[test]
-    fn keymap_preset_parse_defaults_on_unknown_values() {
-        assert_eq!(KeymapPreset::parse("default"), KeymapPreset::Default);
-        assert_eq!(KeymapPreset::parse("emacs"), KeymapPreset::Emacs);
-        assert_eq!(KeymapPreset::parse("unknown"), KeymapPreset::Default);
-    }
-
-    #[test]
-    fn emacs_preset_maps_ctrl_n_and_alt_x() {
-        let next = map_key_to_command_with_preset(
-            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
-            Mode::Normal,
-            KeymapPreset::Emacs,
-        );
-        assert_eq!(next, Some(Command::NextPage));
-
-        let palette = map_key_to_command_with_preset(
-            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT),
-            Mode::Normal,
-            KeymapPreset::Emacs,
-        );
-        assert!(matches!(palette, Some(Command::OpenPalette { .. })));
-    }
-
-    #[test]
-    fn default_preset_maps_slash_to_open_search() {
-        let search = map_key_to_command_with_preset(
+    fn normal_mode_maps_slash_to_open_search() {
+        let search = map_key_to_command(
             KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
             Mode::Normal,
-            KeymapPreset::Default,
         );
 
         assert_eq!(search, Some(Command::OpenSearch));
     }
 
     #[test]
-    fn default_preset_maps_question_mark_to_help_and_help_escape_to_close_help() {
-        let open_help = map_key_to_command_with_preset(
-            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
-            Mode::Normal,
-            KeymapPreset::Default,
-        );
-        assert_eq!(open_help, Some(Command::OpenHelp));
-
-        let close_help = map_key_to_command_with_preset(
-            KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-            Mode::Help,
-            KeymapPreset::Default,
-        );
+    fn help_mode_maps_escape_to_close_help() {
+        let close_help =
+            map_key_to_command(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), Mode::Help);
         assert_eq!(close_help, Some(Command::CloseHelp));
 
-        let question_mark_in_help = map_key_to_command_with_preset(
+        let question_mark_in_help = map_key_to_command(
             KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
             Mode::Help,
-            KeymapPreset::Default,
         );
         assert_eq!(question_mark_in_help, None);
     }
 
     #[test]
-    fn default_preset_maps_zero_to_zoom_reset() {
-        let reset = map_key_to_command_with_preset(
+    fn normal_mode_maps_zero_to_zoom_reset() {
+        let reset = map_key_to_command(
             KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
             Mode::Normal,
-            KeymapPreset::Default,
         );
         assert_eq!(reset, Some(Command::ZoomReset));
-
-        let emacs_reset = map_key_to_command_with_preset(
-            KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
-            Mode::Normal,
-            KeymapPreset::Emacs,
-        );
-        assert_eq!(emacs_reset, Some(Command::ZoomReset));
     }
 
     #[test]
-    fn default_preset_maps_pan_keys_to_default_step_commands() {
-        let left = map_key_to_command_with_preset(
+    fn normal_mode_maps_history_shortcuts() {
+        let back = map_key_to_command(
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+            Mode::Normal,
+        );
+        let forward = map_key_to_command(
+            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL),
+            Mode::Normal,
+        );
+
+        assert_eq!(back, Some(Command::HistoryBack));
+        assert_eq!(forward, Some(Command::HistoryForward));
+    }
+
+    #[test]
+    fn normal_mode_maps_pan_keys_to_default_step_commands() {
+        let left = map_key_to_command(
             KeyEvent::new(KeyCode::Char('H'), KeyModifiers::NONE),
             Mode::Normal,
-            KeymapPreset::Default,
         );
         assert_eq!(
             left,
@@ -232,10 +136,9 @@ mod tests {
             })
         );
 
-        let down = map_key_to_command_with_preset(
+        let down = map_key_to_command(
             KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE),
             Mode::Normal,
-            KeymapPreset::Default,
         );
         assert_eq!(
             down,

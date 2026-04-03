@@ -25,11 +25,7 @@ impl App {
         match event {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                 *last_input_at = Instant::now();
-                let outcome = self.interaction.handle_key_event(
-                    &mut self.state,
-                    key,
-                    &self.config.keymap.preset,
-                )?;
+                let outcome = self.interaction.handle_key_event(&mut self.state, key)?;
                 if outcome.clear_terminal {
                     session.clear()?;
                 }

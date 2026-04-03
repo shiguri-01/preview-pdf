@@ -97,6 +97,7 @@ Rules:
 | `-` | Zoom out |
 | `0` | Reset zoom |
 | `H` / `J` / `K` / `L` | Pan |
+| `:` | Open command palette |
 | `/`      | Open search palette |
 | `n`      | Next search hit |
 | `N`      | Previous search hit |

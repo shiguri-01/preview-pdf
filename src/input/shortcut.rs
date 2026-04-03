@@ -23,10 +23,6 @@ impl ShortcutKey {
         Self::new(KeyCode::Char(ch), KeyModifiers::ALT)
     }
 
-    pub const fn shift(ch: char) -> Self {
-        Self::new(KeyCode::Char(ch), KeyModifiers::SHIFT)
-    }
-
     pub const fn char(ch: char) -> Self {
         Self::key(KeyCode::Char(ch))
     }
@@ -102,7 +98,7 @@ mod tests {
     fn formats_regular_and_modified_keys() {
         assert_eq!(format_shortcut_key(ShortcutKey::ctrl('o')), "Ctrl+O");
         assert_eq!(format_shortcut_key(ShortcutKey::char('?')), "?");
-        assert_eq!(format_shortcut_key(ShortcutKey::shift('a')), "Shift+A");
+        assert_eq!(format_shortcut_key(ShortcutKey::char('A')), "A");
         assert_eq!(
             format_shortcut_key(ShortcutKey::key(KeyCode::PageDown)),
             "PgDn"

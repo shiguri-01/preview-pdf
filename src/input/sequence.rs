@@ -13,6 +13,7 @@ pub enum SequenceRegistrationError {
     EmptySequence,
     ReservedKeyInSequence,
     InvalidNumericSuffix,
+    ShiftCharBindingUnsupported,
 }
 
 type NumericCommandFactory = fn(usize) -> Command;
@@ -50,13 +51,15 @@ impl SequenceRegistry {
         if keys.len() > 1 && keys.iter().copied().any(is_reserved_sequence_key) {
             return Err(SequenceRegistrationError::ReservedKeyInSequence);
         }
+        let keys = keys
+            .iter()
+            .copied()
+            .map(canonicalize_binding_key)
+            .collect::<Result<Vec<_>, _>>()?;
 
         self.bindings
-            .retain(|binding| !matches!(binding, SequenceBinding::Exact { keys: existing, .. } if existing == keys));
-        self.bindings.push(SequenceBinding::Exact {
-            keys: keys.to_vec(),
-            command,
-        });
+            .retain(|binding| !matches!(binding, SequenceBinding::Exact { keys: existing, .. } if existing == &keys));
+        self.bindings.push(SequenceBinding::Exact { keys, command });
         Ok(())
     }
 
@@ -65,6 +68,7 @@ impl SequenceRegistry {
         suffix: ShortcutKey,
         factory: NumericCommandFactory,
     ) -> Result<(), SequenceRegistrationError> {
+        let suffix = canonicalize_binding_key(suffix)?;
         if is_reserved_sequence_key(suffix) {
             return Err(SequenceRegistrationError::ReservedKeyInSequence);
         }
@@ -328,13 +332,32 @@ fn match_numeric_prefix(
 }
 
 fn normalize_key(key: KeyEvent) -> ShortcutKey {
+    normalize_shortcut_key(ShortcutKey::new(key.code, key.modifiers))
+}
+
+fn canonicalize_binding_key(key: ShortcutKey) -> Result<ShortcutKey, SequenceRegistrationError> {
+    if matches!(key.code, KeyCode::Char(_))
+        && key.modifiers.contains(KeyModifiers::SHIFT)
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return Err(SequenceRegistrationError::ShiftCharBindingUnsupported);
+    }
+
+    Ok(normalize_shortcut_key(key))
+}
+
+fn normalize_shortcut_key(key: ShortcutKey) -> ShortcutKey {
     match key.code {
         KeyCode::Char(ch) => {
             let mut modifiers = key.modifiers;
-            modifiers.remove(KeyModifiers::SHIFT);
+            if modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                modifiers.remove(KeyModifiers::SHIFT);
+            }
 
-            let normalized_char = if (modifiers.contains(KeyModifiers::CONTROL)
-                || modifiers.contains(KeyModifiers::ALT))
+            let normalized_char = if modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                 && ch.is_ascii_alphabetic()
             {
                 ch.to_ascii_lowercase()
@@ -545,5 +568,43 @@ mod tests {
             .register_numeric_prefix(ShortcutKey::char('5'), |page| Command::GotoPage { page })
             .expect_err("digit suffix should be rejected");
         assert_eq!(error, SequenceRegistrationError::InvalidNumericSuffix);
+    }
+
+    #[test]
+    fn registry_rejects_shift_modified_printable_char_bindings() {
+        let mut registry = SequenceRegistry::new();
+
+        let error = registry
+            .register_static(
+                &[ShortcutKey::new(KeyCode::Char('a'), KeyModifiers::SHIFT)],
+                Command::NextPage,
+            )
+            .expect_err("Shift+Char bindings should be rejected");
+        assert_eq!(
+            error,
+            SequenceRegistrationError::ShiftCharBindingUnsupported
+        );
+    }
+
+    #[test]
+    fn registry_canonicalizes_ctrl_shift_letters_to_ctrl_letters() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(
+                &[ShortcutKey::new(
+                    KeyCode::Char('O'),
+                    KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+                )],
+                Command::HistoryBack,
+            )
+            .expect("Ctrl+Shift+letter should normalize to Ctrl+letter");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        let resolution =
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        assert_eq!(
+            resolution,
+            SequenceResolution::Dispatch(Command::HistoryBack)
+        );
     }
 }

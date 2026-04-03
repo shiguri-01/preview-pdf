@@ -76,6 +76,20 @@ impl InteractionSubsystem {
             },
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_sequence_registry_and_timeout(
+        registry: SequenceRegistry,
+        timeout: std::time::Duration,
+    ) -> Self {
+        Self {
+            extensions: ExtensionSubsystem::default(),
+            palette: PaletteSubsystem::default(),
+            sequences: SequenceSubsystem {
+                resolver: SequenceResolver::new(registry, timeout),
+            },
+        }
+    }
 }
 
 pub struct App {

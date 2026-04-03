@@ -22,6 +22,7 @@ pub fn build_builtin_sequence_registry() -> SequenceRegistry {
         &[ShortcutKey::char('/')],
         Command::OpenSearch,
     );
+    register_static(&mut registry, &[ShortcutKey::char('?')], Command::OpenHelp);
     register_static(
         &mut registry,
         &[ShortcutKey::char('H')],
@@ -120,6 +121,9 @@ mod tests {
 
         let search = resolver.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
         assert_eq!(search, SequenceResolution::Dispatch(Command::OpenSearch));
+
+        let help = resolver.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert_eq!(help, SequenceResolution::Dispatch(Command::OpenHelp));
 
         let reset = resolver.handle_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE));
         assert_eq!(reset, SequenceResolution::Dispatch(Command::ZoomReset));

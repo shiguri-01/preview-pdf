@@ -372,7 +372,7 @@ mod tests {
     use crate::app::{AppState, Mode};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
     use crate::config::Config;
-    use crate::input::sequence::{SequenceRegistry, SequenceResolver};
+    use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
     use crate::presenter::PresenterKind;
 
@@ -640,8 +640,8 @@ mod tests {
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
-        let mut interaction = InteractionSubsystem::with_sequence_registry(registry.clone());
-        interaction.sequences.resolver = SequenceResolver::new(registry, Duration::ZERO);
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
         let mut state = AppState::default();
 
         interaction
@@ -677,8 +677,8 @@ mod tests {
         registry
             .register_static(&[ShortcutKey::char('j')], Command::NextPage)
             .expect("single-key binding should register");
-        let mut interaction = InteractionSubsystem::with_sequence_registry(registry.clone());
-        interaction.sequences.resolver = SequenceResolver::new(registry, Duration::ZERO);
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
         let mut state = AppState::default();
 
         interaction

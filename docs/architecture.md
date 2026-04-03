@@ -86,7 +86,7 @@ This document defines the current architecture of `pvf`.
   - `traits.rs`: `PdfBackend`, `RgbaFrame`, `OutlineNode`.
   - `hayro.rs`: default backend implementation, factory, and PDF-outline extraction over `hayro_syntax`.
 
-  - `src/config.rs`
+- `src/config.rs`
   - `Config`, `RenderConfig`, `CacheConfig`.
   - Config path resolution priority:
     1. `PVF_CONFIG_PATH`
@@ -103,7 +103,7 @@ This document defines the current architecture of `pvf`.
     - `Unsupported(String)`
     - `Unimplemented(String)`
 
-  - `src/input/`
+- `src/input/`
   - `handler.rs`: input event routing entry points.
   - `keymap.rs`: built-in global key bindings.
 

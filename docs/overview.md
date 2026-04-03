@@ -97,11 +97,12 @@ terminal reports, regardless of which keys produced it.
 |----------|--------|
 | `j` | Next page |
 | `k` | Previous page |
-| `g` | First page |
+| `gg` | First page |
 | `G` | Last page |
+| `[count]G` | Go to page `count` |
 | `+` | Zoom in |
 | `-` | Zoom out |
-| `0` | Reset zoom |
+| `=` | Reset zoom |
 | `H` / `J` / `K` / `L` | Pan |
 | `:` | Open command palette |
 | `/`      | Open search palette |

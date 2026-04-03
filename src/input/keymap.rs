@@ -57,11 +57,18 @@ pub fn build_builtin_sequence_registry() -> SequenceRegistry {
     );
     register_static(&mut registry, &[ShortcutKey::char('j')], Command::NextPage);
     register_static(&mut registry, &[ShortcutKey::char('k')], Command::PrevPage);
-    register_static(&mut registry, &[ShortcutKey::char('g')], Command::FirstPage);
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+        Command::FirstPage,
+    );
     register_static(&mut registry, &[ShortcutKey::char('G')], Command::LastPage);
+    register_numeric_prefix(&mut registry, ShortcutKey::char('G'), |page| {
+        Command::GotoPage { page }
+    });
     register_static(&mut registry, &[ShortcutKey::char('+')], Command::ZoomIn);
     register_static(&mut registry, &[ShortcutKey::char('-')], Command::ZoomOut);
-    register_static(&mut registry, &[ShortcutKey::char('0')], Command::ZoomReset);
+    register_static(&mut registry, &[ShortcutKey::char('=')], Command::ZoomReset);
     register_static(
         &mut registry,
         &[ShortcutKey::ctrl('o')],
@@ -105,6 +112,16 @@ fn register_static(registry: &mut SequenceRegistry, keys: &[ShortcutKey], comman
         .expect("built-in key binding should register");
 }
 
+fn register_numeric_prefix(
+    registry: &mut SequenceRegistry,
+    suffix: ShortcutKey,
+    factory: fn(usize) -> Command,
+) {
+    registry
+        .register_numeric_prefix(suffix, factory)
+        .expect("built-in numeric key binding should register");
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -125,11 +142,47 @@ mod tests {
         let help = resolver.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
         assert_eq!(help, SequenceResolution::Dispatch(Command::OpenHelp));
 
-        let reset = resolver.handle_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE));
-        assert_eq!(reset, SequenceResolution::Dispatch(Command::ZoomReset));
-
         let back = resolver.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
         assert_eq!(back, SequenceResolution::Dispatch(Command::HistoryBack));
+    }
+
+    #[test]
+    fn builtins_require_double_g_for_first_page() {
+        let registry = build_builtin_sequence_registry();
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        let first_g = resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(first_g, SequenceResolution::Pending);
+
+        let second_g = resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        assert_eq!(second_g, SequenceResolution::Dispatch(Command::FirstPage));
+    }
+
+    #[test]
+    fn builtins_support_numeric_goto_prefix() {
+        let registry = build_builtin_sequence_registry();
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        let four = resolver.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
+        assert_eq!(four, SequenceResolution::Pending);
+
+        let two = resolver.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
+        assert_eq!(two, SequenceResolution::Pending);
+
+        let goto = resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        assert_eq!(
+            goto,
+            SequenceResolution::Dispatch(Command::GotoPage { page: 42 })
+        );
+    }
+
+    #[test]
+    fn builtins_map_equal_to_zoom_reset() {
+        let registry = build_builtin_sequence_registry();
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        let reset = resolver.handle_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE));
+        assert_eq!(reset, SequenceResolution::Dispatch(Command::ZoomReset));
     }
 
     #[test]

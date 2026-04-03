@@ -20,6 +20,7 @@ use super::state::{AppState, Mode, PaletteRequest};
 pub(crate) struct KeyEventOutcome {
     pub redraw: bool,
     pub clear_terminal: bool,
+    pub quit_requested: bool,
     pub commands: Vec<CommandRequest>,
 }
 
@@ -35,6 +36,7 @@ impl InteractionSubsystem {
                 PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
                     redraw,
                     clear_terminal: false,
+                    quit_requested: false,
                     commands: Vec::new(),
                 }),
                 PaletteKeyResult::CloseRequested { session_id } => {
@@ -42,6 +44,7 @@ impl InteractionSubsystem {
                     Ok(KeyEventOutcome {
                         redraw: closed,
                         clear_terminal: closed,
+                        quit_requested: false,
                         commands: Vec::new(),
                     })
                 }
@@ -51,6 +54,7 @@ impl InteractionSubsystem {
                     Ok(KeyEventOutcome {
                         redraw: changed_by_palette,
                         clear_terminal: changed_by_palette,
+                        quit_requested: false,
                         commands: command.into_iter().collect(),
                     })
                 }
@@ -66,6 +70,7 @@ impl InteractionSubsystem {
             return Ok(KeyEventOutcome {
                 redraw: true,
                 clear_terminal: true,
+                quit_requested: false,
                 commands: vec![CommandRequest::new(
                     Command::OpenHelp,
                     CommandInvocationSource::Keymap,
@@ -83,6 +88,7 @@ impl InteractionSubsystem {
                     return Ok(KeyEventOutcome {
                         redraw: true,
                         clear_terminal: false,
+                        quit_requested: false,
                         commands: Vec::new(),
                     });
                 }
@@ -90,6 +96,7 @@ impl InteractionSubsystem {
                     return Ok(KeyEventOutcome {
                         redraw: false,
                         clear_terminal: false,
+                        quit_requested: false,
                         commands: vec![CommandRequest::new(
                             ext_command,
                             CommandInvocationSource::Keymap,
@@ -109,6 +116,7 @@ impl InteractionSubsystem {
             return KeyEventOutcome {
                 redraw: closed,
                 clear_terminal: closed,
+                quit_requested: false,
                 commands: vec![CommandRequest::new(
                     Command::CloseHelp,
                     CommandInvocationSource::Keymap,
@@ -122,6 +130,7 @@ impl InteractionSubsystem {
                 KeyEventOutcome {
                     redraw: true,
                     clear_terminal: false,
+                    quit_requested: false,
                     commands: Vec::new(),
                 }
             }
@@ -130,6 +139,7 @@ impl InteractionSubsystem {
                 KeyEventOutcome {
                     redraw: true,
                     clear_terminal: false,
+                    quit_requested: false,
                     commands: Vec::new(),
                 }
             }
@@ -261,11 +271,26 @@ impl InteractionSubsystem {
             SequenceResolution::Pending | SequenceResolution::Cleared => KeyEventOutcome {
                 redraw: true,
                 clear_terminal: false,
+                quit_requested: false,
+                commands: Vec::new(),
+            },
+            SequenceResolution::Dispatch(Command::Quit) => KeyEventOutcome {
+                redraw: false,
+                clear_terminal: false,
+                quit_requested: true,
                 commands: Vec::new(),
             },
             SequenceResolution::DispatchThen { first, next } => {
                 // `DispatchThen` represents "commit the timed-out sequence, then keep
                 // processing the key that arrived after it" without dropping input.
+                if matches!(first, Command::Quit) {
+                    return KeyEventOutcome {
+                        redraw: false,
+                        clear_terminal: false,
+                        quit_requested: true,
+                        commands: Vec::new(),
+                    };
+                }
                 let mut outcome = Self::sequence_outcome(*next, redraw_on_dispatch);
                 outcome.commands.insert(
                     0,
@@ -276,6 +301,7 @@ impl InteractionSubsystem {
             SequenceResolution::Dispatch(command) => KeyEventOutcome {
                 redraw: redraw_on_dispatch,
                 clear_terminal: false,
+                quit_requested: false,
                 commands: vec![CommandRequest::new(
                     command,
                     CommandInvocationSource::Keymap,
@@ -386,7 +412,7 @@ mod tests {
     }
 
     #[test]
-    fn quit_key_returns_quit_command() {
+    fn quit_key_requests_immediate_quit_without_command_requeue() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
 
@@ -397,13 +423,8 @@ mod tests {
             )
             .expect("quit key should be handled");
 
-        assert_eq!(
-            outcome.commands,
-            vec![CommandRequest::new(
-                Command::Quit,
-                CommandInvocationSource::Keymap,
-            )]
-        );
+        assert!(outcome.quit_requested);
+        assert!(outcome.commands.is_empty());
         assert!(!outcome.redraw);
         assert!(!outcome.clear_terminal);
     }

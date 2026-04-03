@@ -11,6 +11,7 @@ use crate::app::terminal_session::TerminalSurface;
 pub(crate) struct InputEventOutcome {
     pub(crate) commands: Vec<CommandRequest>,
     pub(crate) redraw_requested: bool,
+    pub(crate) quit_requested: bool,
 }
 
 impl App {
@@ -34,6 +35,7 @@ impl App {
                 Ok(InputEventOutcome {
                     commands: outcome.commands,
                     redraw_requested: outcome.redraw,
+                    quit_requested: outcome.quit_requested,
                 })
             }
             Event::Resize(_, _) => {
@@ -42,11 +44,13 @@ impl App {
                 Ok(InputEventOutcome {
                     commands: Vec::new(),
                     redraw_requested: true,
+                    quit_requested: false,
                 })
             }
             _ => Ok(InputEventOutcome {
                 commands: Vec::new(),
                 redraw_requested: false,
+                quit_requested: false,
             }),
         }
     }

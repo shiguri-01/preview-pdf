@@ -1,151 +1,196 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::Mode;
 use crate::command::{Command, PanAmount, PanDirection};
 use crate::palette::PaletteKind;
 
-pub fn map_key_to_command(key: KeyEvent, mode: Mode) -> Option<Command> {
-    match mode {
-        Mode::Normal => map_normal_mode_key(key),
-        Mode::Palette => None,
-        Mode::Help => map_help_mode_key(key),
-    }
-}
+use super::sequence::SequenceRegistry;
+use super::shortcut::ShortcutKey;
 
-fn map_normal_mode_key(key: KeyEvent) -> Option<Command> {
-    if key.modifiers.contains(KeyModifiers::CONTROL) {
-        return match key.code {
-            KeyCode::Char('o') => Some(Command::HistoryBack),
-            KeyCode::Char('i') => Some(Command::HistoryForward),
-            _ => None,
-        };
-    }
+pub fn build_builtin_sequence_registry() -> SequenceRegistry {
+    let mut registry = SequenceRegistry::new();
 
-    match key.code {
-        KeyCode::Char(':') => Some(Command::OpenPalette {
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char(':')],
+        Command::OpenPalette {
             kind: PaletteKind::Command,
             seed: None,
-        }),
-        KeyCode::Char('/') => Some(Command::OpenSearch),
-        KeyCode::Char('?') => Some(Command::OpenHelp),
-        KeyCode::Char('H') => Some(Command::Pan {
+        },
+    );
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char('/')],
+        Command::OpenSearch,
+    );
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char('H')],
+        Command::Pan {
             direction: PanDirection::Left,
             amount: PanAmount::DefaultStep,
-        }),
-        KeyCode::Char('J') => Some(Command::Pan {
+        },
+    );
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char('J')],
+        Command::Pan {
             direction: PanDirection::Down,
             amount: PanAmount::DefaultStep,
-        }),
-        KeyCode::Char('K') => Some(Command::Pan {
+        },
+    );
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char('K')],
+        Command::Pan {
             direction: PanDirection::Up,
             amount: PanAmount::DefaultStep,
-        }),
-        KeyCode::Char('L') => Some(Command::Pan {
+        },
+    );
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char('L')],
+        Command::Pan {
             direction: PanDirection::Right,
             amount: PanAmount::DefaultStep,
-        }),
-        KeyCode::Char('j') => Some(Command::NextPage),
-        KeyCode::Char('k') => Some(Command::PrevPage),
-        KeyCode::Char('g') => Some(Command::FirstPage),
-        KeyCode::Char('G') => Some(Command::LastPage),
-        KeyCode::Char('+') => Some(Command::ZoomIn),
-        KeyCode::Char('-') => Some(Command::ZoomOut),
-        KeyCode::Char('0') => Some(Command::ZoomReset),
-        KeyCode::Char('n') => Some(Command::NextSearchHit),
-        KeyCode::Char('N') => Some(Command::PrevSearchHit),
-        KeyCode::Char('q') => Some(Command::Quit),
-        KeyCode::Esc => Some(Command::Cancel),
-        _ => None,
-    }
+        },
+    );
+    register_static(&mut registry, &[ShortcutKey::char('j')], Command::NextPage);
+    register_static(&mut registry, &[ShortcutKey::char('k')], Command::PrevPage);
+    register_static(&mut registry, &[ShortcutKey::char('g')], Command::FirstPage);
+    register_static(&mut registry, &[ShortcutKey::char('G')], Command::LastPage);
+    register_static(&mut registry, &[ShortcutKey::char('+')], Command::ZoomIn);
+    register_static(&mut registry, &[ShortcutKey::char('-')], Command::ZoomOut);
+    register_static(&mut registry, &[ShortcutKey::char('0')], Command::ZoomReset);
+    register_static(
+        &mut registry,
+        &[ShortcutKey::ctrl('o')],
+        Command::HistoryBack,
+    );
+    register_static(
+        &mut registry,
+        &[ShortcutKey::ctrl('i')],
+        Command::HistoryForward,
+    );
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char('n')],
+        Command::NextSearchHit,
+    );
+    register_static(
+        &mut registry,
+        &[ShortcutKey::char('N')],
+        Command::PrevSearchHit,
+    );
+    register_static(&mut registry, &[ShortcutKey::char('q')], Command::Quit);
+    register_static(
+        &mut registry,
+        &[ShortcutKey::key(KeyCode::Esc)],
+        Command::Cancel,
+    );
+
+    registry
 }
 
-fn map_help_mode_key(key: KeyEvent) -> Option<Command> {
+pub fn map_help_mode_key(key: KeyEvent) -> Option<Command> {
     match key.code {
         KeyCode::Esc => Some(Command::CloseHelp),
         _ => None,
     }
 }
 
+fn register_static(registry: &mut SequenceRegistry, keys: &[ShortcutKey], command: Command) {
+    registry
+        .register_static(keys, command)
+        .expect("built-in key binding should register");
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-    use crate::app::Mode;
     use crate::command::{Command, PanAmount, PanDirection};
 
-    use super::map_key_to_command;
+    use super::{build_builtin_sequence_registry, map_help_mode_key};
+    use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceResolution, SequenceResolver};
 
     #[test]
-    fn normal_mode_maps_slash_to_open_search() {
-        let search = map_key_to_command(
-            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
-            Mode::Normal,
-        );
+    fn builtins_preserve_existing_single_key_bindings() {
+        let registry = build_builtin_sequence_registry();
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        assert_eq!(search, Some(Command::OpenSearch));
+        let search = resolver.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        assert_eq!(search, SequenceResolution::Dispatch(Command::OpenSearch));
+
+        let reset = resolver.handle_key(KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE));
+        assert_eq!(reset, SequenceResolution::Dispatch(Command::ZoomReset));
+
+        let back = resolver.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        assert_eq!(back, SequenceResolution::Dispatch(Command::HistoryBack));
     }
 
     #[test]
-    fn help_mode_maps_escape_to_close_help() {
-        let close_help =
-            map_key_to_command(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), Mode::Help);
-        assert_eq!(close_help, Some(Command::CloseHelp));
+    fn builtins_include_pan_keys() {
+        let registry = build_builtin_sequence_registry();
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let question_mark_in_help = map_key_to_command(
-            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
-            Mode::Help,
-        );
-        assert_eq!(question_mark_in_help, None);
-    }
-
-    #[test]
-    fn normal_mode_maps_zero_to_zoom_reset() {
-        let reset = map_key_to_command(
-            KeyEvent::new(KeyCode::Char('0'), KeyModifiers::NONE),
-            Mode::Normal,
-        );
-        assert_eq!(reset, Some(Command::ZoomReset));
-    }
-
-    #[test]
-    fn normal_mode_maps_history_shortcuts() {
-        let back = map_key_to_command(
-            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
-            Mode::Normal,
-        );
-        let forward = map_key_to_command(
-            KeyEvent::new(KeyCode::Char('i'), KeyModifiers::CONTROL),
-            Mode::Normal,
-        );
-
-        assert_eq!(back, Some(Command::HistoryBack));
-        assert_eq!(forward, Some(Command::HistoryForward));
-    }
-
-    #[test]
-    fn normal_mode_maps_pan_keys_to_default_step_commands() {
-        let left = map_key_to_command(
-            KeyEvent::new(KeyCode::Char('H'), KeyModifiers::NONE),
-            Mode::Normal,
-        );
+        let left = resolver.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::NONE));
         assert_eq!(
             left,
-            Some(Command::Pan {
+            SequenceResolution::Dispatch(Command::Pan {
                 direction: PanDirection::Left,
                 amount: PanAmount::DefaultStep,
             })
         );
 
-        let down = map_key_to_command(
-            KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE),
-            Mode::Normal,
-        );
+        let down = resolver.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE));
         assert_eq!(
             down,
-            Some(Command::Pan {
+            SequenceResolution::Dispatch(Command::Pan {
                 direction: PanDirection::Down,
                 amount: PanAmount::DefaultStep,
             })
         );
+    }
+
+    #[test]
+    fn builtins_accept_shift_modified_char_events_for_uppercase_commands() {
+        let registry = build_builtin_sequence_registry();
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        let last_page =
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        assert_eq!(last_page, SequenceResolution::Dispatch(Command::LastPage));
+
+        let pan_down =
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
+        assert_eq!(
+            pan_down,
+            SequenceResolution::Dispatch(Command::Pan {
+                direction: PanDirection::Down,
+                amount: PanAmount::DefaultStep,
+            })
+        );
+    }
+
+    #[test]
+    fn builtins_accept_ctrl_shift_letter_as_ctrl_shortcut() {
+        let registry = build_builtin_sequence_registry();
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        let back = resolver.handle_key(KeyEvent::new(
+            KeyCode::Char('O'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+        assert_eq!(back, SequenceResolution::Dispatch(Command::HistoryBack));
+    }
+
+    #[test]
+    fn help_mode_maps_escape_to_close_help() {
+        let close_help = map_help_mode_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(close_help, Some(Command::CloseHelp));
+
+        let question_mark_in_help =
+            map_help_mode_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert_eq!(question_mark_in_help, None);
     }
 }

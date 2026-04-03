@@ -542,11 +542,14 @@ impl App {
 
         if runtime.ui_actor.needs_redraw() {
             let palette_view = self.interaction.palette_view();
-            let status_bar_segments = self
+            let mut status_bar_segments = self
                 .interaction
                 .extensions
                 .host
                 .status_bar_segments(&self.state);
+            if let Some(pending_sequence) = self.interaction.pending_sequence_status() {
+                status_bar_segments.push(pending_sequence);
+            }
             self.render.render_frame(
                 &mut self.state,
                 &self.config,
@@ -690,7 +693,18 @@ impl App {
             WaitEvent::Event(DomainEvent::RedrawTick) => {
                 self.request_redraw(runtime, RedrawReason::Timer);
             }
-            WaitEvent::Event(DomainEvent::Wake) => {}
+            WaitEvent::Event(DomainEvent::Wake) => {
+                let timeout_outcome = self.interaction.flush_sequence_timeout();
+                if timeout_outcome.quit_requested {
+                    Self::terminate_process_now(runtime);
+                }
+                if timeout_outcome.redraw {
+                    self.request_redraw(runtime, RedrawReason::Input);
+                }
+                if let Some(request) = timeout_outcome.command {
+                    let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
+                }
+            }
             WaitEvent::Closed => return Ok(LoopControl::Break),
         }
         Ok(LoopControl::Continue)

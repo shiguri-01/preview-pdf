@@ -105,7 +105,8 @@ This document defines the current architecture of `pvf`.
 
 - `src/input/`
   - `handler.rs`: input event routing entry points.
-  - `keymap.rs`: built-in global key bindings.
+  - `keymap.rs`: built-in global key binding definitions.
+  - `sequence.rs`: runtime multi-key sequence registry/resolver with timeout-based confirmation.
 
 - `src/ui/`
   - `layout.rs`: region geometry.

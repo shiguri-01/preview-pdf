@@ -87,6 +87,12 @@ Rules:
 
 ## Default key bindings
 
+Printable key bindings are specified by the resulting character, not by a physical
+key plus `Shift`. For example, `A`, `?`, and `:` are distinct literal bindings,
+while `Shift+A` and `Shift+/` are not separate binding forms. This keeps bindings
+stable across keyboard layouts: a binding for `?` matches the `?` character the
+terminal reports, regardless of which keys produced it.
+
 | Key      | Action |
 |----------|--------|
 | `j` | Next page |

@@ -3,6 +3,8 @@ use std::collections::VecDeque;
 use crate::config::Config;
 use crate::error::AppResult;
 use crate::extension::ExtensionHost;
+use crate::input::keymap::build_builtin_sequence_registry;
+use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, SequenceResolver};
 use crate::palette::{PaletteManager, PaletteRegistry};
 use crate::presenter::{ImagePresenter, PresenterKind, create_presenter_with_cache_limits};
 
@@ -37,10 +39,46 @@ pub struct PaletteSubsystem {
     pub pending_requests: VecDeque<PaletteRequest>,
 }
 
-#[derive(Default)]
+pub struct SequenceSubsystem {
+    pub resolver: SequenceResolver,
+}
+
 pub struct InteractionSubsystem {
     pub extensions: ExtensionSubsystem,
     pub palette: PaletteSubsystem,
+    pub sequences: SequenceSubsystem,
+}
+
+impl Default for InteractionSubsystem {
+    fn default() -> Self {
+        Self::with_sequence_registry(build_builtin_sequence_registry())
+    }
+}
+
+impl InteractionSubsystem {
+    pub(crate) fn with_sequence_registry(registry: SequenceRegistry) -> Self {
+        Self {
+            extensions: ExtensionSubsystem::default(),
+            palette: PaletteSubsystem::default(),
+            sequences: SequenceSubsystem {
+                resolver: SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT),
+            },
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_sequence_registry_and_timeout(
+        registry: SequenceRegistry,
+        timeout: std::time::Duration,
+    ) -> Self {
+        Self {
+            extensions: ExtensionSubsystem::default(),
+            palette: PaletteSubsystem::default(),
+            sequences: SequenceSubsystem {
+                resolver: SequenceResolver::new(registry, timeout),
+            },
+        }
+    }
 }
 
 pub struct App {

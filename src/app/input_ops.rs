@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
@@ -7,7 +7,8 @@ use crate::command::{
 };
 use crate::error::AppResult;
 use crate::event::AppEvent;
-use crate::input::keymap::map_key_to_command;
+use crate::input::keymap::map_help_mode_key;
+use crate::input::sequence::SequenceResolution;
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::PaletteKeyResult;
 use crate::palette::{PalettePostAction, PaletteSubmitEffect, PaletteView};
@@ -20,7 +21,7 @@ pub(crate) struct KeyEventOutcome {
     pub redraw: bool,
     pub clear_terminal: bool,
     pub quit_requested: bool,
-    pub command: Option<CommandRequest>,
+    pub commands: Vec<CommandRequest>,
 }
 
 impl InteractionSubsystem {
@@ -30,12 +31,13 @@ impl InteractionSubsystem {
         key: KeyEvent,
     ) -> AppResult<KeyEventOutcome> {
         if state.mode == Mode::Palette {
+            self.sequences.resolver.clear();
             return match self.handle_palette_key(state, key)? {
                 PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
                     redraw,
                     clear_terminal: false,
                     quit_requested: false,
-                    command: None,
+                    commands: Vec::new(),
                 }),
                 PaletteKeyResult::CloseRequested { session_id } => {
                     let closed = self.close_palette_session(state, session_id);
@@ -43,7 +45,7 @@ impl InteractionSubsystem {
                         redraw: closed,
                         clear_terminal: closed,
                         quit_requested: false,
-                        command: None,
+                        commands: Vec::new(),
                     })
                 }
                 PaletteKeyResult::Submit(action) => {
@@ -53,93 +55,71 @@ impl InteractionSubsystem {
                         redraw: changed_by_palette,
                         clear_terminal: changed_by_palette,
                         quit_requested: false,
-                        command,
+                        commands: command.into_iter().collect(),
                     })
                 }
             };
         }
 
         if state.mode == Mode::Help {
+            self.sequences.resolver.clear();
             return Ok(self.handle_help_key_event(state, key));
         }
 
-        if is_help_toggle_key(key) {
-            return Ok(KeyEventOutcome {
-                redraw: true,
-                clear_terminal: true,
-                quit_requested: false,
-                command: Some(CommandRequest::new(
-                    Command::OpenHelp,
-                    CommandInvocationSource::Keymap,
-                )),
-            });
-        }
-
-        let mut command = None;
-        match self.handle_extension_input(state, AppInputEvent::Key(key)) {
-            InputHookResult::Ignored => {}
-            InputHookResult::Consumed => {
-                return Ok(KeyEventOutcome {
-                    redraw: true,
-                    clear_terminal: false,
-                    quit_requested: false,
-                    command: None,
-                });
+        // Once a sequence has started, keep routing keys through the resolver until it
+        // either dispatches, times out, or is canceled. That keeps multi-key handling
+        // from being stolen by global shortcuts or extension-local hooks mid-sequence.
+        if !self.sequences.resolver.has_pending() {
+            match self.handle_extension_input(state, AppInputEvent::Key(key)) {
+                InputHookResult::Ignored => {}
+                InputHookResult::Consumed => {
+                    return Ok(KeyEventOutcome {
+                        redraw: true,
+                        clear_terminal: false,
+                        quit_requested: false,
+                        commands: Vec::new(),
+                    });
+                }
+                InputHookResult::EmitCommand(ext_command) => {
+                    return Ok(KeyEventOutcome {
+                        redraw: false,
+                        clear_terminal: false,
+                        quit_requested: false,
+                        commands: vec![CommandRequest::new(
+                            ext_command,
+                            CommandInvocationSource::Keymap,
+                        )],
+                    });
+                }
             }
-            InputHookResult::EmitCommand(ext_command) => {
-                command = Some(ext_command);
-            }
         }
 
-        if command.is_none() {
-            command = map_key_to_command(key, state.mode);
-        }
-
-        let Some(command) = command else {
-            return Ok(KeyEventOutcome::default());
-        };
-
-        if matches!(command, Command::Quit) {
-            return Ok(KeyEventOutcome {
-                redraw: false,
-                clear_terminal: false,
-                quit_requested: true,
-                command: None,
-            });
-        }
-
-        Ok(KeyEventOutcome {
-            redraw: false,
-            clear_terminal: false,
-            quit_requested: false,
-            command: Some(CommandRequest::new(
-                command,
-                CommandInvocationSource::Keymap,
-            )),
-        })
+        let resolution = self.sequences.resolver.handle_key(key);
+        Ok(Self::sequence_outcome(resolution, false))
     }
 
     fn handle_help_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
+        if let Some(Command::CloseHelp) = map_help_mode_key(key) {
+            let closed = self.close_help_session(state);
+            return KeyEventOutcome {
+                redraw: closed,
+                clear_terminal: closed,
+                quit_requested: false,
+                commands: vec![CommandRequest::new(
+                    Command::CloseHelp,
+                    CommandInvocationSource::Keymap,
+                )],
+            };
+        }
+
         match key.code {
-            KeyCode::Esc => {
-                let closed = self.close_help_session(state);
-                KeyEventOutcome {
-                    redraw: closed,
-                    clear_terminal: closed,
-                    quit_requested: false,
-                    command: Some(CommandRequest::new(
-                        Command::CloseHelp,
-                        CommandInvocationSource::Keymap,
-                    )),
-                }
-            }
             KeyCode::Char('j') => {
                 state.scroll_help_by(1);
                 KeyEventOutcome {
                     redraw: true,
                     clear_terminal: false,
                     quit_requested: false,
-                    command: None,
+                    commands: Vec::new(),
                 }
             }
             KeyCode::Char('k') => {
@@ -148,7 +128,7 @@ impl InteractionSubsystem {
                     redraw: true,
                     clear_terminal: false,
                     quit_requested: false,
-                    command: None,
+                    commands: Vec::new(),
                 }
             }
             _ => KeyEventOutcome::default(),
@@ -161,6 +141,22 @@ impl InteractionSubsystem {
 
     pub(crate) fn palette_view(&self) -> Option<PaletteView> {
         self.palette.manager.view()
+    }
+
+    pub(crate) fn pending_sequence_status(&self) -> Option<String> {
+        self.sequences
+            .resolver
+            .pending_display()
+            .map(|pending| format!("keys {pending}"))
+    }
+
+    pub(crate) fn flush_sequence_timeout(&mut self, mode: Mode) -> KeyEventOutcome {
+        if mode != Mode::Normal {
+            self.sequences.resolver.clear();
+            return KeyEventOutcome::default();
+        }
+        let resolution = self.sequences.resolver.flush_timeout();
+        Self::sequence_outcome(resolution, true)
     }
 
     pub(crate) fn handle_palette_key(
@@ -178,8 +174,7 @@ impl InteractionSubsystem {
         if !self.palette.manager.close_if_matches(session_id) {
             return false;
         }
-        state.mode = Mode::Normal;
-        true
+        self.transition_mode(state, Mode::Normal)
     }
 
     pub(crate) fn close_help_session(&mut self, state: &mut AppState) -> bool {
@@ -187,7 +182,7 @@ impl InteractionSubsystem {
             return false;
         }
 
-        state.mode = Mode::Normal;
+        self.transition_mode(state, Mode::Normal);
         state.reset_help_scroll();
         true
     }
@@ -214,7 +209,7 @@ impl InteractionSubsystem {
                         seed,
                     ) {
                         Ok(()) => {
-                            state.mode = Mode::Palette;
+                            self.transition_mode(state, Mode::Palette);
                             changed = true;
                         }
                         Err(err) => {
@@ -224,7 +219,7 @@ impl InteractionSubsystem {
                 }
                 PaletteRequest::Close => {
                     if self.palette.manager.close() {
-                        state.mode = Mode::Normal;
+                        self.transition_mode(state, Mode::Normal);
                         changed = true;
                     }
                 }
@@ -232,8 +227,7 @@ impl InteractionSubsystem {
         }
 
         if !self.palette.manager.is_open() && state.mode == Mode::Palette {
-            state.mode = Mode::Normal;
-            changed = true;
+            changed |= self.transition_mode(state, Mode::Normal);
         }
         changed
     }
@@ -258,6 +252,72 @@ impl InteractionSubsystem {
         self.extensions.host.handle_event(event, state);
     }
 
+    fn transition_mode(&mut self, state: &mut AppState, next_mode: Mode) -> bool {
+        if state.mode == next_mode {
+            return false;
+        }
+        self.sequences.resolver.clear();
+        state.mode = next_mode;
+        true
+    }
+
+    fn command_effects(command: &Command, redraw_on_dispatch: bool) -> (bool, bool, bool) {
+        (
+            redraw_on_dispatch || matches!(command, Command::OpenHelp),
+            matches!(command, Command::OpenHelp),
+            matches!(command, Command::Quit),
+        )
+    }
+
+    fn sequence_outcome(
+        resolution: SequenceResolution,
+        redraw_on_dispatch: bool,
+    ) -> KeyEventOutcome {
+        match resolution {
+            SequenceResolution::Noop => KeyEventOutcome::default(),
+            SequenceResolution::Pending | SequenceResolution::Cleared => KeyEventOutcome {
+                redraw: true,
+                clear_terminal: false,
+                quit_requested: false,
+                commands: Vec::new(),
+            },
+            SequenceResolution::Dispatch(Command::Quit) => KeyEventOutcome {
+                redraw: false,
+                clear_terminal: false,
+                quit_requested: true,
+                commands: Vec::new(),
+            },
+            SequenceResolution::DispatchThen { first, next } => {
+                // `DispatchThen` represents "commit the timed-out sequence, then keep
+                // processing the key that arrived after it" without dropping input.
+                let (first_redraw, first_clear_terminal, first_quit_requested) =
+                    Self::command_effects(&first, redraw_on_dispatch);
+                let mut outcome = Self::sequence_outcome(*next, redraw_on_dispatch);
+                outcome.redraw |= first_redraw;
+                outcome.clear_terminal |= first_clear_terminal;
+                outcome.quit_requested |= first_quit_requested;
+                outcome.commands.insert(
+                    0,
+                    CommandRequest::new(first, CommandInvocationSource::Keymap),
+                );
+                outcome
+            }
+            SequenceResolution::Dispatch(command) => {
+                let (redraw, clear_terminal, _) =
+                    Self::command_effects(&command, redraw_on_dispatch);
+                KeyEventOutcome {
+                    redraw,
+                    clear_terminal,
+                    quit_requested: false,
+                    commands: vec![CommandRequest::new(
+                        command,
+                        CommandInvocationSource::Keymap,
+                    )],
+                }
+            }
+        }
+    }
+
     pub(crate) fn handle_palette_submit_effect(
         &mut self,
         state: &mut AppState,
@@ -267,7 +327,7 @@ impl InteractionSubsystem {
         if !self.palette.manager.close_if_matches(session_id) {
             return Ok((false, None));
         }
-        state.mode = Mode::Normal;
+        self.transition_mode(state, Mode::Normal);
         let mut changed = true;
         let mut pending_command = None;
 
@@ -301,24 +361,21 @@ impl InteractionSubsystem {
     }
 }
 
-fn is_help_toggle_key(key: KeyEvent) -> bool {
-    // Some terminals report Shift+/ as `?`, while others keep the key code as `/`
-    // and set the Shift modifier. Accept both so help remains accessible.
-    matches!(key.code, KeyCode::Char('?'))
-        || (matches!(key.code, KeyCode::Char('/')) && key.modifiers.contains(KeyModifiers::SHIFT))
-}
-
 #[cfg(test)]
 mod tests {
     use std::io;
+    use std::time::Duration;
 
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::layout::Size;
 
     use crate::app::terminal_session::TerminalSurface;
-    use crate::app::{AppState, Mode};
-    use crate::command::{Command, CommandInvocationSource};
+    use crate::app::{AppState, Mode, PaletteRequest};
+    use crate::command::{Command, CommandInvocationSource, CommandRequest};
     use crate::config::Config;
+    use crate::input::sequence::SequenceRegistry;
+    use crate::input::shortcut::ShortcutKey;
+    use crate::palette::PaletteKind;
     use crate::presenter::PresenterKind;
 
     use super::super::App;
@@ -369,7 +426,7 @@ mod tests {
             .expect("quit key should be handled");
 
         assert!(outcome.quit_requested);
-        assert!(outcome.command.is_none());
+        assert!(outcome.commands.is_empty());
         assert!(!outcome.redraw);
         assert!(!outcome.clear_terminal);
     }
@@ -388,31 +445,8 @@ mod tests {
 
         assert_eq!(state.mode, crate::app::Mode::Normal);
         assert!(matches!(
-            outcome.command,
-            Some(ref request)
-                if request.command == Command::OpenHelp
-                    && request.source == CommandInvocationSource::Keymap
-        ));
-        assert!(outcome.redraw);
-        assert!(outcome.clear_terminal);
-    }
-
-    #[test]
-    fn help_key_requests_open_help_command_with_shift_slash() {
-        let mut interaction = InteractionSubsystem::default();
-        let mut state = AppState::default();
-
-        let outcome = interaction
-            .handle_key_event(
-                &mut state,
-                KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT),
-            )
-            .expect("help key should be handled");
-
-        assert_eq!(state.mode, crate::app::Mode::Normal);
-        assert!(matches!(
-            outcome.command,
-            Some(ref request)
+            outcome.commands.as_slice(),
+            [request]
                 if request.command == Command::OpenHelp
                     && request.source == CommandInvocationSource::Keymap
         ));
@@ -437,7 +471,7 @@ mod tests {
         assert_eq!(state.help_scroll, 1);
         assert!(down.redraw);
         assert!(!down.clear_terminal);
-        assert!(down.command.is_none());
+        assert!(down.commands.is_empty());
 
         let closed = interaction
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
@@ -445,8 +479,8 @@ mod tests {
         assert_eq!(state.mode, crate::app::Mode::Normal);
         assert_eq!(state.help_scroll, 0);
         assert!(matches!(
-            closed.command,
-            Some(ref request)
+            closed.commands.as_slice(),
+            [request]
                 if request.command == Command::CloseHelp
                     && request.source == CommandInvocationSource::Keymap
         ));
@@ -473,7 +507,7 @@ mod tests {
         assert_eq!(state.help_scroll, 0);
         assert!(!outcome.redraw);
         assert!(!outcome.clear_terminal);
-        assert!(outcome.command.is_none());
+        assert!(outcome.commands.is_empty());
     }
 
     #[test]
@@ -498,5 +532,265 @@ mod tests {
         assert_eq!(app.state.mode, Mode::Normal);
         assert_eq!(app.state.help_scroll, 0);
         assert!(needs_redraw);
+    }
+
+    #[test]
+    fn pending_sequence_waits_for_confirmation() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
+        let mut state = AppState::default();
+
+        let first = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+        assert!(first.redraw);
+        assert!(first.commands.is_empty());
+        assert_eq!(
+            interaction.pending_sequence_status().as_deref(),
+            Some("keys g")
+        );
+
+        let confirm = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            )
+            .expect("Enter should confirm the pending sequence");
+        assert!(matches!(
+            confirm.commands.as_slice(),
+            [request]
+                if request.command == Command::FirstPage
+                    && request.source == CommandInvocationSource::Keymap
+        ));
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn pending_sequence_prevents_help_toggle_from_stealing_followup_key() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let mismatch = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+            )
+            .expect("mismatched key should clear the sequence");
+        assert!(mismatch.redraw);
+        assert!(mismatch.commands.is_empty());
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn wake_flushes_timed_out_sequence() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let flushed = interaction.flush_sequence_timeout(state.mode);
+        assert!(matches!(
+            flushed.commands.as_slice(),
+            [request]
+                if request.command == Command::FirstPage
+                    && request.source == CommandInvocationSource::Keymap
+        ));
+        assert!(flushed.redraw);
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn timeout_flush_ignores_pending_sequences_outside_normal_mode() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        state.mode = Mode::Help;
+        let flushed = interaction.flush_sequence_timeout(state.mode);
+
+        assert!(!flushed.redraw);
+        assert!(!flushed.clear_terminal);
+        assert!(!flushed.quit_requested);
+        assert!(flushed.commands.is_empty());
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn opening_palette_clears_pending_sequences() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Open {
+                kind: PaletteKind::Command,
+                seed: None,
+            });
+        assert!(interaction.apply_palette_requests(&mut state));
+        assert_eq!(state.mode, Mode::Palette);
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn timed_out_sequence_returns_expired_command_before_processing_new_key() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .expect("single-key binding should register");
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let next = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            )
+            .expect("next key should dispatch after queuing the expired command");
+
+        assert_eq!(
+            next.commands,
+            vec![
+                CommandRequest::new(Command::FirstPage, CommandInvocationSource::Keymap,),
+                CommandRequest::new(Command::NextPage, CommandInvocationSource::Keymap,)
+            ]
+        );
+    }
+
+    #[test]
+    fn timed_out_sequence_followed_by_quit_sets_quit_requested() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('q')], Command::Quit)
+            .expect("single-key binding should register");
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let next = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
+            )
+            .expect("next key should queue the expired command and request quit");
+
+        assert!(next.quit_requested);
+        assert_eq!(
+            next.commands,
+            vec![CommandRequest::new(
+                Command::FirstPage,
+                CommandInvocationSource::Keymap,
+            )]
+        );
     }
 }

@@ -60,6 +60,7 @@ pub(crate) enum DomainEvent {
     Input(Event),
     InputError(String),
     Command(CommandRequest),
+    Quit,
     App(AppEvent),
     RenderComplete(RenderWorkerResult),
     EncodeComplete(PresenterBackgroundEvent),

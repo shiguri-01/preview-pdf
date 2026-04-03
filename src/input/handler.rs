@@ -9,9 +9,9 @@ use crate::app::App;
 use crate::app::terminal_session::TerminalSurface;
 
 pub(crate) struct InputEventOutcome {
-    pub(crate) quit_requested: bool,
-    pub(crate) command: Option<CommandRequest>,
+    pub(crate) commands: Vec<CommandRequest>,
     pub(crate) redraw_requested: bool,
+    pub(crate) quit_requested: bool,
 }
 
 impl App {
@@ -33,24 +33,24 @@ impl App {
                     *needs_redraw = true;
                 }
                 Ok(InputEventOutcome {
-                    quit_requested: outcome.quit_requested,
-                    command: outcome.command,
+                    commands: outcome.commands,
                     redraw_requested: outcome.redraw,
+                    quit_requested: outcome.quit_requested,
                 })
             }
             Event::Resize(_, _) => {
                 *last_input_at = Instant::now();
                 *needs_redraw = true;
                 Ok(InputEventOutcome {
-                    quit_requested: false,
-                    command: None,
+                    commands: Vec::new(),
                     redraw_requested: true,
+                    quit_requested: false,
                 })
             }
             _ => Ok(InputEventOutcome {
-                quit_requested: false,
-                command: None,
+                commands: Vec::new(),
                 redraw_requested: false,
+                quit_requested: false,
             }),
         }
     }

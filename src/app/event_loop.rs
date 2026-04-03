@@ -85,6 +85,32 @@ impl SessionRestore for HeadlessTerminalSession {
 }
 
 impl App {
+    fn enqueue_loop_event<S>(runtime: &mut LoopRuntime<S>, event: DomainEvent) -> LoopControl {
+        match runtime.loop_event_tx.send(event) {
+            Ok(()) => LoopControl::Continue,
+            Err(_) => LoopControl::Break,
+        }
+    }
+
+    fn enqueue_commands_and_optional_quit<S>(
+        runtime: &mut LoopRuntime<S>,
+        commands: Vec<CommandRequest>,
+        quit_requested: bool,
+    ) -> LoopControl {
+        for request in commands {
+            if matches!(
+                Self::enqueue_loop_event(runtime, DomainEvent::Command(request)),
+                LoopControl::Break
+            ) {
+                return LoopControl::Break;
+            }
+        }
+        if quit_requested {
+            return Self::enqueue_loop_event(runtime, DomainEvent::Quit);
+        }
+        LoopControl::Continue
+    }
+
     fn resolve_command_request<S: TerminalSurface>(
         &self,
         session: &S,
@@ -542,11 +568,14 @@ impl App {
 
         if runtime.ui_actor.needs_redraw() {
             let palette_view = self.interaction.palette_view();
-            let status_bar_segments = self
+            let mut status_bar_segments = self
                 .interaction
                 .extensions
                 .host
                 .status_bar_segments(&self.state);
+            if let Some(pending_sequence) = self.interaction.pending_sequence_status() {
+                status_bar_segments.push(pending_sequence);
+            }
             self.render.render_frame(
                 &mut self.state,
                 &self.config,
@@ -581,6 +610,26 @@ impl App {
     where
         S: TerminalSurface + SessionRestore,
     {
+        // Wake events are not guaranteed to arrive before the next input event, so the
+        // loop checks for timed-out sequences at the start of every iteration as well.
+        let timeout_outcome = self.interaction.flush_sequence_timeout(self.state.mode);
+        if timeout_outcome.clear_terminal {
+            runtime.session.clear()?;
+        }
+        if timeout_outcome.redraw {
+            self.request_redraw(runtime, RedrawReason::Input);
+        }
+        if matches!(
+            Self::enqueue_commands_and_optional_quit(
+                runtime,
+                timeout_outcome.commands,
+                timeout_outcome.quit_requested,
+            ),
+            LoopControl::Break
+        ) {
+            return Ok(LoopControl::Break);
+        }
+
         match waited {
             WaitEvent::Event(DomainEvent::Input(event)) => {
                 let input_outcome = self.handle_input_event(
@@ -589,14 +638,18 @@ impl App {
                     runtime.ui_actor.needs_redraw_mut(),
                     runtime.input_actor.last_input_at_mut(),
                 )?;
-                if input_outcome.quit_requested {
-                    Self::terminate_process_now(runtime);
-                }
                 if input_outcome.redraw_requested {
                     self.request_redraw(runtime, RedrawReason::Input);
                 }
-                if let Some(request) = input_outcome.command {
-                    let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
+                if matches!(
+                    Self::enqueue_commands_and_optional_quit(
+                        runtime,
+                        input_outcome.commands,
+                        input_outcome.quit_requested,
+                    ),
+                    LoopControl::Break
+                ) {
+                    return Ok(LoopControl::Break);
                 }
             }
             WaitEvent::Event(DomainEvent::InputError(message)) => {
@@ -689,6 +742,9 @@ impl App {
             }
             WaitEvent::Event(DomainEvent::RedrawTick) => {
                 self.request_redraw(runtime, RedrawReason::Timer);
+            }
+            WaitEvent::Event(DomainEvent::Quit) => {
+                Self::terminate_process_now(runtime);
             }
             WaitEvent::Event(DomainEvent::Wake) => {}
             WaitEvent::Closed => return Ok(LoopControl::Break),
@@ -807,18 +863,24 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::layout::Size;
     use tokio::runtime::Builder;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::{WaitEvent, cold_start_initial_preview_plan, wait_next_event};
     use crate::app::App;
+    use crate::app::core::InteractionSubsystem;
     use crate::app::state::{PageLayoutMode, VisiblePageSlots};
     use crate::app::terminal_session::TerminalSurface;
     use crate::backend::{PdfDoc, SharedPdfBackend};
-    use crate::command::{Command, CommandRequest, PanAmount, PanDirection};
+    use crate::command::{
+        Command, CommandInvocationSource, CommandRequest, PanAmount, PanDirection,
+    };
     use crate::config::Config;
     use crate::event::DomainEvent;
+    use crate::input::sequence::SequenceRegistry;
+    use crate::input::shortcut::ShortcutKey;
     use crate::presenter::PresenterKind;
     use crate::presenter::{
         ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
@@ -892,12 +954,14 @@ mod tests {
 
     struct StubSession {
         size: Size,
+        clear_count: usize,
     }
 
     impl StubSession {
         fn new(width: u16, height: u16) -> Self {
             Self {
                 size: Size::new(width, height),
+                clear_count: 0,
             }
         }
     }
@@ -908,6 +972,7 @@ mod tests {
         }
 
         fn clear(&mut self) -> io::Result<()> {
+            self.clear_count += 1;
             Ok(())
         }
 
@@ -915,6 +980,12 @@ mod tests {
         where
             F: FnOnce(&mut ratatui::Frame<'_>),
         {
+            Ok(())
+        }
+    }
+
+    impl super::SessionRestore for StubSession {
+        fn restore(&mut self) -> io::Result<()> {
             Ok(())
         }
     }
@@ -997,6 +1068,14 @@ mod tests {
         fs::remove_file(&file).expect("test pdf should be removed");
         let shared: SharedPdfBackend = Arc::new(doc);
         RenderWorker::spawn(shared, 1)
+    }
+
+    fn test_pdf_backend() -> SharedPdfBackend {
+        let file = unique_temp_path(".pdf");
+        fs::write(&file, build_pdf(&["page"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        fs::remove_file(&file).expect("test pdf should be removed");
+        Arc::new(doc)
     }
 
     #[test]
@@ -1182,5 +1261,138 @@ mod tests {
             .await;
             assert!(matches!(second, WaitEvent::Event(DomainEvent::Wake)));
         });
+    }
+
+    #[test]
+    fn wake_timeout_clears_terminal_when_sequence_dispatch_requests_it() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::OpenHelp)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
+            .expect("multi-key binding should register");
+        app.interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+
+        app.interaction
+            .handle_key_event(
+                &mut app.state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+
+        let control = app
+            .handle_waited_event(
+                WaitEvent::Event(DomainEvent::Wake),
+                &mut runtime,
+                Arc::clone(&pdf),
+            )
+            .expect("wake should be handled");
+
+        assert!(matches!(control, super::LoopControl::Continue));
+        assert_eq!(runtime.session.clear_count, 1);
+        assert!(matches!(
+            runtime.loop_event_rx.try_recv(),
+            Ok(DomainEvent::Command(request))
+                if request
+                    == CommandRequest::new(Command::OpenHelp, CommandInvocationSource::Keymap)
+        ));
+    }
+
+    #[test]
+    fn input_outcome_queues_commands_before_quit_event() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('q')], Command::Quit)
+            .expect("single-key binding should register");
+        app.interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+
+        app.interaction
+            .handle_key_event(
+                &mut app.state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+
+        let control = app
+            .handle_waited_event(
+                WaitEvent::Event(DomainEvent::Input(Event::Key(KeyEvent::new(
+                    KeyCode::Char('q'),
+                    KeyModifiers::NONE,
+                )))),
+                &mut runtime,
+                Arc::clone(&pdf),
+            )
+            .expect("input should be handled");
+
+        assert!(matches!(control, super::LoopControl::Continue));
+        assert!(matches!(
+            runtime.loop_event_rx.try_recv(),
+            Ok(DomainEvent::Command(request))
+                if request
+                    == CommandRequest::new(Command::FirstPage, CommandInvocationSource::Keymap)
+        ));
+        assert!(matches!(
+            runtime.loop_event_rx.try_recv(),
+            Ok(DomainEvent::Quit)
+        ));
     }
 }

@@ -9,8 +9,7 @@ use crate::app::App;
 use crate::app::terminal_session::TerminalSurface;
 
 pub(crate) struct InputEventOutcome {
-    pub(crate) quit_requested: bool,
-    pub(crate) command: Option<CommandRequest>,
+    pub(crate) commands: Vec<CommandRequest>,
     pub(crate) redraw_requested: bool,
 }
 
@@ -33,8 +32,7 @@ impl App {
                     *needs_redraw = true;
                 }
                 Ok(InputEventOutcome {
-                    quit_requested: outcome.quit_requested,
-                    command: outcome.command,
+                    commands: outcome.commands,
                     redraw_requested: outcome.redraw,
                 })
             }
@@ -42,14 +40,12 @@ impl App {
                 *last_input_at = Instant::now();
                 *needs_redraw = true;
                 Ok(InputEventOutcome {
-                    quit_requested: false,
-                    command: None,
+                    commands: Vec::new(),
                     redraw_requested: true,
                 })
             }
             _ => Ok(InputEventOutcome {
-                quit_requested: false,
-                command: None,
+                commands: Vec::new(),
                 redraw_requested: false,
             }),
         }

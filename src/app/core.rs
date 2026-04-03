@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use crate::command::CommandRequest;
 use crate::config::Config;
 use crate::error::AppResult;
 use crate::extension::ExtensionHost;
@@ -59,7 +58,6 @@ pub struct InteractionSubsystem {
     pub extensions: ExtensionSubsystem,
     pub palette: PaletteSubsystem,
     pub sequences: SequenceSubsystem,
-    pub queued_commands: VecDeque<CommandRequest>,
 }
 
 impl Default for InteractionSubsystem {
@@ -76,7 +74,6 @@ impl InteractionSubsystem {
             sequences: SequenceSubsystem {
                 resolver: SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT),
             },
-            queued_commands: VecDeque::new(),
         }
     }
 }

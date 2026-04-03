@@ -20,8 +20,7 @@ use super::state::{AppState, Mode, PaletteRequest};
 pub(crate) struct KeyEventOutcome {
     pub redraw: bool,
     pub clear_terminal: bool,
-    pub quit_requested: bool,
-    pub command: Option<CommandRequest>,
+    pub commands: Vec<CommandRequest>,
 }
 
 impl InteractionSubsystem {
@@ -36,16 +35,14 @@ impl InteractionSubsystem {
                 PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
                     redraw,
                     clear_terminal: false,
-                    quit_requested: false,
-                    command: None,
+                    commands: Vec::new(),
                 }),
                 PaletteKeyResult::CloseRequested { session_id } => {
                     let closed = self.close_palette_session(state, session_id);
                     Ok(KeyEventOutcome {
                         redraw: closed,
                         clear_terminal: closed,
-                        quit_requested: false,
-                        command: None,
+                        commands: Vec::new(),
                     })
                 }
                 PaletteKeyResult::Submit(action) => {
@@ -54,8 +51,7 @@ impl InteractionSubsystem {
                     Ok(KeyEventOutcome {
                         redraw: changed_by_palette,
                         clear_terminal: changed_by_palette,
-                        quit_requested: false,
-                        command,
+                        commands: command.into_iter().collect(),
                     })
                 }
             };
@@ -70,14 +66,16 @@ impl InteractionSubsystem {
             return Ok(KeyEventOutcome {
                 redraw: true,
                 clear_terminal: true,
-                quit_requested: false,
-                command: Some(CommandRequest::new(
+                commands: vec![CommandRequest::new(
                     Command::OpenHelp,
                     CommandInvocationSource::Keymap,
-                )),
+                )],
             });
         }
 
+        // Once a sequence has started, keep routing keys through the resolver until it
+        // either dispatches, times out, or is canceled. That keeps multi-key handling
+        // from being stolen by global shortcuts or extension-local hooks mid-sequence.
         if !self.sequences.resolver.has_pending() {
             match self.handle_extension_input(state, AppInputEvent::Key(key)) {
                 InputHookResult::Ignored => {}
@@ -85,26 +83,24 @@ impl InteractionSubsystem {
                     return Ok(KeyEventOutcome {
                         redraw: true,
                         clear_terminal: false,
-                        quit_requested: false,
-                        command: None,
+                        commands: Vec::new(),
                     });
                 }
                 InputHookResult::EmitCommand(ext_command) => {
                     return Ok(KeyEventOutcome {
                         redraw: false,
                         clear_terminal: false,
-                        quit_requested: false,
-                        command: Some(CommandRequest::new(
+                        commands: vec![CommandRequest::new(
                             ext_command,
                             CommandInvocationSource::Keymap,
-                        )),
+                        )],
                     });
                 }
             }
         }
 
         let resolution = self.sequences.resolver.handle_key(key);
-        Ok(self.apply_sequence_resolution(resolution, false))
+        Ok(Self::sequence_outcome(resolution, false))
     }
 
     fn handle_help_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
@@ -113,11 +109,10 @@ impl InteractionSubsystem {
             return KeyEventOutcome {
                 redraw: closed,
                 clear_terminal: closed,
-                quit_requested: false,
-                command: Some(CommandRequest::new(
+                commands: vec![CommandRequest::new(
                     Command::CloseHelp,
                     CommandInvocationSource::Keymap,
-                )),
+                )],
             };
         }
 
@@ -127,8 +122,7 @@ impl InteractionSubsystem {
                 KeyEventOutcome {
                     redraw: true,
                     clear_terminal: false,
-                    quit_requested: false,
-                    command: None,
+                    commands: Vec::new(),
                 }
             }
             KeyCode::Char('k') => {
@@ -136,8 +130,7 @@ impl InteractionSubsystem {
                 KeyEventOutcome {
                     redraw: true,
                     clear_terminal: false,
-                    quit_requested: false,
-                    command: None,
+                    commands: Vec::new(),
                 }
             }
             _ => KeyEventOutcome::default(),
@@ -161,11 +154,7 @@ impl InteractionSubsystem {
 
     pub(crate) fn flush_sequence_timeout(&mut self) -> KeyEventOutcome {
         let resolution = self.sequences.resolver.flush_timeout();
-        self.apply_sequence_resolution(resolution, true)
-    }
-
-    pub(crate) fn drain_queued_commands(&mut self) -> Vec<CommandRequest> {
-        self.queued_commands.drain(..).collect()
+        Self::sequence_outcome(resolution, true)
     }
 
     pub(crate) fn handle_palette_key(
@@ -263,8 +252,7 @@ impl InteractionSubsystem {
         self.extensions.host.handle_event(event, state);
     }
 
-    fn apply_sequence_resolution(
-        &mut self,
+    fn sequence_outcome(
         resolution: SequenceResolution,
         redraw_on_dispatch: bool,
     ) -> KeyEventOutcome {
@@ -273,36 +261,25 @@ impl InteractionSubsystem {
             SequenceResolution::Pending | SequenceResolution::Cleared => KeyEventOutcome {
                 redraw: true,
                 clear_terminal: false,
-                quit_requested: false,
-                command: None,
-            },
-            SequenceResolution::Dispatch(Command::Quit) => KeyEventOutcome {
-                redraw: false,
-                clear_terminal: false,
-                quit_requested: true,
-                command: None,
+                commands: Vec::new(),
             },
             SequenceResolution::DispatchThen { first, next } => {
-                if matches!(first, Command::Quit) {
-                    return KeyEventOutcome {
-                        redraw: false,
-                        clear_terminal: false,
-                        quit_requested: true,
-                        command: None,
-                    };
-                }
-                self.queued_commands
-                    .push_back(CommandRequest::new(first, CommandInvocationSource::Keymap));
-                self.apply_sequence_resolution(*next, redraw_on_dispatch)
+                // `DispatchThen` represents "commit the timed-out sequence, then keep
+                // processing the key that arrived after it" without dropping input.
+                let mut outcome = Self::sequence_outcome(*next, redraw_on_dispatch);
+                outcome.commands.insert(
+                    0,
+                    CommandRequest::new(first, CommandInvocationSource::Keymap),
+                );
+                outcome
             }
             SequenceResolution::Dispatch(command) => KeyEventOutcome {
                 redraw: redraw_on_dispatch,
                 clear_terminal: false,
-                quit_requested: false,
-                command: Some(CommandRequest::new(
+                commands: vec![CommandRequest::new(
                     command,
                     CommandInvocationSource::Keymap,
-                )),
+                )],
             },
         }
     }
@@ -409,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn quit_key_requests_immediate_quit_without_command_requeue() {
+    fn quit_key_returns_quit_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
 
@@ -420,8 +397,13 @@ mod tests {
             )
             .expect("quit key should be handled");
 
-        assert!(outcome.quit_requested);
-        assert!(outcome.command.is_none());
+        assert_eq!(
+            outcome.commands,
+            vec![CommandRequest::new(
+                Command::Quit,
+                CommandInvocationSource::Keymap,
+            )]
+        );
         assert!(!outcome.redraw);
         assert!(!outcome.clear_terminal);
     }
@@ -440,8 +422,8 @@ mod tests {
 
         assert_eq!(state.mode, crate::app::Mode::Normal);
         assert!(matches!(
-            outcome.command,
-            Some(ref request)
+            outcome.commands.as_slice(),
+            [request]
                 if request.command == Command::OpenHelp
                     && request.source == CommandInvocationSource::Keymap
         ));
@@ -463,8 +445,8 @@ mod tests {
 
         assert_eq!(state.mode, crate::app::Mode::Normal);
         assert!(matches!(
-            outcome.command,
-            Some(ref request)
+            outcome.commands.as_slice(),
+            [request]
                 if request.command == Command::OpenHelp
                     && request.source == CommandInvocationSource::Keymap
         ));
@@ -489,7 +471,7 @@ mod tests {
         assert_eq!(state.help_scroll, 1);
         assert!(down.redraw);
         assert!(!down.clear_terminal);
-        assert!(down.command.is_none());
+        assert!(down.commands.is_empty());
 
         let closed = interaction
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
@@ -497,8 +479,8 @@ mod tests {
         assert_eq!(state.mode, crate::app::Mode::Normal);
         assert_eq!(state.help_scroll, 0);
         assert!(matches!(
-            closed.command,
-            Some(ref request)
+            closed.commands.as_slice(),
+            [request]
                 if request.command == Command::CloseHelp
                     && request.source == CommandInvocationSource::Keymap
         ));
@@ -525,7 +507,7 @@ mod tests {
         assert_eq!(state.help_scroll, 0);
         assert!(!outcome.redraw);
         assert!(!outcome.clear_terminal);
-        assert!(outcome.command.is_none());
+        assert!(outcome.commands.is_empty());
     }
 
     #[test]
@@ -574,7 +556,7 @@ mod tests {
             )
             .expect("first key should be captured");
         assert!(first.redraw);
-        assert!(first.command.is_none());
+        assert!(first.commands.is_empty());
         assert_eq!(
             interaction.pending_sequence_status().as_deref(),
             Some("keys g")
@@ -587,8 +569,8 @@ mod tests {
             )
             .expect("Enter should confirm the pending sequence");
         assert!(matches!(
-            confirm.command,
-            Some(ref request)
+            confirm.commands.as_slice(),
+            [request]
                 if request.command == Command::FirstPage
                     && request.source == CommandInvocationSource::Keymap
         ));
@@ -621,7 +603,7 @@ mod tests {
             )
             .expect("mismatched key should clear the sequence");
         assert!(mismatch.redraw);
-        assert!(mismatch.command.is_none());
+        assert!(mismatch.commands.is_empty());
         assert_eq!(interaction.pending_sequence_status(), None);
     }
 
@@ -650,8 +632,8 @@ mod tests {
 
         let flushed = interaction.flush_sequence_timeout();
         assert!(matches!(
-            flushed.command,
-            Some(ref request)
+            flushed.commands.as_slice(),
+            [request]
                 if request.command == Command::FirstPage
                     && request.source == CommandInvocationSource::Keymap
         ));
@@ -660,7 +642,7 @@ mod tests {
     }
 
     #[test]
-    fn timed_out_sequence_queues_expired_command_before_processing_new_key() {
+    fn timed_out_sequence_returns_expired_command_before_processing_new_key() {
         let mut registry = SequenceRegistry::new();
         registry
             .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
@@ -691,20 +673,13 @@ mod tests {
                 KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
             )
             .expect("next key should dispatch after queuing the expired command");
-        let queued = interaction.drain_queued_commands();
 
         assert_eq!(
-            queued,
-            vec![CommandRequest::new(
-                Command::FirstPage,
-                CommandInvocationSource::Keymap,
-            )]
+            next.commands,
+            vec![
+                CommandRequest::new(Command::FirstPage, CommandInvocationSource::Keymap,),
+                CommandRequest::new(Command::NextPage, CommandInvocationSource::Keymap,)
+            ]
         );
-        assert!(matches!(
-            next.command,
-            Some(ref request)
-                if request.command == Command::NextPage
-                    && request.source == CommandInvocationSource::Keymap
-        ));
     }
 }

@@ -584,17 +584,13 @@ impl App {
     where
         S: TerminalSurface + SessionRestore,
     {
+        // Wake events are not guaranteed to arrive before the next input event, so the
+        // loop checks for timed-out sequences at the start of every iteration as well.
         let timeout_outcome = self.interaction.flush_sequence_timeout();
-        if timeout_outcome.quit_requested {
-            Self::terminate_process_now(runtime);
-        }
         if timeout_outcome.redraw {
             self.request_redraw(runtime, RedrawReason::Input);
         }
-        for request in self.interaction.drain_queued_commands() {
-            let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
-        }
-        if let Some(request) = timeout_outcome.command {
+        for request in timeout_outcome.commands {
             let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
         }
 
@@ -606,16 +602,10 @@ impl App {
                     runtime.ui_actor.needs_redraw_mut(),
                     runtime.input_actor.last_input_at_mut(),
                 )?;
-                if input_outcome.quit_requested {
-                    Self::terminate_process_now(runtime);
-                }
                 if input_outcome.redraw_requested {
                     self.request_redraw(runtime, RedrawReason::Input);
                 }
-                for request in self.interaction.drain_queued_commands() {
-                    let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
-                }
-                if let Some(request) = input_outcome.command {
+                for request in input_outcome.commands {
                     let _ = runtime.loop_event_tx.send(DomainEvent::Command(request));
                 }
             }

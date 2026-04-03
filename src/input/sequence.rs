@@ -113,6 +113,8 @@ pub enum SequenceResolution {
     Pending,
     Cleared,
     Dispatch(Command),
+    // When a timed-out prefix is confirmed by the next key press, the old command
+    // must be emitted first and the new key must still be processed immediately.
     DispatchThen {
         first: Command,
         next: Box<SequenceResolution>,
@@ -184,6 +186,8 @@ impl SequenceResolver {
 
         if had_pending {
             if self.state.is_timed_out() {
+                // Timeout is checked again on the next key so a sequence still commits even
+                // if no wake event arrived before the user continued typing.
                 return match self.confirm_pending() {
                     SequenceResolution::Dispatch(command) => SequenceResolution::DispatchThen {
                         first: command,
@@ -362,7 +366,7 @@ fn format_pending_buffer(buffer: &[ShortcutKey]) -> String {
             _ => (format_shortcut_key(*key), false),
         };
 
-        if !formatted.is_empty() && !(previous_was_plain_char && is_plain_char) {
+        if !(formatted.is_empty() || previous_was_plain_char && is_plain_char) {
             formatted.push(' ');
         }
         formatted.push_str(&part);

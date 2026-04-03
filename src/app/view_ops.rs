@@ -4,7 +4,6 @@ use crate::app::PageLayoutMode;
 use crate::backend::PdfBackend;
 use crate::config::Config;
 use crate::error::AppResult;
-use crate::input::keymap::KeymapPreset;
 use crate::palette::PaletteView;
 use crate::presenter::{
     PanOffset, PresenterFeedback, PresenterRenderMode, PresenterRenderOptions,
@@ -203,7 +202,7 @@ impl RenderSubsystem {
     pub(super) fn render_frame(
         &mut self,
         state: &mut AppState,
-        config: &Config,
+        _config: &Config,
         session: &mut impl TerminalSurface,
         pdf: &dyn PdfBackend,
         plan: RenderFramePlan,
@@ -231,7 +230,6 @@ impl RenderSubsystem {
             .unwrap_or_else(|| pdf.path().display().to_string());
         let presenter_caps = self.presenter.capabilities();
         let presenter_runtime = self.presenter.runtime_info();
-        let help_preset = KeymapPreset::parse(&config.keymap.preset);
         let enable_crop = state.zoom > 1.0;
         let mut pan = PanOffset {
             cells_x: state.pan_x,
@@ -377,7 +375,7 @@ impl RenderSubsystem {
                 ui::draw_palette_overlay(frame, image_area, view);
             }
             if state.mode == super::state::Mode::Help {
-                ui::draw_help_overlay(frame, image_area, help_preset, state.help_scroll);
+                ui::draw_help_overlay(frame, image_area, state.help_scroll);
             }
         })?;
         state.pan_x = pan.cells_x;

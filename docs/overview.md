@@ -57,7 +57,7 @@ Rules:
 - Help:
   - command form: `help` opens the modal shortcut help overlay
   - `?` opens the modal shortcut help overlay
-  - the overlay shows the effective shortcuts for the active keymap preset
+  - the overlay shows the built-in shortcuts
   - `Esc` closes the help overlay
 
 - History:
@@ -89,13 +89,13 @@ Rules:
 
 | Key      | Action |
 |----------|--------|
-| `j`      | Next page |
-| `k`      | Previous page |
-| `g`      | First page |
-| `G`      | Last page |
-| `+`      | Zoom in |
-| `-`      | Zoom out |
-| `0`      | Reset zoom |
+| `j` | Next page |
+| `k` | Previous page |
+| `g` | First page |
+| `G` | Last page |
+| `+` | Zoom in |
+| `-` | Zoom out |
+| `0` | Reset zoom |
 | `H` / `J` / `K` / `L` | Pan |
 | `/`      | Open search palette |
 | `n`      | Next search hit |
@@ -105,8 +105,6 @@ Rules:
 | `?`      | Open shortcut help |
 | `q`      | Quit |
 | `Esc`    | Cancel / close current interactive surface |
-
-Key behavior is configurable through keymap presets (`default`, `emacs`) in `config.toml`.
 
 ## Core runtime composition
 
@@ -118,7 +116,7 @@ Key behavior is configurable through keymap presets (`default`, `emacs`) in `con
 
 ## Runtime configuration
 
-`config.toml` controls render/cache/keymap/runtime tuning knobs.
+`config.toml` controls render/cache/runtime tuning knobs.
 
 Config lookup precedence:
 1. `PVF_CONFIG_PATH`

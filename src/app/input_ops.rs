@@ -7,7 +7,7 @@ use crate::command::{
 };
 use crate::error::AppResult;
 use crate::event::AppEvent;
-use crate::input::keymap::{KeymapPreset, map_key_to_command_with_preset};
+use crate::input::keymap::map_key_to_command;
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::PaletteKeyResult;
 use crate::palette::{PalettePostAction, PaletteSubmitEffect, PaletteView};
@@ -28,7 +28,6 @@ impl InteractionSubsystem {
         &mut self,
         state: &mut AppState,
         key: KeyEvent,
-        keymap_preset: &str,
     ) -> AppResult<KeyEventOutcome> {
         if state.mode == Mode::Palette {
             return match self.handle_palette_key(state, key)? {
@@ -93,8 +92,7 @@ impl InteractionSubsystem {
         }
 
         if command.is_none() {
-            let preset = KeymapPreset::parse(keymap_preset);
-            command = map_key_to_command_with_preset(key, state.mode, preset);
+            command = map_key_to_command(key, state.mode);
         }
 
         let Some(command) = command else {
@@ -367,7 +365,6 @@ mod tests {
             .handle_key_event(
                 &mut state,
                 KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
-                "default",
             )
             .expect("quit key should be handled");
 
@@ -386,7 +383,6 @@ mod tests {
             .handle_key_event(
                 &mut state,
                 KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
-                "default",
             )
             .expect("help key should be handled");
 
@@ -410,7 +406,6 @@ mod tests {
             .handle_key_event(
                 &mut state,
                 KeyEvent::new(KeyCode::Char('/'), KeyModifiers::SHIFT),
-                "default",
             )
             .expect("help key should be handled");
 
@@ -437,7 +432,6 @@ mod tests {
             .handle_key_event(
                 &mut state,
                 KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
-                "default",
             )
             .expect("help scroll should be handled");
         assert_eq!(state.help_scroll, 1);
@@ -446,11 +440,7 @@ mod tests {
         assert!(down.command.is_none());
 
         let closed = interaction
-            .handle_key_event(
-                &mut state,
-                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
-                "default",
-            )
+            .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("help close should be handled");
         assert_eq!(state.mode, crate::app::Mode::Normal);
         assert_eq!(state.help_scroll, 0);
@@ -476,7 +466,6 @@ mod tests {
             .handle_key_event(
                 &mut state,
                 KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
-                "default",
             )
             .expect("help key should be handled");
 

@@ -10,7 +10,6 @@ use crate::error::{AppError, AppResult};
 pub struct Config {
     pub render: RenderConfig,
     pub cache: CacheConfig,
-    pub keymap: KeymapConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -74,20 +73,6 @@ impl CacheConfig {
         self.l2_memory_budget_mb
             .saturating_mul(Self::MEBIBYTE)
             .max(1)
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct KeymapConfig {
-    pub preset: String,
-}
-
-impl Default for KeymapConfig {
-    fn default() -> Self {
-        Self {
-            preset: "default".to_string(),
-        }
     }
 }
 
@@ -230,6 +215,27 @@ mod tests {
         assert_eq!(config.cache.l2_memory_budget_mb, 64);
         assert_eq!(config.cache.l1_max_entries, 128);
         assert_eq!(config.cache.l2_max_entries, 96);
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn load_from_path_ignores_legacy_keymap_section() {
+        let path = unique_temp_path("legacy-keymap.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap]
+            preset = "emacs"
+
+            [cache]
+            l1_max_entries = 42
+            "#,
+        )
+        .expect("config file should be written");
+
+        let config = Config::load_from_path(&path).expect("config should parse");
+        assert_eq!(config.cache.l1_max_entries, 42);
 
         fs::remove_file(&path).expect("config file should be removed");
     }

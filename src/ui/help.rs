@@ -3,18 +3,12 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 
-use crate::input::keymap::KeymapPreset;
 use crate::input::shortcut::{ShortcutKey, format_shortcut_sequence};
 
 use super::layout::centered_rect;
 use super::{border, heading_text, primary_text, secondary_text};
 
-pub fn draw_help_overlay(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    preset: KeymapPreset,
-    scroll_offset: usize,
-) {
+pub fn draw_help_overlay(frame: &mut Frame<'_>, area: Rect, scroll_offset: usize) {
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -48,7 +42,7 @@ pub fn draw_help_overlay(
         return;
     }
 
-    let lines = build_help_lines(preset);
+    let lines = build_help_lines();
     let scroll = scroll_offset.min(help_rendered_height(
         &lines,
         content_area.width,
@@ -171,123 +165,10 @@ const DEFAULT_SECTIONS: &[HelpSection] = &[
     },
 ];
 
-const EMACS_SECTIONS: &[HelpSection] = &[
-    HelpSection {
-        title: "Navigation",
-        rows: &[
-            HelpRow {
-                keys: &[ShortcutKey::ctrl('n')],
-                description: "Next page",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::ctrl('p')],
-                description: "Previous page",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::alt('v')],
-                description: "Previous page",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::key(crossterm::event::KeyCode::PageDown)],
-                description: "Next page",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::key(crossterm::event::KeyCode::PageUp)],
-                description: "Previous page",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::char('j')],
-                description: "Next page",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::char('k')],
-                description: "Previous page",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::ctrl('o')],
-                description: "History back",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::ctrl('i')],
-                description: "History forward",
-            },
-        ],
-    },
-    HelpSection {
-        title: "View",
-        rows: &[
-            HelpRow {
-                keys: &[ShortcutKey::char('+')],
-                description: "Zoom in",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::char('-')],
-                description: "Zoom out",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::char('0')],
-                description: "Reset zoom",
-            },
-            HelpRow {
-                keys: &[
-                    ShortcutKey::char('H'),
-                    ShortcutKey::char('J'),
-                    ShortcutKey::char('K'),
-                    ShortcutKey::char('L'),
-                ],
-                description: "Pan",
-            },
-        ],
-    },
-    HelpSection {
-        title: "Search",
-        rows: &[
-            HelpRow {
-                keys: &[ShortcutKey::ctrl('s')],
-                description: "Search",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::char('n')],
-                description: "Next search hit",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::char('N')],
-                description: "Previous search hit",
-            },
-        ],
-    },
-    HelpSection {
-        title: "Other",
-        rows: &[
-            HelpRow {
-                keys: &[ShortcutKey::alt('x')],
-                description: "Command palette",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::char('?')],
-                description: "Help",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::char('q')],
-                description: "Quit",
-            },
-            HelpRow {
-                keys: &[ShortcutKey::key(crossterm::event::KeyCode::Esc)],
-                description: "Cancel / Close",
-            },
-        ],
-    },
-];
-
-fn build_help_lines(preset: KeymapPreset) -> Vec<Line<'static>> {
+fn build_help_lines() -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
-    let sections = match preset {
-        KeymapPreset::Default => DEFAULT_SECTIONS,
-        KeymapPreset::Emacs => EMACS_SECTIONS,
-    };
-
-    for (i, section) in sections.iter().enumerate() {
+    for (i, section) in DEFAULT_SECTIONS.iter().enumerate() {
         lines.push(Line::from(vec![Span::styled(
             section.title,
             heading_text(),
@@ -296,7 +177,7 @@ fn build_help_lines(preset: KeymapPreset) -> Vec<Line<'static>> {
             lines.push(render_help_row(row));
         }
 
-        if i + 1 < sections.len() {
+        if i + 1 < DEFAULT_SECTIONS.len() {
             lines.push(Line::from(""));
         }
     }
@@ -332,14 +213,11 @@ fn help_rendered_height(lines: &[Line<'static>], width: u16, height: u16) -> usi
 
 #[cfg(test)]
 mod tests {
-    use crate::input::keymap::KeymapPreset;
-
     use super::{build_help_lines, help_rendered_height};
 
     #[test]
-    fn help_lines_include_current_preset_bindings() {
-        let default_lines = build_help_lines(KeymapPreset::Default);
-        let default_text = default_lines
+    fn help_lines_include_default_bindings_only() {
+        let text = build_help_lines()
             .iter()
             .map(|line| {
                 line.spans
@@ -349,33 +227,18 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(default_text.contains("Ctrl+O"));
-        assert!(default_text.contains("Help"));
-        assert!(default_text.contains("Reset zoom"));
-
-        let emacs_lines = build_help_lines(KeymapPreset::Emacs);
-        let emacs_text = emacs_lines
-            .iter()
-            .map(|line| {
-                line.spans
-                    .iter()
-                    .map(|span| span.content.as_ref())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(emacs_text.contains("Ctrl+N"));
-        assert!(emacs_text.contains("Alt+X"));
-        assert!(emacs_text.contains("Reset zoom"));
-        assert!(emacs_text.contains("PgDn"));
+        assert!(text.contains("Ctrl+O"));
+        assert!(text.contains("Help"));
+        assert!(text.contains("Reset zoom"));
+        assert!(!text.contains("Ctrl+N"));
+        assert!(!text.contains("Alt+X"));
+        assert!(!text.contains("PgDn"));
     }
 
     #[test]
     fn help_scroll_limit_accounts_for_wrapping() {
-        let raw_limit = build_help_lines(KeymapPreset::Default)
-            .len()
-            .saturating_sub(5);
-        let wrapped_limit = help_rendered_height(&build_help_lines(KeymapPreset::Default), 20, 5);
+        let raw_limit = build_help_lines().len().saturating_sub(5);
+        let wrapped_limit = help_rendered_height(&build_help_lines(), 20, 5);
 
         assert!(wrapped_limit > raw_limit);
         assert!(wrapped_limit > 0);

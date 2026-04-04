@@ -214,6 +214,7 @@ impl InteractionSubsystem {
                         Ok(()) => {
                             changed |= state.mode != Mode::Palette;
                             state.mode = Mode::Palette;
+                            self.sync_sequences_with_mode(state);
                         }
                         Err(err) => {
                             state.set_error_notice(format!("failed to open palette: {err}"));
@@ -224,6 +225,7 @@ impl InteractionSubsystem {
                     if self.palette.manager.close() {
                         changed |= state.mode != Mode::Normal;
                         state.mode = Mode::Normal;
+                        self.sync_sequences_with_mode(state);
                     }
                 }
             }
@@ -232,6 +234,7 @@ impl InteractionSubsystem {
         if !self.palette.manager.is_open() && state.mode == Mode::Palette {
             state.mode = Mode::Normal;
             changed = true;
+            self.sync_sequences_with_mode(state);
         }
         self.sync_sequences_with_mode(state);
         changed
@@ -799,6 +802,46 @@ mod tests {
             });
         assert!(interaction.apply_palette_requests(&mut state));
         assert_eq!(state.mode, Mode::Palette);
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn batched_palette_open_and_close_clears_pending_sequences() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Open {
+                kind: PaletteKind::Command,
+                seed: None,
+            });
+        interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Close);
+
+        assert!(interaction.apply_palette_requests(&mut state));
+        assert_eq!(state.mode, Mode::Normal);
         assert_eq!(interaction.pending_sequence_status(), None);
     }
 

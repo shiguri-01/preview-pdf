@@ -548,6 +548,22 @@ mod tests {
     }
 
     #[test]
+    fn non_digit_exact_binding_dispatches_immediately_alongside_numeric_prefix() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('=')], Command::ZoomReset)
+            .expect("exact binding should register");
+        registry
+            .register_numeric_prefix(ShortcutKey::char('G'), |page| Command::GotoPage { page })
+            .expect("numeric prefix binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        let reset = resolver.handle_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE));
+        assert_eq!(reset, SequenceResolution::Dispatch(Command::ZoomReset));
+        assert_eq!(resolver.pending_display(), None);
+    }
+
+    #[test]
     fn registry_rejects_reserved_keys_in_multikey_sequences() {
         let mut registry = SequenceRegistry::new();
 

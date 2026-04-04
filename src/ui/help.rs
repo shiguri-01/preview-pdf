@@ -82,12 +82,12 @@ const DEFAULT_SECTIONS: &[HelpSection] = &[
                 description: "Previous page",
             },
             HelpRow {
-                keys: &[ShortcutKey::char('g')],
+                keys: &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 description: "First page",
             },
             HelpRow {
                 keys: &[ShortcutKey::char('G')],
-                description: "Last page",
+                description: "Last page (`42G` to go to page 42)",
             },
             HelpRow {
                 keys: &[ShortcutKey::ctrl('o')],
@@ -111,7 +111,7 @@ const DEFAULT_SECTIONS: &[HelpSection] = &[
                 description: "Zoom out",
             },
             HelpRow {
-                keys: &[ShortcutKey::char('0')],
+                keys: &[ShortcutKey::char('=')],
                 description: "Reset zoom",
             },
             HelpRow {
@@ -230,6 +230,8 @@ mod tests {
         assert!(text.contains("Ctrl+O"));
         assert!(text.contains("Help"));
         assert!(text.contains("Reset zoom"));
+        assert!(text.contains("g / g"));
+        assert!(text.contains("42G"));
         assert!(!text.contains("Ctrl+N"));
         assert!(!text.contains("Alt+X"));
         assert!(!text.contains("PgDn"));

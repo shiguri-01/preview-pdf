@@ -21,9 +21,10 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 | Key | Action |
 |---|---|
 | `j` / `k` | Next page / Previous page |
-| `g` / `G` | First page / Last page |
+| `gg` / `G` | First page / Last page |
+| `[count]G` | Go to page `count` |
 | `+` / `-` | Zoom in / Zoom out |
-| `0` | Reset zoom |
+| `=` | Reset zoom |
 | `H` / `J` / `K` / `L` | Pan |
 | `/` | Open search palette |
 | `n` / `N` | Next search hit / Previous search hit |

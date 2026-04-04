@@ -30,8 +30,8 @@ impl InteractionSubsystem {
         state: &mut AppState,
         key: KeyEvent,
     ) -> AppResult<KeyEventOutcome> {
+        self.sync_sequences_with_mode(state);
         if state.mode == Mode::Palette {
-            self.sequences.resolver.clear();
             return match self.handle_palette_key(state, key)? {
                 PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
                     redraw,
@@ -62,7 +62,6 @@ impl InteractionSubsystem {
         }
 
         if state.mode == Mode::Help {
-            self.sequences.resolver.clear();
             return Ok(self.handle_help_key_event(state, key));
         }
 
@@ -152,7 +151,7 @@ impl InteractionSubsystem {
 
     pub(crate) fn flush_sequence_timeout(&mut self, mode: Mode) -> KeyEventOutcome {
         if mode != Mode::Normal {
-            self.sequences.resolver.clear();
+            self.sync_sequences_with_mode_value(mode);
             return KeyEventOutcome::default();
         }
         let resolution = self.sequences.resolver.flush_timeout();
@@ -174,7 +173,10 @@ impl InteractionSubsystem {
         if !self.palette.manager.close_if_matches(session_id) {
             return false;
         }
-        self.transition_mode(state, Mode::Normal)
+        let changed = state.mode != Mode::Normal;
+        state.mode = Mode::Normal;
+        self.sync_sequences_with_mode(state);
+        changed
     }
 
     pub(crate) fn close_help_session(&mut self, state: &mut AppState) -> bool {
@@ -182,8 +184,9 @@ impl InteractionSubsystem {
             return false;
         }
 
-        self.transition_mode(state, Mode::Normal);
+        state.mode = Mode::Normal;
         state.reset_help_scroll();
+        self.sync_sequences_with_mode(state);
         true
     }
 
@@ -209,8 +212,9 @@ impl InteractionSubsystem {
                         seed,
                     ) {
                         Ok(()) => {
-                            self.transition_mode(state, Mode::Palette);
-                            changed = true;
+                            changed |= state.mode != Mode::Palette;
+                            state.mode = Mode::Palette;
+                            self.sync_sequences_with_mode(state);
                         }
                         Err(err) => {
                             state.set_error_notice(format!("failed to open palette: {err}"));
@@ -219,15 +223,18 @@ impl InteractionSubsystem {
                 }
                 PaletteRequest::Close => {
                     if self.palette.manager.close() {
-                        self.transition_mode(state, Mode::Normal);
-                        changed = true;
+                        changed |= state.mode != Mode::Normal;
+                        state.mode = Mode::Normal;
+                        self.sync_sequences_with_mode(state);
                     }
                 }
             }
         }
 
         if !self.palette.manager.is_open() && state.mode == Mode::Palette {
-            changed |= self.transition_mode(state, Mode::Normal);
+            state.mode = Mode::Normal;
+            changed = true;
+            self.sync_sequences_with_mode(state);
         }
         changed
     }
@@ -238,27 +245,30 @@ impl InteractionSubsystem {
         request: CommandRequest,
         pdf: SharedPdfBackend,
     ) -> AppResult<CommandDispatchResult> {
-        dispatch(
+        let result = dispatch(
             state,
             request.command,
             request.source,
             pdf,
             &mut self.extensions.host,
             &mut self.palette.pending_requests,
-        )
+        );
+        self.sync_sequences_with_mode(state);
+        result
     }
 
     pub(crate) fn handle_app_event(&mut self, state: &mut AppState, event: &AppEvent) {
         self.extensions.host.handle_event(event, state);
     }
 
-    fn transition_mode(&mut self, state: &mut AppState, next_mode: Mode) -> bool {
-        if state.mode == next_mode {
-            return false;
+    fn sync_sequences_with_mode(&mut self, state: &AppState) {
+        self.sync_sequences_with_mode_value(state.mode);
+    }
+
+    fn sync_sequences_with_mode_value(&mut self, mode: Mode) {
+        if mode != Mode::Normal {
+            self.sequences.resolver.clear();
         }
-        self.sequences.resolver.clear();
-        state.mode = next_mode;
-        true
     }
 
     fn command_effects(command: &Command, redraw_on_dispatch: bool) -> (bool, bool, bool) {
@@ -327,7 +337,8 @@ impl InteractionSubsystem {
         if !self.palette.manager.close_if_matches(session_id) {
             return Ok((false, None));
         }
-        self.transition_mode(state, Mode::Normal);
+        state.mode = Mode::Normal;
+        self.sync_sequences_with_mode(state);
         let mut changed = true;
         let mut pending_command = None;
 
@@ -363,14 +374,19 @@ impl InteractionSubsystem {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::io;
+    use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::Duration;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::layout::Size;
 
     use crate::app::terminal_session::TerminalSurface;
     use crate::app::{AppState, Mode, PaletteRequest};
+    use crate::backend::{PdfDoc, SharedPdfBackend};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
     use crate::config::Config;
     use crate::input::sequence::SequenceRegistry;
@@ -411,6 +427,85 @@ mod tests {
         {
             Ok(())
         }
+    }
+
+    fn unique_temp_path(suffix: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("pvf-input-ops-{nanos}{suffix}"))
+    }
+
+    fn build_pdf(page_texts: &[&str]) -> Vec<u8> {
+        let page_texts = if page_texts.is_empty() {
+            vec!["".to_string()]
+        } else {
+            page_texts
+                .iter()
+                .map(|text| format!("BT /F1 14 Tf 36 260 Td ({text}) Tj ET"))
+                .collect()
+        };
+
+        let page_count = page_texts.len();
+        let page_ids: Vec<usize> = (0..page_count).map(|i| 4 + i * 2).collect();
+
+        let mut objects = Vec::new();
+        objects.push("<< /Type /Catalog /Pages 2 0 R >>".to_string());
+        let kids = page_ids
+            .iter()
+            .map(|id| format!("{id} 0 R"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        objects.push(format!(
+            "<< /Type /Pages /Kids [{kids}] /Count {page_count} >>"
+        ));
+        objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string());
+
+        for (index, stream) in page_texts.iter().enumerate() {
+            let content_id = 5 + index * 2;
+            objects.push(format!(
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>"
+            ));
+            objects.push(format!(
+                "<< /Length {} >>\nstream\n{}\nendstream",
+                stream.len(),
+                stream
+            ));
+        }
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+        let mut offsets = vec![0_usize];
+        for (index, object) in objects.iter().enumerate() {
+            let object_id = index + 1;
+            offsets.push(bytes.len());
+            bytes.extend_from_slice(format!("{object_id} 0 obj\n{object}\nendobj\n").as_bytes());
+        }
+
+        let xref_start = bytes.len();
+        bytes.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
+        bytes.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in offsets.iter().skip(1) {
+            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        bytes.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
+                objects.len() + 1,
+                xref_start
+            )
+            .as_bytes(),
+        );
+        bytes
+    }
+
+    fn test_pdf_backend() -> SharedPdfBackend {
+        let file = unique_temp_path(".pdf");
+        fs::write(&file, build_pdf(&["page"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        fs::remove_file(&file).expect("test pdf should be removed");
+        Arc::new(doc)
     }
 
     #[test]
@@ -710,6 +805,46 @@ mod tests {
     }
 
     #[test]
+    fn batched_palette_open_and_close_clears_pending_sequences() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Open {
+                kind: PaletteKind::Command,
+                seed: None,
+            });
+        interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Close);
+
+        assert!(interaction.apply_palette_requests(&mut state));
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
     fn timed_out_sequence_returns_expired_command_before_processing_new_key() {
         let mut registry = SequenceRegistry::new();
         registry
@@ -792,5 +927,44 @@ mod tests {
                 CommandInvocationSource::Keymap,
             )]
         );
+    }
+
+    #[test]
+    fn dispatch_command_clears_pending_sequences_after_mode_change() {
+        let pdf = test_pdf_backend();
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+        assert_eq!(
+            interaction.pending_sequence_status().as_deref(),
+            Some("keys g")
+        );
+
+        interaction
+            .dispatch_command(
+                &mut state,
+                CommandRequest::new(Command::OpenHelp, CommandInvocationSource::Keymap),
+                pdf,
+            )
+            .expect("help command should dispatch");
+
+        assert_eq!(state.mode, Mode::Help);
+        assert_eq!(interaction.pending_sequence_status(), None);
     }
 }

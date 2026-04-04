@@ -236,7 +236,6 @@ impl InteractionSubsystem {
             changed = true;
             self.sync_sequences_with_mode(state);
         }
-        self.sync_sequences_with_mode(state);
         changed
     }
 

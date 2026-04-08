@@ -73,9 +73,7 @@ impl HistoryState {
             return Err(AppError::invalid_argument("page number must be >= 1"));
         }
         if page > page_count {
-            return Err(AppError::invalid_argument(
-                "page number exceeds document length",
-            ));
+            return Err(AppError::page_out_of_range(page, page_count));
         }
 
         let target = app.normalize_page_for_layout(page - 1, page_count);

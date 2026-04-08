@@ -40,8 +40,9 @@ impl OutlineState {
         page: usize,
     ) -> AppResult<(CommandOutcome, NoticeAction)> {
         if page >= page_count {
-            return Err(AppError::invalid_argument(
-                "outline destination exceeds document length",
+            return Err(AppError::page_out_of_range(
+                page.saturating_add(1),
+                page_count,
             ));
         }
 

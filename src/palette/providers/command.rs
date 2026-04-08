@@ -620,6 +620,33 @@ mod tests {
     }
 
     #[test]
+    fn submit_dispatches_typed_command_with_history_record() {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input: "quit",
+            seed: None,
+        };
+
+        let effect = provider
+            .on_submit(&ctx, None)
+            .expect("typed command submit should succeed");
+
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Dispatch {
+                command: Command::Quit,
+                history_record: Some(InputHistoryRecord::Command("quit".to_string())),
+                next: PalettePostAction::Close,
+            }
+        );
+    }
+
+    #[test]
     fn tab_completion_appends_trailing_space_for_required_argument_commands() {
         let effect = command_tab_effect("z", "zoom", false);
         assert_eq!(

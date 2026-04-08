@@ -60,13 +60,11 @@ impl PaletteInputHistoryNavigator {
 
         let next_cursor = if older {
             match self.cursor {
-                Some(cursor) if cursor > 0 => Some(cursor - 1),
-                Some(0) => Some(0),
+                Some(cursor) => Some(cursor.saturating_sub(1)),
                 None => {
                     self.draft_input = Some(current_input.to_string());
                     Some(entries.len() - 1)
                 }
-                Some(_) => None,
             }
         } else {
             match self.cursor {

@@ -102,8 +102,8 @@ Return `None` to keep the manager's normal first-item behavior.
 1. close current palette
 2. record optional input history payload
 3. dispatch command
-4. apply queued open/close requests
-5. apply `next`
+4. apply `next` (may queue open/close)
+5. apply queued open/close requests
 
 ## Assistive text row
 

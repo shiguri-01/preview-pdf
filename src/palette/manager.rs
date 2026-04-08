@@ -5,6 +5,7 @@ use tui_input::backend::crossterm::EventHandler;
 use crate::app::{AppState, notice_action_for_error};
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
+use crate::input::InputHistorySnapshot;
 
 use super::kind::PaletteKind;
 use super::matcher::{CandidateMatcher, ContainsMatcher};
@@ -27,6 +28,62 @@ struct PaletteSession {
     visible: Vec<usize>,
     selected: usize,
     assistive_text: Option<String>,
+    input_history: PaletteInputHistoryNavigator,
+}
+
+#[derive(Debug, Default)]
+struct PaletteInputHistoryNavigator {
+    snapshot: InputHistorySnapshot,
+    cursor: Option<usize>,
+    draft_input: Option<String>,
+}
+
+impl PaletteInputHistoryNavigator {
+    fn new(snapshot: InputHistorySnapshot) -> Self {
+        Self {
+            snapshot,
+            cursor: None,
+            draft_input: None,
+        }
+    }
+
+    fn clear_navigation(&mut self) {
+        self.cursor = None;
+        self.draft_input = None;
+    }
+
+    fn recall(&mut self, current_input: &str, older: bool) -> Option<String> {
+        let entries = self.snapshot.entries();
+        if entries.is_empty() {
+            return None;
+        }
+
+        let next_cursor = if older {
+            match self.cursor {
+                Some(cursor) if cursor > 0 => Some(cursor - 1),
+                Some(0) => Some(0),
+                None => {
+                    self.draft_input = Some(current_input.to_string());
+                    Some(entries.len() - 1)
+                }
+                Some(_) => None,
+            }
+        } else {
+            match self.cursor {
+                Some(cursor) if cursor + 1 < entries.len() => Some(cursor + 1),
+                Some(_) => None,
+                None => return None,
+            }
+        };
+
+        self.cursor = next_cursor;
+        let next_value = next_cursor
+            .map(|cursor| entries[cursor].clone())
+            .or_else(|| self.draft_input.take())
+            .unwrap_or_default();
+
+        (next_value != current_input).then_some(next_value)
+    }
 }
 
 pub struct PaletteManager {
@@ -53,6 +110,7 @@ impl PaletteManager {
         extensions: &ExtensionUiSnapshot,
         kind: PaletteKind,
         seed: Option<String>,
+        input_history: Option<InputHistorySnapshot>,
     ) -> AppResult<()> {
         let provider = registry.get(kind);
 
@@ -85,6 +143,7 @@ impl PaletteManager {
             visible,
             selected,
             assistive_text,
+            input_history: PaletteInputHistoryNavigator::new(input_history.unwrap_or_default()),
         });
         Ok(())
     }
@@ -126,12 +185,32 @@ impl PaletteManager {
                 });
             }
             KeyCode::Up => {
-                self.select_prev();
-                return Ok(PaletteKeyResult::Consumed { redraw: true });
+                let redraw = if supports_input_history(session.kind) {
+                    let previous_input = session.input.value().to_string();
+                    let changed = self.recall_input_history(true);
+                    if changed {
+                        self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
+                    }
+                    changed
+                } else {
+                    self.select_prev();
+                    true
+                };
+                return Ok(PaletteKeyResult::Consumed { redraw });
             }
             KeyCode::Down => {
-                self.select_next();
-                return Ok(PaletteKeyResult::Consumed { redraw: true });
+                let redraw = if supports_input_history(session.kind) {
+                    let previous_input = session.input.value().to_string();
+                    let changed = self.recall_input_history(false);
+                    if changed {
+                        self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
+                    }
+                    changed
+                } else {
+                    self.select_next();
+                    true
+                };
+                return Ok(PaletteKeyResult::Consumed { redraw });
             }
             KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.select_prev();
@@ -191,6 +270,9 @@ impl PaletteManager {
 
         let previous_input = session.input.value().to_string();
         session.input.handle_event(&Event::Key(key));
+        if session.input.value() != previous_input {
+            session.input_history.clear_navigation();
+        }
         self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
         Ok(PaletteKeyResult::Consumed { redraw: true })
     }
@@ -312,6 +394,17 @@ impl PaletteManager {
         self.next_session_id = self.next_session_id.saturating_add(1);
         id
     }
+
+    fn recall_input_history(&mut self, older: bool) -> bool {
+        let Some(session) = self.active.as_mut() else {
+            return false;
+        };
+        let Some(next_value) = session.input_history.recall(session.input.value(), older) else {
+            return false;
+        };
+        session.input = Input::new(next_value);
+        true
+    }
 }
 
 fn apply_palette_submit_error_notice(app: &mut AppState, err: AppError) {
@@ -342,6 +435,10 @@ fn selected_candidate_for<'a>(
     visible.get(selected).and_then(|idx| candidates.get(*idx))
 }
 
+fn supports_input_history(kind: PaletteKind) -> bool {
+    matches!(kind, PaletteKind::Command | PaletteKind::Search)
+}
+
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -349,20 +446,32 @@ mod tests {
     use crate::{
         app::AppState,
         extension::ExtensionUiSnapshot,
+        input::InputHistorySnapshot,
         palette::{PaletteKind, PaletteRegistry},
     };
 
     use super::PaletteManager;
 
+    fn history_snapshot(entries: &[&str]) -> InputHistorySnapshot {
+        InputHistorySnapshot::from_entries(entries)
+    }
+
     #[test]
-    fn command_palette_resets_selection_when_input_changes() {
+    fn command_palette_uses_ctrl_n_for_selection_when_input_history_is_enabled() {
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
         let mut app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         manager
-            .open(&registry, &app, &extensions, PaletteKind::Command, None)
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                None,
+                None,
+            )
             .expect("command palette should open");
 
         let initial_view = manager.view().expect("palette should be visible");
@@ -373,7 +482,7 @@ mod tests {
                 &registry,
                 &mut app,
                 &extensions,
-                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
             )
             .expect("selection move should succeed");
         let selected_view = manager.view().expect("palette should be visible");
@@ -393,15 +502,80 @@ mod tests {
     }
 
     #[test]
-    fn search_palette_keeps_selection_when_input_changes() {
+    fn command_palette_recalls_input_history_with_up_and_restores_draft_on_down() {
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
         let mut app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         manager
-            .open(&registry, &app, &extensions, PaletteKind::Search, None)
-            .expect("search palette should open");
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                None,
+                Some(history_snapshot(&["next-page", "prev-page"])),
+            )
+            .expect("command palette should open");
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
+            )
+            .expect("selection move should succeed");
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
+            )
+            .expect("typing should succeed");
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            )
+            .expect("history recall should succeed");
+        let older_view = manager.view().expect("palette should be visible");
+        assert_eq!(older_view.input, "prev-page");
+        assert_eq!(older_view.selected_idx, 0);
+        assert_eq!(
+            older_view.items.first().map(|item| item
+                .left
+                .iter()
+                .map(|part| part.text.as_str())
+                .collect::<String>()),
+            Some("prev-page".to_string())
+        );
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            )
+            .expect("history recall should succeed");
+        let oldest_view = manager.view().expect("palette should be visible");
+        assert_eq!(oldest_view.input, "next-page");
+        assert_eq!(oldest_view.selected_idx, 0);
+        assert_eq!(
+            oldest_view.items.first().map(|item| item
+                .left
+                .iter()
+                .map(|part| part.text.as_str())
+                .collect::<String>()),
+            Some("next-page".to_string())
+        );
 
         manager
             .handle_key(
@@ -409,6 +583,47 @@ mod tests {
                 &mut app,
                 &extensions,
                 KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            )
+            .expect("history recall should succeed");
+        let newer_view = manager.view().expect("palette should be visible");
+        assert_eq!(newer_view.input, "prev-page");
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            )
+            .expect("draft restore should succeed");
+        let restored_view = manager.view().expect("palette should be visible");
+        assert_eq!(restored_view.input, "z");
+    }
+
+    #[test]
+    fn search_palette_keeps_selection_when_typing_after_ctrl_n() {
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let mut app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        manager
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Search,
+                None,
+                Some(history_snapshot(&["needle"])),
+            )
+            .expect("search palette should open");
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
             )
             .expect("selection move should succeed");
         let selected_view = manager.view().expect("palette should be visible");
@@ -441,6 +656,7 @@ mod tests {
                 &extensions,
                 PaletteKind::History,
                 Some("f:5,Search: later|c:4|b:3,Search: earlier".to_string()),
+                None,
             )
             .expect("history palette should open");
 

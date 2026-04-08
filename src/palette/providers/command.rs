@@ -6,6 +6,7 @@ use crate::command::parse_command_text;
 use crate::command::parse_invocable_command_text;
 use crate::command::{CommandConditionContext, CommandInvocationSource};
 use crate::error::AppResult;
+use crate::input::InputHistoryRecord;
 use crate::input::shortcut::{ShortcutKey, format_shortcut_sequence};
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
@@ -77,6 +78,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 Ok(command) => {
                     return Ok(PaletteSubmitEffect::Dispatch {
                         command,
+                        history_record: Some(InputHistoryRecord::Command(input.to_string())),
                         next: PalettePostAction::Close,
                     });
                 }
@@ -99,6 +101,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 if let Ok(command) = parse_command_text(spec.id) {
                     return Ok(PaletteSubmitEffect::Dispatch {
                         command,
+                        history_record: Some(InputHistoryRecord::Command(spec.id.to_string())),
                         next: PalettePostAction::Close,
                     });
                 }
@@ -146,9 +149,13 @@ impl PaletteProvider for CommandPaletteProvider {
     ) -> Option<String> {
         let enter = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Enter)]);
         let tab = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Tab)]);
+        let history = format_shortcut_sequence(&[
+            ShortcutKey::key(crossterm::event::KeyCode::Up),
+            ShortcutKey::key(crossterm::event::KeyCode::Down),
+        ]);
         let trimmed = ctx.input.trim();
         if trimmed.is_empty() {
-            return Some(format!("{enter}: run  {tab}: complete"));
+            return Some(format!("{enter}: run  {tab}: complete  {history}: history"));
         }
 
         if has_argument_phase(ctx.input) {
@@ -162,7 +169,7 @@ impl PaletteProvider for CommandPaletteProvider {
                         Some(format!("{} {} | {}", spec.id, usage, spec.title))
                     }
                 }
-                None => Some(format!("{enter}: run  {tab}: complete")),
+                None => Some(format!("{enter}: run  {tab}: complete  {history}: history")),
             };
         }
 
@@ -175,7 +182,7 @@ impl PaletteProvider for CommandPaletteProvider {
             }
         }
 
-        Some(format!("{enter}: run  {tab}: complete"))
+        Some(format!("{enter}: run  {tab}: complete  {history}: history"))
     }
 }
 
@@ -375,6 +382,7 @@ mod tests {
     use crate::app::AppState;
     use crate::command::Command;
     use crate::extension::ExtensionUiSnapshot;
+    use crate::input::InputHistoryRecord;
     use crate::palette::{
         PaletteContext, PaletteKind, PalettePostAction, PaletteProvider, PaletteSubmitEffect,
         PaletteTabEffect,
@@ -577,6 +585,9 @@ mod tests {
                     mode: crate::command::PageLayoutModeArg::Spread,
                     direction: None,
                 },
+                history_record: Some(InputHistoryRecord::Command(
+                    "page-layout-spread".to_string(),
+                )),
                 next: PalettePostAction::Close,
             }
         );
@@ -601,6 +612,7 @@ mod tests {
             effect,
             PaletteSubmitEffect::Dispatch {
                 command: Command::OpenSearch,
+                history_record: Some(InputHistoryRecord::Command("search".to_string())),
                 next: PalettePostAction::Close,
             }
         );

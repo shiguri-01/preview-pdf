@@ -90,6 +90,7 @@ impl PaletteProvider for OutlinePaletteProvider {
 
         Ok(PaletteSubmitEffect::Dispatch {
             command: Command::OutlineGoto { page, title },
+            history_record: None,
             next: PalettePostAction::Close,
         })
     }

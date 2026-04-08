@@ -75,7 +75,8 @@ Return `None` to keep the manager's normal first-item behavior.
 ## Keyboard semantics
 
 - `Esc`: close current palette.
-- `Up` / `Down` / `Ctrl+P` / `Ctrl+N`: move selection.
+- `Ctrl+P` / `Ctrl+N`: move selection.
+- `Up` / `Down`: move input history in command/search palettes; move selection in history/outline palettes.
 - `Tab`: apply provider `on_tab`.
 - `Enter`: apply provider `on_submit`.
 
@@ -95,13 +96,14 @@ Return `None` to keep the manager's normal first-item behavior.
 `on_submit` returns:
 - `Close`
 - `Reopen { kind, seed }`
-- `Dispatch { command, next }`
+- `Dispatch { command, history_record, next }`
 
 `Dispatch` transaction order:
 1. close current palette
-2. dispatch command
-3. apply queued open/close requests
-4. apply `next`
+2. record optional input history payload
+3. dispatch command
+4. apply queued open/close requests
+5. apply `next`
 
 ## Assistive text row
 
@@ -118,6 +120,8 @@ Return `None` to keep the manager's normal first-item behavior.
 ## Command palette (`PaletteKind::Command`)
 
 - Open shortcut in normal mode: `:`
+- `Up` / `Down` recall recent command inputs
+- `Ctrl+P` / `Ctrl+N` move the candidate selection
 - Enter behavior:
   1. If input parses as a valid command with args, dispatch directly.
   2. Else if selected candidate has no args, dispatch directly.
@@ -145,9 +149,12 @@ Return `None` to keep the manager's normal first-item behavior.
 - Open shortcut in normal mode: `/`
 - Also invocable by command palette command: `search`
 - Input mode: `FreeText`
+- `Up` / `Down` recall recent search queries
+- `Ctrl+P` / `Ctrl+N` move the matcher selection
 - Candidate list exposes matcher choices:
   - `contains-insensitive` (default)
   - `contains-sensitive`
+- Search history stores only the query text; changing history never changes the selected matcher.
 - Enter dispatches internal search-submit behavior with query + matcher and closes.
 - Empty input on Enter reopens for correction.
 

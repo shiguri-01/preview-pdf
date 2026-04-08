@@ -1,5 +1,6 @@
 use crate::command::{Command, SearchMatcherKind};
 use crate::error::AppResult;
+use crate::input::InputHistoryRecord;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
@@ -80,6 +81,7 @@ impl PaletteProvider for SearchPaletteProvider {
                 query: query.to_string(),
                 matcher,
             },
+            history_record: Some(InputHistoryRecord::SearchQuery(query.to_string())),
             next: PalettePostAction::Close,
         })
     }
@@ -89,6 +91,6 @@ impl PaletteProvider for SearchPaletteProvider {
         _ctx: &PaletteContext<'_>,
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
-        Some("Enter: search  [up/down]: select matcher".to_string())
+        Some("Enter: search  Up/Down: history  Ctrl+P/N: matcher".to_string())
     }
 }

@@ -52,7 +52,13 @@ Rules:
   - compact search status segment in chrome/status bar while active
   - `Esc` in normal mode cancels active search state
   - command form: `search` opens the dedicated search palette
+  - search palette keeps a recent query history
+  - while search palette is open, `Up` / `Down` navigate query history and `Ctrl+P` / `Ctrl+N` select the matcher
   - `next-search-hit` / `prev-search-hit` are available only while search is active
+
+- Command palette:
+  - keeps a recent command input history
+  - while command palette is open, `Up` / `Down` navigate command history and `Ctrl+P` / `Ctrl+N` move the candidate selection
 
 - Help:
   - command form: `help` opens the modal shortcut help overlay

@@ -3,6 +3,7 @@ use crate::app::AppState;
 use crate::command::Command;
 use crate::error::AppResult;
 use crate::extension::ExtensionUiSnapshot;
+use crate::input::InputHistoryRecord;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteInputMode {
@@ -114,6 +115,7 @@ pub enum PaletteSubmitEffect {
     },
     Dispatch {
         command: Command,
+        history_record: Option<InputHistoryRecord>,
         next: PalettePostAction,
     },
 }

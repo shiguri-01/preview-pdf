@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use crate::config::Config;
 use crate::error::AppResult;
 use crate::extension::ExtensionHost;
+use crate::input::InputHistoryService;
 use crate::input::keymap::build_builtin_sequence_registry;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, SequenceResolver};
 use crate::palette::{PaletteManager, PaletteRegistry};
@@ -46,6 +47,7 @@ pub struct SequenceSubsystem {
 pub struct InteractionSubsystem {
     pub extensions: ExtensionSubsystem,
     pub palette: PaletteSubsystem,
+    pub history: InputHistoryService,
     pub sequences: SequenceSubsystem,
 }
 
@@ -60,6 +62,7 @@ impl InteractionSubsystem {
         Self {
             extensions: ExtensionSubsystem::default(),
             palette: PaletteSubsystem::default(),
+            history: InputHistoryService::default(),
             sequences: SequenceSubsystem {
                 resolver: SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT),
             },
@@ -74,6 +77,7 @@ impl InteractionSubsystem {
         Self {
             extensions: ExtensionSubsystem::default(),
             palette: PaletteSubsystem::default(),
+            history: InputHistoryService::default(),
             sequences: SequenceSubsystem {
                 resolver: SequenceResolver::new(registry, timeout),
             },

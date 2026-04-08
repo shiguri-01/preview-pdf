@@ -89,6 +89,7 @@ impl PaletteProvider for HistoryPaletteProvider {
 
         Ok(PaletteSubmitEffect::Dispatch {
             command: Command::HistoryGoto { page },
+            history_record: None,
             next: PalettePostAction::Close,
         })
     }

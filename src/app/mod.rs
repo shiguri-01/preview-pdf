@@ -21,5 +21,5 @@ pub use core::App;
 pub use runtime::RenderRuntime;
 pub use state::{
     AppState, CacheHandle, CacheRefs, Mode, Notice, NoticeAction, NoticeLevel, PageLayoutMode,
-    PaletteRequest, SpreadDirection, VisiblePageSlots,
+    PaletteRequest, SpreadDirection, VisiblePageSlots, notice_action_for_error,
 };

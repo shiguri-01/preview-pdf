@@ -1,3 +1,4 @@
+use crate::error::AppError;
 use crate::palette::PaletteKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -272,5 +273,45 @@ impl AppState {
             (PageLayoutMode::Spread, SpreadDirection::Ltr, false) => 3,
             (PageLayoutMode::Spread, SpreadDirection::Rtl, false) => 4,
         }
+    }
+}
+
+pub fn notice_action_for_error(err: AppError) -> NoticeAction {
+    match err {
+        AppError::InvalidArgument(message)
+        | AppError::Unsupported(message)
+        | AppError::Unimplemented(message) => NoticeAction::warning(message),
+        other => NoticeAction::error(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use super::{NoticeAction, NoticeLevel, notice_action_for_error};
+    use crate::error::AppError;
+
+    #[test]
+    fn notice_action_for_invalid_argument_is_warning() {
+        assert_eq!(
+            notice_action_for_error(AppError::invalid_argument("bad command")),
+            NoticeAction::Show {
+                level: NoticeLevel::Warning,
+                message: "bad command".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn notice_action_for_io_error_is_error() {
+        let err = AppError::io_with_context(io::Error::other("boom"), "disk failed");
+        assert_eq!(
+            notice_action_for_error(err),
+            NoticeAction::Show {
+                level: NoticeLevel::Error,
+                message: "I/O error: disk failed".to_string(),
+            }
+        );
     }
 }

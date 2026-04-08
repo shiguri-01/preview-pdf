@@ -2,7 +2,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
-use crate::app::AppState;
+use crate::app::{AppState, notice_action_for_error};
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
 
@@ -315,12 +315,7 @@ impl PaletteManager {
 }
 
 fn apply_palette_submit_error_notice(app: &mut AppState, err: AppError) {
-    match err {
-        AppError::InvalidArgument(message)
-        | AppError::Unsupported(message)
-        | AppError::Unimplemented(message) => app.set_warning_notice(message),
-        other => app.set_error_notice(other.to_string()),
-    }
+    app.apply_notice_action(notice_action_for_error(err));
 }
 
 fn selected_candidate(session: &PaletteSession) -> Option<&PaletteCandidate> {

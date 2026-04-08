@@ -23,6 +23,7 @@ use super::perf_runner::{
 };
 use super::render_ops::{CurrentTaskContext, PrefetchDispatchContext};
 use super::scale::select_input_poll_timeout;
+use super::state::notice_action_for_error;
 use super::terminal_session::{InteractiveTerminalSession, TerminalSurface};
 use super::view_ops::{InitialPreviewPlan, RenderFramePlan, compute_initial_preview_plan};
 
@@ -659,11 +660,18 @@ impl App {
             }
             WaitEvent::Event(DomainEvent::Command(request)) => {
                 let request = self.resolve_command_request(&runtime.session, request);
-                let dispatch = self.interaction.dispatch_command(
+                let dispatch = match self.interaction.dispatch_command(
                     &mut self.state,
                     request,
                     Arc::clone(&pdf),
-                )?;
+                ) {
+                    Ok(dispatch) => dispatch,
+                    Err(err) => {
+                        self.state.apply_notice_action(notice_action_for_error(err));
+                        self.request_redraw(runtime, RedrawReason::Command);
+                        return Ok(LoopControl::Continue);
+                    }
+                };
                 for event in dispatch.emitted_events {
                     let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
                 }
@@ -1394,5 +1402,47 @@ mod tests {
             runtime.loop_event_rx.try_recv(),
             Ok(DomainEvent::Quit)
         ));
+    }
+
+    #[test]
+    fn command_error_becomes_notice_and_loop_continues() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+
+        let control = app
+            .handle_waited_event(
+                WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
+                    Command::GotoPage { page: 999 },
+                    CommandInvocationSource::Keymap,
+                ))),
+                &mut runtime,
+                Arc::clone(&pdf),
+            )
+            .expect("command error should be handled as a notice");
+
+        assert!(matches!(control, super::LoopControl::Continue));
+        let notice = app.state.notice.expect("command error should set a notice");
+        assert_eq!(notice.level, crate::app::NoticeLevel::Warning);
+        assert_eq!(notice.message, "page 999 is out of range (1-1)");
+        assert!(runtime.loop_event_rx.try_recv().is_err());
     }
 }

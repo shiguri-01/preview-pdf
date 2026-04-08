@@ -43,6 +43,12 @@ impl AppError {
         Self::InvalidArgument(message.into())
     }
 
+    pub fn page_out_of_range(page: usize, page_count: usize) -> Self {
+        debug_assert!(page_count > 0);
+        let message = format!("page {page} is out of range (1-{page_count})");
+        Self::invalid_argument(message)
+    }
+
     pub fn pdf_render(page: usize, source: impl std::error::Error + Send + Sync + 'static) -> Self {
         Self::PdfRender {
             page,
@@ -68,5 +74,17 @@ mod tests {
         let err = AppError::pdf_render(7, AppError::invalid_argument("bad page"));
         assert!(matches!(err, AppError::PdfRender { page: 7, .. }));
         assert_eq!(err.to_string(), "PDF render failed for page 7");
+    }
+
+    #[test]
+    fn page_out_of_range_uses_human_friendly_range() {
+        assert_eq!(
+            AppError::page_out_of_range(999, 42).to_string(),
+            "invalid argument: page 999 is out of range (1-42)"
+        );
+        assert_eq!(
+            AppError::page_out_of_range(3, 1).to_string(),
+            "invalid argument: page 3 is out of range (1-1)"
+        );
     }
 }

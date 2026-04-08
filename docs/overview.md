@@ -63,7 +63,7 @@ Rules:
 - Help:
   - command form: `help` opens the modal shortcut help overlay
   - `?` opens the modal shortcut help overlay
-  - the overlay shows the built-in shortcuts
+  - the overlay shows the current global keymap bindings
   - `Esc` closes the help overlay
 
 - History:

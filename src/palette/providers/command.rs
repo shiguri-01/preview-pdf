@@ -148,14 +148,15 @@ impl PaletteProvider for CommandPaletteProvider {
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
         let enter = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Enter)]);
-        let tab = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Tab)]);
+        let selection = format_shortcut_sequence(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
         let history = format_shortcut_sequence(&[
             ShortcutKey::key(crossterm::event::KeyCode::Up),
             ShortcutKey::key(crossterm::event::KeyCode::Down),
         ]);
+        let default_hint = format!("{enter}: run  {selection}: select  {history}: history");
         let trimmed = ctx.input.trim();
         if trimmed.is_empty() {
-            return Some(format!("{enter}: run  {tab}: complete  {history}: history"));
+            return Some(default_hint);
         }
 
         if has_argument_phase(ctx.input) {
@@ -169,7 +170,7 @@ impl PaletteProvider for CommandPaletteProvider {
                         Some(format!("{} {} | {}", spec.id, usage, spec.title))
                     }
                 }
-                None => Some(format!("{enter}: run  {tab}: complete  {history}: history")),
+                None => Some(default_hint),
             };
         }
 
@@ -182,7 +183,7 @@ impl PaletteProvider for CommandPaletteProvider {
             }
         }
 
-        Some(format!("{enter}: run  {tab}: complete  {history}: history"))
+        Some(default_hint)
     }
 }
 

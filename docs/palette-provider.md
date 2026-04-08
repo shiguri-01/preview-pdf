@@ -124,7 +124,7 @@ Return `None` to keep the manager's normal first-item behavior.
 - `Ctrl+P` / `Ctrl+N` move the candidate selection
 - Enter behavior:
   1. If input parses as a valid command with args, dispatch directly.
-  2. Else if selected candidate has no args, dispatch directly.
+  2. Else if selected candidate has no required args, dispatch directly.
   3. Else if selected candidate requires args, reopen with `seed = "{command-id} "`.
   4. Otherwise reopen preserving input.
 - `Tab` autocompletes from selected candidate and always appends one trailing space.

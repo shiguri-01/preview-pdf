@@ -237,9 +237,7 @@ impl PaletteManager {
                         value,
                         move_cursor_to_end: _move_cursor_to_end,
                     } => {
-                        if session.input.value() != value {
-                            session.input_history.clear_navigation();
-                        }
+                        session.input_history.clear_navigation();
                         session.input = Input::new(value);
                     }
                 }

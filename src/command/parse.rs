@@ -56,7 +56,7 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         "history" => parse_no_args(id, args_text, Command::OpenHistory),
         "outline" => parse_no_args(id, args_text, Command::OpenOutline),
         "outline-goto" => parse_outline_goto(args_text),
-        "cancel" => parse_no_args(id, args_text, Command::Cancel),
+        "cancel-search" => parse_no_args(id, args_text, Command::Cancel),
         "quit" => parse_no_args(id, args_text, Command::Quit),
         _ => Err(AppError::unsupported(
             "command parser is out of sync with registry",
@@ -120,7 +120,7 @@ fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResult<Command> 
         "history-forward" => "history-forward does not accept arguments",
         "history" => "history does not accept arguments",
         "outline" => "outline does not accept arguments",
-        "cancel" => "cancel does not accept arguments",
+        "cancel-search" => "cancel-search does not accept arguments",
         "quit" => "quit does not accept arguments",
         _ => "command does not accept arguments",
     }))

@@ -51,6 +51,7 @@ Rules:
   - asynchronous scanning with progress updates
   - compact search status segment in chrome/status bar while active
   - `Esc` in normal mode cancels active search state
+  - command form: `cancel-search` cancels active search state when search is active
   - command form: `search` opens the dedicated search palette
   - search palette keeps a recent query history
   - while search palette is open, `Up` / `Down` navigate query history and `Ctrl+P` / `Ctrl+N` select the matcher

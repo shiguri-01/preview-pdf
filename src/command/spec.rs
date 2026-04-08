@@ -313,12 +313,12 @@ const COMMAND_SPECS: [CommandSpec; 31] = [
         availability: CommandAvailability::Always,
     },
     CommandSpec {
-        id: "cancel",
-        title: "Cancel",
+        id: "cancel-search",
+        title: "Cancel Search",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
     },
     CommandSpec {
         id: "quit",

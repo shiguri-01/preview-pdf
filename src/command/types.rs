@@ -184,7 +184,7 @@ impl Command {
             Self::OpenHistory => "history",
             Self::OpenOutline => "outline",
             Self::OutlineGoto { .. } => "outline-goto",
-            Self::Cancel => "cancel",
+            Self::Cancel => "cancel-search",
             Self::Quit => "quit",
         }
     }
@@ -308,7 +308,7 @@ impl ActionId {
             Self::History => "history",
             Self::Outline => "outline",
             Self::OutlineGoto => "outline-goto",
-            Self::Cancel => "cancel",
+            Self::Cancel => "cancel-search",
             Self::Quit => "quit",
             Self::RenderQueue => "render-queue",
             Self::PrefetchEncode => "prefetch-encode",

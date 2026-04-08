@@ -134,11 +134,7 @@ pub fn dispatch(
         Command::OpenOutline => extension_host.open_outline_palette(pdf, palette_requests),
         Command::OutlineGoto { page, .. } => extension_host.outline_goto(app, page_count, page),
         Command::Cancel => {
-            if app.mode == Mode::Palette {
-                palette_requests.push_back(PaletteRequest::Close);
-            } else {
-                let _ = extension_host.cancel_search(pdf)?;
-            }
+            let _ = extension_host.cancel_search(pdf)?;
             Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
         Command::Quit => Ok((CommandOutcome::QuitRequested, NoticeAction::Keep)),

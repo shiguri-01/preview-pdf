@@ -210,6 +210,7 @@ impl InteractionSubsystem {
                         &extensions,
                         kind,
                         seed,
+                        self.history.snapshot_for_palette(kind),
                     ) {
                         Ok(()) => {
                             changed |= state.mode != Mode::Palette;
@@ -349,7 +350,14 @@ impl InteractionSubsystem {
                     .pending_requests
                     .push_back(PaletteRequest::Open { kind, seed });
             }
-            PaletteSubmitEffect::Dispatch { command, next } => {
+            PaletteSubmitEffect::Dispatch {
+                command,
+                history_record,
+                next,
+            } => {
+                if let Some(record) = history_record {
+                    self.history.record(record);
+                }
                 pending_command = Some(CommandRequest::new(
                     command,
                     CommandInvocationSource::PaletteProvider,

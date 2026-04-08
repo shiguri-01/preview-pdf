@@ -6,6 +6,7 @@ use crate::command::parse_command_text;
 use crate::command::parse_invocable_command_text;
 use crate::command::{CommandConditionContext, CommandInvocationSource};
 use crate::error::AppResult;
+use crate::input::InputHistoryRecord;
 use crate::input::shortcut::{ShortcutKey, format_shortcut_sequence};
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
@@ -77,6 +78,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 Ok(command) => {
                     return Ok(PaletteSubmitEffect::Dispatch {
                         command,
+                        history_record: Some(InputHistoryRecord::Command(input.to_string())),
                         next: PalettePostAction::Close,
                     });
                 }
@@ -99,6 +101,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 if let Ok(command) = parse_command_text(spec.id) {
                     return Ok(PaletteSubmitEffect::Dispatch {
                         command,
+                        history_record: Some(InputHistoryRecord::Command(spec.id.to_string())),
                         next: PalettePostAction::Close,
                     });
                 }
@@ -145,10 +148,15 @@ impl PaletteProvider for CommandPaletteProvider {
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
         let enter = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Enter)]);
-        let tab = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Tab)]);
+        let selection = format_shortcut_sequence(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
+        let history = format_shortcut_sequence(&[
+            ShortcutKey::key(crossterm::event::KeyCode::Up),
+            ShortcutKey::key(crossterm::event::KeyCode::Down),
+        ]);
+        let default_hint = format!("{enter}: run  {selection}: select  {history}: history");
         let trimmed = ctx.input.trim();
         if trimmed.is_empty() {
-            return Some(format!("{enter}: run  {tab}: complete"));
+            return Some(default_hint);
         }
 
         if has_argument_phase(ctx.input) {
@@ -162,7 +170,7 @@ impl PaletteProvider for CommandPaletteProvider {
                         Some(format!("{} {} | {}", spec.id, usage, spec.title))
                     }
                 }
-                None => Some(format!("{enter}: run  {tab}: complete")),
+                None => Some(default_hint),
             };
         }
 
@@ -175,7 +183,7 @@ impl PaletteProvider for CommandPaletteProvider {
             }
         }
 
-        Some(format!("{enter}: run  {tab}: complete"))
+        Some(default_hint)
     }
 }
 
@@ -375,6 +383,7 @@ mod tests {
     use crate::app::AppState;
     use crate::command::Command;
     use crate::extension::ExtensionUiSnapshot;
+    use crate::input::InputHistoryRecord;
     use crate::palette::{
         PaletteContext, PaletteKind, PalettePostAction, PaletteProvider, PaletteSubmitEffect,
         PaletteTabEffect,
@@ -577,6 +586,9 @@ mod tests {
                     mode: crate::command::PageLayoutModeArg::Spread,
                     direction: None,
                 },
+                history_record: Some(InputHistoryRecord::Command(
+                    "page-layout-spread".to_string(),
+                )),
                 next: PalettePostAction::Close,
             }
         );
@@ -601,6 +613,34 @@ mod tests {
             effect,
             PaletteSubmitEffect::Dispatch {
                 command: Command::OpenSearch,
+                history_record: Some(InputHistoryRecord::Command("search".to_string())),
+                next: PalettePostAction::Close,
+            }
+        );
+    }
+
+    #[test]
+    fn submit_dispatches_typed_command_with_history_record() {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input: "quit",
+            seed: None,
+        };
+
+        let effect = provider
+            .on_submit(&ctx, None)
+            .expect("typed command submit should succeed");
+
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Dispatch {
+                command: Command::Quit,
+                history_record: Some(InputHistoryRecord::Command("quit".to_string())),
                 next: PalettePostAction::Close,
             }
         );

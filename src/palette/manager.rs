@@ -237,6 +237,9 @@ impl PaletteManager {
                         value,
                         move_cursor_to_end: _move_cursor_to_end,
                     } => {
+                        if session.input.value() != value {
+                            session.input_history.clear_navigation();
+                        }
                         session.input = Input::new(value);
                     }
                 }
@@ -640,6 +643,57 @@ mod tests {
         let updated_view = manager.view().expect("palette should be visible");
         assert_eq!(updated_view.selected_idx, 1);
         assert_eq!(updated_view.input, "a");
+    }
+
+    #[test]
+    fn tab_completion_resets_history_navigation_state() {
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let mut app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        manager
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                None,
+                Some(history_snapshot(&["next-page", "prev-page"])),
+            )
+            .expect("command palette should open");
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
+            )
+            .expect("history recall should succeed");
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
+            )
+            .expect("tab completion should succeed");
+
+        let completed_view = manager.view().expect("palette should be visible");
+        assert_eq!(completed_view.input, "prev-page ");
+
+        manager
+            .handle_key(
+                &registry,
+                &mut app,
+                &extensions,
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            )
+            .expect("down after tab should be handled");
+
+        let after_down_view = manager.view().expect("palette should be visible");
+        assert_eq!(after_down_view.input, "prev-page ");
     }
 
     #[test]

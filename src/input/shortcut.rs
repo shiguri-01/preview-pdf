@@ -29,89 +29,134 @@ impl ShortcutKey {
 }
 
 pub fn format_shortcut_key(key: ShortcutKey) -> String {
-    let mut parts = Vec::new();
+    if key.code == KeyCode::BackTab {
+        return "<s-tab>".to_string();
+    }
+
+    if let KeyCode::Char(ch) = key.code
+        && !key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT)
+    {
+        return ch.to_string();
+    }
+
+    let has_modifier = key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
+    let key_text = base_key_text(key);
+    if !has_modifier {
+        return format!("<{key_text}>");
+    }
+
+    let mut modifiers = Vec::new();
     if key.modifiers.contains(KeyModifiers::CONTROL) {
-        parts.push("Ctrl");
+        modifiers.push("c");
     }
     if key.modifiers.contains(KeyModifiers::ALT) {
-        parts.push("Alt");
+        modifiers.push("m");
     }
     if key.modifiers.contains(KeyModifiers::SHIFT) {
-        parts.push("Shift");
+        modifiers.push("s");
     }
 
-    let key_text = match key.code {
-        KeyCode::Backspace => "Backspace".to_string(),
-        KeyCode::Enter => "Enter".to_string(),
-        KeyCode::Left => "Left".to_string(),
-        KeyCode::Right => "Right".to_string(),
-        KeyCode::Up => "Up".to_string(),
-        KeyCode::Down => "Down".to_string(),
-        KeyCode::Home => "Home".to_string(),
-        KeyCode::End => "End".to_string(),
-        KeyCode::PageUp => "PgUp".to_string(),
-        KeyCode::PageDown => "PgDn".to_string(),
-        KeyCode::Tab => "Tab".to_string(),
-        KeyCode::BackTab => "BackTab".to_string(),
-        KeyCode::Delete => "Delete".to_string(),
-        KeyCode::Insert => "Insert".to_string(),
-        KeyCode::Esc => "Esc".to_string(),
-        KeyCode::F(n) => format!("F{n}"),
-        KeyCode::Char(ch) => {
-            if (key.modifiers.contains(KeyModifiers::CONTROL)
-                || key.modifiers.contains(KeyModifiers::ALT)
-                || key.modifiers.contains(KeyModifiers::SHIFT))
-                && ch.is_ascii_alphabetic()
-            {
-                ch.to_ascii_uppercase().to_string()
-            } else {
-                ch.to_string()
-            }
-        }
-        _ => format!("{:?}", key.code),
-    };
-
-    if parts.is_empty() {
-        key_text
-    } else {
-        let mut text = parts.join("+");
-        text.push('+');
-        text.push_str(&key_text);
-        text
-    }
+    format!("<{}-{key_text}>", modifiers.join("-"))
 }
 
 pub fn format_shortcut_sequence(keys: &[ShortcutKey]) -> String {
+    format_shortcut_keys(keys, "")
+}
+
+pub fn format_shortcut_alternatives(keys: &[ShortcutKey]) -> String {
+    format_shortcut_keys(keys, " / ")
+}
+
+pub fn format_shortcut_alternatives_tight(keys: &[ShortcutKey]) -> String {
+    format_shortcut_keys(keys, "/")
+}
+
+fn format_shortcut_keys(keys: &[ShortcutKey], separator: &str) -> String {
     keys.iter()
         .map(|key| format_shortcut_key(*key))
         .collect::<Vec<_>>()
-        .join(" / ")
+        .join(separator)
+}
+
+fn base_key_text(key: ShortcutKey) -> String {
+    match key.code {
+        KeyCode::Backspace => "backspace".to_string(),
+        KeyCode::Enter => "enter".to_string(),
+        KeyCode::Left => "left".to_string(),
+        KeyCode::Right => "right".to_string(),
+        KeyCode::Up => "up".to_string(),
+        KeyCode::Down => "down".to_string(),
+        KeyCode::Home => "home".to_string(),
+        KeyCode::End => "end".to_string(),
+        KeyCode::PageUp => "pgup".to_string(),
+        KeyCode::PageDown => "pgdn".to_string(),
+        KeyCode::Tab => "tab".to_string(),
+        KeyCode::Delete => "del".to_string(),
+        KeyCode::Insert => "ins".to_string(),
+        KeyCode::Esc => "esc".to_string(),
+        KeyCode::F(n) => format!("f{n}"),
+        KeyCode::Char(ch) => ch.to_ascii_lowercase().to_string(),
+        _ => format!("{:?}", key.code),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
-    use super::{ShortcutKey, format_shortcut_key, format_shortcut_sequence};
+    use super::{
+        ShortcutKey, format_shortcut_alternatives, format_shortcut_alternatives_tight,
+        format_shortcut_key, format_shortcut_sequence,
+    };
 
     #[test]
     fn formats_regular_and_modified_keys() {
-        assert_eq!(format_shortcut_key(ShortcutKey::ctrl('o')), "Ctrl+O");
+        assert_eq!(format_shortcut_key(ShortcutKey::ctrl('o')), "<c-o>");
         assert_eq!(format_shortcut_key(ShortcutKey::char('?')), "?");
         assert_eq!(format_shortcut_key(ShortcutKey::char('A')), "A");
         assert_eq!(
             format_shortcut_key(ShortcutKey::key(KeyCode::PageDown)),
-            "PgDn"
+            "<pgdn>"
         );
         assert_eq!(
             format_shortcut_key(ShortcutKey::new(KeyCode::Char('O'), KeyModifiers::CONTROL)),
-            "Ctrl+O"
+            "<c-o>"
+        );
+        assert_eq!(
+            format_shortcut_key(ShortcutKey::new(KeyCode::Char('x'), KeyModifiers::ALT)),
+            "<m-x>"
+        );
+        assert_eq!(format_shortcut_key(ShortcutKey::key(KeyCode::Esc)), "<esc>");
+        assert_eq!(
+            format_shortcut_key(ShortcutKey::key(KeyCode::Enter)),
+            "<enter>"
+        );
+        assert_eq!(
+            format_shortcut_key(ShortcutKey::key(KeyCode::BackTab)),
+            "<s-tab>"
         );
     }
 
     #[test]
     fn formats_shortcut_sequences() {
         let text = format_shortcut_sequence(&[ShortcutKey::char('j'), ShortcutKey::char('k')]);
-        assert_eq!(text, "j / k");
+        assert_eq!(text, "jk");
+    }
+
+    #[test]
+    fn formats_shortcut_alternatives() {
+        let text = format_shortcut_alternatives(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
+        assert_eq!(text, "<c-p> / <c-n>");
+    }
+
+    #[test]
+    fn formats_tight_shortcut_alternatives() {
+        let text =
+            format_shortcut_alternatives_tight(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
+        assert_eq!(text, "<c-p>/<c-n>");
     }
 }

@@ -1,5 +1,6 @@
 use crate::command::Command;
 use crate::error::AppResult;
+use crate::input::shortcut::format_shortcut_key;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
@@ -99,7 +100,10 @@ impl PaletteProvider for HistoryPaletteProvider {
         _ctx: &PaletteContext<'_>,
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
-        Some("Enter: jump to page".to_string())
+        let enter = format_shortcut_key(crate::input::shortcut::ShortcutKey::key(
+            crossterm::event::KeyCode::Enter,
+        ));
+        Some(format!("{enter} jump to page"))
     }
 
     fn initial_input(&self, _seed: Option<&str>) -> String {
@@ -563,15 +567,15 @@ mod tests {
 
         assert_eq!(
             provider.assistive_text(&ctx, Some(&current)),
-            Some("Enter: jump to page".to_string())
+            Some("<enter> jump to page".to_string())
         );
         assert_eq!(
             provider.assistive_text(&ctx, Some(&other)),
-            Some("Enter: jump to page".to_string())
+            Some("<enter> jump to page".to_string())
         );
         assert_eq!(
             provider.assistive_text(&ctx, None),
-            Some("Enter: jump to page".to_string())
+            Some("<enter> jump to page".to_string())
         );
     }
 

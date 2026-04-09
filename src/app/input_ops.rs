@@ -45,15 +45,9 @@ impl InteractionSubsystem {
                 });
             }
             if state.mode == Mode::Help {
-                let closed = state.mode == Mode::Help;
-                if closed {
-                    state.mode = Mode::Normal;
-                    state.reset_help_scroll();
-                    self.sync_sequences_with_mode(state);
-                }
                 return Ok(KeyEventOutcome {
-                    redraw: closed,
-                    clear_terminal: closed,
+                    redraw: true,
+                    clear_terminal: true,
                     quit_requested: false,
                     commands: vec![CommandRequest::new(
                         Command::CloseHelp,
@@ -586,8 +580,8 @@ mod tests {
         let closed = interaction
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("help close should be handled");
-        assert_eq!(state.mode, crate::app::Mode::Normal);
-        assert_eq!(state.help_scroll, 0);
+        assert_eq!(state.mode, crate::app::Mode::Help);
+        assert_eq!(state.help_scroll, 1);
         assert!(matches!(
             closed.commands.as_slice(),
             [request]
@@ -630,18 +624,25 @@ mod tests {
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let mut last_input_at = std::time::Instant::now();
 
-        app.handle_input_event(
-            crossterm::event::Event::Key(key),
-            &mut session,
-            &mut needs_redraw,
-            &mut last_input_at,
-        )
-        .expect("help close should be handled");
+        let outcome = app
+            .handle_input_event(
+                crossterm::event::Event::Key(key),
+                &mut session,
+                &mut needs_redraw,
+                &mut last_input_at,
+            )
+            .expect("help close should be handled");
 
         assert_eq!(session.clear_count, 1);
-        assert_eq!(app.state.mode, Mode::Normal);
+        assert_eq!(app.state.mode, Mode::Help);
         assert_eq!(app.state.help_scroll, 0);
         assert!(needs_redraw);
+        assert!(matches!(
+            outcome.commands.as_slice(),
+            [request]
+                if request.command == Command::CloseHelp
+                    && request.source == CommandInvocationSource::Keymap
+        ));
     }
 
     #[test]

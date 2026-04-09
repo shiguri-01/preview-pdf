@@ -50,7 +50,7 @@ Rules:
   - case-sensitive and case-insensitive matcher modes
   - asynchronous scanning with progress updates
   - compact search status segment in chrome/status bar while active
-  - `Esc` in normal mode cancels active search state
+  - `Esc` in normal mode cancels active search state after any pending key sequence either consumes `Esc` or clears
   - command form: `cancel-search` cancels active search state when search is active
   - command form: `search` opens the dedicated search palette
   - search palette keeps a recent query history

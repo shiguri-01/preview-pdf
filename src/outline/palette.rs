@@ -319,5 +319,4 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].left[0].text.trim(), "Überblick");
     }
-
 }

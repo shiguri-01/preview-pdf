@@ -185,12 +185,12 @@ impl InteractionSubsystem {
     }
 
     fn close_palette_overlay(&mut self, state: &mut AppState) -> bool {
-        if !self.palette.manager.close() {
-            return false;
-        }
         let changed = state.mode != Mode::Normal;
-        state.mode = Mode::Normal;
-        self.sync_sequences_with_mode(state);
+        let _ = self.palette.manager.close();
+        if changed {
+            state.mode = Mode::Normal;
+            self.sync_sequences_with_mode(state);
+        }
         changed
     }
 
@@ -680,6 +680,24 @@ mod tests {
         assert_eq!(session.clear_count, 1);
         assert_eq!(app.state.mode, Mode::Normal);
         assert!(needs_redraw);
+        assert!(outcome.commands.is_empty());
+    }
+
+    #[test]
+    fn palette_close_repairs_stale_palette_mode_even_without_active_session() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState {
+            mode: Mode::Palette,
+            ..AppState::default()
+        };
+
+        let outcome = interaction
+            .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .expect("stale palette close should be handled");
+
+        assert_eq!(state.mode, Mode::Normal);
+        assert!(outcome.redraw);
+        assert!(outcome.clear_terminal);
         assert!(outcome.commands.is_empty());
     }
 

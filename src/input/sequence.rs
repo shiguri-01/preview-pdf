@@ -26,8 +26,27 @@ enum SequenceBinding {
     },
     NumericPrefix {
         suffix: ShortcutKey,
+        command_id: &'static str,
         factory: NumericCommandFactory,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExactSequenceBinding {
+    pub keys: Vec<ShortcutKey>,
+    pub command_id: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NumericSequenceBinding {
+    pub suffix: ShortcutKey,
+    pub command_id: &'static str,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SequenceRegistrySnapshot {
+    pub exact_bindings: Vec<ExactSequenceBinding>,
+    pub numeric_prefix_bindings: Vec<NumericSequenceBinding>,
 }
 
 #[derive(Clone, Default)]
@@ -65,6 +84,7 @@ impl SequenceRegistry {
 
     pub fn register_numeric_prefix(
         &mut self,
+        command_id: &'static str,
         suffix: ShortcutKey,
         factory: NumericCommandFactory,
     ) -> Result<(), SequenceRegistrationError> {
@@ -79,9 +99,35 @@ impl SequenceRegistry {
         self.bindings.retain(|binding| {
             !matches!(binding, SequenceBinding::NumericPrefix { suffix: existing, .. } if *existing == suffix)
         });
-        self.bindings
-            .push(SequenceBinding::NumericPrefix { suffix, factory });
+        self.bindings.push(SequenceBinding::NumericPrefix {
+            suffix,
+            command_id,
+            factory,
+        });
         Ok(())
+    }
+
+    pub fn snapshot(&self) -> SequenceRegistrySnapshot {
+        let mut snapshot = SequenceRegistrySnapshot::default();
+        for binding in &self.bindings {
+            match binding {
+                SequenceBinding::Exact { keys, command } => {
+                    snapshot.exact_bindings.push(ExactSequenceBinding {
+                        keys: keys.clone(),
+                        command_id: command.id(),
+                    });
+                }
+                SequenceBinding::NumericPrefix {
+                    suffix, command_id, ..
+                } => snapshot
+                    .numeric_prefix_bindings
+                    .push(NumericSequenceBinding {
+                        suffix: *suffix,
+                        command_id,
+                    }),
+            }
+        }
+        snapshot
     }
 
     fn match_buffer(&self, buffer: &[ShortcutKey]) -> RegistryMatch {
@@ -97,13 +143,13 @@ impl SequenceRegistry {
                         has_prefix = true;
                     }
                 }
-                SequenceBinding::NumericPrefix { suffix, factory } => {
-                    match match_numeric_prefix(buffer, *suffix, *factory) {
-                        NumericMatch::None => {}
-                        NumericMatch::Prefix => has_prefix = true,
-                        NumericMatch::Exact(command) => exact = Some(command),
-                    }
-                }
+                SequenceBinding::NumericPrefix {
+                    suffix, factory, ..
+                } => match match_numeric_prefix(buffer, *suffix, *factory) {
+                    NumericMatch::None => {}
+                    NumericMatch::Prefix => has_prefix = true,
+                    NumericMatch::Exact(command) => exact = Some(command),
+                },
             }
         }
 
@@ -238,6 +284,10 @@ impl SequenceResolver {
 
     pub fn clear(&mut self) -> bool {
         self.state.clear()
+    }
+
+    pub fn snapshot(&self) -> SequenceRegistrySnapshot {
+        self.registry.snapshot()
     }
 
     pub fn pending_display(&self) -> Option<String> {
@@ -526,7 +576,9 @@ mod tests {
     fn numeric_prefix_dispatches_and_formats_pending_digits() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_numeric_prefix(ShortcutKey::char('G'), |page| Command::GotoPage { page })
+            .register_numeric_prefix("goto-page", ShortcutKey::char('G'), |page| {
+                Command::GotoPage { page }
+            })
             .expect("numeric prefix binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
@@ -554,7 +606,9 @@ mod tests {
             .register_static(&[ShortcutKey::char('=')], Command::ZoomReset)
             .expect("exact binding should register");
         registry
-            .register_numeric_prefix(ShortcutKey::char('G'), |page| Command::GotoPage { page })
+            .register_numeric_prefix("goto-page", ShortcutKey::char('G'), |page| {
+                Command::GotoPage { page }
+            })
             .expect("numeric prefix binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
@@ -581,9 +635,39 @@ mod tests {
         let mut registry = SequenceRegistry::new();
 
         let error = registry
-            .register_numeric_prefix(ShortcutKey::char('5'), |page| Command::GotoPage { page })
+            .register_numeric_prefix("goto-page", ShortcutKey::char('5'), |page| {
+                Command::GotoPage { page }
+            })
             .expect_err("digit suffix should be rejected");
         assert_eq!(error, SequenceRegistrationError::InvalidNumericSuffix);
+    }
+
+    #[test]
+    fn snapshot_includes_exact_and_numeric_bindings() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .expect("single-key binding should register");
+        registry
+            .register_numeric_prefix("goto-page", ShortcutKey::char('G'), |page| {
+                Command::GotoPage { page }
+            })
+            .expect("numeric prefix binding should register");
+
+        let snapshot = registry.snapshot();
+
+        assert_eq!(snapshot.exact_bindings.len(), 1);
+        assert_eq!(snapshot.exact_bindings[0].command_id, "next-page");
+        assert_eq!(
+            snapshot.exact_bindings[0].keys,
+            vec![ShortcutKey::char('j')]
+        );
+        assert_eq!(snapshot.numeric_prefix_bindings.len(), 1);
+        assert_eq!(snapshot.numeric_prefix_bindings[0].command_id, "goto-page");
+        assert_eq!(
+            snapshot.numeric_prefix_bindings[0].suffix,
+            ShortcutKey::char('G')
+        );
     }
 
     #[test]

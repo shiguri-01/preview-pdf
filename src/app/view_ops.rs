@@ -4,6 +4,7 @@ use crate::app::PageLayoutMode;
 use crate::backend::PdfBackend;
 use crate::config::Config;
 use crate::error::AppResult;
+use crate::input::sequence::SequenceRegistrySnapshot;
 use crate::palette::PaletteView;
 use crate::presenter::{
     PanOffset, PresenterFeedback, PresenterRenderMode, PresenterRenderOptions,
@@ -32,6 +33,7 @@ pub(super) struct InitialPreviewPlan {
 
 pub(super) struct RenderFramePlan {
     pub(super) palette_view: Option<PaletteView>,
+    pub(super) help_keymap: SequenceRegistrySnapshot,
     pub(super) status_bar_segments: Vec<String>,
     pub(super) page_count: usize,
     pub(super) visible_pages: VisiblePageSlots,
@@ -209,6 +211,7 @@ impl RenderSubsystem {
     ) -> AppResult<()> {
         let RenderFramePlan {
             palette_view,
+            help_keymap,
             status_bar_segments,
             page_count,
             visible_pages,
@@ -375,7 +378,7 @@ impl RenderSubsystem {
                 ui::draw_palette_overlay(frame, image_area, view);
             }
             if state.mode == super::state::Mode::Help {
-                ui::draw_help_overlay(frame, image_area, state.help_scroll);
+                ui::draw_help_overlay(frame, image_area, state.help_scroll, &help_keymap);
             }
         })?;
         state.pan_x = pan.cells_x;

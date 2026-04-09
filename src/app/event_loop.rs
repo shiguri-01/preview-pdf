@@ -584,6 +584,7 @@ impl App {
                 pdf,
                 RenderFramePlan {
                     palette_view,
+                    help_keymap: self.interaction.sequences.resolver.snapshot(),
                     status_bar_segments,
                     page_count: runtime.page_count,
                     visible_pages: step.visible_pages,

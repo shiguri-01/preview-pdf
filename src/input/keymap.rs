@@ -61,7 +61,7 @@ pub fn build_builtin_sequence_registry() -> SequenceRegistry {
         Command::FirstPage,
     );
     register_static(&mut registry, &[ShortcutKey::char('G')], Command::LastPage);
-    register_numeric_prefix(&mut registry, ShortcutKey::char('G'), |page| {
+    register_numeric_prefix(&mut registry, "goto-page", ShortcutKey::char('G'), |page| {
         Command::GotoPage { page }
     });
     register_static(&mut registry, &[ShortcutKey::char('+')], Command::ZoomIn);
@@ -99,11 +99,12 @@ fn register_static(registry: &mut SequenceRegistry, keys: &[ShortcutKey], comman
 
 fn register_numeric_prefix(
     registry: &mut SequenceRegistry,
+    command_id: &'static str,
     suffix: ShortcutKey,
     factory: fn(usize) -> Command,
 ) {
     registry
-        .register_numeric_prefix(suffix, factory)
+        .register_numeric_prefix(command_id, suffix, factory)
         .expect("built-in numeric key binding should register");
 }
 

@@ -1,0 +1,56 @@
+name: Build Artifacts
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: artifacts-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-artifacts:
+    name: Build artifact (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact-name: pvf-linux-x86_64
+            binary-path: target/release/pvf
+            asset-path: dist/pvf-linux-x86_64/pvf
+          - os: macos-14
+            artifact-name: pvf-macos-arm64
+            binary-path: target/release/pvf
+            asset-path: dist/pvf-macos-arm64/pvf
+          - os: windows-2022
+            artifact-name: pvf-windows-x86_64
+            binary-path: target/release/pvf.exe
+            asset-path: dist/pvf-windows-x86_64/pvf.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Stage artifact
+        shell: bash
+        run: |
+          mkdir -p "$(dirname "${{ matrix.asset-path }}")"
+          cp "${{ matrix.binary-path }}" "${{ matrix.asset-path }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: dist/${{ matrix.artifact-name }}
+          if-no-files-found: error

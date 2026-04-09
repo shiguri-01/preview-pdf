@@ -177,11 +177,6 @@ impl PaletteManager {
         };
 
         match key.code {
-            KeyCode::Esc => {
-                return Ok(PaletteKeyResult::CloseRequested {
-                    session_id: session.id,
-                });
-            }
             KeyCode::Up => {
                 let redraw = if supports_input_history(session.kind) {
                     let previous_input = session.input.value().to_string();

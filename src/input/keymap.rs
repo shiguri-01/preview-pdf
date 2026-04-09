@@ -1,5 +1,3 @@
-use crossterm::event::{KeyCode, KeyEvent};
-
 use crate::command::{Command, PanAmount, PanDirection};
 use crate::palette::PaletteKind;
 
@@ -90,20 +88,7 @@ pub fn build_builtin_sequence_registry() -> SequenceRegistry {
         Command::PrevSearchHit,
     );
     register_static(&mut registry, &[ShortcutKey::char('q')], Command::Quit);
-    register_static(
-        &mut registry,
-        &[ShortcutKey::key(KeyCode::Esc)],
-        Command::Cancel,
-    );
-
     registry
-}
-
-pub fn map_help_mode_key(key: KeyEvent) -> Option<Command> {
-    match key.code {
-        KeyCode::Esc => Some(Command::CloseHelp),
-        _ => None,
-    }
 }
 
 fn register_static(registry: &mut SequenceRegistry, keys: &[ShortcutKey], command: Command) {
@@ -128,7 +113,7 @@ mod tests {
 
     use crate::command::{Command, PanAmount, PanDirection};
 
-    use super::{build_builtin_sequence_registry, map_help_mode_key};
+    use super::build_builtin_sequence_registry;
     use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceResolution, SequenceResolver};
 
     #[test]
@@ -237,15 +222,5 @@ mod tests {
             KeyModifiers::CONTROL | KeyModifiers::SHIFT,
         ));
         assert_eq!(back, SequenceResolution::Dispatch(Command::HistoryBack));
-    }
-
-    #[test]
-    fn help_mode_maps_escape_to_close_help() {
-        let close_help = map_help_mode_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
-        assert_eq!(close_help, Some(Command::CloseHelp));
-
-        let question_mark_in_help =
-            map_help_mode_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
-        assert_eq!(question_mark_in_help, None);
     }
 }

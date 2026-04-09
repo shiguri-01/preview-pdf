@@ -215,7 +215,6 @@ pub struct PaletteSubmitAction {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PaletteKeyResult {
     Consumed { redraw: bool },
-    CloseRequested { session_id: u64 },
     Submit(PaletteSubmitAction),
 }
 

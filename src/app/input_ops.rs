@@ -7,7 +7,6 @@ use crate::command::{
 };
 use crate::error::AppResult;
 use crate::event::AppEvent;
-use crate::input::keymap::map_help_mode_key;
 use crate::input::sequence::SequenceResolution;
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::PaletteKeyResult;
@@ -31,6 +30,51 @@ impl InteractionSubsystem {
         key: KeyEvent,
     ) -> AppResult<KeyEventOutcome> {
         self.sync_sequences_with_mode(state);
+        if key.code == KeyCode::Esc {
+            if state.mode == Mode::Palette {
+                let closed = self.palette.manager.close();
+                if closed {
+                    state.mode = Mode::Normal;
+                    self.sync_sequences_with_mode(state);
+                }
+                return Ok(KeyEventOutcome {
+                    redraw: closed,
+                    clear_terminal: closed,
+                    quit_requested: false,
+                    commands: Vec::new(),
+                });
+            }
+            if state.mode == Mode::Help {
+                return Ok(KeyEventOutcome {
+                    redraw: true,
+                    clear_terminal: true,
+                    quit_requested: false,
+                    commands: vec![CommandRequest::new(
+                        Command::CloseHelp,
+                        CommandInvocationSource::Keymap,
+                    )],
+                });
+            }
+            if self.sequences.resolver.has_pending() {
+                let resolution = self.sequences.resolver.handle_key(key);
+                return Ok(Self::sequence_outcome(resolution, false));
+            }
+            let search_active = self.extensions.host.ui_snapshot().search_active;
+            return Ok(KeyEventOutcome {
+                redraw: search_active,
+                clear_terminal: false,
+                quit_requested: false,
+                commands: if search_active {
+                    vec![CommandRequest::new(
+                        Command::Cancel,
+                        CommandInvocationSource::Keymap,
+                    )]
+                } else {
+                    Vec::new()
+                },
+            });
+        }
+
         if state.mode == Mode::Palette {
             return match self.handle_palette_key(state, key)? {
                 PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
@@ -39,15 +83,6 @@ impl InteractionSubsystem {
                     quit_requested: false,
                     commands: Vec::new(),
                 }),
-                PaletteKeyResult::CloseRequested { session_id } => {
-                    let closed = self.close_palette_session(state, session_id);
-                    Ok(KeyEventOutcome {
-                        redraw: closed,
-                        clear_terminal: closed,
-                        quit_requested: false,
-                        commands: Vec::new(),
-                    })
-                }
                 PaletteKeyResult::Submit(action) => {
                     let (changed_by_palette, command) =
                         self.handle_palette_submit_effect(state, action.session_id, action.effect)?;
@@ -98,19 +133,6 @@ impl InteractionSubsystem {
     }
 
     fn handle_help_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
-        if let Some(Command::CloseHelp) = map_help_mode_key(key) {
-            let closed = self.close_help_session(state);
-            return KeyEventOutcome {
-                redraw: closed,
-                clear_terminal: closed,
-                quit_requested: false,
-                commands: vec![CommandRequest::new(
-                    Command::CloseHelp,
-                    CommandInvocationSource::Keymap,
-                )],
-            };
-        }
-
         match key.code {
             KeyCode::Char('j') => {
                 state.scroll_help_by(1);
@@ -167,27 +189,6 @@ impl InteractionSubsystem {
         self.palette
             .manager
             .handle_key(&self.palette.registry, state, &extensions, key)
-    }
-
-    pub(crate) fn close_palette_session(&mut self, state: &mut AppState, session_id: u64) -> bool {
-        if !self.palette.manager.close_if_matches(session_id) {
-            return false;
-        }
-        let changed = state.mode != Mode::Normal;
-        state.mode = Mode::Normal;
-        self.sync_sequences_with_mode(state);
-        changed
-    }
-
-    pub(crate) fn close_help_session(&mut self, state: &mut AppState) -> bool {
-        if state.mode != Mode::Help {
-            return false;
-        }
-
-        state.mode = Mode::Normal;
-        state.reset_help_scroll();
-        self.sync_sequences_with_mode(state);
-        true
     }
 
     pub(crate) fn handle_extension_input(
@@ -579,8 +580,8 @@ mod tests {
         let closed = interaction
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("help close should be handled");
-        assert_eq!(state.mode, crate::app::Mode::Normal);
-        assert_eq!(state.help_scroll, 0);
+        assert_eq!(state.mode, crate::app::Mode::Help);
+        assert_eq!(state.help_scroll, 1);
         assert!(matches!(
             closed.commands.as_slice(),
             [request]
@@ -623,18 +624,25 @@ mod tests {
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let mut last_input_at = std::time::Instant::now();
 
-        app.handle_input_event(
-            crossterm::event::Event::Key(key),
-            &mut session,
-            &mut needs_redraw,
-            &mut last_input_at,
-        )
-        .expect("help close should be handled");
+        let outcome = app
+            .handle_input_event(
+                crossterm::event::Event::Key(key),
+                &mut session,
+                &mut needs_redraw,
+                &mut last_input_at,
+            )
+            .expect("help close should be handled");
 
         assert_eq!(session.clear_count, 1);
-        assert_eq!(app.state.mode, Mode::Normal);
+        assert_eq!(app.state.mode, Mode::Help);
         assert_eq!(app.state.help_scroll, 0);
         assert!(needs_redraw);
+        assert!(matches!(
+            outcome.commands.as_slice(),
+            [request]
+                if request.command == Command::CloseHelp
+                    && request.source == CommandInvocationSource::Keymap
+        ));
     }
 
     #[test]

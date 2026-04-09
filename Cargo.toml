@@ -1,7 +1,15 @@
 [package]
-name = "pvf"
+name = "preview-pdf"
 version = "0.1.0"
 edition = "2024"
+default-run = "pvf"
+
+[lib]
+name = "pvf"
+
+[[bin]]
+name = "pvf"
+path = "src/main.rs"
 
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["extern_crate_alloc"] }

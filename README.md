@@ -1,4 +1,4 @@
-# pvf
+# pvf (preview-pdf)
 
 `pvf` is a PDF viewer for the terminal.
 

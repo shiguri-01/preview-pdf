@@ -1941,6 +1941,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "preview-pdf"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "clap",
+ "crossterm 0.28.1",
+ "fast_image_resize 6.0.0",
+ "flume",
+ "futures-util",
+ "hayro",
+ "image",
+ "kurbo",
+ "lru 0.16.3",
+ "ratatui 0.30.0",
+ "ratatui-image",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+ "tui-input",
+ "unicode-segmentation",
+ "unicode-width 0.2.0",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1966,32 +1992,6 @@ checksum = "52717f9a02b6965224f95ca2a81e2e0c5c43baacd28ca057577988930b6c3d5b"
 dependencies = [
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "pvf"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "clap",
- "crossterm 0.28.1",
- "fast_image_resize 6.0.0",
- "flume",
- "futures-util",
- "hayro",
- "image",
- "kurbo",
- "lru 0.16.3",
- "ratatui 0.30.0",
- "ratatui-image",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "toml",
- "tui-input",
- "unicode-segmentation",
- "unicode-width 0.2.0",
 ]
 
 [[package]]

@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*.*.*"
@@ -13,8 +14,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    name: Test release candidate (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Restore cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test
+
   build-release-assets:
     name: Build release asset (${{ matrix.os }})
+    needs: test
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -34,7 +52,7 @@ jobs:
             archive-name: pvf-windows-x86_64.zip
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -75,7 +93,7 @@ jobs:
           "$hash  ${{ matrix.archive-name }}" | Out-File -FilePath "dist/${{ matrix.archive-name }}.sha256" -Encoding ascii
 
       - name: Upload packaged artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact-name }}
           path: |
@@ -89,7 +107,7 @@ jobs:
     needs: build-release-assets
     steps:
       - name: Download packaged artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release-assets
 

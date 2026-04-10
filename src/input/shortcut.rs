@@ -29,9 +29,7 @@ impl ShortcutKey {
 }
 
 pub fn format_shortcut_key(key: ShortcutKey) -> String {
-    if key.code == KeyCode::BackTab {
-        return "<s-tab>".to_string();
-    }
+    let is_back_tab = key.code == KeyCode::BackTab;
 
     if let KeyCode::Char(ch) = key.code
         && !key
@@ -41,10 +39,15 @@ pub fn format_shortcut_key(key: ShortcutKey) -> String {
         return ch.to_string();
     }
 
-    let has_modifier = key
-        .modifiers
-        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
-    let key_text = base_key_text(key);
+    let has_modifier = is_back_tab
+        || key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
+    let key_text = if is_back_tab {
+        "tab".to_string()
+    } else {
+        base_key_text(key)
+    };
     if !has_modifier {
         return format!("<{key_text}>");
     }
@@ -56,7 +59,7 @@ pub fn format_shortcut_key(key: ShortcutKey) -> String {
     if key.modifiers.contains(KeyModifiers::ALT) {
         modifiers.push("m");
     }
-    if key.modifiers.contains(KeyModifiers::SHIFT) {
+    if is_back_tab || key.modifiers.contains(KeyModifiers::SHIFT) {
         modifiers.push("s");
     }
 
@@ -138,6 +141,20 @@ mod tests {
         assert_eq!(
             format_shortcut_key(ShortcutKey::key(KeyCode::BackTab)),
             "<s-tab>"
+        );
+        assert_eq!(
+            format_shortcut_key(ShortcutKey::new(
+                KeyCode::BackTab,
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT
+            )),
+            "<c-s-tab>"
+        );
+        assert_eq!(
+            format_shortcut_key(ShortcutKey::new(
+                KeyCode::BackTab,
+                KeyModifiers::ALT | KeyModifiers::SHIFT
+            )),
+            "<m-s-tab>"
         );
     }
 

@@ -35,6 +35,7 @@ pub fn format_shortcut_key(key: ShortcutKey) -> String {
         && !key
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT)
+        && ch != ' '
     {
         return ch.to_string();
     }
@@ -102,6 +103,7 @@ fn base_key_text(key: ShortcutKey) -> String {
         KeyCode::Insert => "ins".to_string(),
         KeyCode::Esc => "esc".to_string(),
         KeyCode::F(n) => format!("f{n}"),
+        KeyCode::Char(' ') => "space".to_string(),
         KeyCode::Char(ch) => ch.to_ascii_lowercase().to_string(),
         _ => format!("{:?}", key.code),
     }
@@ -119,6 +121,7 @@ mod tests {
     #[test]
     fn formats_regular_and_modified_keys() {
         assert_eq!(format_shortcut_key(ShortcutKey::ctrl('o')), "<c-o>");
+        assert_eq!(format_shortcut_key(ShortcutKey::char(' ')), "<space>");
         assert_eq!(format_shortcut_key(ShortcutKey::char('?')), "?");
         assert_eq!(format_shortcut_key(ShortcutKey::char('A')), "A");
         assert_eq!(

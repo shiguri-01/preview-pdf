@@ -31,29 +31,8 @@ impl InteractionSubsystem {
     ) -> AppResult<KeyEventOutcome> {
         self.sync_sequences_with_mode(state);
         if key.code == KeyCode::Esc {
-            if state.mode == Mode::Palette {
-                let closed = self.palette.manager.close();
-                if closed {
-                    state.mode = Mode::Normal;
-                    self.sync_sequences_with_mode(state);
-                }
-                return Ok(KeyEventOutcome {
-                    redraw: closed,
-                    clear_terminal: closed,
-                    quit_requested: false,
-                    commands: Vec::new(),
-                });
-            }
-            if state.mode == Mode::Help {
-                return Ok(KeyEventOutcome {
-                    redraw: true,
-                    clear_terminal: true,
-                    quit_requested: false,
-                    commands: vec![CommandRequest::new(
-                        Command::CloseHelp,
-                        CommandInvocationSource::Keymap,
-                    )],
-                });
+            if let Some(outcome) = self.close_active_overlay(state) {
+                return Ok(outcome);
             }
             if self.sequences.resolver.has_pending() {
                 let resolution = self.sequences.resolver.handle_key(key);
@@ -189,6 +168,41 @@ impl InteractionSubsystem {
         self.palette
             .manager
             .handle_key(&self.palette.registry, state, &extensions, key)
+    }
+
+    fn close_active_overlay(&mut self, state: &mut AppState) -> Option<KeyEventOutcome> {
+        let closed = match state.mode {
+            Mode::Palette => self.close_palette_overlay(state),
+            Mode::Help => self.close_help_overlay(state),
+            Mode::Normal => return None,
+        };
+        Some(KeyEventOutcome {
+            redraw: closed,
+            clear_terminal: closed,
+            quit_requested: false,
+            commands: Vec::new(),
+        })
+    }
+
+    fn close_palette_overlay(&mut self, state: &mut AppState) -> bool {
+        let changed = state.mode != Mode::Normal;
+        let _ = self.palette.manager.close();
+        if changed {
+            state.mode = Mode::Normal;
+            self.sync_sequences_with_mode(state);
+        }
+        changed
+    }
+
+    fn close_help_overlay(&mut self, state: &mut AppState) -> bool {
+        if state.mode != Mode::Help {
+            return false;
+        }
+
+        state.mode = Mode::Normal;
+        state.reset_help_scroll();
+        self.sync_sequences_with_mode(state);
+        true
     }
 
     pub(crate) fn handle_extension_input(
@@ -580,14 +594,9 @@ mod tests {
         let closed = interaction
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("help close should be handled");
-        assert_eq!(state.mode, crate::app::Mode::Help);
-        assert_eq!(state.help_scroll, 1);
-        assert!(matches!(
-            closed.commands.as_slice(),
-            [request]
-                if request.command == Command::CloseHelp
-                    && request.source == CommandInvocationSource::Keymap
-        ));
+        assert_eq!(state.mode, crate::app::Mode::Normal);
+        assert_eq!(state.help_scroll, 0);
+        assert!(closed.commands.is_empty());
         assert!(closed.redraw);
         assert!(closed.clear_terminal);
     }
@@ -634,15 +643,62 @@ mod tests {
             .expect("help close should be handled");
 
         assert_eq!(session.clear_count, 1);
-        assert_eq!(app.state.mode, Mode::Help);
+        assert_eq!(app.state.mode, Mode::Normal);
         assert_eq!(app.state.help_scroll, 0);
         assert!(needs_redraw);
-        assert!(matches!(
-            outcome.commands.as_slice(),
-            [request]
-                if request.command == Command::CloseHelp
-                    && request.source == CommandInvocationSource::Keymap
-        ));
+        assert!(outcome.commands.is_empty());
+    }
+
+    #[test]
+    fn palette_close_clears_terminal_and_restores_normal_mode() {
+        let mut app = App::new_with_config(PresenterKind::RatatuiImage, Config::default())
+            .expect("app should initialize");
+        app.interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Open {
+                kind: PaletteKind::Command,
+                seed: None,
+            });
+        assert!(app.interaction.apply_palette_requests(&mut app.state));
+        assert_eq!(app.state.mode, Mode::Palette);
+
+        let mut session = MockSession::new(80, 24);
+        let mut needs_redraw = false;
+        let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        let mut last_input_at = std::time::Instant::now();
+
+        let outcome = app
+            .handle_input_event(
+                crossterm::event::Event::Key(key),
+                &mut session,
+                &mut needs_redraw,
+                &mut last_input_at,
+            )
+            .expect("palette close should be handled");
+
+        assert_eq!(session.clear_count, 1);
+        assert_eq!(app.state.mode, Mode::Normal);
+        assert!(needs_redraw);
+        assert!(outcome.commands.is_empty());
+    }
+
+    #[test]
+    fn palette_close_repairs_stale_palette_mode_even_without_active_session() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState {
+            mode: Mode::Palette,
+            ..AppState::default()
+        };
+
+        let outcome = interaction
+            .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .expect("stale palette close should be handled");
+
+        assert_eq!(state.mode, Mode::Normal);
+        assert!(outcome.redraw);
+        assert!(outcome.clear_terminal);
+        assert!(outcome.commands.is_empty());
     }
 
     #[test]

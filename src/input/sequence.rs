@@ -230,7 +230,12 @@ impl SequenceResolver {
     pub fn handle_key(&mut self, key: KeyEvent) -> SequenceResolution {
         match normalize_key(key) {
             Some(key) => self.handle_normalized_key(key),
-            None => SequenceResolution::Noop,
+            None if self.state.is_empty() => SequenceResolution::Noop,
+            None if self.state.is_timed_out() => self.confirm_pending(),
+            None => {
+                self.state.clear();
+                SequenceResolution::Cleared
+            }
         }
     }
 
@@ -717,14 +722,22 @@ mod tests {
     fn unsupported_modifier_input_is_ignored() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('k')], Command::PrevPage)
-            .expect("single-key binding should register");
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
 
         let resolution =
             resolver.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER));
 
-        assert_eq!(resolution, SequenceResolution::Noop);
+        assert_eq!(resolution, SequenceResolution::Cleared);
         assert_eq!(resolver.pending_display(), None);
     }
 }

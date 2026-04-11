@@ -7,28 +7,31 @@ pub struct ShortcutKey {
 }
 
 impl ShortcutKey {
-    pub const fn new(code: KeyCode, modifiers: KeyModifiers) -> Self {
+    pub fn new(code: KeyCode, modifiers: KeyModifiers) -> Self {
+        assert_supported_modifiers(modifiers);
         Self { code, modifiers }
     }
 
-    pub const fn key(code: KeyCode) -> Self {
+    pub fn key(code: KeyCode) -> Self {
         Self::new(code, KeyModifiers::NONE)
     }
 
-    pub const fn ctrl(ch: char) -> Self {
+    pub fn ctrl(ch: char) -> Self {
         Self::new(KeyCode::Char(ch), KeyModifiers::CONTROL)
     }
 
-    pub const fn alt(ch: char) -> Self {
+    pub fn alt(ch: char) -> Self {
         Self::new(KeyCode::Char(ch), KeyModifiers::ALT)
     }
 
-    pub const fn char(ch: char) -> Self {
+    pub fn char(ch: char) -> Self {
         Self::key(KeyCode::Char(ch))
     }
 }
 
 pub fn format_shortcut_key(key: ShortcutKey) -> String {
+    assert_supported_modifiers(key.modifiers);
+
     let is_back_tab = key.code == KeyCode::BackTab;
 
     if let KeyCode::Char(ch) = key.code
@@ -65,6 +68,13 @@ pub fn format_shortcut_key(key: ShortcutKey) -> String {
     }
 
     format!("<{}-{key_text}>", modifiers.join("-"))
+}
+
+fn assert_supported_modifiers(modifiers: KeyModifiers) {
+    assert!(
+        !modifiers.intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META),
+        "ShortcutKey does not support SUPER, HYPER, or META modifiers",
+    );
 }
 
 pub fn format_shortcut_sequence(keys: &[ShortcutKey]) -> String {
@@ -150,6 +160,14 @@ mod tests {
             "<s-tab>"
         );
         assert_eq!(
+            format_shortcut_key(ShortcutKey::new(KeyCode::BackTab, KeyModifiers::CONTROL)),
+            "<c-s-tab>"
+        );
+        assert_eq!(
+            format_shortcut_key(ShortcutKey::new(KeyCode::BackTab, KeyModifiers::ALT)),
+            "<m-s-tab>"
+        );
+        assert_eq!(
             format_shortcut_key(ShortcutKey::new(
                 KeyCode::BackTab,
                 KeyModifiers::CONTROL | KeyModifiers::SHIFT
@@ -182,5 +200,11 @@ mod tests {
         let text =
             format_shortcut_alternatives_tight(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
         assert_eq!(text, "<c-p>/<c-n>");
+    }
+
+    #[test]
+    #[should_panic(expected = "ShortcutKey does not support SUPER, HYPER, or META modifiers")]
+    fn rejects_unsupported_modifiers() {
+        let _ = ShortcutKey::new(KeyCode::Char('k'), KeyModifiers::SUPER);
     }
 }

@@ -7,7 +7,9 @@ use crate::command::parse_invocable_command_text;
 use crate::command::{CommandConditionContext, CommandInvocationSource};
 use crate::error::AppResult;
 use crate::input::InputHistoryRecord;
-use crate::input::shortcut::{ShortcutKey, format_shortcut_sequence};
+use crate::input::shortcut::{
+    ShortcutKey, format_shortcut_alternatives_tight, format_shortcut_key,
+};
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTabEffect,
@@ -147,13 +149,14 @@ impl PaletteProvider for CommandPaletteProvider {
         ctx: &PaletteContext<'_>,
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
-        let enter = format_shortcut_sequence(&[ShortcutKey::key(crossterm::event::KeyCode::Enter)]);
-        let selection = format_shortcut_sequence(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
-        let history = format_shortcut_sequence(&[
+        let enter = format_shortcut_key(ShortcutKey::key(crossterm::event::KeyCode::Enter));
+        let selection =
+            format_shortcut_alternatives_tight(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
+        let history = format_shortcut_alternatives_tight(&[
             ShortcutKey::key(crossterm::event::KeyCode::Up),
             ShortcutKey::key(crossterm::event::KeyCode::Down),
         ]);
-        let default_hint = format!("{enter}: run  {selection}: select  {history}: history");
+        let default_hint = format!("{enter} run   {selection} select   {history} history");
         let trimmed = ctx.input.trim();
         if trimmed.is_empty() {
             return Some(default_hint);

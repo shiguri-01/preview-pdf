@@ -1,6 +1,9 @@
 use crate::command::{Command, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::input::InputHistoryRecord;
+use crate::input::shortcut::{
+    ShortcutKey, format_shortcut_alternatives_tight, format_shortcut_key,
+};
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
@@ -91,6 +94,15 @@ impl PaletteProvider for SearchPaletteProvider {
         _ctx: &PaletteContext<'_>,
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
-        Some("Enter: search  Up/Down: history  Ctrl+P/N: matcher".to_string())
+        let enter = format_shortcut_key(ShortcutKey::key(crossterm::event::KeyCode::Enter));
+        let history = format_shortcut_alternatives_tight(&[
+            ShortcutKey::key(crossterm::event::KeyCode::Up),
+            ShortcutKey::key(crossterm::event::KeyCode::Down),
+        ]);
+        let matcher =
+            format_shortcut_alternatives_tight(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
+        Some(format!(
+            "{enter} search   {history} history   {matcher} matcher"
+        ))
     }
 }

@@ -50,22 +50,22 @@ Rules:
   - case-sensitive and case-insensitive matcher modes
   - asynchronous scanning with progress updates
   - compact search status segment in chrome/status bar while active
-  - `Esc` in normal mode cancels active search state after any pending key sequence either consumes `Esc` or clears
+  - `<esc>` in normal mode cancels active search state after any pending key sequence either consumes `<esc>` or clears
   - command form: `cancel-search` cancels active search state when search is active
   - command form: `search` opens the dedicated search palette
   - search palette keeps a recent query history
-  - while search palette is open, `Up` / `Down` navigate query history and `Ctrl+P` / `Ctrl+N` select the matcher
+  - while search palette is open, `<up>` / `<down>` navigate query history and `<c-p>` / `<c-n>` select the matcher
   - `next-search-hit` / `prev-search-hit` are available only while search is active
 
 - Command palette:
   - keeps a recent command input history
-  - while command palette is open, `Up` / `Down` navigate command history and `Ctrl+P` / `Ctrl+N` move the candidate selection
+  - while command palette is open, `<up>` / `<down>` navigate command history and `<c-p>` / `<c-n>` move the candidate selection
 
 - Help:
   - command form: `help` opens the modal shortcut help overlay
   - `?` opens the modal shortcut help overlay
   - the overlay shows the current global keymap bindings
-  - `Esc` closes the help overlay
+  - `<esc>` closes the help overlay
 
 - History:
   - back/forward navigation history
@@ -115,11 +115,11 @@ terminal reports, regardless of which keys produced it.
 | `/`      | Open search palette |
 | `n`      | Next search hit |
 | `N`      | Previous search hit |
-| `Ctrl+O` | History back |
-| `Ctrl+I` | History forward |
+| `<c-o>` | History back |
+| `<c-i>` | History forward |
 | `?`      | Open shortcut help |
 | `q`      | Quit |
-| `Esc`    | Cancel / close current interactive surface |
+| `<esc>`  | Cancel / close current interactive surface |
 
 ## Core runtime composition
 

@@ -228,7 +228,15 @@ impl SequenceResolver {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> SequenceResolution {
-        self.handle_normalized_key(normalize_key(key))
+        match normalize_key(key) {
+            Some(key) => self.handle_normalized_key(key),
+            None if self.state.is_empty() => SequenceResolution::Noop,
+            None if self.state.is_timed_out() => self.confirm_pending(),
+            None => {
+                self.state.clear();
+                SequenceResolution::Cleared
+            }
+        }
     }
 
     fn handle_normalized_key(&mut self, key: ShortcutKey) -> SequenceResolution {
@@ -252,11 +260,11 @@ impl SequenceResolver {
                 };
             }
 
-            if key.code == KeyCode::Esc {
+            if key.code() == KeyCode::Esc {
                 self.state.clear();
                 return SequenceResolution::Cleared;
             }
-            if key.code == KeyCode::Enter {
+            if key.code() == KeyCode::Enter {
                 return self.confirm_pending();
             }
         }
@@ -352,8 +360,8 @@ fn match_numeric_prefix(
     let mut index = 0;
 
     while let Some(key) = buffer.get(index) {
-        if let KeyCode::Char(ch) = key.code
-            && key.modifiers == KeyModifiers::NONE
+        if let KeyCode::Char(ch) = key.code()
+            && key.modifiers() == KeyModifiers::NONE
             && ch.is_ascii_digit()
         {
             digits.push(ch);
@@ -381,15 +389,17 @@ fn match_numeric_prefix(
     }
 }
 
-fn normalize_key(key: KeyEvent) -> ShortcutKey {
-    normalize_shortcut_key(ShortcutKey::new(key.code, key.modifiers))
+fn normalize_key(key: KeyEvent) -> Option<ShortcutKey> {
+    ShortcutKey::try_new(key.code, key.modifiers)
+        .ok()
+        .map(normalize_shortcut_key)
 }
 
 fn canonicalize_binding_key(key: ShortcutKey) -> Result<ShortcutKey, SequenceRegistrationError> {
-    if matches!(key.code, KeyCode::Char(_))
-        && key.modifiers.contains(KeyModifiers::SHIFT)
+    if matches!(key.code(), KeyCode::Char(_))
+        && key.modifiers().contains(KeyModifiers::SHIFT)
         && !key
-            .modifiers
+            .modifiers()
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
     {
         return Err(SequenceRegistrationError::ShiftCharBindingUnsupported);
@@ -399,9 +409,9 @@ fn canonicalize_binding_key(key: ShortcutKey) -> Result<ShortcutKey, SequenceReg
 }
 
 fn normalize_shortcut_key(key: ShortcutKey) -> ShortcutKey {
-    match key.code {
+    match key.code() {
         KeyCode::Char(ch) => {
-            let mut modifiers = key.modifiers;
+            let mut modifiers = key.modifiers();
             if modifiers.intersects(KeyModifiers::SHIFT | KeyModifiers::CONTROL | KeyModifiers::ALT)
             {
                 modifiers.remove(KeyModifiers::SHIFT);
@@ -417,16 +427,16 @@ fn normalize_shortcut_key(key: ShortcutKey) -> ShortcutKey {
 
             ShortcutKey::new(KeyCode::Char(normalized_char), modifiers)
         }
-        _ => ShortcutKey::new(key.code, key.modifiers),
+        _ => ShortcutKey::new(key.code(), key.modifiers()),
     }
 }
 
 fn is_reserved_sequence_key(key: ShortcutKey) -> bool {
-    matches!(key.code, KeyCode::Enter | KeyCode::Esc)
+    matches!(key.code(), KeyCode::Enter | KeyCode::Esc)
 }
 
 fn is_digit_key(key: ShortcutKey) -> bool {
-    matches!(key.code, KeyCode::Char(ch) if key.modifiers == KeyModifiers::NONE && ch.is_ascii_digit())
+    matches!(key.code(), KeyCode::Char(ch) if key.modifiers() == KeyModifiers::NONE && ch.is_ascii_digit())
 }
 
 fn format_pending_buffer(buffer: &[ShortcutKey]) -> String {
@@ -434,8 +444,8 @@ fn format_pending_buffer(buffer: &[ShortcutKey]) -> String {
     let mut previous_was_plain_char = false;
 
     for key in buffer {
-        let (part, is_plain_char) = match key.code {
-            KeyCode::Char(ch) if key.modifiers == KeyModifiers::NONE => (ch.to_string(), true),
+        let (part, is_plain_char) = match key.code() {
+            KeyCode::Char(ch) if key.modifiers() == KeyModifiers::NONE => (ch.to_string(), true),
             _ => (format_shortcut_key(*key), false),
         };
 
@@ -706,5 +716,28 @@ mod tests {
             resolution,
             SequenceResolution::Dispatch(Command::HistoryBack)
         );
+    }
+
+    #[test]
+    fn unsupported_modifier_input_is_ignored() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+
+        let resolution =
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER));
+
+        assert_eq!(resolution, SequenceResolution::Cleared);
+        assert_eq!(resolver.pending_display(), None);
     }
 }

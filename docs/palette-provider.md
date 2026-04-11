@@ -74,11 +74,11 @@ Return `None` to keep the manager's normal first-item behavior.
 
 ## Keyboard semantics
 
-- `Esc`: close current palette.
-- `Ctrl+P` / `Ctrl+N`: move selection.
-- `Up` / `Down`: move input history in command/search palettes; move selection in history/outline palettes.
-- `Tab`: apply provider `on_tab`.
-- `Enter`: apply provider `on_submit`.
+- `<esc>`: close current palette.
+- `<c-p>` / `<c-n>`: move selection.
+- `<up>` / `<down>`: move input history in command/search palettes; move selection in history/outline palettes.
+- `<tab>`: apply provider `on_tab`.
+- `<enter>`: apply provider `on_submit`.
 
 ## Tab effect contract
 
@@ -120,8 +120,8 @@ Return `None` to keep the manager's normal first-item behavior.
 ## Command palette (`PaletteKind::Command`)
 
 - Open shortcut in normal mode: `:`
-- `Up` / `Down` recall recent command inputs
-- `Ctrl+P` / `Ctrl+N` move the candidate selection
+- `<up>` / `<down>` recall recent command inputs
+- `<c-p>` / `<c-n>` move the candidate selection
 - Enter behavior:
   1. If input parses as a valid command with args, dispatch directly.
   2. Else if selected candidate has no required args, dispatch directly.
@@ -149,8 +149,8 @@ Return `None` to keep the manager's normal first-item behavior.
 - Open shortcut in normal mode: `/`
 - Also invocable by command palette command: `search`
 - Input mode: `FreeText`
-- `Up` / `Down` recall recent search queries
-- `Ctrl+P` / `Ctrl+N` move the matcher selection
+- `<up>` / `<down>` recall recent search queries
+- `<c-p>` / `<c-n>` move the matcher selection
 - Candidate list exposes matcher choices:
   - `contains-insensitive` (default)
   - `contains-sensitive`

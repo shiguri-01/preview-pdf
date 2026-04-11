@@ -1,5 +1,6 @@
 use crate::command::Command;
 use crate::error::AppResult;
+use crate::input::shortcut::format_shortcut_key;
 use crate::palette::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
     PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
@@ -103,7 +104,10 @@ impl PaletteProvider for OutlinePaletteProvider {
         if ctx.extensions.outline_entries.is_empty() {
             Some("No outline entries in this document".to_string())
         } else {
-            Some("Enter: jump to page".to_string())
+            let enter = format_shortcut_key(crate::input::shortcut::ShortcutKey::key(
+                crossterm::event::KeyCode::Enter,
+            ));
+            Some(format!("{enter} jump to page"))
         }
     }
 }

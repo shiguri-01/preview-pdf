@@ -289,15 +289,15 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("Ctrl+O"));
+        assert!(text.contains("<c-o>"));
         assert!(text.contains("Help"));
         assert!(text.contains("Reset zoom"));
-        assert!(text.contains("g / g"));
+        assert!(text.contains("gg"));
         assert!(text.contains("[count]G"));
         assert!(text.contains("H / J / K / L"));
-        assert!(!text.contains("Ctrl+N"));
-        assert!(!text.contains("Alt+X"));
-        assert!(!text.contains("PgDn"));
+        assert!(!text.contains("<c-n>"));
+        assert!(!text.contains("<m-x>"));
+        assert!(!text.contains("<pgdn>"));
     }
 
     #[test]

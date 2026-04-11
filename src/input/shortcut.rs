@@ -105,7 +105,7 @@ fn base_key_text(key: ShortcutKey) -> String {
         KeyCode::F(n) => format!("f{n}"),
         KeyCode::Char(' ') => "space".to_string(),
         KeyCode::Char(ch) => ch.to_ascii_lowercase().to_string(),
-        _ => format!("{:?}", key.code),
+        _ => format!("{:?}", key.code).to_ascii_lowercase(),
     }
 }
 
@@ -127,6 +127,10 @@ mod tests {
         assert_eq!(
             format_shortcut_key(ShortcutKey::key(KeyCode::PageDown)),
             "<pgdn>"
+        );
+        assert_eq!(
+            format_shortcut_key(ShortcutKey::key(KeyCode::CapsLock)),
+            "<capslock>"
         );
         assert_eq!(
             format_shortcut_key(ShortcutKey::new(KeyCode::Char('O'), KeyModifiers::CONTROL)),

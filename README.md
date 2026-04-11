@@ -28,10 +28,10 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 | `H` / `J` / `K` / `L` | Pan |
 | `/` | Open search palette |
 | `n` / `N` | Next search hit / Previous search hit |
-| `Ctrl+O` / `Ctrl+I` | History back / History forward |
+| `<c-o>` / `<c-i>` | History back / History forward |
 | `?` | Open help overlay |
 | `:` | Open command palette |
-| `Esc` | Cancel current interactive state |
+| `<esc>` | Cancel current interactive state |
 | `q` | Quit |
 
 ## Common Commands

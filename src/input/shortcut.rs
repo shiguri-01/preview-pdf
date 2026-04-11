@@ -2,14 +2,24 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShortcutKey {
-    pub code: KeyCode,
-    pub modifiers: KeyModifiers,
+    code: KeyCode,
+    modifiers: KeyModifiers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShortcutKeyError {
+    UnsupportedModifiers,
 }
 
 impl ShortcutKey {
     pub fn new(code: KeyCode, modifiers: KeyModifiers) -> Self {
-        assert_supported_modifiers(modifiers);
-        Self { code, modifiers }
+        Self::try_new(code, modifiers)
+            .expect("ShortcutKey does not support SUPER, HYPER, or META modifiers")
+    }
+
+    pub fn try_new(code: KeyCode, modifiers: KeyModifiers) -> Result<Self, ShortcutKeyError> {
+        validate_modifiers(modifiers)?;
+        Ok(Self { code, modifiers })
     }
 
     pub fn key(code: KeyCode) -> Self {
@@ -27,16 +37,22 @@ impl ShortcutKey {
     pub fn char(ch: char) -> Self {
         Self::key(KeyCode::Char(ch))
     }
+
+    pub fn code(self) -> KeyCode {
+        self.code
+    }
+
+    pub fn modifiers(self) -> KeyModifiers {
+        self.modifiers
+    }
 }
 
 pub fn format_shortcut_key(key: ShortcutKey) -> String {
-    assert_supported_modifiers(key.modifiers);
+    let is_back_tab = key.code() == KeyCode::BackTab;
 
-    let is_back_tab = key.code == KeyCode::BackTab;
-
-    if let KeyCode::Char(ch) = key.code
+    if let KeyCode::Char(ch) = key.code()
         && !key
-            .modifiers
+            .modifiers()
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT)
         && ch != ' '
     {
@@ -45,7 +61,7 @@ pub fn format_shortcut_key(key: ShortcutKey) -> String {
 
     let has_modifier = is_back_tab
         || key
-            .modifiers
+            .modifiers()
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT);
     let key_text = if is_back_tab {
         "tab".to_string()
@@ -57,24 +73,24 @@ pub fn format_shortcut_key(key: ShortcutKey) -> String {
     }
 
     let mut modifiers = Vec::new();
-    if key.modifiers.contains(KeyModifiers::CONTROL) {
+    if key.modifiers().contains(KeyModifiers::CONTROL) {
         modifiers.push("c");
     }
-    if key.modifiers.contains(KeyModifiers::ALT) {
+    if key.modifiers().contains(KeyModifiers::ALT) {
         modifiers.push("m");
     }
-    if is_back_tab || key.modifiers.contains(KeyModifiers::SHIFT) {
+    if is_back_tab || key.modifiers().contains(KeyModifiers::SHIFT) {
         modifiers.push("s");
     }
 
     format!("<{}-{key_text}>", modifiers.join("-"))
 }
 
-fn assert_supported_modifiers(modifiers: KeyModifiers) {
-    assert!(
-        !modifiers.intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META),
-        "ShortcutKey does not support SUPER, HYPER, or META modifiers",
-    );
+fn validate_modifiers(modifiers: KeyModifiers) -> Result<(), ShortcutKeyError> {
+    if modifiers.intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META) {
+        return Err(ShortcutKeyError::UnsupportedModifiers);
+    }
+    Ok(())
 }
 
 pub fn format_shortcut_sequence(keys: &[ShortcutKey]) -> String {
@@ -97,7 +113,7 @@ fn format_shortcut_keys(keys: &[ShortcutKey], separator: &str) -> String {
 }
 
 fn base_key_text(key: ShortcutKey) -> String {
-    match key.code {
+    match key.code() {
         KeyCode::Backspace => "backspace".to_string(),
         KeyCode::Enter => "enter".to_string(),
         KeyCode::Left => "left".to_string(),
@@ -115,7 +131,7 @@ fn base_key_text(key: ShortcutKey) -> String {
         KeyCode::F(n) => format!("f{n}"),
         KeyCode::Char(' ') => "space".to_string(),
         KeyCode::Char(ch) => ch.to_ascii_lowercase().to_string(),
-        _ => format!("{:?}", key.code).to_ascii_lowercase(),
+        _ => format!("{:?}", key.code()).to_ascii_lowercase(),
     }
 }
 
@@ -124,8 +140,8 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::{
-        ShortcutKey, format_shortcut_alternatives, format_shortcut_alternatives_tight,
-        format_shortcut_key, format_shortcut_sequence,
+        ShortcutKey, ShortcutKeyError, format_shortcut_alternatives,
+        format_shortcut_alternatives_tight, format_shortcut_key, format_shortcut_sequence,
     };
 
     #[test]
@@ -203,8 +219,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "ShortcutKey does not support SUPER, HYPER, or META modifiers")]
-    fn rejects_unsupported_modifiers() {
-        let _ = ShortcutKey::new(KeyCode::Char('k'), KeyModifiers::SUPER);
+    fn try_new_rejects_unsupported_modifiers() {
+        assert_eq!(
+            ShortcutKey::try_new(KeyCode::Char('k'), KeyModifiers::SUPER),
+            Err(ShortcutKeyError::UnsupportedModifiers)
+        );
     }
 }

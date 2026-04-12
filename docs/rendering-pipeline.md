@@ -1,182 +1,182 @@
-# pvf Rendering Pipeline Specification
+# Rendering Pipeline Specification
 
-This document defines how `pvf` transforms PDF page content into terminal pixels.
+This document is the source of truth for how the runtime transforms PDF page
+content into terminal image output.
 
-## End-to-end contract
+## Scope
 
-Pipeline:
+This document owns:
 
-1. Open PDF backend document.
-2. Rasterize visible page(s) into `RgbaFrame`.
-   - On cold start, the visible page or spread may also be rasterized at a lower preview scale so the viewer can present a coarse image before the full-resolution content is ready.
-3. Cache rasterized frame in L1 cache.
-4. Compose spread frame (when enabled), then crop to viewport/pan window when required.
-5. Prepare terminal frame entry in L2 cache.
-6. Encode image for terminal protocol in encode worker lanes.
-7. Render ready protocol frame through ratatui draw path.
+- rasterization contracts
+- L1 and L2 cache semantics
+- viewport crop and spread composition behavior
+- render scheduling and worker priority rules
+- presenter encode behavior
+- redraw timing rules
+- exported performance signals
 
-## Stage contracts
+## End-to-end flow
 
-## 1. PDF rasterization (`backend/traits.rs`, `backend/hayro.rs`)
+1. Open the PDF backend document.
+2. Rasterize the visible page or pages into `RgbaFrame`.
+3. Store raster output in the L1 rendered-page cache.
+4. Compose spread output and crop to the current viewport when needed.
+5. Prepare terminal-frame entries in the L2 cache.
+6. Encode the image for the active terminal protocol.
+7. Draw a ready terminal frame through the presenter.
 
-Primary API:
+Cold start may additionally render a lower-resolution preview for the current
+view before the full-resolution image is ready.
 
-```rust
-fn render_page(&mut self, page: u32, scale: f64) -> AppResult<RgbaFrame>
-```
+## Rasterization contract
 
-Requirements:
-- Output pixel format is RGBA (4 bytes/pixel).
-- `RgbaFrame` pixel storage is shareable across caches and presenter handoff, but encode/downscale paths should consume the owned buffer without cloning when the frame is uniquely owned.
-- Cache identity includes `doc_id` (stable hash of file path), page index, scale, and layout tag.
-- Render-worker page tasks use layout tag `0` (source page identity).
-
-Text extraction (`extract_text`) provides line-oriented text data for search.
-
-## 2. L1 rendered-page cache (`render/cache.rs`)
-
-- Cache key: `RenderedPageKey { doc_id, page, scale_milli, layout_tag }`.
-- Cache value: `RgbaFrame`.
-- Cache policy: LRU + memory budget enforcement on insert.
-- Cache counters are tracked for hit/miss/eviction reporting.
-
-`scale_milli` stores scale as integer milli-units for exact key equality.
-`layout_tag` separates single-page and spread presenter identities to prevent L2 key collisions.
-
-## 3. Viewport crop/pan (`app/frame_ops.rs`)
-
-APIs:
+Primary backend API:
 
 ```rust
-fn crop_frame_for_viewport(frame, viewport, pan, cell_px) -> RgbaFrame
-fn compose_spread_frame(left, right, gap_px) -> RgbaFrame
+fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>
 ```
 
-Requirements:
-- In spread mode, two page frames are horizontally composed with a fixed gap.
-- Missing partner page (odd tail page) is represented as a blank slot.
-- When zoomed content exceeds viewport, only the visible region is forwarded.
-- Crop is cell-aligned to avoid sub-cell artifacts.
-- If full frame fits viewport, original frame is forwarded.
+Rules:
 
-## 4. Render workers (`render/worker.rs`)
+- raster output uses RGBA pixel storage
+- cache identity includes document identity, page identity, scale, and layout
+  identity
+- render-worker page tasks use layout tag `0` for source-page identity
+- text extraction is a separate backend path used by search
 
-- A fixed-size worker pool executes `RenderTask`.
-- Completed work is emitted as `RenderResultEvent` through worker result channel.
-- Capacity limits bound concurrent in-flight render tasks.
-- `RenderTask.class` uses shared `WorkClass`.
+## L1 rendered-page cache
 
-Preemption rule for current-page critical tasks:
-- On saturation, stale lower-priority tasks can be canceled to admit critical work.
-- Priority order:
-  - `CriticalCurrent`
-  - `GuardReverse`
-  - `DirectionalLead`
-  - `Background`
+- key: `RenderedPageKey { doc_id, page, scale_milli, layout_tag }`
+- value: `RgbaFrame`
+- policy: LRU with memory-budget enforcement on insert, except that the current
+  critical render may temporarily occupy a single oversize entry
+- counters track hit, miss, and eviction behavior
 
-Cold-start preview rule:
-- While no page image has been displayed yet, the runtime may enqueue both:
-  - lower-resolution preview render(s) for the currently visible page(s), and
-  - the normal full-resolution current-page render(s).
-- In spread layout, the preview path renders each visible source page at preview scale, then composes them into a temporary spread image with the same layout tag as the eventual full-resolution spread.
-- The preview is only a temporary display path; pending redraws continue until the full-resolution current page is cached and presented.
+`scale_milli` stores scale in integer milli-units for exact key equality.
+`layout_tag` keeps single-page and spread presenter identities distinct.
 
-## 5. Scheduling and prefetch (`render/scheduler.rs`, `render/prefetch.rs`)
+## Viewport and spread composition
 
-`NavTracker` produces `NavIntent { direction, streak, generation }`.
+Rules:
 
-Scheduler requirements:
-- Always include current visible page(s) (`CriticalCurrent` for each).
-- Include one reverse guard page (`GuardReverse`).
-- Include directional lead pages (`DirectionalLead`) with depth based on streak.
-- Fill remaining budget with `Background` tasks.
+- spread mode horizontally composes the left and right page with a fixed gap
+- a missing partner page is represented as a blank slot
+- if zoomed content exceeds the viewport, only the visible region is forwarded
+- crop is cell-aligned
+- if the full frame already fits, the uncropped frame is forwarded
 
-Queue requirements (`PrefetchQueue`):
-- Priority ordering.
-- Key deduplication with priority replacement.
-- Stale-generation cancellation.
-- Max depth enforcement.
-- Queue class metadata uses shared `WorkClass`.
+## Render workers and scheduling
 
-## 6. Encode worker lanes (`presenter/encode.rs`)
+- render work runs in a fixed-size worker pool
+- completed render work returns as `RenderWorkerResult`
+- in-flight work is capacity-limited
+- task priority uses shared `WorkClass`
 
-Input:
-- `EncodeWorkerRequest::Encode { key, picker, frame, area, class, generation }`
+Priority order:
 
-Per-task behavior:
-1. Resize/crop frame for target terminal area.
-2. Encode to `StatefulProtocol` with negotiated protocol picker.
+1. `CriticalCurrent`
+2. `GuardReverse`
+3. `DirectionalLead`
+4. `Background`
 
-Requirements:
-- `CriticalCurrent` tasks use the current lane.
-- `GuardReverse`, `DirectionalLead`, and `Background` tasks use the background lane.
-- Current-lane queued work drops older generations so fast page flips do not build a stale current backlog.
-- Background-lane stale-generation tasks are discarded before encode completion path, except for `GuardReverse` and any other work class preserved by `WorkClass::kept_on_background_stale_generation()`.
-- Render-complete handoff keeps one explicit exception: completed `CriticalCurrent` render work is downgraded to `DirectionalLead` before presenter-side prefetch encode routing.
-- Resize/downscale reads source RGBA bytes through an immutable image view, so shared `RgbaFrame` storage does not trigger copy-on-write cloning before the destination buffer is produced.
-- Results are returned as `EncodeWorkerResult` and drained by presenter.
+Scheduling rules:
 
-## 7. L2 terminal-frame cache (`presenter/l2_cache.rs`)
+- always include the currently visible page or pages
+- include one reverse-guard page
+- include directional lead pages based on navigation streak
+- use remaining budget for background prefetch work
+- stale lower-priority work may be canceled to admit critical current work
 
-- Cache key: `TerminalFrameKey { rendered_page, viewport, pan }`.
-- Value states:
+## Cold-start preview behavior
+
+- while no page image has been displayed yet, the runtime may enqueue both
+  preview-scale work and full-resolution current-page work
+- in spread layout, preview rendering rasterizes each visible source page and
+  then composes a temporary spread image
+- the preview remains visible until the full-resolution current view is ready
+
+## Presenter encode and L2 cache
+
+Encode input:
+
+```rust
+EncodeWorkerRequest::Encode { key, picker, frame, area, class, generation }
+```
+
+Encode rules:
+
+- `CriticalCurrent` tasks use the current encode lane
+- lower-priority work uses the background lane
+- stale generations are dropped aggressively for current work
+- background stale-generation work is discarded unless the work class is
+  explicitly preserved
+- completed `CriticalCurrent` render work is downgraded to `DirectionalLead`
+  before presenter-side prefetch encode routing
+
+L2 cache rules:
+
+- key: `TerminalFrameKey { rendered_page, viewport, pan }`
+- states:
   - `PendingFrame`
   - `Encoding`
   - `Ready(StatefulProtocol)`
   - `Failed`
-- Cache policy: LRU + memory budget enforcement.
+- policy: LRU with memory-budget enforcement, except that an oversize current
+  entry may temporarily coexist with the currently visible ready frame to avoid
+  regressing to a blank viewer
 
-State transitions:
+`viewport` and `pan` are part of the L2 key because terminal output depends on
+both.
 
-```text
-insert -> PendingFrame -> Encoding -> Ready | Failed
-```
+## Presenter draw contract
 
-`viewport` and `pan` are part of the key because terminal output depends on both.
+`ImagePresenter::render(...) -> AppResult<PresenterRenderOutcome>` must follow
+these rules:
 
-## 8. Presenter draw path (`presenter/ratatui.rs`)
+- `drew_image = true` means a terminal image was drawn
+- `feedback` indicates whether the current image is ready, pending, or failed
+- `used_stale_fallback = true` means an older ready frame was drawn
 
-`ImagePresenter::render(...) -> AppResult<PresenterRenderOutcome>` contract:
-- `drew_image=true` means a terminal frame was drawn (current or stale fallback).
-- `feedback` conveys overlay intent:
-  - `None`: current image is ready.
-  - `Pending`: current image is still preparing/encoding.
-  - `Failed`: current image failed to prepare/encode.
-- `used_stale_fallback=true` means the presenter drew a previous ready frame.
+Frame-level UI rules:
 
-Protocol handling:
-- Presenter resolves terminal image protocol through picker/capability flow.
-- Draw path renders protocol image into ratatui frame region.
+- a frame must not end in a clear-only state
+- each frame must show either image content, a loading overlay, or an error
+  overlay
+- if the current page is pending and an older image is visible, the loading
+  overlay is drawn over that image
 
-UI contract:
-- A frame must never end with "Clear only".
-- Viewer output for each frame must include one of:
-  - image content,
-  - loading overlay,
-  - error overlay.
-- When the current page is pending and an older image is still visible, the loading overlay is drawn on top of that existing image instead of suppressing it.
+## Redraw timing
 
-## Pending redraw timer behavior
+- `RedrawTick` is enabled only while the current view is not fully cached and
+  render or presenter work is still pending
+- queued prefetch work keeps the loop on the busy wake timeout even after the
+  current view is cached
+- once the current view is cached and presenter work is drained, redraws are
+  event-driven rather than timer-driven
 
-- `RedrawTick` is not a permanently active idle timer.
-- The loop enables pending redraw ticks only while the current view is not fully cached and either:
-  - render workers still have in-flight work, or
-  - the presenter still has encode/presenter-side pending work.
-- Prefetch work stays wake-sensitive even after the current view is cached:
-  - queued prefetch tasks keep the loop on the busy wake timeout.
-- Once the current view is cached and presenter work is drained, redraws must be event-driven (`input`, `command`, `app_event`, `render_complete`, `state_changed`) rather than timer-driven.
-
-## Observable performance signals (`perf.rs`)
+## Observable performance signals
 
 The runtime tracks:
-- render time (`render_ms`)
-- encode time (`encode_ms`, surfaced as `convert_ms` in perf reports)
-- terminal draw time (`blit_ms`)
-- render/encode queue wait time (`render_queue_wait_ms`, `encode_queue_wait_ms`)
-- L1/L2 cache hit rates
-- render/encode queue depth and in-flight samples
-- presenter encode queue metrics are aggregated across the current and background lanes
-- render/encode canceled task counts
-- redraw request counts broken down by reason (`input`, `command`, `app_event`, `render_complete`, `pending_work`, `timer`, `input_error`, `state_changed`)
 
-These values are used by perf JSON reports and other offline/debugging analysis. The interactive diagnostics bar is intentionally narrower and only shows the active presenter/protocol path.
+- `render_ms`
+- `encode_ms` and the reported `convert_ms`
+- `blit_ms`
+- `render_queue_wait_ms`
+- `encode_queue_wait_ms`
+- L1 and L2 cache hit rates
+- render and encode queue depth and in-flight samples
+- canceled render and encode task counts
+- redraw request counts by reason
+
+These values feed perf JSON reports and offline diagnostics.
+
+## Code references
+
+- `src/backend/traits.rs`
+- `src/render/cache.rs`
+- `src/render/scheduler.rs`
+- `src/render/prefetch.rs`
+- `src/render/worker.rs`
+- `src/presenter/encode.rs`
+- `src/presenter/l2_cache.rs`
+- `src/presenter/ratatui.rs`

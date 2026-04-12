@@ -1,84 +1,89 @@
-# pvf Extension System Specification
+# Extension System Specification
 
-This document defines extension contracts and runtime behavior in `pvf`.
+This document is the source of truth for extension contracts and current
+extension behavior.
+
+## Scope
+
+This document owns the `Extension` trait contract, `ExtensionHost` composition
+and dispatch order, extension input/event/background/status-bar behavior, and
+built-in extension behavior.
+
+Palette behavior is specified in `palette-provider.md`.
 
 ## Design constraints
 
-- Extensions are internal modules.
-- Extension dispatch is static and typed.
-- Extension state is stored as concrete fields in `ExtensionHost`.
-- Extension hooks are explicit: input, event, background, status bar segment.
-- Extension-owned UI state is exposed to palette providers via a read-only snapshot (`ExtensionUiSnapshot`), not via `AppState`.
+- extensions are internal modules
+- dispatch is static and typed
+- extension state is stored as concrete fields on `ExtensionHost`
+- extension UI data is exposed to palettes through `ExtensionUiSnapshot`
 
 ## Extension contract
 
-`src/extension/traits.rs`:
+Each extension defines:
 
-```rust
-pub trait Extension {
-    type State: Send;
+- one concrete state type
+- an initialization path for that state
+- an input hook for extension-local interception
+- an event hook for observing `AppEvent`
+- a background hook for non-input progress
+- an optional status-bar segment projection
 
-    fn init_state() -> Self::State;
+Contract rules:
 
-    fn handle_input(
-        state: &mut Self::State,
-        event: AppInputEvent,
-        app: &mut AppState,
-    ) -> InputHookResult;
-
-    fn handle_event(state: &mut Self::State, event: &AppEvent, app: &mut AppState);
-
-    fn on_background(state: &mut Self::State, app: &mut AppState) -> bool;
-
-    fn status_bar_segment(state: &Self::State, app: &AppState) -> Option<String>;
-}
-```
+- extension state must be sendable across runtime boundaries
+- extension hooks operate on extension-owned state plus shared app state
+- input hooks return `Ignored` when they do not claim the event
+- background hooks report whether they changed visible or behavioral state
+- status-bar output is optional
 
 ## Host composition
 
-`src/extension/host.rs` owns:
+`ExtensionHost` owns:
 
-```rust
-pub struct ExtensionHost {
-    search: SearchRuntime,
-    history: HistoryState,
-}
-```
+- search runtime state
+- history state
+- outline state
 
-Dispatch order is fixed:
-1. `SearchExtension`
-2. `HistoryExtension`
+Dispatch rules:
 
-## Input/event/background flow
+- input hooks run search first, then history
+- outline does not participate in extension input interception
+- event hooks run search, history, then outline
+- background drain currently polls search and history
 
-- Input flow:
-  - `ExtensionHost::handle_input()` invokes search, then history.
-  - First non-`Ignored` hook result is applied.
-  - Built-in global shortcuts should live in app keymap/command routing; extension input hooks are for extension-local interception only.
+## Runtime flows
 
-- Event flow:
-  - `command::dispatch()` emits typed `AppEvent` values.
-  - Main loop re-enqueues them as `DomainEvent::App`.
-  - `ExtensionHost::handle_event()` forwards each event to both extensions.
+- Input flow
+  - extension input hooks are for extension-local interception
+  - built-in global shortcuts stay in app keymap and command routing
+  - the first non-ignored input hook result wins
 
-- Background flow:
-  - Main loop calls `command::drain_background_events()`.
-  - Host polls extension background hooks.
-  - Search results are drained through extension-owned `SearchEngine` (inside `SearchRuntime`).
+- Event flow
+  - command dispatch emits typed `AppEvent` values
+  - the main loop re-enqueues them as `DomainEvent::App`
+  - the extension host forwards each event to all current extensions that
+    subscribe
 
-- Status bar flow:
-  - UI asks `ExtensionHost::status_bar_segments()`.
-  - Host aggregates non-empty segments from registered extensions.
+- Background flow
+  - search drains asynchronous search worker results
+  - history may update state from loop-local background checks
+  - outline currently has no background polling path
 
-- Palette flow:
-  - Palette contexts include `ExtensionUiSnapshot`.
-  - Providers can gate candidates (for example, search navigation commands) using snapshot fields like `search_active`.
+- Status-bar flow
+  - the UI asks the host for extension segments
+  - non-empty extension segments are appended in host order
 
-## Built-in extensions
+- Palette flow
+  - the host exposes `ExtensionUiSnapshot`
+  - current snapshot data includes `search_active` and cached outline entries
 
-### Search (`src/search/`)
+## Current extensions
 
-State (`SearchState`) contains:
+### Search
+
+State tracks:
+
 - query and matcher
 - generation
 - progress counters
@@ -86,56 +91,69 @@ State (`SearchState`) contains:
 - latest error
 
 Behavior:
-- submits async search jobs
-- moves to next/previous hit
-- consumes background search events (`Snapshot`, `Completed`, `Failed`)
-- contributes compact search progress/hit info to status bar when active
 
-### History (`src/history/`)
+- opens the search palette
+- submits asynchronous search jobs
+- cancels active search work
+- moves to next or previous search hit
+- consumes background search completion and progress events
+- contributes compact search progress and hit status to the status bar while
+  active
 
-State (`HistoryState`) contains:
-- `back_stack` and `forward_stack` (capacity: 64)
+### History
+
+State tracks:
+
+- `back_stack`
+- `forward_stack`
 - `suppress_next_record`
 
 Behavior:
-- history back/forward/goto
-- opens history palette
+
+- performs history back, forward, and direct goto
+- opens the history palette
 - records navigation from `AppEvent::PageChanged`
-- record policy is reason-based:
-  - records `Goto` and `Search`
-  - does not record `Step`, `History`, `LayoutNormalize`
-  - clears `forward_stack` for non-history transitions
-  - allows same-page (`from == to`) search transitions to be recorded
-  - navigation reason is associated with the destination page (`to`)
-  - origin page (`from`) is stored as a deduplicated usability aid
+- clears forward history on non-history navigation
+- records reason-bearing transitions such as goto, search, and outline
 
-## Shared extension event types
+### Outline
 
-`src/event.rs`:
+State tracks:
 
-```rust
-enum NavReason {
-    Step,
-    Goto(GotoKind),
-    Search { query: String },
-    History(HistoryOp),
-    LayoutNormalize,
-}
+- extracted outline entries cached for palette use
 
-enum AppEvent {
-    CommandExecuted { id: ActionId, outcome: CommandOutcome },
-    PageChanged { from: usize, to: usize, reason: NavReason },
-    ModeChanged { from: Mode, to: Mode },
-}
-```
+Behavior:
 
-## Adding an extension
+- opens the outline palette
+- loads and flattens outline/bookmark entries from the backend
+- ignores unsupported or non-page destinations
+- jumps to the selected outline page through command flow
 
-1. Define a concrete state type and `Extension` implementation.
-2. Add the state field to `ExtensionHost`.
-3. Wire dispatch in host methods:
-   - `handle_input`
-   - `handle_event`
-   - background drain path
-4. Add command variants/dispatch behavior when required.
-5. Add palette provider and `PaletteKind` support when UI exposure is needed.
+## Shared event types
+
+`src/event.rs` defines:
+
+- `NavReason`
+  - `Step`
+  - `Goto(GotoKind)`
+  - `Search { query }`
+  - `History(HistoryOp)`
+  - `Outline { title }`
+  - `LayoutNormalize`
+
+- `AppEvent`
+  - `CommandExecuted`
+  - `PageChanged`
+  - `ModeChanged`
+
+These types belong to core runtime flow and are consumed by extensions for
+recording and state updates.
+
+## Code references
+
+- `src/extension/traits.rs`
+- `src/extension/host.rs`
+- `src/event.rs`
+- `src/search/`
+- `src/history/`
+- `src/outline/`

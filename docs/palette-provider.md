@@ -1,191 +1,180 @@
 # Palette Provider Specification
 
-This document defines the palette provider contract in `pvf`.
+This document is the source of truth for palette contracts and current palette
+behavior.
+
+## Scope
+
+This document owns `PaletteKind`, `PaletteProvider`, palette session and
+selection behavior, palette-local keyboard semantics, and built-in palette
+behavior.
 
 ## Runtime model
 
-- Palette instances are identified by `PaletteKind`.
-- Provider resolution is static via `PaletteRegistry`.
-- A palette session has a session id; transitions validate active session id.
+- palette instances are identified by `PaletteKind`
+- provider resolution is static via `PaletteRegistry`
+- a palette session has a session id, and transitions validate the active
+  session id
 
-## Provider interface
+## Provider contract
 
 `PaletteProvider` exposes:
 
 - `kind() -> PaletteKind`
 - `title(ctx) -> String`
 - `input_mode() -> PaletteInputMode`
-- `list(ctx) -> Vec<PaletteCandidate>`
-- `on_tab(ctx, selected) -> PaletteTabEffect` (default: `Noop`)
-- `on_submit(ctx, selected) -> PaletteSubmitEffect`
-- `assistive_text(ctx, selected) -> Option<String>` (default: `None`)
-- `reset_selection_on_input_change() -> bool` (default: `false`)
-- `initial_selected_candidate(ctx, candidates) -> Option<usize>` (default: `None`)
-- `initial_input(seed) -> String` (default: `seed` passthrough)
+- `list(ctx) -> AppResult<Vec<PaletteCandidate>>`
+- `on_tab(ctx, selected) -> AppResult<PaletteTabEffect>`
+- `on_submit(ctx, selected) -> AppResult<PaletteSubmitEffect>`
+- `assistive_text(ctx, selected) -> Option<String>`
+- `reset_selection_on_input_change() -> bool`
+- `initial_selected_candidate(ctx, candidates) -> Option<usize>`
+- `initial_input(seed) -> String`
 
-`PaletteContext` contains:
-- `ctx.app`: app state
-- `ctx.kind`: active palette kind
-- `ctx.input`: current input text
-- `ctx.seed`: optional seed string
+`PaletteContext` includes current app state, palette kind, input text, optional
+seed data, and extension UI snapshot data.
 
-`selected` is the currently highlighted visible candidate, if any.
+## Candidate and rendering contract
 
-`PaletteCandidate` carries display segments for the candidate row:
+`PaletteCandidate` separates:
 
-- `left`: primary row content, rendered from one or more text segments
-- `right`: trailing detail content, rendered from one or more text segments
-- each text segment has a tone, currently `Primary` or `Secondary`
-- `search_texts`: structured search inputs used by the shared matcher
+- `left` text parts
+- `right` text parts
+- `search_texts` for matching
 
-`search_texts` is independent from the rendered row content. Providers should
-populate it from the candidate's existing structured data so matching can use
-values that are not shown directly in the UI.
+Rules:
 
-The palette renderer is responsible for laying out both sides, reserving the
-trailing padding space, and applying selection highlighting to the whole row.
-Selection highlighting is palette-wide and does not vary by palette kind.
-When a palette row becomes too narrow, the renderer should prefer preserving
-the row's meaning over preserving a strict left/right split: if both sides can
-fit, show both; if not, trim the weaker side first, but keep enough of the
-other side to avoid turning the row into noise. This is why structured
-candidate parts are exposed separately instead of forcing every provider to
-pre-flatten text into one label string.
+- candidate search input is independent from rendered row text
+- the renderer lays out both sides and applies row-wide selection highlighting
+- when width is constrained, the renderer preserves row meaning rather than a
+  rigid left/right split
 
 ## Input modes
 
 - `FilterCandidates`
-  - Runtime filters candidates based on input text.
+  - runtime filtering is driven by the input text
 - `FreeText`
-  - Input is provider-owned command/query text.
+  - provider owns the meaning of the input text
 - `Custom`
-  - Provider defines its own list/input strategy in `list()`.
+  - provider owns how input and candidate generation interact
 
-When `reset_selection_on_input_change()` returns `true`, the palette manager
-resets the highlighted candidate to the first visible row whenever the input
-text changes. Providers should opt in only when the candidate list is derived
-from the current input.
+Selection rules:
 
-When `initial_selected_candidate(ctx, candidates)` returns `Some(idx)`, the
-palette manager uses that candidate index as the initial highlight after the
-list is built and filtered. Providers can use this hook to control the default
-selection for buckets of candidates that have a meaningful "current" item.
-Return `None` to keep the manager's normal first-item behavior.
+- providers opt into selection reset by returning `true` from
+  `reset_selection_on_input_change()`
+- providers can override the initial highlight with
+  `initial_selected_candidate(...)`
+- `initial_input(seed)` defaults to the seed value and may be overridden when
+  seed data should not appear verbatim in the input field
 
 ## Keyboard semantics
 
-- `<esc>`: close current palette.
-- `<c-p>` / `<c-n>`: move selection.
-- `<up>` / `<down>`: move input history in command/search palettes; move selection in history/outline palettes.
-- `<tab>`: apply provider `on_tab`.
-- `<enter>`: apply provider `on_submit`.
+- `<esc>` closes the current palette
+- `<c-p>` / `<c-n>` move the current selection
+- `<up>` / `<down>` recall input history in command and search palettes
+- `<up>` / `<down>` move selection in history and outline palettes
+- `<tab>` applies the provider `on_tab` effect
+- `<enter>` applies the provider `on_submit` effect
 
-## Tab effect contract
+## Tab and submit effects
 
 `on_tab` returns:
+
 - `Noop`
 - `SetInput { value, move_cursor_to_end }`
 
-`SetInput` semantics:
-- replace input with `value`
-- move cursor when requested
-- rebuild title/candidates/assistive text
-
-## Submit effect contract
-
 `on_submit` returns:
+
 - `Close`
 - `Reopen { kind, seed }`
 - `Dispatch { command, history_record, next }`
 
-`Dispatch` transaction order:
-1. close current palette
-2. record optional input history payload
-3. dispatch command
-4. apply `next` (may queue open/close)
-5. apply queued open/close requests
+Dispatch order:
 
-## Assistive text row
+1. close the current palette
+2. record optional input history
+3. queue or return the command request for later dispatch
+4. apply the queued next action
 
-- Providers may return one optional assistive text line.
-- Palette popup layout:
-  1. input
-  2. assistive text
-  3. candidate list
-- While a palette is open, the terminal cursor is shown at the current input position.
-- The input line itself does not draw a software caret; cursor visibility is delegated to the terminal.
+## Assistive text and input line
 
-## Built-in providers
+- providers may expose one assistive text row
+- palette layout is input line, then assistive text, then candidate list
+- while a palette is open, the terminal cursor is shown at the current input
+  position
+- the input line does not draw a software caret
 
-## Command palette (`PaletteKind::Command`)
+## Current palette behavior
 
-- Open shortcut in normal mode: `:`
+### Command palette
+
+- kind: `PaletteKind::Command`
+- open shortcut: `:`
+- input mode: `Custom`
 - `<up>` / `<down>` recall recent command inputs
-- `<c-p>` / `<c-n>` move the candidate selection
-- Enter behavior:
-  1. If input parses as a valid command with args, dispatch directly.
-  2. Else if selected candidate has no required args, dispatch directly.
-  3. Else if selected candidate requires args, reopen with `seed = "{command-id} "`.
-  4. Otherwise reopen preserving input.
-- `Tab` autocompletes from selected candidate and always appends one trailing space.
-- Candidate rows render command `id` and `usage` on the left, with the command title on the right in secondary color.
-- Candidate search also uses command metadata beyond the rendered row, so ids,
-  titles, and argument-related text all participate in filtering/ranking.
-- If input includes whitespace (argument phase), candidate list is hidden.
-- Candidate ranking uses command-aware scoring:
-  - command `id` (hyphen-separated lowercase) is the primary target.
-  - `title` is a weaker secondary target.
-  - acronym-style queries from id tokens are supported (for example, `nsh` -> `next-search-hit`).
-- Candidate visibility is derived from command metadata.
-  - internal-only commands are never listed
-  - commands with availability conditions are listed only when all conditions are met
-  - `next-search-hit` / `prev-search-hit` are shown only while search is active
-- Hand-typed command execution also respects command metadata.
-  - internal-only commands cannot be invoked from command palette input
-  - commands gated by runtime conditions cannot be invoked until those conditions are met
+- `<c-p>` / `<c-n>` move candidate selection
+- `Tab` autocompletes from the selected candidate and appends one trailing
+  space
+- if input contains whitespace, the candidate list is hidden because the user is
+  in argument-entry phase
+- candidate ranking and argument-phase handling are provider-defined rather than
+  generic filter-mode behavior
+- internal-only commands are never listed
+- runtime-gated commands are listed only when their availability conditions are
+  met
+- direct typed invocation still enforces the same exposure and availability
+  checks
 
-## Search palette (`PaletteKind::Search`)
+Enter behavior:
 
-- Open shortcut in normal mode: `/`
-- Also invocable by command palette command: `search`
-- Input mode: `FreeText`
+1. dispatch typed input directly when it parses as a valid command
+2. otherwise dispatch the selected command when it needs no arguments
+3. otherwise reopen with the selected command id plus trailing space
+4. otherwise reopen preserving input
+
+### Search palette
+
+- kind: `PaletteKind::Search`
+- open shortcut: `/`
+- command entry point: `search`
+- input mode: `FreeText`
 - `<up>` / `<down>` recall recent search queries
-- `<c-p>` / `<c-n>` move the matcher selection
-- Candidate list exposes matcher choices:
-  - `contains-insensitive` (default)
-  - `contains-sensitive`
-- Search history stores only the query text; changing history never changes the selected matcher.
-- Enter dispatches internal search-submit behavior with query + matcher and closes.
-- Empty input on Enter reopens for correction.
+- `<c-p>` / `<c-n>` select the matcher candidate
+- matcher candidates are `contains-insensitive` and `contains-sensitive`
+- search history stores only the query text
+- pressing Enter with empty input reopens for correction
+- successful submit dispatches internal search-submit behavior and closes
 
-## History palette (`PaletteKind::History`)
+### History palette
 
-- Open via command palette command: `history`
-- Input mode: `Custom`
-- `initial_input` returns empty text; seed is used as serialized context.
-- Candidates are shown in navigation order around the current page.
-- Left side shows the index and either a prefixed intent label (`/query`, `#title`),
-  a goto label (`first-page`, `last-page`), or a page label when the entry has no
-  readable intent label.
-- Right side always shows the page label as `p.N` in secondary tone.
-- Current page is initially selected, even when forward history entries appear before it.
-- The provider hook `initial_selected_candidate(...)` in `PaletteProvider`
-  controls that initial highlight; the history provider uses it to select the
-  candidate whose id starts with `current-`.
-- Candidate matching uses three stable buckets in this order: signed index matches first,
-  formatted reason text matches second, page-label matches third. The index is a signed
-  offset from the current page (`0` for current, negative for back, positive for forward).
-  The display order follows the candidate index sequence used by the history palette.
-- Enter dispatches internal history-goto behavior with selected page and closes.
+- kind: `PaletteKind::History`
+- command entry point: `history`
+- input mode: `Custom`
+- seed data is used as serialized context, while visible input starts empty
+- candidates are shown in navigation order around the current page
+- the current page is selected when the palette opens
+- matching uses signed index, then formatted reason text, then page label
+- Enter dispatches internal history-goto behavior and closes
 
-## Outline palette (`PaletteKind::Outline`)
+### Outline palette
 
-- Open via command palette command: `outline`
-- Input mode: `Custom`
-- Candidate source is extension-owned cached outline data, not palette seed serialization.
-- Candidates are flattened depth-first for display only.
-- Hierarchy is represented with indentation in the left-side title; detail shows the page number in loading-overlay format (`p.12`).
-- Candidate matching uses two buckets in this order: outline-title text matches first, then page-label text matches; each bucket is sorted by page so the list stays readable.
-- Queries are matched as plain text, so page labels like `p.1` can also match `p.10` or `p.123`.
-- Enter dispatches internal outline-goto behavior with the resolved page and closes.
-- Empty outline state is valid and shows assistive text indicating that the document has no usable outline entries.
+- kind: `PaletteKind::Outline`
+- command entry point: `outline`
+- input mode: `Custom`
+- candidates come from extension-owned cached outline data
+- visible rows flatten the hierarchy depth-first and show indentation for depth
+- detail text shows page labels as `p.N`
+- matching uses outline title first, then page label
+- an empty outline list is valid and shows assistive text
+- Enter dispatches internal outline-goto behavior and closes
+
+## Code references
+
+- `src/palette/kind.rs`
+- `src/palette/types.rs`
+- `src/palette/manager.rs`
+- `src/palette/registry.rs`
+- `src/palette/providers/command.rs`
+- `src/search/palette.rs`
+- `src/history/palette.rs`
+- `src/outline/palette.rs`

@@ -130,18 +130,18 @@ Dispatch order:
 
 Enter behavior:
 
-1. dispatch typed input directly when it parses as a valid command
-2. otherwise, if an enum candidate is selected, accept that value and dispatch
+1. if an enum candidate is selected, accept that value and dispatch
    immediately when the resulting command is complete
-3. otherwise, if an enum candidate is selected, reopen with the accepted value
+2. otherwise, if an enum candidate is selected, reopen with the accepted value
    so later arguments can be entered
+3. otherwise dispatch typed input directly when it parses as a valid command
 4. otherwise dispatch the selected command when it needs no arguments
 5. otherwise reopen with the selected command id plus trailing space
 6. otherwise reopen preserving input
 
 During argument entry, `Enter` follows the same submit rules as any other
-palette state: it confirms the current typed input if that input already parses,
-otherwise it acts on the current selection.
+palette state: selected enum candidates take precedence over parsing the
+current input.
 
 ### Search palette
 

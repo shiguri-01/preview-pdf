@@ -36,12 +36,14 @@ Each command has:
 - `id`
 - `title`
 - `args`
-- `arg` UI hints
+- `args[].hint` UI hints
 - `exposure`
 - `invocation`
 - `availability`
 
-`CommandSpec` is the registry-backed metadata type for those fields.
+`CommandSpec` is the registry-backed metadata type for those fields. Per-argument
+UI metadata stays on `ArgSpec::hint`; there is no separate top-level `arg`
+field on `CommandSpec`.
 
 Rules:
 
@@ -50,8 +52,8 @@ Rules:
 - typed commands are expected to have a matching registry entry
 - command palette visibility is derived from metadata rather than hand-coded
   per-command UI rules
-- command argument metadata may additionally describe enum-valued arguments for
-  palette completion and assistive text
+- `args[].hint` may additionally describe enum-valued arguments for palette
+  completion and assistive text
 
 ## Invocation sources and visibility
 

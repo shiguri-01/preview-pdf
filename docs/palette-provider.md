@@ -115,8 +115,8 @@ Dispatch order:
 - `<c-p>` / `<c-n>` move candidate selection
 - `Tab` autocompletes from the selected candidate and appends one trailing
   space
-- if input contains whitespace, the candidate list is hidden because the user is
-  in argument-entry phase
+- enum-valued arguments keep the candidate list visible during argument entry
+- non-enum arguments still hide the candidate list during argument entry
 - candidate ranking and argument-phase handling are provider-defined rather than
   generic filter-mode behavior
 - internal-only commands are never listed
@@ -124,13 +124,24 @@ Dispatch order:
   met
 - direct typed invocation still enforces the same exposure and availability
   checks
+- assistive text uses English type labels for free-form arguments and literal
+  value lists for enum arguments, such as `integer`, `number`, `text`, or
+  `ltr / rtl`
 
 Enter behavior:
 
-1. dispatch typed input directly when it parses as a valid command
-2. otherwise dispatch the selected command when it needs no arguments
-3. otherwise reopen with the selected command id plus trailing space
-4. otherwise reopen preserving input
+1. if an enum candidate is selected, accept that value and dispatch
+   immediately when the resulting command is complete
+2. otherwise, if an enum candidate is selected, reopen with the accepted value
+   so later arguments can be entered
+3. otherwise dispatch typed input directly when it parses as a valid command
+4. otherwise dispatch the selected command when it needs no arguments
+5. otherwise reopen with the selected command id plus trailing space
+6. otherwise reopen preserving input
+
+During argument entry, `Enter` follows the same submit rules as any other
+palette state: selected enum candidates take precedence over parsing the
+current input.
 
 ### Search palette
 

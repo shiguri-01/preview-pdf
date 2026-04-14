@@ -36,11 +36,14 @@ Each command has:
 - `id`
 - `title`
 - `args`
+- `args[].hint` UI hints
 - `exposure`
 - `invocation`
 - `availability`
 
-`CommandSpec` is the registry-backed metadata type for those fields.
+`CommandSpec` is the registry-backed metadata type for those fields. Per-argument
+UI metadata stays on `ArgSpec::hint`; there is no separate top-level `arg`
+field on `CommandSpec`.
 
 Rules:
 
@@ -49,6 +52,8 @@ Rules:
 - typed commands are expected to have a matching registry entry
 - command palette visibility is derived from metadata rather than hand-coded
   per-command UI rules
+- `args[].hint` may additionally describe enum-valued arguments for palette
+  completion and assistive text
 
 ## Invocation sources and visibility
 
@@ -106,6 +111,10 @@ Command-specific parsing rules:
   - takes no arguments
 - `page-layout-spread [ltr|rtl]`
   - accepts at most one spread direction argument
+  - the argument is optional to keep the common case short to type; users can
+    stop at `page-layout-spread` and let the command use its default direction
+  - omission is therefore not a separate argument value or token; it is just
+    the shorter command form
 - `open-palette <kind> [seed]`
   - parses palette kind first and preserves remaining text as optional seed
 - `submit-search <query> [matcher]`

@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use crate::palette::PaletteKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -7,19 +9,37 @@ pub enum SearchMatcherKind {
 }
 
 impl SearchMatcherKind {
-    pub fn id(self) -> &'static str {
+    const VARIANTS: [Self; 2] = [Self::ContainsInsensitive, Self::ContainsSensitive];
+
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::ContainsInsensitive => "contains-insensitive",
             Self::ContainsSensitive => "contains-sensitive",
         }
     }
 
+    pub fn id(self) -> &'static str {
+        self.as_str()
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "contains-insensitive" => Some(Self::ContainsInsensitive),
-            "contains-sensitive" => Some(Self::ContainsSensitive),
-            _ => None,
-        }
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|candidate| candidate.as_str() == value)
+    }
+
+    pub fn values() -> &'static [&'static str] {
+        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
+
+        VALUES
+            .get_or_init(|| {
+                SearchMatcherKind::VARIANTS
+                    .iter()
+                    .map(|candidate| candidate.as_str())
+                    .collect()
+            })
+            .as_ref()
     }
 }
 
@@ -30,19 +50,37 @@ pub enum PageLayoutModeArg {
 }
 
 impl PageLayoutModeArg {
-    pub fn id(self) -> &'static str {
+    const VARIANTS: [Self; 2] = [Self::Single, Self::Spread];
+
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Single => "single",
             Self::Spread => "spread",
         }
     }
 
+    pub fn id(self) -> &'static str {
+        self.as_str()
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "single" => Some(Self::Single),
-            "spread" => Some(Self::Spread),
-            _ => None,
-        }
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|candidate| candidate.as_str() == value)
+    }
+
+    pub fn values() -> &'static [&'static str] {
+        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
+
+        VALUES
+            .get_or_init(|| {
+                PageLayoutModeArg::VARIANTS
+                    .iter()
+                    .map(|candidate| candidate.as_str())
+                    .collect()
+            })
+            .as_ref()
     }
 }
 
@@ -53,19 +91,37 @@ pub enum SpreadDirectionArg {
 }
 
 impl SpreadDirectionArg {
-    pub fn id(self) -> &'static str {
+    const VARIANTS: [Self; 2] = [Self::Ltr, Self::Rtl];
+
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Ltr => "ltr",
             Self::Rtl => "rtl",
         }
     }
 
+    pub fn id(self) -> &'static str {
+        self.as_str()
+    }
+
     pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "ltr" => Some(Self::Ltr),
-            "rtl" => Some(Self::Rtl),
-            _ => None,
-        }
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|candidate| candidate.as_str() == value)
+    }
+
+    pub fn values() -> &'static [&'static str] {
+        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
+
+        VALUES
+            .get_or_init(|| {
+                SpreadDirectionArg::VARIANTS
+                    .iter()
+                    .map(|candidate| candidate.as_str())
+                    .collect()
+            })
+            .as_ref()
     }
 }
 
@@ -78,14 +134,35 @@ pub enum PanDirection {
 }
 
 impl PanDirection {
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "left" => Some(Self::Left),
-            "right" => Some(Self::Right),
-            "up" => Some(Self::Up),
-            "down" => Some(Self::Down),
-            _ => None,
+    const VARIANTS: [Self; 4] = [Self::Left, Self::Right, Self::Up, Self::Down];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::Up => "up",
+            Self::Down => "down",
         }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|candidate| candidate.as_str() == value)
+    }
+
+    pub fn values() -> &'static [&'static str] {
+        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
+
+        VALUES
+            .get_or_init(|| {
+                PanDirection::VARIANTS
+                    .iter()
+                    .map(|candidate| candidate.as_str())
+                    .collect()
+            })
+            .as_ref()
     }
 }
 
@@ -371,6 +448,70 @@ mod tests {
     };
 
     #[test]
+    fn enum_command_arguments_round_trip_through_strings() {
+        for direction in [
+            PanDirection::Left,
+            PanDirection::Right,
+            PanDirection::Up,
+            PanDirection::Down,
+        ] {
+            assert_eq!(PanDirection::parse(direction.as_str()), Some(direction));
+        }
+
+        for direction in [SpreadDirectionArg::Ltr, SpreadDirectionArg::Rtl] {
+            assert_eq!(
+                SpreadDirectionArg::parse(direction.as_str()),
+                Some(direction)
+            );
+        }
+
+        for matcher in [
+            SearchMatcherKind::ContainsInsensitive,
+            SearchMatcherKind::ContainsSensitive,
+        ] {
+            assert_eq!(SearchMatcherKind::parse(matcher.as_str()), Some(matcher));
+        }
+
+        for mode in [PageLayoutModeArg::Single, PageLayoutModeArg::Spread] {
+            assert_eq!(PageLayoutModeArg::parse(mode.as_str()), Some(mode));
+        }
+    }
+
+    #[test]
+    fn enum_value_lists_are_derived_from_variant_strings() {
+        assert_eq!(
+            PanDirection::values(),
+            &[
+                PanDirection::Left.as_str(),
+                PanDirection::Right.as_str(),
+                PanDirection::Up.as_str(),
+                PanDirection::Down.as_str(),
+            ]
+        );
+        assert_eq!(
+            SpreadDirectionArg::values(),
+            &[
+                SpreadDirectionArg::Ltr.as_str(),
+                SpreadDirectionArg::Rtl.as_str(),
+            ]
+        );
+        assert_eq!(
+            SearchMatcherKind::values(),
+            &[
+                SearchMatcherKind::ContainsInsensitive.as_str(),
+                SearchMatcherKind::ContainsSensitive.as_str(),
+            ]
+        );
+        assert_eq!(
+            PageLayoutModeArg::values(),
+            &[
+                PageLayoutModeArg::Single.as_str(),
+                PageLayoutModeArg::Spread.as_str(),
+            ]
+        );
+    }
+
+    #[test]
     fn command_action_id_maps_search_and_history_variants() {
         assert_eq!(Command::OpenSearch.action_id(), ActionId::Search);
         assert_eq!(
@@ -429,11 +570,30 @@ pub enum ArgKind {
     String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ArgHint {
+    None,
+    Enum(fn() -> &'static [&'static str]),
+}
+
+impl PartialEq for ArgHint {
+    fn eq(&self, other: &Self) -> bool {
+        match (*self, *other) {
+            (Self::None, Self::None) => true,
+            (Self::Enum(lhs), Self::Enum(rhs)) => std::ptr::fn_addr_eq(lhs, rhs),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for ArgHint {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArgSpec {
     pub name: &'static str,
     pub kind: ArgKind,
     pub required: bool,
+    pub hint: ArgHint,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

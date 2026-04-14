@@ -430,10 +430,17 @@ pub enum ArgKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArgHint {
+    None,
+    Enum(&'static [&'static str]),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArgSpec {
     pub name: &'static str,
     pub kind: ArgKind,
     pub required: bool,
+    pub hint: ArgHint,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

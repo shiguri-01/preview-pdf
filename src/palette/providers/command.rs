@@ -4,7 +4,7 @@ use crate::command::first_token;
 use crate::command::is_command_visible_in_palette;
 use crate::command::parse_command_text;
 use crate::command::parse_invocable_command_text;
-use crate::command::{CommandConditionContext, CommandInvocationSource};
+use crate::command::{ArgHint, ArgKind, ArgSpec, CommandConditionContext, CommandInvocationSource};
 use crate::error::AppResult;
 use crate::input::InputHistoryRecord;
 use crate::input::shortcut::{
@@ -36,30 +36,41 @@ impl PaletteProvider for CommandPaletteProvider {
     }
 
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
-        if has_argument_phase(ctx.input) {
-            return Ok(Vec::new());
+        let analysis = analyze_command_input(ctx.input);
+        match analysis.active_argument {
+            Some(argument) if argument.is_enum() => {
+                let mut candidates = argument
+                    .values()
+                    .iter()
+                    .map(|value| enum_value_candidate(value))
+                    .collect::<Vec<_>>();
+                rank_enum_candidates(argument.token, &mut candidates);
+                Ok(candidates)
+            }
+            Some(_) => Ok(Vec::new()),
+            None => {
+                let mut candidates = all_command_specs()
+                    .into_iter()
+                    .filter(|spec| {
+                        let command_ctx = CommandConditionContext {
+                            app: ctx.app,
+                            extensions: ctx.extensions,
+                            source: CommandInvocationSource::CommandPaletteInput,
+                        };
+                        is_command_visible_in_palette(*spec, &command_ctx)
+                    })
+                    .map(|spec| PaletteCandidate {
+                        id: spec.id.to_string(),
+                        left: format_left(spec.id, spec.args),
+                        right: vec![PaletteTextPart::secondary(spec.title)],
+                        search_texts: format_search_texts(spec.id, spec.title, spec.args),
+                        payload: PalettePayload::Opaque(spec.id.to_string()),
+                    })
+                    .collect::<Vec<_>>();
+                rank_command_candidates(ctx.input, &mut candidates);
+                Ok(candidates)
+            }
         }
-
-        let mut candidates = all_command_specs()
-            .into_iter()
-            .filter(|spec| {
-                let command_ctx = CommandConditionContext {
-                    app: ctx.app,
-                    extensions: ctx.extensions,
-                    source: CommandInvocationSource::CommandPaletteInput,
-                };
-                is_command_visible_in_palette(*spec, &command_ctx)
-            })
-            .map(|spec| PaletteCandidate {
-                id: spec.id.to_string(),
-                left: format_left(spec.id, spec.args),
-                right: vec![PaletteTextPart::secondary(spec.title)],
-                search_texts: format_search_texts(spec.id, spec.title, spec.args),
-                payload: PalettePayload::Opaque(spec.id.to_string()),
-            })
-            .collect::<Vec<_>>();
-        rank_command_candidates(ctx.input, &mut candidates);
-        Ok(candidates)
     }
 
     fn on_submit(
@@ -69,7 +80,11 @@ impl PaletteProvider for CommandPaletteProvider {
     ) -> AppResult<PaletteSubmitEffect> {
         let input = ctx.input.trim();
 
-        // 1. If the user typed an explicit command form, prefer that over candidate fallback.
+        if let Some(effect) = submit_selected_enum_candidate(ctx, selected)? {
+            return Ok(effect);
+        }
+
+        let mut deferred_error = None;
         if !input.is_empty() {
             match parse_invocable_command_text(
                 input,
@@ -84,11 +99,8 @@ impl PaletteProvider for CommandPaletteProvider {
                         next: PalettePostAction::Close,
                     });
                 }
-                Err(err)
-                    if has_argument_phase(input)
-                        || find_command_spec(first_token(input)).is_some() =>
-                {
-                    return Err(err);
+                Err(err) if find_command_spec(first_token(input)).is_some() => {
+                    deferred_error = Some(err);
                 }
                 Err(_) => {}
             }
@@ -116,6 +128,10 @@ impl PaletteProvider for CommandPaletteProvider {
             }
         }
 
+        if let Some(err) = deferred_error {
+            return Err(err);
+        }
+
         // 3. Fallback: reopen preserving current input.
         Ok(PaletteSubmitEffect::Reopen {
             kind: self.kind(),
@@ -125,12 +141,20 @@ impl PaletteProvider for CommandPaletteProvider {
 
     fn on_tab(
         &self,
-        _ctx: &PaletteContext<'_>,
+        ctx: &PaletteContext<'_>,
         selected: Option<&PaletteCandidate>,
     ) -> AppResult<PaletteTabEffect> {
         let Some(candidate) = selected else {
             return Ok(PaletteTabEffect::Noop);
         };
+
+        let analysis = analyze_command_input(ctx.input);
+        if let Some(value) = selected_enum_value(&analysis, candidate) {
+            return Ok(PaletteTabEffect::SetInput {
+                value: apply_enum_completion(&analysis, value),
+                move_cursor_to_end: true,
+            });
+        }
 
         let value = match &candidate.payload {
             PalettePayload::Opaque(value) => value.clone(),
@@ -162,32 +186,75 @@ impl PaletteProvider for CommandPaletteProvider {
             return Some(default_hint);
         }
 
-        if has_argument_phase(ctx.input) {
-            let command_id = first_token(trimmed);
-            return match find_command_spec(command_id) {
-                Some(spec) => {
-                    let usage = usage_text(spec.args);
-                    if usage.is_empty() {
-                        Some(format!("{} | {}", spec.id, spec.title))
-                    } else {
-                        Some(format!("{} {} | {}", spec.id, usage, spec.title))
-                    }
-                }
-                None => Some(default_hint),
-            };
+        let analysis = analyze_command_input(ctx.input);
+        match analysis.active_argument {
+            Some(argument) if argument.is_enum() => {
+                return Some(format!(
+                    "{} {} | {}: {}",
+                    argument.spec.id,
+                    usage_text(argument.spec.args),
+                    argument.arg.name,
+                    argument.values().join(" / ")
+                ));
+            }
+            Some(argument) => {
+                return Some(format!(
+                    "{} {} | {}: {}",
+                    argument.spec.id,
+                    usage_text(argument.spec.args),
+                    argument.arg.name,
+                    ui_type_label(argument.arg.kind)
+                ));
+            }
+            None => {}
+        }
+
+        if let Some(spec) = analysis.command_spec {
+            let usage = usage_text(spec.args);
+            if usage.is_empty() {
+                return Some(format!("{} | {}", spec.id, spec.title));
+            }
+            return Some(format!("{} {} | {}", spec.id, usage, spec.title));
         }
 
         if let Some(spec) = find_command_spec(trimmed) {
             let usage = usage_text(spec.args);
             if usage.is_empty() {
                 return Some(format!("{} | {}", spec.id, spec.title));
-            } else {
-                return Some(format!("{} {} | {}", spec.id, usage, spec.title));
             }
+            return Some(format!("{} {} | {}", spec.id, usage, spec.title));
         }
 
         Some(default_hint)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActiveArgument<'a> {
+    spec: crate::command::CommandSpec,
+    arg: ArgSpec,
+    index: usize,
+    token: &'a str,
+}
+
+impl ActiveArgument<'_> {
+    fn is_enum(self) -> bool {
+        matches!(self.arg.hint, ArgHint::Enum(_))
+    }
+
+    fn values(self) -> &'static [&'static str] {
+        match self.arg.hint {
+            ArgHint::Enum(values) => values,
+            ArgHint::None => &[],
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CommandInputAnalysis<'a> {
+    trimmed_input: &'a str,
+    command_spec: Option<crate::command::CommandSpec>,
+    active_argument: Option<ActiveArgument<'a>>,
 }
 
 fn format_left(command_id: &str, args: &[crate::command::ArgSpec]) -> Vec<PaletteTextPart> {
@@ -222,16 +289,148 @@ fn usage_text(args: &[crate::command::ArgSpec]) -> String {
     usage
 }
 
-fn has_argument_phase(input: &str) -> bool {
-    let trimmed = input.trim_start();
-    if trimmed.is_empty() {
-        return false;
-    }
-    trimmed.contains(char::is_whitespace)
-}
-
 fn command_requires_argument_input(spec: crate::command::CommandSpec) -> bool {
     spec.args.iter().any(|arg| arg.required)
+}
+
+fn ui_type_label(kind: ArgKind) -> &'static str {
+    match kind {
+        ArgKind::I32 => "integer",
+        ArgKind::F32 => "number",
+        ArgKind::String => "text",
+    }
+}
+
+fn enum_value_candidate(value: &str) -> PaletteCandidate {
+    PaletteCandidate {
+        id: value.to_string(),
+        left: vec![PaletteTextPart::primary(value)],
+        right: Vec::new(),
+        search_texts: vec![PaletteSearchText::new(value)],
+        payload: PalettePayload::Opaque(value.to_string()),
+    }
+}
+
+fn analyze_command_input(input: &str) -> CommandInputAnalysis<'_> {
+    let trimmed = input.trim_start();
+    if trimmed.is_empty() {
+        return CommandInputAnalysis {
+            trimmed_input: trimmed,
+            command_spec: None,
+            active_argument: None,
+        };
+    }
+
+    let Some(spec) = find_command_spec(first_token(trimmed)) else {
+        return CommandInputAnalysis {
+            trimmed_input: trimmed,
+            command_spec: None,
+            active_argument: None,
+        };
+    };
+
+    CommandInputAnalysis {
+        trimmed_input: trimmed,
+        command_spec: Some(spec),
+        active_argument: active_argument(trimmed, spec),
+    }
+}
+
+fn active_argument<'a>(
+    input: &'a str,
+    spec: crate::command::CommandSpec,
+) -> Option<ActiveArgument<'a>> {
+    let trimmed = input.trim_start();
+    let split_idx = trimmed.find(char::is_whitespace)?;
+    let args_text = trimmed[split_idx..].trim_start();
+    let has_trailing_whitespace = trimmed.chars().last().is_some_and(char::is_whitespace);
+
+    let tokens = args_text.split_whitespace().collect::<Vec<_>>();
+    let active_index = if has_trailing_whitespace {
+        tokens.len()
+    } else {
+        tokens.len().checked_sub(1)?
+    };
+    let arg = *spec.args.get(active_index)?;
+    let token = if has_trailing_whitespace {
+        ""
+    } else {
+        tokens.get(active_index).copied().unwrap_or("")
+    };
+
+    Some(ActiveArgument {
+        spec,
+        arg,
+        index: active_index,
+        token,
+    })
+}
+
+fn selected_enum_value<'a>(
+    analysis: &CommandInputAnalysis<'_>,
+    candidate: &'a PaletteCandidate,
+) -> Option<&'a str> {
+    analysis
+        .active_argument
+        .is_some_and(ActiveArgument::is_enum)
+    .then_some(match &candidate.payload {
+        PalettePayload::Opaque(value) => value.as_str(),
+        PalettePayload::None => "",
+    })
+    .filter(|value| !value.is_empty())
+}
+
+fn apply_enum_completion(analysis: &CommandInputAnalysis<'_>, value: &str) -> String {
+    let Some(spec) = analysis.command_spec else {
+        return format!("{value} ");
+    };
+    let Some(active_argument) = analysis.active_argument else {
+        return format!("{value} ");
+    };
+
+    let mut parts = vec![spec.id];
+    let existing_args = analysis
+        .trimmed_input
+        .split_whitespace()
+        .skip(1)
+        .take(active_argument.index)
+        .collect::<Vec<_>>();
+    parts.extend(existing_args);
+    parts.push(value);
+
+    format!("{} ", parts.join(" "))
+}
+
+fn submit_selected_enum_candidate(
+    ctx: &PaletteContext<'_>,
+    selected: Option<&PaletteCandidate>,
+) -> AppResult<Option<PaletteSubmitEffect>> {
+    let Some(candidate) = selected else {
+        return Ok(None);
+    };
+    let analysis = analyze_command_input(ctx.input);
+    let Some(value) = selected_enum_value(&analysis, candidate) else {
+        return Ok(None);
+    };
+
+    let synthesized = apply_enum_completion(&analysis, value);
+    let synthesized_trimmed = synthesized.trim();
+    match parse_invocable_command_text(
+        synthesized_trimmed,
+        CommandInvocationSource::CommandPaletteInput,
+        ctx.app,
+        ctx.extensions,
+    ) {
+        Ok(command) => Ok(Some(PaletteSubmitEffect::Dispatch {
+            command,
+            history_record: Some(InputHistoryRecord::Command(synthesized_trimmed.to_string())),
+            next: PalettePostAction::Close,
+        })),
+        Err(_) => Ok(Some(PaletteSubmitEffect::Reopen {
+            kind: PaletteKind::Command,
+            seed: Some(synthesized),
+        })),
+    }
 }
 
 const SCORE_ID_EXACT: i32 = 10_000;
@@ -250,6 +449,35 @@ struct CandidateScore {
 }
 
 fn rank_command_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) {
+    let query = input.trim().to_ascii_lowercase();
+    if query.is_empty() {
+        return;
+    }
+
+    let mut scored = candidates
+        .drain(..)
+        .filter_map(|candidate| {
+            score_command_candidate(&query, &candidate).map(|meta| (candidate, meta))
+        })
+        .collect::<Vec<_>>();
+
+    scored.sort_by(
+        |(left_candidate, left_meta), (right_candidate, right_meta)| {
+            right_meta
+                .score
+                .cmp(&left_meta.score)
+                .then_with(|| left_meta.tie_len.cmp(&right_meta.tie_len))
+                .then_with(|| left_candidate.id.cmp(&right_candidate.id))
+        },
+    );
+
+    *candidates = scored
+        .into_iter()
+        .map(|(candidate, _meta)| candidate)
+        .collect();
+}
+
+fn rank_enum_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) {
     let query = input.trim().to_ascii_lowercase();
     if query.is_empty() {
         return;
@@ -461,6 +689,20 @@ mod tests {
             .expect("tab should succeed")
     }
 
+    fn assistive_text_for_input(input: &str, search_active: bool) -> Option<String> {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input,
+            seed: None,
+        };
+        provider.assistive_text(&ctx, None)
+    }
+
     #[test]
     fn list_hides_search_hit_navigation_when_search_is_inactive() {
         let provider = CommandPaletteProvider;
@@ -515,8 +757,26 @@ mod tests {
     }
 
     #[test]
-    fn argument_phase_still_hides_candidates() {
+    fn non_enum_argument_phase_hides_candidates() {
         let list = command_list_for_input("goto-page ", false);
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn enum_argument_phase_lists_values() {
+        let list = command_list_for_input("page-layout-spread ", false);
+        assert_eq!(ids(&list), vec!["ltr".to_string(), "rtl".to_string()]);
+    }
+
+    #[test]
+    fn enum_argument_phase_filters_values() {
+        let list = command_list_for_input("page-layout-spread r", false);
+        assert_eq!(ids(&list), vec!["rtl".to_string(), "ltr".to_string()]);
+    }
+
+    #[test]
+    fn trailing_non_enum_argument_phase_hides_enum_candidates() {
+        let list = command_list_for_input("pan left ", false);
         assert!(list.is_empty());
     }
 
@@ -670,6 +930,76 @@ mod tests {
                 value: "quit ".to_string(),
                 move_cursor_to_end: true,
             }
+        );
+    }
+
+    #[test]
+    fn tab_completion_replaces_enum_argument_and_appends_space() {
+        let effect = command_tab_effect("page-layout-spread r", "rtl", false);
+        assert_eq!(
+            effect,
+            PaletteTabEffect::SetInput {
+                value: "page-layout-spread rtl ".to_string(),
+                move_cursor_to_end: true,
+            }
+        );
+    }
+
+    #[test]
+    fn submit_dispatches_selected_enum_argument_when_result_is_complete() {
+        let effect = command_submit_effect("page-layout-spread ", "rtl", false);
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Dispatch {
+                command: Command::SetPageLayout {
+                    mode: crate::command::PageLayoutModeArg::Spread,
+                    direction: Some(crate::command::SpreadDirectionArg::Rtl),
+                },
+                history_record: Some(InputHistoryRecord::Command(
+                    "page-layout-spread rtl".to_string(),
+                )),
+                next: PalettePostAction::Close,
+            }
+        );
+    }
+
+    #[test]
+    fn assistive_text_uses_enum_values_for_enum_arguments() {
+        assert_eq!(
+            assistive_text_for_input("page-layout-spread ", false),
+            Some("page-layout-spread [direction] | direction: ltr / rtl".to_string())
+        );
+    }
+
+    #[test]
+    fn assistive_text_uses_integer_label_for_integer_arguments() {
+        assert_eq!(
+            assistive_text_for_input("goto-page ", false),
+            Some("goto-page <page> | page: integer".to_string())
+        );
+    }
+
+    #[test]
+    fn assistive_text_uses_number_label_for_float_arguments() {
+        assert_eq!(
+            assistive_text_for_input("zoom ", false),
+            Some("zoom <value> | value: number".to_string())
+        );
+    }
+
+    #[test]
+    fn assistive_text_shows_title_when_all_arguments_are_complete() {
+        assert_eq!(
+            assistive_text_for_input("pan left 1 ", false),
+            Some("pan <direction> [amount] | Pan".to_string())
+        );
+    }
+
+    #[test]
+    fn assistive_text_shows_title_for_complete_no_argument_command() {
+        assert_eq!(
+            assistive_text_for_input("quit ", false),
+            Some("quit | Quit".to_string())
         );
     }
 

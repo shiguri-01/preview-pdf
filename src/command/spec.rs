@@ -3,50 +3,59 @@ use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
 
 use super::types::{
-    ArgKind, ArgSpec, Command, CommandAvailability, CommandCondition, CommandExposure,
+    ArgHint, ArgKind, ArgSpec, Command, CommandAvailability, CommandCondition, CommandExposure,
     CommandInvocationPolicy, CommandInvocationSource, CommandSpec,
 };
 
 const NO_ARGS: [ArgSpec; 0] = [];
 const NO_CONDITIONS: [CommandCondition; 0] = [];
 const REQUIRES_SEARCH_ACTIVE: [CommandCondition; 1] = [CommandCondition::SearchActive];
+const PAN_DIRECTION_VALUES: [&str; 4] = ["left", "right", "up", "down"];
+const SPREAD_DIRECTION_VALUES: [&str; 2] = ["ltr", "rtl"];
 const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     name: "page",
     kind: ArgKind::I32,
     required: true,
+    hint: ArgHint::None,
 }];
 const ARGS_ZOOM: [ArgSpec; 1] = [ArgSpec {
     name: "value",
     kind: ArgKind::F32,
     required: true,
+    hint: ArgHint::None,
 }];
 const ARGS_PAN: [ArgSpec; 2] = [
     ArgSpec {
         name: "direction",
         kind: ArgKind::String,
         required: true,
+        hint: ArgHint::Enum(&PAN_DIRECTION_VALUES),
     },
     ArgSpec {
         name: "amount",
         kind: ArgKind::I32,
         required: false,
+        hint: ArgHint::None,
     },
 ];
 const ARGS_PAGE_LAYOUT_SPREAD: [ArgSpec; 1] = [ArgSpec {
     name: "direction",
     kind: ArgKind::String,
     required: false,
+    hint: ArgHint::Enum(&SPREAD_DIRECTION_VALUES),
 }];
 const ARGS_OPEN_PALETTE: [ArgSpec; 2] = [
     ArgSpec {
         name: "kind",
         kind: ArgKind::String,
         required: true,
+        hint: ArgHint::None,
     },
     ArgSpec {
         name: "seed",
         kind: ArgKind::String,
         required: false,
+        hint: ArgHint::None,
     },
 ];
 const ARGS_SUBMIT_SEARCH: [ArgSpec; 2] = [
@@ -54,28 +63,33 @@ const ARGS_SUBMIT_SEARCH: [ArgSpec; 2] = [
         name: "query",
         kind: ArgKind::String,
         required: true,
+        hint: ArgHint::None,
     },
     ArgSpec {
         name: "matcher",
         kind: ArgKind::String,
         required: false,
+        hint: ArgHint::None,
     },
 ];
 const ARGS_HISTORY_GOTO: [ArgSpec; 1] = [ArgSpec {
     name: "page",
     kind: ArgKind::I32,
     required: true,
+    hint: ArgHint::None,
 }];
 const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
     ArgSpec {
         name: "page",
         kind: ArgKind::I32,
         required: true,
+        hint: ArgHint::None,
     },
     ArgSpec {
         name: "title",
         kind: ArgKind::String,
         required: true,
+        hint: ArgHint::None,
     },
 ];
 

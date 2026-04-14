@@ -36,6 +36,7 @@ Each command has:
 - `id`
 - `title`
 - `args`
+- `arg` UI hints
 - `exposure`
 - `invocation`
 - `availability`
@@ -49,6 +50,8 @@ Rules:
 - typed commands are expected to have a matching registry entry
 - command palette visibility is derived from metadata rather than hand-coded
   per-command UI rules
+- command argument metadata may additionally describe enum-valued arguments for
+  palette completion and assistive text
 
 ## Invocation sources and visibility
 

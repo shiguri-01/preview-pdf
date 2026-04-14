@@ -12,7 +12,8 @@ pub use spec::{
     is_command_visible_in_palette, rejection_message_for_command, validate_command_for_source,
 };
 pub use types::{
-    ActionId, ArgKind, ArgSpec, Command, CommandAvailability, CommandCondition, CommandExposure,
-    CommandInvocationPolicy, CommandInvocationSource, CommandOutcome, CommandRequest, CommandSpec,
-    PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind, SpreadDirectionArg,
+    ActionId, ArgHint, ArgKind, ArgSpec, Command, CommandAvailability, CommandCondition,
+    CommandExposure, CommandInvocationPolicy, CommandInvocationSource, CommandOutcome,
+    CommandRequest, CommandSpec, PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind,
+    SpreadDirectionArg,
 };

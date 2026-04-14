@@ -217,14 +217,6 @@ impl PaletteProvider for CommandPaletteProvider {
             return Some(format!("{} {} | {}", spec.id, usage, spec.title));
         }
 
-        if let Some(spec) = find_command_spec(trimmed) {
-            let usage = usage_text(spec.args);
-            if usage.is_empty() {
-                return Some(format!("{} | {}", spec.id, spec.title));
-            }
-            return Some(format!("{} {} | {}", spec.id, usage, spec.title));
-        }
-
         Some(default_hint)
     }
 }

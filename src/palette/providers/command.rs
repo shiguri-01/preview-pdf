@@ -44,7 +44,7 @@ impl PaletteProvider for CommandPaletteProvider {
                     .iter()
                     .map(|value| enum_value_candidate(value))
                     .collect::<Vec<_>>();
-                rank_enum_candidates(argument.token, &mut candidates);
+                filter_enum_candidates(argument.token, &mut candidates);
                 Ok(candidates)
             }
             Some(_) => Ok(Vec::new()),
@@ -477,33 +477,21 @@ fn rank_command_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) 
         .collect();
 }
 
-fn rank_enum_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) {
+fn filter_enum_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) {
     let query = input.trim().to_ascii_lowercase();
     if query.is_empty() {
         return;
     }
 
-    let mut scored = candidates
-        .drain(..)
-        .filter_map(|candidate| {
-            score_command_candidate(&query, &candidate).map(|meta| (candidate, meta))
-        })
-        .collect::<Vec<_>>();
-
-    scored.sort_by(
-        |(left_candidate, left_meta), (right_candidate, right_meta)| {
-            right_meta
-                .score
-                .cmp(&left_meta.score)
-                .then_with(|| left_meta.tie_len.cmp(&right_meta.tie_len))
-                .then_with(|| left_candidate.id.cmp(&right_candidate.id))
-        },
-    );
-
-    *candidates = scored
-        .into_iter()
-        .map(|(candidate, _meta)| candidate)
+    let filtered: Vec<_> = candidates
+        .iter()
+        .filter(|candidate| score_command_candidate(&query, candidate).is_some())
+        .cloned()
         .collect();
+
+    if !filtered.is_empty() {
+        *candidates = filtered;
+    }
 }
 
 fn score_command_candidate(query: &str, candidate: &PaletteCandidate) -> Option<CandidateScore> {
@@ -771,7 +759,44 @@ mod tests {
     #[test]
     fn enum_argument_phase_filters_values() {
         let list = command_list_for_input("page-layout-spread r", false);
-        assert_eq!(ids(&list), vec!["rtl".to_string(), "ltr".to_string()]);
+        assert_eq!(ids(&list), vec!["ltr".to_string(), "rtl".to_string()]);
+    }
+
+    #[test]
+    fn enum_argument_candidates_keep_definition_order() {
+        let list = command_list_for_input("pan ", false);
+        assert_eq!(
+            ids(&list),
+            vec![
+                "left".to_string(),
+                "right".to_string(),
+                "up".to_string(),
+                "down".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn enum_argument_candidates_filter_without_reordering() {
+        let list = command_list_for_input("pan t", false);
+        assert_eq!(ids(&list), vec!["left".to_string(), "right".to_string()]);
+
+        let list = command_list_for_input("page-layout-spread rt", false);
+        assert_eq!(ids(&list), vec!["rtl".to_string()]);
+    }
+
+    #[test]
+    fn enum_argument_candidates_fall_back_to_full_list_when_no_match() {
+        let list = command_list_for_input("pan z", false);
+        assert_eq!(
+            ids(&list),
+            vec![
+                "left".to_string(),
+                "right".to_string(),
+                "up".to_string(),
+                "down".to_string()
+            ]
+        );
     }
 
     #[test]

@@ -4,14 +4,13 @@ use crate::extension::ExtensionUiSnapshot;
 
 use super::types::{
     ArgHint, ArgKind, ArgSpec, Command, CommandAvailability, CommandCondition, CommandExposure,
-    CommandInvocationPolicy, CommandInvocationSource, CommandSpec,
+    CommandInvocationPolicy, CommandInvocationSource, CommandSpec, PanDirection,
+    SpreadDirectionArg,
 };
 
 const NO_ARGS: [ArgSpec; 0] = [];
 const NO_CONDITIONS: [CommandCondition; 0] = [];
 const REQUIRES_SEARCH_ACTIVE: [CommandCondition; 1] = [CommandCondition::SearchActive];
-const PAN_DIRECTION_VALUES: [&str; 4] = ["left", "right", "up", "down"];
-const SPREAD_DIRECTION_VALUES: [&str; 2] = ["ltr", "rtl"];
 const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     name: "page",
     kind: ArgKind::I32,
@@ -29,7 +28,7 @@ const ARGS_PAN: [ArgSpec; 2] = [
         name: "direction",
         kind: ArgKind::String,
         required: true,
-        hint: ArgHint::Enum(&PAN_DIRECTION_VALUES),
+        hint: ArgHint::Enum(PanDirection::values),
     },
     ArgSpec {
         name: "amount",
@@ -42,7 +41,7 @@ const ARGS_PAGE_LAYOUT_SPREAD: [ArgSpec; 1] = [ArgSpec {
     name: "direction",
     kind: ArgKind::String,
     required: false,
-    hint: ArgHint::Enum(&SPREAD_DIRECTION_VALUES),
+    hint: ArgHint::Enum(SpreadDirectionArg::values),
 }];
 const ARGS_OPEN_PALETTE: [ArgSpec; 2] = [
     ArgSpec {

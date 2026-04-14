@@ -139,6 +139,10 @@ Enter behavior:
 5. otherwise reopen with the selected command id plus trailing space
 6. otherwise reopen preserving input
 
+During argument entry, `Enter` follows the same submit rules as any other
+palette state: it confirms the current typed input if that input already parses,
+otherwise it acts on the current selection.
+
 ### Search palette
 
 - kind: `PaletteKind::Search`

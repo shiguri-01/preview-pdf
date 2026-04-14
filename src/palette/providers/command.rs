@@ -244,7 +244,7 @@ impl ActiveArgument<'_> {
 
     fn values(self) -> &'static [&'static str] {
         match self.arg.hint {
-            ArgHint::Enum(values) => values,
+            ArgHint::Enum(values) => values(),
             ArgHint::None => &[],
         }
     }
@@ -373,11 +373,11 @@ fn selected_enum_value<'a>(
     analysis
         .active_argument
         .is_some_and(ActiveArgument::is_enum)
-    .then_some(match &candidate.payload {
-        PalettePayload::Opaque(value) => value.as_str(),
-        PalettePayload::None => "",
-    })
-    .filter(|value| !value.is_empty())
+        .then_some(match &candidate.payload {
+            PalettePayload::Opaque(value) => value.as_str(),
+            PalettePayload::None => "",
+        })
+        .filter(|value| !value.is_empty())
 }
 
 fn apply_enum_completion(analysis: &CommandInputAnalysis<'_>, value: &str) -> String {
@@ -904,6 +904,38 @@ mod tests {
             PaletteSubmitEffect::Dispatch {
                 command: Command::Quit,
                 history_record: Some(InputHistoryRecord::Command("quit".to_string())),
+                next: PalettePostAction::Close,
+            }
+        );
+    }
+
+    #[test]
+    fn submit_dispatches_typed_optional_enum_command_without_argument() {
+        let provider = CommandPaletteProvider;
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input: "page-layout-spread",
+            seed: None,
+        };
+
+        let effect = provider
+            .on_submit(&ctx, None)
+            .expect("typed command submit should succeed");
+
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Dispatch {
+                command: Command::SetPageLayout {
+                    mode: crate::command::PageLayoutModeArg::Spread,
+                    direction: None,
+                },
+                history_record: Some(InputHistoryRecord::Command(
+                    "page-layout-spread".to_string(),
+                )),
                 next: PalettePostAction::Close,
             }
         );

@@ -3,18 +3,16 @@
 `pvf` is a PDF viewer for the terminal.
 
 ```bash
-cargo run --release -- <file.pdf>
-cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report.json
+pvf <file.pdf>
 ```
 
-## Features
+## Highlights
 
-- Single or spread layout
-- Zoom
-- Full-text search with next/previous hit navigation
-- Page history (back/forward)
-- Command palette for actions like `goto-page` and `page-layout-spread`
-- Help overlay via `help`
+- Keyboard-first PDF viewer for the terminal
+- Single-page and spread layout
+- Full-text search across the document
+- Outline navigation for structured PDFs
+- Command palette for all viewer actions
 
 ## Keys
 
@@ -34,14 +32,6 @@ cargo run --release -- perf <file.pdf> --scenario page-flip-forward --out report
 | `<esc>` | Cancel current interactive state |
 | `q` | Quit |
 
-## Common Commands
-
-- `goto-page <number>`
-- `page-layout-spread [ltr|rtl]`
-- `zoom <value>`
-- `search`
-- `history`
-
 ## Note
 
-Image quality and compatibility depend on terminal image protocol support (Kitty, Sixel, iTerm2, or halfblocks fallback).
+Image quality and compatibility depend on terminal image protocol support such as Kitty, Sixel, or iTerm2.

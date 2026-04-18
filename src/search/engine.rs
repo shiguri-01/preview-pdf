@@ -34,6 +34,8 @@ pub enum SearchEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchOccurrence {
+    pub glyph_start: usize,
+    pub glyph_end: usize,
     pub rects: Vec<PdfRect>,
 }
 
@@ -325,11 +327,21 @@ pub(crate) fn locate_occurrences(
     prepared_query: &str,
     case_sensitive: bool,
 ) -> Vec<SearchOccurrence> {
-    let direct = locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, false);
-    if !direct.is_empty() {
-        return direct;
+    let mut occurrences =
+        locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, false);
+
+    for occurrence in locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
+    {
+        let duplicate = occurrences.iter().any(|existing| {
+            existing.glyph_start == occurrence.glyph_start
+                && existing.glyph_end == occurrence.glyph_end
+        });
+        if !duplicate {
+            occurrences.push(occurrence);
+        }
     }
-    locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
+
+    occurrences
 }
 
 fn locate_occurrences_with_strategy(
@@ -386,7 +398,11 @@ fn locate_occurrences_with_strategy(
             let glyph_end = char_map[cursor + query_len - 1];
             let rects = merge_occurrence_rects(&glyphs[glyph_start..=glyph_end]);
             if !rects.is_empty() {
-                occurrences.push(SearchOccurrence { rects });
+                occurrences.push(SearchOccurrence {
+                    glyph_start,
+                    glyph_end,
+                    rects,
+                });
             }
             cursor += query_len;
         } else {
@@ -1036,6 +1052,34 @@ mod tests {
                 y1: 50.0
             }
         );
+    }
+
+    #[test]
+    fn locate_occurrences_keeps_direct_and_whitespace_insensitive_matches() {
+        let glyphs = vec![
+            glyph('f', 10.0, 20.0, 18.0, 32.0),
+            glyph('o', 20.0, 20.0, 28.0, 32.0),
+            glyph('o', 30.0, 20.0, 38.0, 32.0),
+            glyph('b', 40.0, 20.0, 48.0, 32.0),
+            glyph('a', 50.0, 20.0, 58.0, 32.0),
+            glyph('r', 60.0, 20.0, 68.0, 32.0),
+            glyph(' ', 70.0, 20.0, 74.0, 32.0),
+            glyph('f', 80.0, 20.0, 88.0, 32.0),
+            glyph('o', 90.0, 20.0, 98.0, 32.0),
+            glyph('o', 100.0, 20.0, 108.0, 32.0),
+            glyph(' ', 110.0, 20.0, 114.0, 32.0),
+            glyph('b', 120.0, 20.0, 128.0, 32.0),
+            glyph('a', 130.0, 20.0, 138.0, 32.0),
+            glyph('r', 140.0, 20.0, 148.0, 32.0),
+        ];
+
+        let occurrences = locate_occurrences(&glyphs, "foobar", false);
+
+        assert_eq!(occurrences.len(), 2);
+        assert_eq!(occurrences[0].glyph_start, 0);
+        assert_eq!(occurrences[0].glyph_end, 5);
+        assert_eq!(occurrences[1].glyph_start, 7);
+        assert_eq!(occurrences[1].glyph_end, 13);
     }
 
     fn wait_for_completed_hits(

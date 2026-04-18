@@ -154,6 +154,42 @@ fn presenter_cache_key_distinguishes_pages_even_with_same_pixels() {
 }
 
 #[test]
+fn presenter_cache_key_distinguishes_overlay_stamps() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 24,
+    };
+    let rendered_page = RenderedPageKey::new(1, 0, 1.0);
+
+    presenter
+        .prepare(
+            rendered_page,
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            1,
+            1,
+        )
+        .expect("first overlay prepare should pass");
+    presenter
+        .prepare(
+            rendered_page,
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            2,
+            2,
+        )
+        .expect("second overlay prepare should pass");
+
+    assert_eq!(presenter.l2_cache_len(), 2);
+    assert_eq!(presenter.perf_stats().cache_hit_rate_l2, 0.0);
+}
+
+#[test]
 fn presenter_renders_after_prepare() {
     let mut presenter = RatatuiImagePresenter::new();
     let viewport = Viewport {

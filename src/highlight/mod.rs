@@ -37,6 +37,9 @@ pub struct HighlightOverlaySnapshot {
 
 impl HighlightOverlaySnapshot {
     pub fn new(spans: Vec<HighlightSpan>) -> Self {
+        if spans.is_empty() {
+            return Self::default();
+        }
         let mut snapshot = Self { spans, stamp: 0 };
         snapshot.stamp = snapshot.compute_stamp();
         snapshot

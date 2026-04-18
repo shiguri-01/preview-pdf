@@ -130,7 +130,6 @@ Encode rules:
 
 L2 cache rules:
 
-- key: `TerminalFrameKey { rendered_page, viewport, pan }`
 - key: `TerminalFrameKey { rendered_page, viewport, pan, overlay_stamp }`
 - states:
   - `PendingFrame`

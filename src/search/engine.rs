@@ -24,6 +24,7 @@ pub enum SearchEvent {
     Completed {
         generation: u64,
         hits: Vec<SearchPageHit>,
+        highlight_unavailable: bool,
     },
     Failed {
         generation: u64,
@@ -44,6 +45,7 @@ pub struct SearchPageHit {
 
 pub trait SearchMatcher: Send + Sync {
     fn prepare_query(&self, raw_query: &str) -> String;
+    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool;
     fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence>;
 }
 
@@ -179,6 +181,10 @@ impl SearchMatcher for CancelMatcher {
         String::new()
     }
 
+    fn matches_page(&self, _page_text: &str, _prepared_query: &str) -> bool {
+        false
+    }
+
     fn locate_matches(&self, _page: &TextPage, _prepared_query: &str) -> Vec<SearchOccurrence> {
         Vec::new()
     }
@@ -241,6 +247,7 @@ fn run_job(
         let _ = event_tx.send(SearchEvent::Completed {
             generation: job.generation,
             hits: Vec::new(),
+            highlight_unavailable: false,
         });
         return WorkerControl::Continue;
     }
@@ -250,6 +257,7 @@ fn run_job(
     let total_pages = doc.page_count();
 
     let mut hits = Vec::new();
+    let mut highlight_unavailable = false;
     for page in 0..total_pages {
         match flush_requests(request_rx, pending) {
             WorkerControl::Continue => {
@@ -260,8 +268,8 @@ fn run_job(
             WorkerControl::Shutdown => return WorkerControl::Shutdown,
         }
 
-        let text_page = match doc.extract_text_page(page) {
-            Ok(text_page) => text_page,
+        let text = match doc.extract_text(page) {
+            Ok(text) => text,
             Err(err) => {
                 let _ = event_tx.send(SearchEvent::Failed {
                     generation: job.generation,
@@ -271,8 +279,14 @@ fn run_job(
             }
         };
 
-        let occurrences = job.matcher.locate_matches(&text_page, &query);
-        if !occurrences.is_empty() {
+        if job.matcher.matches_page(&text, &query) {
+            let occurrences = match doc.extract_positioned_text(page) {
+                Ok(text_page) => job.matcher.locate_matches(&text_page, &query),
+                Err(_) => {
+                    highlight_unavailable = true;
+                    Vec::new()
+                }
+            };
             hits.push(SearchPageHit { page, occurrences });
         }
 
@@ -290,6 +304,7 @@ fn run_job(
     let _ = event_tx.send(SearchEvent::Completed {
         generation: job.generation,
         hits,
+        highlight_unavailable,
     });
     WorkerControl::Continue
 }
@@ -534,6 +549,7 @@ enum RectExtent {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
     use std::path::PathBuf;
     use std::process;
     use std::sync::Arc;
@@ -545,7 +561,8 @@ mod tests {
         locate_occurrences, merge_occurrence_rects,
     };
     use crate::backend::open_default_backend;
-    use crate::backend::{PdfRect, TextGlyph, TextPage};
+    use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
+    use crate::error::{AppError, AppResult};
 
     #[derive(Debug)]
     struct ContainsMatcher {
@@ -561,8 +578,79 @@ mod tests {
             }
         }
 
+        fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
+            let prepared_page = if self.case_sensitive {
+                page_text.to_string()
+            } else {
+                page_text.to_lowercase()
+            };
+
+            if prepared_page.contains(prepared_query) {
+                return true;
+            }
+
+            prepared_page
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+                .contains(
+                    &prepared_query
+                        .chars()
+                        .filter(|ch| !ch.is_whitespace())
+                        .collect::<String>(),
+                )
+        }
+
         fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence> {
             locate_occurrences(&page.glyphs, prepared_query, self.case_sensitive)
+        }
+    }
+
+    struct SearchOnlyStubPdf {
+        path: PathBuf,
+        text: String,
+    }
+
+    impl SearchOnlyStubPdf {
+        fn new(text: &str) -> Self {
+            Self {
+                path: PathBuf::from("search-only.pdf"),
+                text: text.to_string(),
+            }
+        }
+    }
+
+    impl PdfBackend for SearchOnlyStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            42
+        }
+
+        fn page_count(&self) -> usize {
+            1
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+
+        fn extract_text(&self, _page: usize) -> AppResult<String> {
+            Ok(self.text.clone())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> AppResult<TextPage> {
+            Err(AppError::unsupported("positioned text unavailable"))
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in search test"))
         }
     }
 
@@ -617,7 +705,7 @@ mod tests {
         let cancel_generation = engine.cancel(pdf).expect("cancel should succeed");
 
         assert_eq!(cancel_generation, running_generation + 1);
-        let hits = wait_for_completed_hits(&mut engine, cancel_generation);
+        let (hits, _) = wait_for_completed_hits(&mut engine, cancel_generation);
         assert!(hits.is_empty());
 
         fs::remove_file(&file).expect("test file should be removed");
@@ -641,7 +729,7 @@ mod tests {
             )
             .expect("submit should succeed");
 
-        let hits = wait_for_completed_hits(&mut engine, generation);
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hit_pages(&hits), vec![0, 1]);
 
         fs::remove_file(&file).expect("test file should be removed");
@@ -665,7 +753,7 @@ mod tests {
             )
             .expect("submit should succeed");
 
-        let hits = wait_for_completed_hits(&mut engine, generation);
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hit_pages(&hits), vec![1]);
 
         fs::remove_file(&file).expect("test file should be removed");
@@ -692,10 +780,31 @@ mod tests {
             )
             .expect("submit should succeed");
 
-        let hits = wait_for_completed_hits(&mut engine, generation);
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hit_pages(&hits), vec![0]);
 
         fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn search_keeps_hit_pages_when_positioned_text_is_unavailable() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchOnlyStubPdf::new("alpha beta"));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].page, 0);
+        assert!(hits[0].occurrences.is_empty());
+        assert!(highlight_unavailable);
     }
 
     #[test]
@@ -812,7 +921,10 @@ mod tests {
         );
     }
 
-    fn wait_for_completed_hits(engine: &mut SearchEngine, generation: u64) -> Vec<SearchPageHit> {
+    fn wait_for_completed_hits(
+        engine: &mut SearchEngine,
+        generation: u64,
+    ) -> (Vec<SearchPageHit>, bool) {
         let timeout = Duration::from_secs(3);
         let start = Instant::now();
 
@@ -821,10 +933,11 @@ mod tests {
                 if let SearchEvent::Completed {
                     generation: event_generation,
                     hits,
+                    highlight_unavailable,
                 } = event
                     && event_generation == generation
                 {
-                    return hits;
+                    return (hits, highlight_unavailable);
                 }
             }
 

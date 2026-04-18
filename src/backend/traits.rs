@@ -226,10 +226,8 @@ pub trait PdfBackend: Send + Sync {
     fn page_count(&self) -> usize;
     fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)>;
     fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>;
-    fn extract_text_page(&self, page: usize) -> AppResult<TextPage>;
-    fn extract_text(&self, page: usize) -> AppResult<String> {
-        Ok(self.extract_text_page(page)?.extracted_text())
-    }
+    fn extract_text(&self, page: usize) -> AppResult<String>;
+    fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage>;
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>>;
 }
 

@@ -61,6 +61,8 @@ Rules:
   - search runs asynchronously and reports progress while active
   - visible search hits are highlighted through the generic highlight overlay
     layer
+  - if highlight extraction fails for matched pages, search results are kept and
+    a concise warning notice is shown
   - `search` opens the search palette
   - `next-search-hit` and `prev-search-hit` are available only while search is
     active

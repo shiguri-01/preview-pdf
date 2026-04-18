@@ -418,9 +418,7 @@ fn spread_render_spaces(
         });
     }
     if let (Some(page), Some(frame)) = (slots.right_page, right_frame) {
-        let origin_x_px = left_frame
-            .map(|left| left.width.saturating_add(gap_px))
-            .unwrap_or(0);
+        let origin_x_px = spread_left_slot_width_px(left_frame, right_frame).saturating_add(gap_px);
         let (width_pt, height_pt) = doc.page_dimensions(page)?;
         pages.push(PageRenderSpace {
             page,
@@ -433,4 +431,98 @@ fn spread_render_spaces(
         });
     }
     Ok(pages)
+}
+
+fn spread_left_slot_width_px(
+    left_frame: Option<&RgbaFrame>,
+    right_frame: Option<&RgbaFrame>,
+) -> u32 {
+    left_frame
+        .map(|frame| frame.width)
+        .or_else(|| right_frame.map(|frame| frame.width))
+        .unwrap_or(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::spread_render_spaces;
+    use crate::app::state::VisiblePageSlots;
+    use crate::backend::{OutlineNode, PdfBackend, RgbaFrame, TextPage};
+    use crate::error::{AppError, AppResult};
+
+    #[derive(Debug)]
+    struct StubBackend {
+        path: PathBuf,
+    }
+
+    impl Default for StubBackend {
+        fn default() -> Self {
+            Self {
+                path: PathBuf::from("stub.pdf"),
+            }
+        }
+    }
+
+    impl PdfBackend for StubBackend {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            1
+        }
+
+        fn page_count(&self) -> usize {
+            2
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 200.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_text(&self, _page: usize) -> AppResult<String> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> AppResult<TextPage> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+    }
+
+    #[test]
+    fn spread_render_spaces_offsets_right_page_after_blank_left_slot() {
+        let doc = StubBackend::default();
+        let right = RgbaFrame {
+            width: 120,
+            height: 240,
+            pixels: vec![0; 120 * 240 * 4].into(),
+        };
+        let spaces = spread_render_spaces(
+            &doc,
+            VisiblePageSlots {
+                anchor_page: 1,
+                trailing_page: None,
+                left_page: None,
+                right_page: Some(1),
+            },
+            None,
+            Some(&right),
+            8,
+        )
+        .expect("spread spaces should resolve");
+
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].page, 1);
+        assert_eq!(spaces[0].origin_x_px, 128);
+    }
 }

@@ -142,7 +142,11 @@ mod tests {
             })
         }
 
-        fn extract_text_page(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(String::new())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
             Ok(TextPage {
                 width_pt: 1.0,
                 height_pt: 1.0,

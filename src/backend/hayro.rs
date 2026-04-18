@@ -54,8 +54,12 @@ impl PdfBackend for PdfDoc {
         PdfDoc::render_page(self, page, scale)
     }
 
-    fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
-        PdfDoc::extract_text_page(self, page)
+    fn extract_text(&self, page: usize) -> AppResult<String> {
+        PdfDoc::extract_text(self, page)
+    }
+
+    fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage> {
+        PdfDoc::extract_positioned_text(self, page)
     }
 
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
@@ -173,7 +177,7 @@ impl PdfDoc {
         })
     }
 
-    pub fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
+    pub fn extract_text(&self, page: usize) -> AppResult<String> {
         if page >= self.page_count() {
             return Err(AppError::invalid_argument("page index is out of range"));
         }
@@ -184,7 +188,21 @@ impl PdfDoc {
             .get(page)
             .ok_or(AppError::invalid_argument("page index is out of range"))?;
 
-        Ok(extract_text_page_with_device(page_ref))
+        Ok(extract_text_with_device(page_ref).trim().to_owned())
+    }
+
+    pub fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage> {
+        if page >= self.page_count() {
+            return Err(AppError::invalid_argument("page index is out of range"));
+        }
+
+        let page_ref = self
+            .pdf
+            .pages()
+            .get(page)
+            .ok_or(AppError::invalid_argument("page index is out of range"))?;
+
+        Ok(extract_positioned_text_with_device(page_ref))
     }
 
     pub fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
@@ -588,7 +606,114 @@ impl<'a> NamedDestination<'a> {
     }
 }
 
-fn extract_text_page_with_device(page: &Page<'_>) -> TextPage {
+fn extract_text_with_device(page: &Page<'_>) -> String {
+    let mut context = Context::new(
+        page.initial_transform(true),
+        page.intersected_crop_box().to_kurbo(),
+        page.xref(),
+        InterpreterSettings::default(),
+    );
+    let mut device = PlainTextExtractDevice::default();
+    interpret_page(page, &mut context, &mut device);
+    device.finish()
+}
+
+#[derive(Default)]
+struct PlainTextExtractDevice {
+    text: String,
+    last_point: Option<Point>,
+    last_glyph: Option<(char, i32, i32)>,
+}
+
+impl PlainTextExtractDevice {
+    fn finish(self) -> String {
+        self.text
+    }
+
+    fn push_char(&mut self, ch: char, x: f64, y: f64) {
+        if ch == '\n' || ch == '\r' {
+            push_plain_newline(&mut self.text);
+            self.last_point = Some(Point::new(x, y));
+            return;
+        }
+        if ch.is_whitespace() {
+            push_plain_space(&mut self.text);
+            self.last_point = Some(Point::new(x, y));
+            return;
+        }
+
+        if let Some(last) = self.last_point
+            && (y - last.y).abs() > PLAIN_TEXT_LINE_BREAK_THRESHOLD
+        {
+            push_plain_newline(&mut self.text);
+        }
+
+        self.text.push(ch);
+        self.last_point = Some(Point::new(x, y));
+    }
+
+    fn is_duplicate_glyph(&self, ch: char, x: f64, y: f64) -> bool {
+        self.last_glyph == Some((ch, quantize_coord(x), quantize_coord(y)))
+    }
+
+    fn set_last_glyph(&mut self, ch: char, x: f64, y: f64) {
+        self.last_glyph = Some((ch, quantize_coord(x), quantize_coord(y)));
+    }
+}
+
+impl<'a> Device<'a> for PlainTextExtractDevice {
+    fn set_soft_mask(&mut self, _mask: Option<SoftMask<'a>>) {}
+
+    fn set_blend_mode(&mut self, _blend_mode: BlendMode) {}
+
+    fn draw_path(
+        &mut self,
+        _path: &BezPath,
+        _transform: Affine,
+        _paint: &Paint<'a>,
+        _draw_mode: &PathDrawMode,
+    ) {
+    }
+
+    fn push_clip_path(&mut self, _clip_path: &ClipPath) {}
+
+    fn push_transparency_group(
+        &mut self,
+        _opacity: f32,
+        _mask: Option<SoftMask<'a>>,
+        _blend_mode: BlendMode,
+    ) {
+    }
+
+    fn draw_glyph(
+        &mut self,
+        glyph: &Glyph<'a>,
+        transform: Affine,
+        glyph_transform: Affine,
+        _paint: &Paint<'a>,
+        _draw_mode: &GlyphDrawMode,
+    ) {
+        let Some(ch) = glyph.as_unicode() else {
+            return;
+        };
+
+        let position = (transform * glyph_transform) * Point::ORIGIN;
+        if self.is_duplicate_glyph(ch, position.x, position.y) {
+            return;
+        }
+
+        self.set_last_glyph(ch, position.x, position.y);
+        self.push_char(ch, position.x, position.y);
+    }
+
+    fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
+
+    fn pop_clip_path(&mut self) {}
+
+    fn pop_transparency_group(&mut self) {}
+}
+
+fn extract_positioned_text_with_device(page: &Page<'_>) -> TextPage {
     let mut context = Context::new(
         page.initial_transform(true),
         page.intersected_crop_box().to_kurbo(),
@@ -596,18 +721,18 @@ fn extract_text_page_with_device(page: &Page<'_>) -> TextPage {
         InterpreterSettings::default(),
     );
     let (width_pt, height_pt) = page.render_dimensions();
-    let mut device = TextExtractDevice::default();
+    let mut device = PositionedTextExtractDevice::default();
     interpret_page(page, &mut context, &mut device);
     device.finish(width_pt, height_pt)
 }
 
 #[derive(Default)]
-struct TextExtractDevice {
+struct PositionedTextExtractDevice {
     last_glyph: Option<(char, i32, i32)>,
     glyphs: Vec<TextGlyph>,
 }
 
-impl TextExtractDevice {
+impl PositionedTextExtractDevice {
     fn finish(self, width_pt: f32, height_pt: f32) -> TextPage {
         TextPage {
             width_pt,
@@ -625,7 +750,7 @@ impl TextExtractDevice {
     }
 }
 
-impl<'a> Device<'a> for TextExtractDevice {
+impl<'a> Device<'a> for PositionedTextExtractDevice {
     fn set_soft_mask(&mut self, _mask: Option<SoftMask<'a>>) {}
 
     fn set_blend_mode(&mut self, _blend_mode: BlendMode) {}
@@ -683,6 +808,20 @@ fn quantize_coord(value: f64) -> i32 {
     (value * 100.0).round() as i32
 }
 
+const PLAIN_TEXT_LINE_BREAK_THRESHOLD: f64 = 6.0;
+
+fn push_plain_newline(out: &mut String) {
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+}
+
+fn push_plain_space(out: &mut String) {
+    if !out.ends_with([' ', '\n']) {
+        out.push(' ');
+    }
+}
+
 fn glyph_bbox(glyph: &Glyph<'_>, transform: Affine, glyph_transform: Affine) -> Option<PdfRect> {
     let outline = match glyph {
         Glyph::Outline(outline) => outline.outline(),
@@ -726,7 +865,6 @@ mod tests {
 
     use hayro::vello_cpu::Pixmap;
 
-    use crate::backend::PdfBackend;
     use crate::error::AppError;
 
     use super::{PdfDoc, decode_pdf_text_string, pixel_buffer_from_pixmap};

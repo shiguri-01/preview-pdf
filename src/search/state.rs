@@ -123,6 +123,8 @@ impl Default for SearchState {
 }
 
 impl SearchState {
+    const HIGHLIGHT_UNAVAILABLE_NOTICE: &str = "some search highlights are unavailable";
+
     pub fn open_palette(
         &mut self,
         _app: &mut AppState,
@@ -221,7 +223,11 @@ impl SearchState {
                     self.in_progress = true;
                     changed = true;
                 }
-                SearchEvent::Completed { generation, hits } => {
+                SearchEvent::Completed {
+                    generation,
+                    hits,
+                    highlight_unavailable,
+                } => {
                     if generation != self.generation {
                         continue;
                     }
@@ -230,6 +236,11 @@ impl SearchState {
                     self.hit_pages_progress = hits.len();
                     self.current_hit = None;
                     self.hits = hits;
+                    if highlight_unavailable {
+                        app.apply_notice_action(NoticeAction::warning(
+                            Self::HIGHLIGHT_UNAVAILABLE_NOTICE,
+                        ));
+                    }
                     changed = true;
                 }
                 SearchEvent::Failed {
@@ -382,6 +393,29 @@ impl SearchMatcher for ContainsMatcher {
         }
     }
 
+    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
+        let prepared_page = if self.case_sensitive {
+            page_text.to_string()
+        } else {
+            page_text.to_lowercase()
+        };
+
+        if prepared_page.contains(prepared_query) {
+            return true;
+        }
+
+        prepared_page
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect::<String>()
+            .contains(
+                &prepared_query
+                    .chars()
+                    .filter(|ch| !ch.is_whitespace())
+                    .collect::<String>(),
+            )
+    }
+
     fn locate_matches(
         &self,
         page: &crate::backend::TextPage,
@@ -396,9 +430,10 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::{AppState, NoticeAction};
+    use crate::app::{AppState, NoticeAction, NoticeLevel};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{CommandOutcome, SearchMatcherKind};
+    use crate::error::AppError;
     use crate::search::engine::SearchEngine;
 
     use super::SearchState;
@@ -442,12 +477,68 @@ mod tests {
             })
         }
 
-        fn extract_text_page(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(String::new())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
             Ok(TextPage {
                 width_pt: 612.0,
                 height_pt: 792.0,
                 glyphs: Vec::new(),
             })
+        }
+
+        fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct HighlightUnavailableStubPdf {
+        path: PathBuf,
+        text: String,
+    }
+
+    impl HighlightUnavailableStubPdf {
+        fn new(text: &str) -> Self {
+            Self {
+                path: PathBuf::from("highlight-unavailable.pdf"),
+                text: text.to_string(),
+            }
+        }
+    }
+
+    impl PdfBackend for HighlightUnavailableStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            10
+        }
+
+        fn page_count(&self) -> usize {
+            1
+        }
+
+        fn page_dimensions(&self, _page: usize) -> crate::error::AppResult<(f32, f32)> {
+            Ok((612.0, 792.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> crate::error::AppResult<RgbaFrame> {
+            Ok(RgbaFrame {
+                width: 1,
+                height: 1,
+                pixels: vec![0, 0, 0, 0].into(),
+            })
+        }
+
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(self.text.clone())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Err(AppError::unsupported("positioned text unavailable"))
         }
 
         fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
@@ -591,6 +682,45 @@ mod tests {
             assert_eq!(app.notice, None);
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+
+    #[test]
+    fn on_background_warns_when_highlight_is_unavailable() {
+        let mut state = SearchState::default();
+        let mut app = AppState::default();
+        let pdf = Arc::new(HighlightUnavailableStubPdf::new("alpha beta")) as SharedPdfBackend;
+        let mut engine = SearchEngine::new();
+
+        state
+            .submit(
+                &mut app,
+                Arc::clone(&pdf),
+                &mut engine,
+                "alpha".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit should succeed");
+
+        let timeout = std::time::Duration::from_secs(3);
+        let start = std::time::Instant::now();
+        while state.in_progress() {
+            let _ = state.on_background(&mut app, &mut engine);
+            assert!(
+                start.elapsed() <= timeout,
+                "timed out waiting for search completion"
+            );
+            if state.in_progress() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        assert_eq!(
+            state.status_bar_segment(),
+            Some("SEARCH 1 hits".to_string())
+        );
+        let notice = app.notice.expect("warning notice should be set");
+        assert_eq!(notice.level, NoticeLevel::Warning);
+        assert_eq!(notice.message, SearchState::HIGHLIGHT_UNAVAILABLE_NOTICE);
     }
 
     #[test]

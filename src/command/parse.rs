@@ -134,24 +134,36 @@ fn parse_open_palette(args_text: &str) -> AppResult<Command> {
         ));
     }
 
-    let (kind_text, payload) = match trimmed.find(char::is_whitespace) {
+    let (kind_text, input) = match trimmed.find(char::is_whitespace) {
         Some(index) => {
             let kind = trimmed[..index].trim();
             let input = trimmed[index..].trim_start();
-            let payload = if input.is_empty() {
-                None
-            } else {
-                Some(PaletteOpenPayload::CommandInput(input.to_string()))
-            };
-            (kind, payload)
+            (kind, input)
         }
-        None => (trimmed, None),
+        None => (trimmed, ""),
     };
 
     let kind =
         PaletteKind::parse(kind_text).ok_or(AppError::invalid_argument("unknown palette kind"))?;
+    let payload = parse_open_palette_payload(kind, input);
 
     Ok(Command::OpenPalette { kind, payload })
+}
+
+fn parse_open_palette_payload(kind: PaletteKind, input: &str) -> Option<PaletteOpenPayload> {
+    if input.is_empty() {
+        return None;
+    }
+
+    Some(match kind {
+        PaletteKind::Command => PaletteOpenPayload::CommandInput(input.to_string()),
+        PaletteKind::Search => PaletteOpenPayload::Search {
+            query: input.to_string(),
+            matcher: SearchMatcherKind::ContainsInsensitive,
+        },
+        PaletteKind::History => PaletteOpenPayload::HistorySeed(input.to_string()),
+        PaletteKind::Outline => PaletteOpenPayload::OutlineQuery(input.to_string()),
+    })
 }
 
 fn parse_goto_page(args_text: &str) -> AppResult<Command> {
@@ -390,7 +402,7 @@ mod tests {
     use crate::command::{
         Command, PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind, SpreadDirectionArg,
     };
-    use crate::palette::PaletteKind;
+    use crate::palette::{PaletteKind, PaletteOpenPayload};
 
     #[test]
     fn parses_basic_commands() {
@@ -411,6 +423,33 @@ mod tests {
             Command::OpenPalette {
                 kind: PaletteKind::Command,
                 payload: None,
+            }
+        );
+        assert_eq!(
+            parse_command_text("open-palette history b:11|c:12|f:13")
+                .expect("parse should succeed"),
+            Command::OpenPalette {
+                kind: PaletteKind::History,
+                payload: Some(PaletteOpenPayload::HistorySeed(
+                    "b:11|c:12|f:13".to_string(),
+                )),
+            }
+        );
+        assert_eq!(
+            parse_command_text("open-palette search needle").expect("parse should succeed"),
+            Command::OpenPalette {
+                kind: PaletteKind::Search,
+                payload: Some(PaletteOpenPayload::Search {
+                    query: "needle".to_string(),
+                    matcher: SearchMatcherKind::ContainsInsensitive,
+                }),
+            }
+        );
+        assert_eq!(
+            parse_command_text("open-palette outline appendix").expect("parse should succeed"),
+            Command::OpenPalette {
+                kind: PaletteKind::Outline,
+                payload: Some(PaletteOpenPayload::OutlineQuery("appendix".to_string())),
             }
         );
     }

@@ -101,6 +101,7 @@ impl PaletteCandidate {
 pub enum PaletteOpenPayload {
     CommandInput(String),
     HistorySeed(String),
+    OutlineQuery(String),
     Search {
         query: String,
         matcher: SearchMatcherKind,
@@ -112,6 +113,7 @@ impl PaletteOpenPayload {
         match self {
             Self::CommandInput(input) => Some(input.as_str()),
             Self::HistorySeed(_) => None,
+            Self::OutlineQuery(query) => Some(query.as_str()),
             Self::Search { query, .. } => Some(query.as_str()),
         }
     }

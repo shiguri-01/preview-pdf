@@ -281,7 +281,18 @@ fn run_job(
 
         if job.matcher.matches_page(&text, &query) {
             let occurrences = match doc.extract_positioned_text(page) {
-                Ok(text_page) => job.matcher.locate_matches(&text_page, &query),
+                Ok(text_page) => {
+                    if text_page.dropped_glyphs > 0 {
+                        highlight_unavailable = true;
+                        Vec::new()
+                    } else {
+                        let occurrences = job.matcher.locate_matches(&text_page, &query);
+                        if occurrences.is_empty() {
+                            highlight_unavailable = true;
+                        }
+                        occurrences
+                    }
+                }
                 Err(_) => {
                     highlight_unavailable = true;
                     Vec::new()
@@ -654,6 +665,56 @@ mod tests {
         }
     }
 
+    struct SearchPositionedStubPdf {
+        path: PathBuf,
+        text: String,
+        positioned_text: TextPage,
+    }
+
+    impl SearchPositionedStubPdf {
+        fn new(text: &str, positioned_text: TextPage) -> Self {
+            Self {
+                path: PathBuf::from("search-positioned.pdf"),
+                text: text.to_string(),
+                positioned_text,
+            }
+        }
+    }
+
+    impl PdfBackend for SearchPositionedStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            43
+        }
+
+        fn page_count(&self) -> usize {
+            1
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+
+        fn extract_text(&self, _page: usize) -> AppResult<String> {
+            Ok(self.text.clone())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> AppResult<TextPage> {
+            Ok(self.positioned_text.clone())
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+    }
+
     #[test]
     fn submit_returns_incrementing_generation() {
         let file = unique_temp_path("generation.pdf");
@@ -803,6 +864,62 @@ mod tests {
         let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].page, 0);
+        assert!(hits[0].occurrences.is_empty());
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
+    fn search_marks_highlight_unavailable_when_match_has_no_geometry() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "alpha beta",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: Vec::new(),
+                dropped_glyphs: 0,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].occurrences.is_empty());
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
+    fn search_treats_dropped_positioned_glyphs_as_highlight_failure() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "alpha beta",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: vec![glyph('a', 0.0, 0.0, 10.0, 10.0)],
+                dropped_glyphs: 1,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
         assert!(hits[0].occurrences.is_empty());
         assert!(highlight_unavailable);
     }

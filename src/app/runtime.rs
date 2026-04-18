@@ -124,8 +124,7 @@ impl RenderRuntime {
             reason: "current-page",
         };
         let frame = self.resolve_task_frame(doc, &task)?;
-        let page_space = page_render_space(doc, task.page, &frame, 0);
-        let frame = decorate_frame(&frame, overlay, &[page_space]);
+        let frame = decorate_single_page_frame(doc, task.page, &frame, overlay);
         let (frame, pan_for_presenter) =
             prepare_presenter_frame(&frame, viewport, pan, cell_px, enable_crop);
         presenter.prepare(
@@ -181,8 +180,7 @@ impl RenderRuntime {
         generation: u64,
     ) -> AppResult<bool> {
         let prepared = if let Some(frame) = self.l1_cache.get(&key) {
-            let page_space = page_render_space(doc, key.page, frame, 0);
-            let frame = decorate_frame(frame, overlay, &[page_space]);
+            let frame = decorate_single_page_frame(doc, key.page, frame, overlay);
             let (frame, pan_for_presenter) =
                 prepare_presenter_frame(&frame, viewport, pan, cell_px, enable_crop);
             presenter.prepare(
@@ -249,12 +247,7 @@ impl RenderRuntime {
             Some(_) => trailing_frame.as_ref(),
             None => None,
         };
-        let spread_frame = compose_spread_frame(left_frame, right_frame, gap_px);
-        let decorated = decorate_frame(
-            &spread_frame,
-            overlay,
-            &spread_render_spaces(doc, slots, left_frame, right_frame, gap_px)?,
-        );
+        let decorated = decorate_spread_frame(doc, slots, left_frame, right_frame, gap_px, overlay);
         let (frame, pan_for_presenter) =
             prepare_presenter_frame(&decorated, viewport, pan, cell_px, enable_crop);
         presenter.prepare(
@@ -379,14 +372,41 @@ fn decorate_frame(
     }
 }
 
+fn decorate_single_page_frame(
+    doc: &dyn PdfBackend,
+    page: usize,
+    frame: &RgbaFrame,
+    overlay: &HighlightOverlaySnapshot,
+) -> RgbaFrame {
+    match page_render_space(doc, page, frame, 0) {
+        Ok(page_space) => decorate_frame(frame, overlay, &[page_space]),
+        Err(_) => frame.clone(),
+    }
+}
+
+fn decorate_spread_frame(
+    doc: &dyn PdfBackend,
+    slots: VisiblePageSlots,
+    left_frame: Option<&RgbaFrame>,
+    right_frame: Option<&RgbaFrame>,
+    gap_px: u32,
+    overlay: &HighlightOverlaySnapshot,
+) -> RgbaFrame {
+    let spread_frame = compose_spread_frame(left_frame, right_frame, gap_px);
+    match spread_render_spaces(doc, slots, left_frame, right_frame, gap_px) {
+        Ok(pages) => decorate_frame(&spread_frame, overlay, &pages),
+        Err(_) => spread_frame,
+    }
+}
+
 fn page_render_space(
     doc: &dyn PdfBackend,
     page: usize,
     frame: &RgbaFrame,
     origin_x_px: u32,
-) -> PageRenderSpace {
-    let (width_pt, height_pt) = doc.page_dimensions(page).unwrap_or((1.0, 1.0));
-    PageRenderSpace {
+) -> AppResult<PageRenderSpace> {
+    let (width_pt, height_pt) = doc.page_dimensions(page)?;
+    Ok(PageRenderSpace {
         page,
         origin_x_px,
         origin_y_px: 0,
@@ -394,7 +414,7 @@ fn page_render_space(
         height_px: frame.height,
         width_pt,
         height_pt,
-    }
+    })
 }
 
 fn spread_render_spaces(

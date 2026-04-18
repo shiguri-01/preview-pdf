@@ -168,6 +168,7 @@ pub struct TextPage {
     pub width_pt: f32,
     pub height_pt: f32,
     pub glyphs: Vec<TextGlyph>,
+    pub dropped_glyphs: usize,
 }
 
 impl TextPage {
@@ -332,6 +333,7 @@ mod tests {
                     },
                 },
             ],
+            dropped_glyphs: 0,
         };
 
         assert_eq!(page.extracted_text(), "A\nB");

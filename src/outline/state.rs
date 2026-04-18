@@ -151,6 +151,7 @@ mod tests {
                 width_pt: 1.0,
                 height_pt: 1.0,
                 glyphs: Vec::new(),
+                dropped_glyphs: 0,
             })
         }
 

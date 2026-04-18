@@ -730,6 +730,7 @@ fn extract_positioned_text_with_device(page: &Page<'_>) -> TextPage {
 struct PositionedTextExtractDevice {
     last_glyph: Option<(char, i32, i32)>,
     glyphs: Vec<TextGlyph>,
+    dropped_glyphs: usize,
 }
 
 impl PositionedTextExtractDevice {
@@ -738,6 +739,7 @@ impl PositionedTextExtractDevice {
             width_pt,
             height_pt,
             glyphs: self.glyphs,
+            dropped_glyphs: self.dropped_glyphs,
         }
     }
 
@@ -794,6 +796,8 @@ impl<'a> Device<'a> for PositionedTextExtractDevice {
         self.set_last_glyph(ch, position.x, position.y);
         if let Some(bbox) = glyph_bbox(glyph, transform, glyph_transform) {
             self.glyphs.push(TextGlyph { ch, bbox });
+        } else {
+            self.dropped_glyphs += 1;
         }
     }
 

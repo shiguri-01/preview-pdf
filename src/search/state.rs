@@ -6,7 +6,7 @@ use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
-use crate::palette::PaletteKind;
+use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::engine::{
     SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit, locate_occurrences,
@@ -130,14 +130,17 @@ impl SearchState {
         _app: &mut AppState,
         palette_requests: &mut VecDeque<PaletteRequest>,
     ) -> (CommandOutcome, NoticeAction) {
-        let seed = if self.query.is_empty() {
+        let payload = if self.query.is_empty() {
             None
         } else {
-            Some(self.query.clone())
+            Some(PaletteOpenPayload::Search {
+                query: self.query.clone(),
+                matcher: self.matcher,
+            })
         };
         palette_requests.push_back(PaletteRequest::Open {
             kind: PaletteKind::Search,
-            seed,
+            payload,
         });
         (CommandOutcome::Applied, NoticeAction::Clear)
     }
@@ -427,13 +430,15 @@ impl SearchMatcher for ContainsMatcher {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::{AppState, NoticeAction, NoticeLevel};
+    use crate::app::{AppState, NoticeAction, NoticeLevel, PaletteRequest};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{CommandOutcome, SearchMatcherKind};
     use crate::error::AppError;
+    use crate::palette::{PaletteKind, PaletteOpenPayload};
     use crate::search::engine::SearchEngine;
 
     use super::SearchState;
@@ -571,6 +576,32 @@ mod tests {
         assert_eq!(
             state.status_bar_segment(),
             Some("SEARCH 0 hits".to_string())
+        );
+    }
+
+    #[test]
+    fn open_palette_includes_query_and_matcher_in_payload() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            matcher: SearchMatcherKind::ContainsSensitive,
+            ..SearchState::default()
+        };
+        let mut app = AppState::default();
+        let mut requests = VecDeque::new();
+
+        let (outcome, notice) = state.open_palette(&mut app, &mut requests);
+
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(
+            requests.pop_front(),
+            Some(PaletteRequest::Open {
+                kind: PaletteKind::Search,
+                payload: Some(PaletteOpenPayload::Search {
+                    query: "needle".to_string(),
+                    matcher: SearchMatcherKind::ContainsSensitive,
+                }),
+            })
         );
     }
 

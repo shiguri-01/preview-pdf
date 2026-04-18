@@ -5,8 +5,9 @@ use crate::input::shortcut::{
     ShortcutKey, format_shortcut_alternatives_tight, format_shortcut_key,
 };
 use crate::palette::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
+    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteOpenPayload,
+    PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect,
+    PaletteTextPart,
 };
 
 pub struct SearchPaletteProvider;
@@ -26,6 +27,23 @@ impl PaletteProvider for SearchPaletteProvider {
 
     fn reset_selection_on_input_change(&self) -> bool {
         false
+    }
+
+    fn initial_selected_candidate(
+        &self,
+        ctx: &PaletteContext<'_>,
+        candidates: &[PaletteCandidate],
+    ) -> Option<usize> {
+        let PaletteOpenPayload::Search { matcher, .. } = ctx.open_payload? else {
+            return None;
+        };
+
+        candidates
+            .iter()
+            .position(|candidate| match &candidate.payload {
+                PalettePayload::Opaque(id) => SearchMatcherKind::parse(id) == Some(*matcher),
+                PalettePayload::None => false,
+            })
     }
 
     fn list(&self, _ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
@@ -68,7 +86,7 @@ impl PaletteProvider for SearchPaletteProvider {
         if query.is_empty() {
             return Ok(PaletteSubmitEffect::Reopen {
                 kind: self.kind(),
-                seed: None,
+                payload: None,
             });
         }
 
@@ -104,5 +122,69 @@ impl PaletteProvider for SearchPaletteProvider {
         Some(format!(
             "{enter} search   {history} history   {matcher} matcher"
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        command::SearchMatcherKind,
+        extension::ExtensionUiSnapshot,
+        palette::{PaletteContext, PaletteKind, PaletteOpenPayload, PaletteProvider},
+    };
+
+    use super::SearchPaletteProvider;
+
+    #[test]
+    fn search_payload_prefills_query_input() {
+        let provider = SearchPaletteProvider;
+        let open_payload = PaletteOpenPayload::Search {
+            query: "needle".to_string(),
+            matcher: SearchMatcherKind::ContainsSensitive,
+        };
+
+        assert_eq!(provider.initial_input(Some(&open_payload)), "needle");
+    }
+
+    #[test]
+    fn search_payload_selects_current_matcher() {
+        let provider = SearchPaletteProvider;
+        let app = crate::app::AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+        let open_payload = PaletteOpenPayload::Search {
+            query: "needle".to_string(),
+            matcher: SearchMatcherKind::ContainsSensitive,
+        };
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Search,
+            input: "needle",
+            open_payload: Some(&open_payload),
+        };
+        let candidates = provider.list(&ctx).expect("search list should build");
+
+        assert_eq!(
+            provider.initial_selected_candidate(&ctx, &candidates),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn non_search_payload_keeps_default_selection() {
+        let provider = SearchPaletteProvider;
+        let app = crate::app::AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+        let open_payload = PaletteOpenPayload::CommandInput("needle".to_string());
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Search,
+            input: "needle",
+            open_payload: Some(&open_payload),
+        };
+        let candidates = provider.list(&ctx).expect("search list should build");
+
+        assert_eq!(provider.initial_selected_candidate(&ctx, &candidates), None);
     }
 }

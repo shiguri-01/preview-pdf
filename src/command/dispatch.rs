@@ -111,8 +111,8 @@ pub fn dispatch(
             let visible = !app.debug_status_visible;
             set_debug_status_visible(app, visible)
         }
-        Command::OpenPalette { kind, seed } => {
-            palette_requests.push_back(PaletteRequest::Open { kind, seed });
+        Command::OpenPalette { kind, payload } => {
+            palette_requests.push_back(PaletteRequest::Open { kind, payload });
             Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
         Command::ClosePalette => {

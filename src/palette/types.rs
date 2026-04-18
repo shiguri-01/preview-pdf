@@ -1,6 +1,6 @@
 use super::kind::PaletteKind;
 use crate::app::AppState;
-use crate::command::Command;
+use crate::command::{Command, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::InputHistoryRecord;
@@ -98,11 +98,33 @@ impl PaletteCandidate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaletteOpenPayload {
+    CommandInput(String),
+    HistorySeed(String),
+    OutlineQuery(String),
+    Search {
+        query: String,
+        matcher: SearchMatcherKind,
+    },
+}
+
+impl PaletteOpenPayload {
+    pub fn initial_input(&self) -> Option<&str> {
+        match self {
+            Self::CommandInput(input) => Some(input.as_str()),
+            Self::HistorySeed(_) => None,
+            Self::OutlineQuery(query) => Some(query.as_str()),
+            Self::Search { query, .. } => Some(query.as_str()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PalettePostAction {
     Close,
     Reopen {
         kind: PaletteKind,
-        seed: Option<String>,
+        payload: Option<PaletteOpenPayload>,
     },
 }
 
@@ -111,7 +133,7 @@ pub enum PaletteSubmitEffect {
     Close,
     Reopen {
         kind: PaletteKind,
-        seed: Option<String>,
+        payload: Option<PaletteOpenPayload>,
     },
     Dispatch {
         command: Command,
@@ -134,7 +156,7 @@ pub struct PaletteContext<'a> {
     pub extensions: &'a ExtensionUiSnapshot,
     pub kind: PaletteKind,
     pub input: &'a str,
-    pub seed: Option<&'a str>,
+    pub open_payload: Option<&'a PaletteOpenPayload>,
 }
 
 pub trait PaletteProvider: Send + Sync {
@@ -180,10 +202,13 @@ pub trait PaletteProvider: Send + Sync {
     }
     /// Returns the initial input text when the palette opens.
     ///
-    /// Defaults to the seed value. Override to decouple seed (data) from
+    /// Defaults to the open payload's input text. Override to decouple open payload data from
     /// the visible input field.
-    fn initial_input(&self, seed: Option<&str>) -> String {
-        seed.unwrap_or("").to_string()
+    fn initial_input(&self, open_payload: Option<&PaletteOpenPayload>) -> String {
+        open_payload
+            .and_then(PaletteOpenPayload::initial_input)
+            .unwrap_or("")
+            .to_string()
     }
 }
 

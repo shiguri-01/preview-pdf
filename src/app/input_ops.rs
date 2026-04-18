@@ -217,14 +217,14 @@ impl InteractionSubsystem {
         let mut changed = false;
         while let Some(request) = self.palette.pending_requests.pop_front() {
             match request {
-                PaletteRequest::Open { kind, seed } => {
+                PaletteRequest::Open { kind, payload } => {
                     let extensions = self.extensions.host.ui_snapshot();
                     match self.palette.manager.open(
                         &self.palette.registry,
                         state,
                         &extensions,
                         kind,
-                        seed,
+                        payload,
                         self.history.snapshot_for_palette(kind),
                     ) {
                         Ok(()) => {
@@ -360,10 +360,10 @@ impl InteractionSubsystem {
 
         match effect {
             PaletteSubmitEffect::Close => {}
-            PaletteSubmitEffect::Reopen { kind, seed } => {
+            PaletteSubmitEffect::Reopen { kind, payload } => {
                 self.palette
                     .pending_requests
-                    .push_back(PaletteRequest::Open { kind, seed });
+                    .push_back(PaletteRequest::Open { kind, payload });
             }
             PaletteSubmitEffect::Dispatch {
                 command,
@@ -379,10 +379,10 @@ impl InteractionSubsystem {
                 ));
                 match next {
                     PalettePostAction::Close => {}
-                    PalettePostAction::Reopen { kind, seed } => {
+                    PalettePostAction::Reopen { kind, payload } => {
                         self.palette
                             .pending_requests
-                            .push_back(PaletteRequest::Open { kind, seed });
+                            .push_back(PaletteRequest::Open { kind, payload });
                     }
                 }
             }
@@ -658,7 +658,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
-                seed: None,
+                payload: None,
             });
         assert!(app.interaction.apply_palette_requests(&mut app.state));
         assert_eq!(app.state.mode, Mode::Palette);
@@ -869,7 +869,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
-                seed: None,
+                payload: None,
             });
         assert!(interaction.apply_palette_requests(&mut state));
         assert_eq!(state.mode, Mode::Palette);
@@ -904,7 +904,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
-                seed: None,
+                payload: None,
             });
         interaction
             .palette

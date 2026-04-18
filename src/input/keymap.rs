@@ -12,7 +12,7 @@ pub fn build_builtin_sequence_registry() -> SequenceRegistry {
         &[ShortcutKey::char(':')],
         Command::OpenPalette {
             kind: PaletteKind::Command,
-            seed: None,
+            payload: None,
         },
     );
     register_static(

@@ -132,8 +132,10 @@ mod tests {
     #[test]
     fn initial_selection_uses_last_search_matcher() {
         let provider = SearchPaletteProvider;
-        let mut extensions = ExtensionUiSnapshot::default();
-        extensions.search_matcher = SearchMatcherKind::ContainsSensitive;
+        let extensions = ExtensionUiSnapshot {
+            search_matcher: SearchMatcherKind::ContainsSensitive,
+            ..ExtensionUiSnapshot::default()
+        };
         let app = crate::app::AppState::default();
         let ctx = PaletteContext {
             app: &app,

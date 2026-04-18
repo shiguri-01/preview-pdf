@@ -13,16 +13,28 @@ use crate::search::{SearchExtension, SearchRuntime};
 
 use super::traits::Extension;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionUiSnapshot {
     pub search_active: bool,
+    pub search_matcher: SearchMatcherKind,
     pub outline_entries: Arc<[OutlinePaletteEntry]>,
+}
+
+impl Default for ExtensionUiSnapshot {
+    fn default() -> Self {
+        Self {
+            search_active: false,
+            search_matcher: SearchMatcherKind::ContainsInsensitive,
+            outline_entries: Arc::from([]),
+        }
+    }
 }
 
 impl ExtensionUiSnapshot {
     pub fn with_search_active(search_active: bool) -> Self {
         Self {
             search_active,
+            search_matcher: SearchMatcherKind::ContainsInsensitive,
             outline_entries: Arc::from([]),
         }
     }
@@ -175,6 +187,7 @@ impl ExtensionHost {
     pub fn ui_snapshot(&self) -> ExtensionUiSnapshot {
         ExtensionUiSnapshot {
             search_active: self.search.is_active(),
+            search_matcher: self.search.matcher(),
             outline_entries: self.outline.palette_entries(),
         }
     }

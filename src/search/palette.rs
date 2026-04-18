@@ -59,6 +59,20 @@ impl PaletteProvider for SearchPaletteProvider {
         ])
     }
 
+    fn initial_selected_candidate(
+        &self,
+        ctx: &PaletteContext<'_>,
+        candidates: &[PaletteCandidate],
+    ) -> Option<usize> {
+        let selected_matcher = ctx.extensions.search_matcher.id();
+        candidates
+            .iter()
+            .position(|candidate| match &candidate.payload {
+                PalettePayload::Opaque(id) => id == selected_matcher,
+                PalettePayload::None => false,
+            })
+    }
+
     fn on_submit(
         &self,
         ctx: &PaletteContext<'_>,
@@ -104,5 +118,39 @@ impl PaletteProvider for SearchPaletteProvider {
         Some(format!(
             "{enter} search   {history} history   {matcher} matcher"
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::command::SearchMatcherKind;
+    use crate::extension::ExtensionUiSnapshot;
+    use crate::palette::{PaletteContext, PaletteKind, PaletteProvider};
+
+    use super::SearchPaletteProvider;
+
+    #[test]
+    fn initial_selection_uses_last_search_matcher() {
+        let provider = SearchPaletteProvider;
+        let mut extensions = ExtensionUiSnapshot::default();
+        extensions.search_matcher = SearchMatcherKind::ContainsSensitive;
+        let app = crate::app::AppState::default();
+        let ctx = PaletteContext {
+            app: &app,
+            extensions: &extensions,
+            kind: PaletteKind::Search,
+            input: "needle",
+            seed: Some("needle"),
+        };
+
+        let candidates = provider.list(&ctx).expect("search candidates should build");
+        let selected = provider
+            .initial_selected_candidate(&ctx, &candidates)
+            .expect("matching candidate should exist");
+
+        assert_eq!(
+            candidates[selected].id,
+            SearchMatcherKind::ContainsSensitive.id()
+        );
     }
 }

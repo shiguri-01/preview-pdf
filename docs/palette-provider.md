@@ -152,6 +152,7 @@ current input.
 - `<up>` / `<down>` recall recent search queries
 - `<c-p>` / `<c-n>` select the matcher candidate
 - matcher candidates are `contains-insensitive` and `contains-sensitive`
+- opening the palette selects the last matcher used for search submit
 - search history stores only the query text
 - pressing Enter with empty input reopens for correction
 - successful submit dispatches internal search-submit behavior and closes

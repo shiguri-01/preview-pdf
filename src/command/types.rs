@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use crate::palette::PaletteKind;
+use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchMatcherKind {
@@ -200,7 +200,7 @@ pub enum Command {
     DebugStatusToggle,
     OpenPalette {
         kind: PaletteKind,
-        seed: Option<String>,
+        payload: Option<PaletteOpenPayload>,
     },
     ClosePalette,
     OpenHelp,
@@ -555,7 +555,7 @@ mod tests {
         assert_eq!(
             Command::OpenPalette {
                 kind: PaletteKind::Command,
-                seed: None,
+                payload: None,
             }
             .action_id(),
             ActionId::OpenPalette

@@ -3,7 +3,7 @@ use std::num::IntErrorKind;
 use crate::app::AppState;
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
-use crate::palette::PaletteKind;
+use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::spec::{CommandConditionContext, find_command_spec, validate_command_id_for_source};
 use super::types::{
@@ -134,16 +134,16 @@ fn parse_open_palette(args_text: &str) -> AppResult<Command> {
         ));
     }
 
-    let (kind_text, seed) = match trimmed.find(char::is_whitespace) {
+    let (kind_text, payload) = match trimmed.find(char::is_whitespace) {
         Some(index) => {
             let kind = trimmed[..index].trim();
-            let seed = trimmed[index..].trim_start();
-            let seed = if seed.is_empty() {
+            let input = trimmed[index..].trim_start();
+            let payload = if input.is_empty() {
                 None
             } else {
-                Some(seed.to_string())
+                Some(PaletteOpenPayload::CommandInput(input.to_string()))
             };
-            (kind, seed)
+            (kind, payload)
         }
         None => (trimmed, None),
     };
@@ -151,7 +151,7 @@ fn parse_open_palette(args_text: &str) -> AppResult<Command> {
     let kind =
         PaletteKind::parse(kind_text).ok_or(AppError::invalid_argument("unknown palette kind"))?;
 
-    Ok(Command::OpenPalette { kind, seed })
+    Ok(Command::OpenPalette { kind, payload })
 }
 
 fn parse_goto_page(args_text: &str) -> AppResult<Command> {
@@ -410,7 +410,7 @@ mod tests {
             parse_command_text("open-palette command").expect("parse should succeed"),
             Command::OpenPalette {
                 kind: PaletteKind::Command,
-                seed: None,
+                payload: None,
             }
         );
     }

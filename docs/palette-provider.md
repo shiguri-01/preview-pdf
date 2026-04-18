@@ -86,7 +86,7 @@ Selection rules:
 `on_submit` returns:
 
 - `Close`
-- `Reopen { kind, seed }`
+- `Reopen { kind, payload }`
 - `Dispatch { command, history_record, next }`
 
 Dispatch order:
@@ -149,6 +149,7 @@ current input.
 - open shortcut: `/`
 - command entry point: `search`
 - input mode: `FreeText`
+- active search reopens with the current query prefilled and current matcher selected
 - `<up>` / `<down>` recall recent search queries
 - `<c-p>` / `<c-n>` select the matcher candidate
 - matcher candidates are `contains-insensitive` and `contains-sensitive`

@@ -73,7 +73,7 @@ Selection rules:
 - `<esc>` closes the current palette
 - `<c-p>` / `<c-n>` move the current selection
 - `<up>` / `<down>` recall input history in command and search palettes
-- `<up>` / `<down>` move selection in history and outline palettes
+- `<up>` / `<down>` move selection in history, outline, and search-results palettes
 - `<tab>` applies the provider `on_tab` effect
 - `<enter>` applies the provider `on_submit` effect
 
@@ -157,6 +157,18 @@ current input.
 - search history stores only the query text
 - pressing Enter with empty input reopens for correction
 - successful submit dispatches internal search-submit behavior and closes
+
+### Search-results palette
+
+- kind: `PaletteKind::SearchResults`
+- command entry point: `search-results`
+- input mode: `Custom`
+- availability: only while search is active
+- candidates represent search hit occurrences (including multiple hits on the same page)
+- row text shows hit index, context snippet containing the matched segment, and page label
+- matching uses hit index first, then snippet text, then page label
+- an empty hit list is valid and keeps the palette open with assistive text
+- Enter dispatches internal search-goto behavior and closes
 
 ### History palette
 

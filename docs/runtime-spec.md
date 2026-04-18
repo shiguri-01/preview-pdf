@@ -60,6 +60,9 @@ Rules:
     matchers
   - search runs asynchronously and reports progress while active
   - `search` opens the search palette
+  - `search-results` opens the search hit list palette while search is active
+  - search-results rows show hit index, context snippet, and page label
+  - the search-results palette can open even when there are zero hits
   - `next-search-hit` and `prev-search-hit` are available only while search is
     active
   - `cancel-search` cancels the active search state when search is active

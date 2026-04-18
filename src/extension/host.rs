@@ -9,13 +9,14 @@ use crate::event::AppEvent;
 use crate::history::{HistoryExtension, HistoryState};
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::outline::{OutlineExtension, OutlinePaletteEntry, OutlineState};
-use crate::search::{SearchExtension, SearchRuntime};
+use crate::search::{SearchExtension, SearchPaletteEntry, SearchRuntime};
 
 use super::traits::Extension;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtensionUiSnapshot {
     pub search_active: bool,
+    pub search_results_entries: Arc<[SearchPaletteEntry]>,
     pub outline_entries: Arc<[OutlinePaletteEntry]>,
 }
 
@@ -23,6 +24,7 @@ impl ExtensionUiSnapshot {
     pub fn with_search_active(search_active: bool) -> Self {
         Self {
             search_active,
+            search_results_entries: Arc::from([]),
             outline_entries: Arc::from([]),
         }
     }
@@ -85,6 +87,23 @@ impl ExtensionHost {
         matcher: SearchMatcherKind,
     ) -> AppResult<(CommandOutcome, NoticeAction)> {
         self.search.submit(app, pdf, query, matcher)
+    }
+
+    pub fn open_search_results_palette(
+        &mut self,
+        app: &mut AppState,
+        palette_requests: &mut VecDeque<PaletteRequest>,
+    ) -> (CommandOutcome, NoticeAction) {
+        self.search.open_results_palette(app, palette_requests)
+    }
+
+    pub fn search_result_goto(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+        page: usize,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        self.search.goto_result(app, page_count, page)
     }
 
     pub fn cancel_search(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
@@ -175,6 +194,7 @@ impl ExtensionHost {
     pub fn ui_snapshot(&self) -> ExtensionUiSnapshot {
         ExtensionUiSnapshot {
             search_active: self.search.is_active(),
+            search_results_entries: self.search.palette_entries(),
             outline_entries: self.outline.palette_entries(),
         }
     }

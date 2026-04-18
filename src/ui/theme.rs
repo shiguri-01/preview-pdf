@@ -20,6 +20,10 @@ pub fn warning_text() -> Style {
     Style::default().fg(Color::LightYellow)
 }
 
+pub fn hit_highlight_text() -> Style {
+    Style::default().bg(Color::Yellow)
+}
+
 pub fn error_text() -> Style {
     Style::default().fg(Color::LightRed)
 }

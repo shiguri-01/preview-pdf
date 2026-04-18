@@ -46,7 +46,7 @@ impl InputHistoryService {
         match kind {
             PaletteKind::Command => Some(self.command_snapshot()),
             PaletteKind::Search => Some(self.search_snapshot()),
-            PaletteKind::History | PaletteKind::Outline => None,
+            PaletteKind::SearchResults | PaletteKind::History | PaletteKind::Outline => None,
         }
     }
 
@@ -135,6 +135,11 @@ mod tests {
 
         assert!(history.snapshot_for_palette(PaletteKind::Command).is_some());
         assert!(history.snapshot_for_palette(PaletteKind::Search).is_some());
+        assert!(
+            history
+                .snapshot_for_palette(PaletteKind::SearchResults)
+                .is_none()
+        );
         assert!(history.snapshot_for_palette(PaletteKind::History).is_none());
         assert!(history.snapshot_for_palette(PaletteKind::Outline).is_none());
     }

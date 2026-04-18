@@ -21,13 +21,37 @@ pub struct SearchSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchEvent {
     Snapshot(SearchSnapshot),
-    Completed { generation: u64, hits: Vec<usize> },
-    Failed { generation: u64, message: String },
+    Completed {
+        generation: u64,
+        page_hits: Vec<usize>,
+        occurrences: Vec<SearchHitOccurrence>,
+    },
+    Failed {
+        generation: u64,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchMatchSpan {
+    pub start: usize,
+    pub end: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchHitOccurrence {
+    pub page: usize,
+    pub snippet: String,
+    pub snippet_match_start: Option<usize>,
+    pub snippet_match_end: Option<usize>,
 }
 
 pub trait SearchMatcher: Send + Sync {
     fn prepare_query(&self, raw_query: &str) -> String;
-    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool;
+    fn find_matches(&self, page_text: &str, prepared_query: &str) -> Vec<SearchMatchSpan>;
+    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
+        !self.find_matches(page_text, prepared_query).is_empty()
+    }
 }
 
 #[derive(Clone)]
@@ -162,8 +186,8 @@ impl SearchMatcher for CancelMatcher {
         String::new()
     }
 
-    fn matches_page(&self, _page_text: &str, _prepared_query: &str) -> bool {
-        false
+    fn find_matches(&self, _page_text: &str, _prepared_query: &str) -> Vec<SearchMatchSpan> {
+        Vec::new()
     }
 }
 
@@ -223,7 +247,8 @@ fn run_job(
         let _ = event_tx.send(SearchEvent::Snapshot(snapshot));
         let _ = event_tx.send(SearchEvent::Completed {
             generation: job.generation,
-            hits: Vec::new(),
+            page_hits: Vec::new(),
+            occurrences: Vec::new(),
         });
         return WorkerControl::Continue;
     }
@@ -232,7 +257,8 @@ fn run_job(
 
     let total_pages = doc.page_count();
 
-    let mut hits = Vec::new();
+    let mut page_hits = Vec::new();
+    let mut occurrences = Vec::new();
     for page in 0..total_pages {
         match flush_requests(request_rx, pending) {
             WorkerControl::Continue => {
@@ -254,8 +280,18 @@ fn run_job(
             }
         };
 
-        if job.matcher.matches_page(&text, &query) {
-            hits.push(page);
+        let matches = job.matcher.find_matches(&text, &query);
+        if !matches.is_empty() {
+            page_hits.push(page);
+            occurrences.extend(matches.into_iter().map(|mat| {
+                let snippet = build_hit_snippet(&text, mat.start, mat.end);
+                SearchHitOccurrence {
+                    page,
+                    snippet: snippet.text,
+                    snippet_match_start: snippet.match_start,
+                    snippet_match_end: snippet.match_end,
+                }
+            }));
         }
 
         let scanned_pages = page + 1;
@@ -263,7 +299,7 @@ fn run_job(
             generation: job.generation,
             scanned_pages,
             total_pages,
-            hit_pages: hits.len(),
+            hit_pages: page_hits.len(),
             done: scanned_pages == total_pages,
         };
         let _ = event_tx.send(SearchEvent::Snapshot(snapshot));
@@ -271,9 +307,74 @@ fn run_job(
 
     let _ = event_tx.send(SearchEvent::Completed {
         generation: job.generation,
-        hits,
+        page_hits,
+        occurrences,
     });
     WorkerControl::Continue
+}
+
+struct SnippetPresentation {
+    text: String,
+    match_start: Option<usize>,
+    match_end: Option<usize>,
+}
+
+fn build_hit_snippet(page_text: &str, start: usize, end: usize) -> SnippetPresentation {
+    const CONTEXT_CHARS: usize = 16;
+
+    let chars = page_text.chars().collect::<Vec<_>>();
+    if chars.is_empty() {
+        return SnippetPresentation {
+            text: String::new(),
+            match_start: None,
+            match_end: None,
+        };
+    }
+
+    let start_char = byte_to_char_index(page_text, start).min(chars.len());
+    let end_char = byte_to_char_index(page_text, end).min(chars.len());
+    let end_char = end_char.max(start_char.saturating_add(1)).min(chars.len());
+
+    let context_start = start_char.saturating_sub(CONTEXT_CHARS);
+    let context_end = end_char.saturating_add(CONTEXT_CHARS).min(chars.len());
+
+    let before = chars[context_start..start_char].iter().collect::<String>();
+    let matched = chars[start_char..end_char].iter().collect::<String>();
+    let after = chars[end_char..context_end].iter().collect::<String>();
+
+    let mut snippet = String::new();
+    let mut match_start = None;
+    let mut match_end = None;
+    if context_start > 0 {
+        snippet.push('…');
+    }
+    snippet.push_str(&before);
+    if !matched.is_empty() {
+        match_start = Some(snippet.len());
+    }
+    snippet.push_str(&matched);
+    if !matched.is_empty() {
+        match_end = Some(snippet.len());
+    }
+    snippet.push_str(&after);
+    if context_end < chars.len() {
+        snippet.push('…');
+    }
+
+    SnippetPresentation {
+        text: snippet,
+        match_start,
+        match_end,
+    }
+}
+
+fn byte_to_char_index(text: &str, byte_idx: usize) -> usize {
+    if byte_idx == 0 {
+        return 0;
+    }
+    text.char_indices()
+        .take_while(|(idx, _)| *idx < byte_idx)
+        .count()
 }
 
 fn flush_requests(
@@ -301,7 +402,7 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    use super::{SearchEngine, SearchEvent, SearchMatcher};
+    use super::{SearchEngine, SearchEvent, SearchMatchSpan, SearchMatcher};
     use crate::backend::open_default_backend;
 
     #[derive(Debug)]
@@ -318,18 +419,33 @@ mod tests {
             }
         }
 
-        fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
+        fn find_matches(&self, page_text: &str, prepared_query: &str) -> Vec<SearchMatchSpan> {
             let prepared_page = if self.case_sensitive {
                 page_text.to_string()
             } else {
                 page_text.to_lowercase()
             };
 
-            if prepared_page.contains(prepared_query) {
-                return true;
+            let mut matches = Vec::new();
+            let mut offset = 0usize;
+            while offset < prepared_page.len() {
+                let Some(relative) = prepared_page[offset..].find(prepared_query) else {
+                    break;
+                };
+                let start = offset + relative;
+                let end = start + prepared_query.len();
+                matches.push(SearchMatchSpan { start, end });
+                offset = end;
+            }
+            if !matches.is_empty() {
+                return matches;
             }
 
-            remove_whitespace(&prepared_page).contains(&remove_whitespace(prepared_query))
+            let compact_page = remove_whitespace(&prepared_page);
+            if !compact_page.contains(&remove_whitespace(prepared_query)) {
+                return Vec::new();
+            }
+            vec![SearchMatchSpan { start: 0, end: 1 }]
         }
     }
 
@@ -477,11 +593,12 @@ mod tests {
             for event in engine.drain_events() {
                 if let SearchEvent::Completed {
                     generation: event_generation,
-                    hits,
+                    page_hits,
+                    ..
                 } = event
                     && event_generation == generation
                 {
-                    return hits;
+                    return page_hits;
                 }
             }
 

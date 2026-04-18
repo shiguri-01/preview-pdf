@@ -705,10 +705,16 @@ mod tests {
         assert!(
             !list
                 .iter()
+                .any(|candidate| candidate.id == "search-results")
+        );
+        assert!(
+            !list
+                .iter()
                 .any(|candidate| candidate.id == "prev-search-hit")
         );
         assert!(!list.iter().any(|candidate| candidate.id == "open-palette"));
         assert!(!list.iter().any(|candidate| candidate.id == "submit-search"));
+        assert!(!list.iter().any(|candidate| candidate.id == "search-goto"));
         assert!(!list.iter().any(|candidate| candidate.id == "history-goto"));
     }
 
@@ -729,6 +735,10 @@ mod tests {
         assert!(
             list.iter()
                 .any(|candidate| candidate.id == "next-search-hit")
+        );
+        assert!(
+            list.iter()
+                .any(|candidate| candidate.id == "search-results")
         );
         assert!(
             list.iter()

@@ -122,8 +122,14 @@ pub fn dispatch(
         Command::OpenHelp => open_help(app),
         Command::CloseHelp => close_help(app),
         Command::OpenSearch => Ok(extension_host.open_search_palette(app, palette_requests)),
+        Command::OpenSearchResults => {
+            Ok(extension_host.open_search_results_palette(app, palette_requests))
+        }
         Command::SubmitSearch { query, matcher } => {
             extension_host.submit_search(app, Arc::clone(&pdf), query, matcher)
+        }
+        Command::SearchResultGoto { page } => {
+            extension_host.search_result_goto(app, page_count, page)
         }
         Command::NextSearchHit => Ok(extension_host.next_search_hit(app)),
         Command::PrevSearchHit => Ok(extension_host.prev_search_hit(app)),
@@ -217,9 +223,11 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         Command::LastPage => Some(NavReason::Goto(GotoKind::LastPage)),
         Command::GotoPage { .. } => Some(NavReason::Goto(GotoKind::SpecificPage)),
         Command::SetPageLayout { .. } => Some(NavReason::LayoutNormalize),
-        Command::NextSearchHit | Command::PrevSearchHit => Some(NavReason::Search {
-            query: extension_host.search_query().to_string(),
-        }),
+        Command::SearchResultGoto { .. } | Command::NextSearchHit | Command::PrevSearchHit => {
+            Some(NavReason::Search {
+                query: extension_host.search_query().to_string(),
+            })
+        }
         Command::HistoryBack => Some(NavReason::History(HistoryOp::Back)),
         Command::HistoryForward => Some(NavReason::History(HistoryOp::Forward)),
         Command::HistoryGoto { .. } => Some(NavReason::History(HistoryOp::Goto)),
@@ -239,6 +247,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::OpenHelp
         | Command::CloseHelp
         | Command::OpenSearch
+        | Command::OpenSearchResults
         | Command::SubmitSearch { .. }
         | Command::OpenHistory
         | Command::OpenOutline

@@ -9,7 +9,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::palette::{PaletteItemView, PaletteView};
 
 use super::layout::centered_rect;
-use super::{border, error_text, primary_text, secondary_text};
+use super::{border, error_text, hit_highlight_text, primary_text, secondary_text};
 
 const PALETTE_ITEM_DECORATION_WIDTH: usize = 3;
 const MIN_VISIBLE_SIDE_WIDTH: usize = 4;
@@ -397,6 +397,7 @@ fn palette_text_style(tone: crate::palette::PaletteTextTone, selected: bool) -> 
     match tone {
         crate::palette::PaletteTextTone::Primary => primary_text(),
         crate::palette::PaletteTextTone::Secondary => secondary_text(),
+        crate::palette::PaletteTextTone::Highlight => hit_highlight_text(),
     }
 }
 

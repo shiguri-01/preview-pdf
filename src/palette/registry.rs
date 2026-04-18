@@ -1,5 +1,8 @@
 use crate::error::AppResult;
-use crate::extension::{HistoryPaletteProvider, OutlinePaletteProvider, SearchPaletteProvider};
+use crate::extension::{
+    HistoryPaletteProvider, OutlinePaletteProvider, SearchPaletteProvider,
+    SearchResultsPaletteProvider,
+};
 
 use super::providers::CommandPaletteProvider;
 use super::{
@@ -10,6 +13,7 @@ use super::{
 pub struct PaletteRegistry {
     command: CommandPaletteProvider,
     search: SearchPaletteProvider,
+    search_results: SearchResultsPaletteProvider,
     history: HistoryPaletteProvider,
     outline: OutlinePaletteProvider,
 }
@@ -17,6 +21,7 @@ pub struct PaletteRegistry {
 pub enum PaletteProviderRef<'a> {
     Command(&'a CommandPaletteProvider),
     Search(&'a SearchPaletteProvider),
+    SearchResults(&'a SearchResultsPaletteProvider),
     History(&'a HistoryPaletteProvider),
     Outline(&'a OutlinePaletteProvider),
 }
@@ -26,6 +31,7 @@ impl Default for PaletteRegistry {
         Self {
             command: CommandPaletteProvider,
             search: SearchPaletteProvider,
+            search_results: SearchResultsPaletteProvider,
             history: HistoryPaletteProvider,
             outline: OutlinePaletteProvider,
         }
@@ -37,6 +43,7 @@ impl PaletteRegistry {
         match kind {
             PaletteKind::Command => PaletteProviderRef::Command(&self.command),
             PaletteKind::Search => PaletteProviderRef::Search(&self.search),
+            PaletteKind::SearchResults => PaletteProviderRef::SearchResults(&self.search_results),
             PaletteKind::History => PaletteProviderRef::History(&self.history),
             PaletteKind::Outline => PaletteProviderRef::Outline(&self.outline),
         }
@@ -48,6 +55,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.kind(),
             Self::Search(provider) => provider.kind(),
+            Self::SearchResults(provider) => provider.kind(),
             Self::History(provider) => provider.kind(),
             Self::Outline(provider) => provider.kind(),
         }
@@ -57,6 +65,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.title(ctx),
             Self::Search(provider) => provider.title(ctx),
+            Self::SearchResults(provider) => provider.title(ctx),
             Self::History(provider) => provider.title(ctx),
             Self::Outline(provider) => provider.title(ctx),
         }
@@ -66,6 +75,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.input_mode(),
             Self::Search(provider) => provider.input_mode(),
+            Self::SearchResults(provider) => provider.input_mode(),
             Self::History(provider) => provider.input_mode(),
             Self::Outline(provider) => provider.input_mode(),
         }
@@ -75,6 +85,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.list(ctx),
             Self::Search(provider) => provider.list(ctx),
+            Self::SearchResults(provider) => provider.list(ctx),
             Self::History(provider) => provider.list(ctx),
             Self::Outline(provider) => provider.list(ctx),
         }
@@ -88,6 +99,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.on_tab(ctx, selected),
             Self::Search(provider) => provider.on_tab(ctx, selected),
+            Self::SearchResults(provider) => provider.on_tab(ctx, selected),
             Self::History(provider) => provider.on_tab(ctx, selected),
             Self::Outline(provider) => provider.on_tab(ctx, selected),
         }
@@ -101,6 +113,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.on_submit(ctx, selected),
             Self::Search(provider) => provider.on_submit(ctx, selected),
+            Self::SearchResults(provider) => provider.on_submit(ctx, selected),
             Self::History(provider) => provider.on_submit(ctx, selected),
             Self::Outline(provider) => provider.on_submit(ctx, selected),
         }
@@ -114,6 +127,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.assistive_text(ctx, selected),
             Self::Search(provider) => provider.assistive_text(ctx, selected),
+            Self::SearchResults(provider) => provider.assistive_text(ctx, selected),
             Self::History(provider) => provider.assistive_text(ctx, selected),
             Self::Outline(provider) => provider.assistive_text(ctx, selected),
         }
@@ -123,6 +137,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.reset_selection_on_input_change(),
             Self::Search(provider) => provider.reset_selection_on_input_change(),
+            Self::SearchResults(provider) => provider.reset_selection_on_input_change(),
             Self::History(provider) => provider.reset_selection_on_input_change(),
             Self::Outline(provider) => provider.reset_selection_on_input_change(),
         }
@@ -136,6 +151,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.initial_selected_candidate(ctx, candidates),
             Self::Search(provider) => provider.initial_selected_candidate(ctx, candidates),
+            Self::SearchResults(provider) => provider.initial_selected_candidate(ctx, candidates),
             Self::History(provider) => provider.initial_selected_candidate(ctx, candidates),
             Self::Outline(provider) => provider.initial_selected_candidate(ctx, candidates),
         }
@@ -145,6 +161,7 @@ impl<'a> PaletteProviderRef<'a> {
         match self {
             Self::Command(provider) => provider.initial_input(open_payload),
             Self::Search(provider) => provider.initial_input(open_payload),
+            Self::SearchResults(provider) => provider.initial_input(open_payload),
             Self::History(provider) => provider.initial_input(open_payload),
             Self::Outline(provider) => provider.initial_input(open_payload),
         }
@@ -177,6 +194,10 @@ mod tests {
         assert_eq!(
             registry.get(PaletteKind::Search).kind(),
             PaletteKind::Search
+        );
+        assert_eq!(
+            registry.get(PaletteKind::SearchResults).kind(),
+            PaletteKind::SearchResults
         );
         assert_eq!(
             registry.get(PaletteKind::History).kind(),

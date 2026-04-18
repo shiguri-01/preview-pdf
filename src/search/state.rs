@@ -10,6 +10,7 @@ use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::engine::{
     SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit, locate_occurrences,
+    page_matches_contains, prepare_contains_query,
 };
 
 #[derive(Default)]
@@ -389,34 +390,11 @@ struct ContainsMatcher {
 
 impl SearchMatcher for ContainsMatcher {
     fn prepare_query(&self, raw_query: &str) -> String {
-        if self.case_sensitive {
-            raw_query.to_string()
-        } else {
-            raw_query.to_lowercase()
-        }
+        prepare_contains_query(raw_query, self.case_sensitive)
     }
 
     fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
-        let prepared_page = if self.case_sensitive {
-            page_text.to_string()
-        } else {
-            page_text.to_lowercase()
-        };
-
-        if prepared_page.contains(prepared_query) {
-            return true;
-        }
-
-        prepared_page
-            .chars()
-            .filter(|ch| !ch.is_whitespace())
-            .collect::<String>()
-            .contains(
-                &prepared_query
-                    .chars()
-                    .filter(|ch| !ch.is_whitespace())
-                    .collect::<String>(),
-            )
+        page_matches_contains(page_text, prepared_query, self.case_sensitive)
     }
 
     fn locate_matches(

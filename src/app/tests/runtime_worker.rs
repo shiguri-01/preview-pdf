@@ -10,9 +10,9 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 
 use super::super::runtime::RenderRuntime;
-use crate::backend::{PdfBackend, PdfDoc, RgbaFrame, SharedPdfBackend};
-use crate::error::AppResult;
-use crate::highlight::HighlightOverlaySnapshot;
+use crate::backend::{OutlineNode, PdfBackend, PdfDoc, PdfRect, RgbaFrame, SharedPdfBackend};
+use crate::error::{AppError, AppResult};
+use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
 use crate::perf::PerfStats;
 use crate::presenter::{
     ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
@@ -28,6 +28,7 @@ struct TestPresenter {
     prepare_calls: usize,
     prefetch_calls: usize,
     render_calls: usize,
+    last_prepare_overlay_stamp: Option<u64>,
     stats: PerfStats,
 }
 
@@ -38,10 +39,11 @@ impl ImagePresenter for TestPresenter {
         _frame: &RgbaFrame,
         _viewport: Viewport,
         _pan: PanOffset,
-        _overlay_stamp: u64,
+        overlay_stamp: u64,
         _generation: u64,
     ) -> AppResult<()> {
         self.prepare_calls += 1;
+        self.last_prepare_overlay_stamp = Some(overlay_stamp);
         self.stats.record_convert(Duration::from_millis(4));
         self.stats.set_l2_hit_rate(0.5);
         Ok(())
@@ -87,6 +89,46 @@ impl ImagePresenter for TestPresenter {
 
     fn perf_snapshot(&self) -> Option<PerfStats> {
         Some(self.stats.clone())
+    }
+}
+
+struct PageDimensionFailingPdf;
+
+impl PdfBackend for PageDimensionFailingPdf {
+    fn path(&self) -> &std::path::Path {
+        std::path::Path::new("page-dimension-failing.pdf")
+    }
+
+    fn doc_id(&self) -> u64 {
+        7
+    }
+
+    fn page_count(&self) -> usize {
+        1
+    }
+
+    fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+        Err(AppError::invalid_argument("page dimensions unavailable"))
+    }
+
+    fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+        Ok(RgbaFrame {
+            width: 4,
+            height: 4,
+            pixels: vec![255; 64].into(),
+        })
+    }
+
+    fn extract_text(&self, _page: usize) -> AppResult<String> {
+        Err(AppError::unsupported("not needed in runtime test"))
+    }
+
+    fn extract_positioned_text(&self, _page: usize) -> AppResult<crate::backend::TextPage> {
+        Err(AppError::unsupported("not needed in runtime test"))
+    }
+
+    fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+        Err(AppError::unsupported("not needed in runtime test"))
     }
 }
 
@@ -194,6 +236,47 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
     assert_eq!(runtime.perf_stats.cache_hit_rate_l2, 0.5);
 
     fs::remove_file(&file).expect("test pdf should be removed");
+}
+
+#[test]
+fn prepare_current_page_uses_zero_overlay_stamp_when_decoration_falls_back() {
+    let doc = PageDimensionFailingPdf;
+    let mut runtime = RenderRuntime::default();
+    let mut presenter = TestPresenter::default();
+    let mut pan = PanOffset::default();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 24,
+    };
+    let overlay = HighlightOverlaySnapshot::new(vec![HighlightSpan {
+        source: HighlightSource::Search,
+        page: 0,
+        rects: vec![PdfRect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 10.0,
+            y1: 10.0,
+        }],
+        style: HighlightStyle::SEARCH_HIT,
+    }]);
+
+    runtime
+        .prepare_current_page(
+            &doc,
+            &mut presenter,
+            viewport,
+            0,
+            1.0,
+            &mut pan,
+            None,
+            false,
+            &overlay,
+        )
+        .expect("prepare should succeed");
+
+    assert_eq!(presenter.last_prepare_overlay_stamp, Some(0));
 }
 
 #[test]

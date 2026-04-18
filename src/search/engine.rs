@@ -51,6 +51,25 @@ pub trait SearchMatcher: Send + Sync {
     fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence>;
 }
 
+pub(crate) fn prepare_contains_query(raw_query: &str, case_sensitive: bool) -> String {
+    normalize_text_for_search(raw_query, case_sensitive, false)
+}
+
+pub(crate) fn page_matches_contains(
+    page_text: &str,
+    prepared_query: &str,
+    case_sensitive: bool,
+) -> bool {
+    let prepared_page = normalize_text_for_search(page_text, case_sensitive, false);
+    if prepared_page.contains(prepared_query) {
+        return true;
+    }
+
+    let whitespace_insensitive_page = normalize_text_for_search(page_text, case_sensitive, true);
+    let whitespace_insensitive_query = normalize_text_for_search(prepared_query, true, true);
+    whitespace_insensitive_page.contains(&whitespace_insensitive_query)
+}
+
 #[derive(Clone)]
 struct SearchJob {
     generation: u64,
@@ -284,6 +303,9 @@ fn run_job(
         if job.matcher.matches_page(&text, &query) {
             let occurrences = match doc.extract_positioned_text(page) {
                 Ok(text_page) => {
+                    if text_page.dropped_glyphs > 0 {
+                        highlight_unavailable = true;
+                    }
                     let occurrences = job.matcher.locate_matches(&text_page, &query);
                     if occurrences.is_empty() {
                         highlight_unavailable = true;
@@ -349,31 +371,13 @@ fn locate_occurrences_with_strategy(
         return Vec::new();
     }
 
-    let mut search_text = String::new();
-    let mut char_map = Vec::new();
-    for (glyph_index, glyph) in glyphs.iter().enumerate() {
-        if ignore_whitespace && glyph.ch.is_whitespace() {
-            continue;
-        }
-        let normalized = normalize_char(glyph.ch, case_sensitive);
-        if !ignore_whitespace || !normalized.is_whitespace() {
-            search_text.push(normalized);
-            char_map.push(glyph_index);
-        }
-    }
-
+    let (search_text, char_map) =
+        normalize_glyphs_for_search(glyphs, case_sensitive, ignore_whitespace);
     if search_text.is_empty() {
         return Vec::new();
     }
 
-    let query_text = if ignore_whitespace {
-        prepared_query
-            .chars()
-            .filter(|ch| !ch.is_whitespace())
-            .collect::<String>()
-    } else {
-        prepared_query.to_string()
-    };
+    let query_text = normalize_text_for_search(prepared_query, true, ignore_whitespace);
     if query_text.is_empty() {
         return Vec::new();
     }
@@ -406,6 +410,29 @@ fn locate_occurrences_with_strategy(
     }
 
     occurrences
+}
+
+fn normalize_glyphs_for_search(
+    glyphs: &[TextGlyph],
+    case_sensitive: bool,
+    ignore_whitespace: bool,
+) -> (String, Vec<usize>) {
+    let mut search_text = String::new();
+    let mut char_map = Vec::new();
+
+    for (glyph_index, glyph) in glyphs.iter().enumerate() {
+        if ignore_whitespace && glyph.ch.is_whitespace() {
+            continue;
+        }
+        for normalized in normalize_chars(glyph.ch, case_sensitive) {
+            if !ignore_whitespace || !normalized.is_whitespace() {
+                search_text.push(normalized);
+                char_map.push(glyph_index);
+            }
+        }
+    }
+
+    (search_text, char_map)
 }
 
 fn merge_occurrence_rects(glyphs: &[TextGlyph]) -> Vec<PdfRect> {
@@ -532,12 +559,19 @@ fn median_rect_extent(glyphs: &[&TextGlyph], extent: RectExtent) -> f32 {
     values[values.len() / 2]
 }
 
-fn normalize_char(ch: char, case_sensitive: bool) -> char {
+fn normalize_chars(ch: char, case_sensitive: bool) -> Vec<char> {
     if case_sensitive {
-        ch
+        vec![ch]
     } else {
-        ch.to_lowercase().next().unwrap_or(ch)
+        ch.to_lowercase().collect()
     }
+}
+
+fn normalize_text_for_search(text: &str, case_sensitive: bool, ignore_whitespace: bool) -> String {
+    text.chars()
+        .flat_map(|ch| normalize_chars(ch, case_sensitive))
+        .filter(|ch| !ignore_whitespace || !ch.is_whitespace())
+        .collect()
 }
 
 fn flush_requests(
@@ -580,7 +614,7 @@ mod tests {
 
     use super::{
         SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit,
-        locate_occurrences, merge_occurrence_rects,
+        locate_occurrences, merge_occurrence_rects, page_matches_contains, prepare_contains_query,
     };
     use crate::backend::open_default_backend;
     use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
@@ -593,34 +627,11 @@ mod tests {
 
     impl SearchMatcher for ContainsMatcher {
         fn prepare_query(&self, raw_query: &str) -> String {
-            if self.case_sensitive {
-                raw_query.to_string()
-            } else {
-                raw_query.to_lowercase()
-            }
+            prepare_contains_query(raw_query, self.case_sensitive)
         }
 
         fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
-            let prepared_page = if self.case_sensitive {
-                page_text.to_string()
-            } else {
-                page_text.to_lowercase()
-            };
-
-            if prepared_page.contains(prepared_query) {
-                return true;
-            }
-
-            prepared_page
-                .chars()
-                .filter(|ch| !ch.is_whitespace())
-                .collect::<String>()
-                .contains(
-                    &prepared_query
-                        .chars()
-                        .filter(|ch| !ch.is_whitespace())
-                        .collect::<String>(),
-                )
+            page_matches_contains(page_text, prepared_query, self.case_sensitive)
         }
 
         fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence> {
@@ -936,6 +947,40 @@ mod tests {
     }
 
     #[test]
+    fn search_marks_highlight_unavailable_when_dropped_glyphs_and_occurrences_exist() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "alpha beta",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: vec![
+                    glyph('a', 0.0, 0.0, 10.0, 10.0),
+                    glyph('l', 10.0, 0.0, 20.0, 10.0),
+                    glyph('p', 20.0, 0.0, 30.0, 10.0),
+                    glyph('h', 30.0, 0.0, 40.0, 10.0),
+                    glyph('a', 40.0, 0.0, 50.0, 10.0),
+                ],
+                dropped_glyphs: 1,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
     fn merge_occurrence_rects_merges_same_line_with_spaces() {
         let glyphs = vec![
             glyph('a', 10.0, 20.0, 18.0, 32.0),
@@ -1075,6 +1120,17 @@ mod tests {
         assert_eq!(occurrences[0].glyph_end, 5);
         assert_eq!(occurrences[1].glyph_start, 7);
         assert_eq!(occurrences[1].glyph_end, 13);
+    }
+
+    #[test]
+    fn locate_occurrences_preserves_multi_char_lowercase_expansion() {
+        let glyphs = vec![glyph('İ', 10.0, 20.0, 18.0, 32.0)];
+
+        let occurrences = locate_occurrences(&glyphs, "i\u{307}", false);
+
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].glyph_start, 0);
+        assert_eq!(occurrences[0].glyph_end, 0);
     }
 
     fn wait_for_completed_hits(

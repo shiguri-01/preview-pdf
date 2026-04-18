@@ -124,7 +124,7 @@ impl RenderRuntime {
             reason: "current-page",
         };
         let frame = self.resolve_task_frame(doc, &task)?;
-        let frame = decorate_single_page_frame(doc, task.page, &frame, overlay);
+        let (frame, overlay_stamp) = decorate_single_page_frame(doc, task.page, &frame, overlay);
         let (frame, pan_for_presenter) =
             prepare_presenter_frame(&frame, viewport, pan, cell_px, enable_crop);
         presenter.prepare(
@@ -132,7 +132,7 @@ impl RenderRuntime {
             &frame,
             viewport,
             pan_for_presenter,
-            overlay.stamp,
+            overlay_stamp,
             task.generation,
         )?;
         Ok(())
@@ -180,7 +180,7 @@ impl RenderRuntime {
         generation: u64,
     ) -> AppResult<bool> {
         let prepared = if let Some(frame) = self.l1_cache.get(&key) {
-            let frame = decorate_single_page_frame(doc, key.page, frame, overlay);
+            let (frame, overlay_stamp) = decorate_single_page_frame(doc, key.page, frame, overlay);
             let (frame, pan_for_presenter) =
                 prepare_presenter_frame(&frame, viewport, pan, cell_px, enable_crop);
             presenter.prepare(
@@ -188,7 +188,7 @@ impl RenderRuntime {
                 &frame,
                 viewport,
                 pan_for_presenter,
-                overlay.stamp,
+                overlay_stamp,
                 generation,
             )?;
             true
@@ -247,7 +247,8 @@ impl RenderRuntime {
             Some(_) => trailing_frame.as_ref(),
             None => None,
         };
-        let decorated = decorate_spread_frame(doc, slots, left_frame, right_frame, gap_px, overlay);
+        let (decorated, overlay_stamp) =
+            decorate_spread_frame(doc, slots, left_frame, right_frame, gap_px, overlay);
         let (frame, pan_for_presenter) =
             prepare_presenter_frame(&decorated, viewport, pan, cell_px, enable_crop);
         presenter.prepare(
@@ -255,7 +256,7 @@ impl RenderRuntime {
             &frame,
             viewport,
             pan_for_presenter,
-            overlay.stamp,
+            overlay_stamp,
             generation,
         )?;
         Ok(true)
@@ -381,10 +382,13 @@ fn decorate_single_page_frame(
     page: usize,
     frame: &RgbaFrame,
     overlay: &HighlightOverlaySnapshot,
-) -> RgbaFrame {
+) -> (RgbaFrame, u64) {
+    if overlay.is_empty() {
+        return (frame.clone(), 0);
+    }
     match page_render_space(doc, page, frame, 0) {
-        Ok(page_space) => decorate_frame(frame, overlay, &[page_space]),
-        Err(_) => frame.clone(),
+        Ok(page_space) => (decorate_frame(frame, overlay, &[page_space]), overlay.stamp),
+        Err(_) => (frame.clone(), 0),
     }
 }
 
@@ -395,11 +399,17 @@ fn decorate_spread_frame(
     right_frame: Option<&RgbaFrame>,
     gap_px: u32,
     overlay: &HighlightOverlaySnapshot,
-) -> RgbaFrame {
+) -> (RgbaFrame, u64) {
     let spread_frame = compose_spread_frame(left_frame, right_frame, gap_px);
+    if overlay.is_empty() {
+        return (spread_frame, 0);
+    }
     match spread_render_spaces(doc, slots, left_frame, right_frame, gap_px) {
-        Ok(pages) => decorate_frame(&spread_frame, overlay, &pages),
-        Err(_) => spread_frame,
+        Ok(pages) if !pages.is_empty() => (
+            decorate_frame(&spread_frame, overlay, &pages),
+            overlay.stamp,
+        ),
+        _ => (spread_frame, 0),
     }
 }
 

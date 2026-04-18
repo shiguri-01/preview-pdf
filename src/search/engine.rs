@@ -284,16 +284,11 @@ fn run_job(
         if job.matcher.matches_page(&text, &query) {
             let occurrences = match doc.extract_positioned_text(page) {
                 Ok(text_page) => {
-                    if text_page.dropped_glyphs > 0 {
+                    let occurrences = job.matcher.locate_matches(&text_page, &query);
+                    if occurrences.is_empty() {
                         highlight_unavailable = true;
-                        Vec::new()
-                    } else {
-                        let occurrences = job.matcher.locate_matches(&text_page, &query);
-                        if occurrences.is_empty() {
-                            highlight_unavailable = true;
-                        }
-                        occurrences
                     }
+                    occurrences
                 }
                 Err(_) => {
                     highlight_unavailable = true;

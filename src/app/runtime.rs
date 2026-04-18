@@ -268,11 +268,15 @@ impl RenderRuntime {
         viewport: Viewport,
         key: RenderedPageKey,
         pan: &mut PanOffset,
+        overlay_stamp: u64,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
         class: WorkClass,
         generation: u64,
     ) -> AppResult<bool> {
+        if overlay_stamp != 0 {
+            return Ok(false);
+        }
         let prepared = if let Some(frame) = self.l1_cache.get(&key) {
             let (frame, pan_for_presenter) =
                 prepare_presenter_frame(frame, viewport, pan, cell_px, enable_crop);
@@ -281,7 +285,7 @@ impl RenderRuntime {
                 &frame,
                 viewport,
                 pan_for_presenter,
-                0,
+                overlay_stamp,
                 class,
                 generation,
             )?;

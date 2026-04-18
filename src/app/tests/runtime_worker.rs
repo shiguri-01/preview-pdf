@@ -254,6 +254,7 @@ fn prefetch_encode_from_cache_invokes_presenter() {
             viewport,
             key,
             &mut pan,
+            0,
             None,
             false,
             WorkClass::DirectionalLead,
@@ -262,6 +263,45 @@ fn prefetch_encode_from_cache_invokes_presenter() {
         .expect("prefetch from cache should succeed");
     assert!(prefetched);
     assert_eq!(presenter.prefetch_calls, 1);
+}
+
+#[test]
+fn prefetch_encode_from_cache_skips_when_overlay_active() {
+    let mut runtime = RenderRuntime::default();
+    let mut presenter = TestPresenter::default();
+    let key = RenderedPageKey::new(5, 2, 1.0);
+    runtime.l1_cache.insert(
+        key,
+        RgbaFrame {
+            width: 2,
+            height: 2,
+            pixels: vec![255; 16].into(),
+        },
+        false,
+    );
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 24,
+    };
+    let mut pan = PanOffset::default();
+
+    let prefetched = runtime
+        .try_prefetch_encode_from_cache(
+            &mut presenter,
+            viewport,
+            key,
+            &mut pan,
+            1,
+            None,
+            false,
+            WorkClass::DirectionalLead,
+            1,
+        )
+        .expect("prefetch from cache should succeed");
+    assert!(!prefetched);
+    assert_eq!(presenter.prefetch_calls, 0);
 }
 
 #[test]

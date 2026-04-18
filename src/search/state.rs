@@ -457,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn open_palette_includes_query_and_matcher_in_seed() {
+    fn open_palette_includes_query_and_matcher_in_payload() {
         let mut state = SearchState {
             query: "needle".to_string(),
             matcher: SearchMatcherKind::ContainsSensitive,

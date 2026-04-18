@@ -29,10 +29,10 @@ behavior.
 - `assistive_text(ctx, selected) -> Option<String>`
 - `reset_selection_on_input_change() -> bool`
 - `initial_selected_candidate(ctx, candidates) -> Option<usize>`
-- `initial_input(seed) -> String`
+- `initial_input(open_payload) -> String`
 
-`PaletteContext` includes current app state, palette kind, input text, optional
-seed data, and extension UI snapshot data.
+`PaletteContext` includes current app state, palette kind, input text,
+optional `open_payload`, and extension UI snapshot data.
 
 ## Candidate and rendering contract
 
@@ -64,8 +64,9 @@ Selection rules:
   `reset_selection_on_input_change()`
 - providers can override the initial highlight with
   `initial_selected_candidate(...)`
-- `initial_input(seed)` defaults to the seed value and may be overridden when
-  seed data should not appear verbatim in the input field
+- `initial_input(open_payload)` defaults to the payload's visible input text and
+  may be overridden when open payload data should not appear verbatim in the
+  input field
 
 ## Keyboard semantics
 
@@ -162,7 +163,8 @@ current input.
 - kind: `PaletteKind::History`
 - command entry point: `history`
 - input mode: `Custom`
-- seed data is used as serialized context, while visible input starts empty
+- `PaletteOpenPayload::HistorySeed` is used as serialized context, while
+  visible input starts empty
 - candidates are shown in navigation order around the current page
 - the current page is selected when the palette opens
 - matching uses signed index, then formatted reason text, then page label

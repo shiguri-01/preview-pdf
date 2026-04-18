@@ -123,13 +123,6 @@ impl PaletteProvider for SearchPaletteProvider {
             "{enter} search   {history} history   {matcher} matcher"
         ))
     }
-
-    fn initial_input(&self, open_payload: Option<&PaletteOpenPayload>) -> String {
-        open_payload
-            .and_then(PaletteOpenPayload::initial_input)
-            .unwrap_or("")
-            .to_string()
-    }
 }
 
 #[cfg(test)]
@@ -143,7 +136,7 @@ mod tests {
     use super::SearchPaletteProvider;
 
     #[test]
-    fn search_seed_prefills_query_input() {
+    fn search_payload_prefills_query_input() {
         let provider = SearchPaletteProvider;
         let open_payload = PaletteOpenPayload::Search {
             query: "needle".to_string(),
@@ -154,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn search_seed_selects_current_matcher() {
+    fn search_payload_selects_current_matcher() {
         let provider = SearchPaletteProvider;
         let app = crate::app::AppState::default();
         let extensions = ExtensionUiSnapshot::default();
@@ -178,7 +171,7 @@ mod tests {
     }
 
     #[test]
-    fn non_search_seed_keeps_default_selection() {
+    fn non_search_payload_keeps_default_selection() {
         let provider = SearchPaletteProvider;
         let app = crate::app::AppState::default();
         let extensions = ExtensionUiSnapshot::default();

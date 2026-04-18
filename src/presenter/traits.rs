@@ -120,6 +120,7 @@ pub trait ImagePresenter {
         generation: u64,
     ) -> AppResult<()>;
 
+    #[allow(clippy::too_many_arguments)]
     fn prefetch_encode(
         &mut self,
         cache_key: RenderedPageKey,

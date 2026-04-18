@@ -76,8 +76,8 @@ Dispatch rules:
 
 - Palette flow
   - the host exposes `ExtensionUiSnapshot`
-  - current snapshot data includes `search_active`, `search_matcher`, and
-    cached outline entries
+  - current snapshot data includes `search_active`,
+    `search_palette_initial_matcher`, and cached outline entries
 
 ## Current extensions
 

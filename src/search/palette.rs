@@ -64,7 +64,7 @@ impl PaletteProvider for SearchPaletteProvider {
         ctx: &PaletteContext<'_>,
         candidates: &[PaletteCandidate],
     ) -> Option<usize> {
-        let selected_matcher = ctx.extensions.search_matcher.id();
+        let selected_matcher = ctx.extensions.search_palette_initial_matcher.id();
         candidates
             .iter()
             .position(|candidate| match &candidate.payload {
@@ -133,7 +133,7 @@ mod tests {
     fn initial_selection_uses_last_search_matcher() {
         let provider = SearchPaletteProvider;
         let extensions = ExtensionUiSnapshot {
-            search_matcher: SearchMatcherKind::ContainsSensitive,
+            search_palette_initial_matcher: SearchMatcherKind::ContainsSensitive,
             ..ExtensionUiSnapshot::default()
         };
         let app = crate::app::AppState::default();

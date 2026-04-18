@@ -203,7 +203,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "",
-            seed: None,
+            open_payload: None,
         };
 
         let items = provider.list(&ctx).expect("outline list should build");
@@ -241,7 +241,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "3",
-            seed: None,
+            open_payload: None,
         };
 
         let items = provider.list(&ctx).expect("outline list should build");
@@ -280,7 +280,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "p.1",
-            seed: None,
+            open_payload: None,
         };
 
         let items = provider.list(&ctx).expect("outline list should build");
@@ -312,7 +312,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "ÜBER",
-            seed: None,
+            open_payload: None,
         };
 
         let items = provider.list(&ctx).expect("outline list should build");

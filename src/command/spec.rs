@@ -529,7 +529,7 @@ mod tests {
         validate_command_for_source(
             &Command::OpenPalette {
                 kind: crate::palette::PaletteKind::Command,
-                seed: None,
+                payload: None,
             },
             &keymap_ctx,
         )

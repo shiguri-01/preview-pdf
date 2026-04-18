@@ -2,8 +2,9 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::input::shortcut::format_shortcut_key;
 use crate::palette::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
+    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteOpenPayload,
+    PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect,
+    PaletteTextPart,
 };
 
 pub struct HistoryPaletteProvider;
@@ -39,7 +40,11 @@ impl PaletteProvider for HistoryPaletteProvider {
     }
 
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
-        let seed = ctx.seed.unwrap_or("");
+        let payload = ctx.open_payload;
+        let seed = match payload {
+            Some(PaletteOpenPayload::HistorySeed(seed)) => seed.as_str(),
+            _ => "",
+        };
         let parsed = parse_seed(seed, ctx.app.current_page);
         let query = ctx.input.trim().to_ascii_lowercase();
         if query.is_empty() {
@@ -106,7 +111,7 @@ impl PaletteProvider for HistoryPaletteProvider {
         Some(format!("{enter} jump to page"))
     }
 
-    fn initial_input(&self, _seed: Option<&str>) -> String {
+    fn initial_input(&self, _open_payload: Option<&PaletteOpenPayload>) -> String {
         String::new()
     }
 }
@@ -381,13 +386,13 @@ struct SeedEntry {
     display_index: isize,
 }
 
-fn parse_seed(seed: &str, fallback_current: usize) -> Vec<SeedEntry> {
+fn parse_seed(payload: &str, fallback_current: usize) -> Vec<SeedEntry> {
     let mut back_entries = Vec::new();
     let mut forward_entries = Vec::new();
     let mut current_page = fallback_current;
     let mut current_reason = String::new();
 
-    let parts: Vec<&str> = seed.split('|').collect();
+    let parts: Vec<&str> = payload.split('|').collect();
     for part in &parts {
         if let Some(data) = part.strip_prefix("b:") {
             for item in data.split(';') {
@@ -461,7 +466,9 @@ mod tests {
     use crate::{
         app::AppState,
         extension::ExtensionUiSnapshot,
-        palette::{PaletteCandidate, PaletteContext, PalettePayload, PaletteProvider},
+        palette::{
+            PaletteCandidate, PaletteContext, PaletteOpenPayload, PalettePayload, PaletteProvider,
+        },
     };
 
     use super::{
@@ -547,7 +554,7 @@ mod tests {
             extensions: &extensions,
             kind: crate::palette::PaletteKind::History,
             input: "",
-            seed: None,
+            open_payload: None,
         };
 
         let current = PaletteCandidate {
@@ -602,13 +609,14 @@ mod tests {
             ..AppState::default()
         };
         let extensions = ExtensionUiSnapshot::default();
+        let payload = PaletteOpenPayload::HistorySeed(seed.to_string());
 
         let ctx = PaletteContext {
             app: &app,
             extensions: &extensions,
             kind: crate::palette::PaletteKind::History,
             input: "",
-            seed: Some(seed),
+            open_payload: Some(&payload),
         };
 
         let items = provider.list(&ctx).expect("history list should build");
@@ -627,13 +635,14 @@ mod tests {
             ..AppState::default()
         };
         let extensions = ExtensionUiSnapshot::default();
+        let payload = PaletteOpenPayload::HistorySeed(seed.to_string());
 
         let ctx = PaletteContext {
             app: &app,
             extensions: &extensions,
             kind: crate::palette::PaletteKind::History,
             input: "",
-            seed: Some(seed),
+            open_payload: Some(&payload),
         };
 
         let items = provider.list(&ctx).expect("history list should build");

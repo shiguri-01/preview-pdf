@@ -4,7 +4,7 @@ use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::command::CommandOutcome;
 use crate::error::{AppError, AppResult};
 use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
-use crate::palette::PaletteKind;
+use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 const HISTORY_CAPACITY: usize = 64;
 
@@ -100,7 +100,7 @@ impl HistoryState {
         let seed = self.serialize_seed(app.current_page);
         palette_requests.push_back(PaletteRequest::Open {
             kind: PaletteKind::History,
-            seed: Some(seed),
+            payload: Some(PaletteOpenPayload::HistorySeed(seed)),
         });
         (CommandOutcome::Applied, NoticeAction::Clear)
     }
@@ -427,12 +427,13 @@ mod tests {
             ..AppState::default()
         };
         let extensions = ExtensionUiSnapshot::default();
+        let payload = crate::palette::PaletteOpenPayload::HistorySeed(seed);
         let ctx = PaletteContext {
             app: &app,
             extensions: &extensions,
             kind: PaletteKind::History,
             input: "",
-            seed: Some(&seed),
+            open_payload: Some(&payload),
         };
 
         let items = provider.list(&ctx).expect("history list should build");

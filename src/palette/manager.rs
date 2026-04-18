@@ -13,14 +13,14 @@ use super::registry::PaletteProviderRef;
 use super::registry::PaletteRegistry;
 use super::types::{
     PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView, PaletteKeyResult,
-    PaletteSubmitAction, PaletteTabEffect, PaletteView,
+    PaletteOpenPayload, PaletteSubmitAction, PaletteTabEffect, PaletteView,
 };
 
 #[derive(Debug)]
 struct PaletteSession {
     id: u64,
     kind: PaletteKind,
-    seed: Option<String>,
+    payload: Option<PaletteOpenPayload>,
     title: String,
     input_mode: PaletteInputMode,
     input: Input,
@@ -107,19 +107,19 @@ impl PaletteManager {
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         kind: PaletteKind,
-        seed: Option<String>,
+        payload: Option<PaletteOpenPayload>,
         input_history: Option<InputHistorySnapshot>,
     ) -> AppResult<()> {
         let provider = registry.get(kind);
 
-        let input = Input::new(provider.initial_input(seed.as_deref()));
+        let input = Input::new(provider.initial_input(payload.as_ref()));
 
         let ctx = PaletteContext {
             app,
             extensions,
             kind,
             input: input.value(),
-            seed: seed.as_deref(),
+            open_payload: payload.as_ref(),
         };
         let title = provider.title(&ctx);
         let candidates = provider.list(&ctx)?;
@@ -133,7 +133,7 @@ impl PaletteManager {
         self.active = Some(PaletteSession {
             id: self.take_session_id(),
             kind,
-            seed,
+            payload,
             title,
             input_mode,
             input,
@@ -222,7 +222,7 @@ impl PaletteManager {
                     extensions,
                     kind: session.kind,
                     input: session.input.value(),
-                    seed: session.seed.as_deref(),
+                    open_payload: session.payload.as_ref(),
                 };
                 match provider.on_tab(&ctx, selected)? {
                     PaletteTabEffect::Noop => {}
@@ -245,7 +245,7 @@ impl PaletteManager {
                     extensions,
                     kind: session.kind,
                     input: session.input.value(),
-                    seed: session.seed.as_deref(),
+                    open_payload: session.payload.as_ref(),
                 };
                 let effect = match provider.on_submit(&ctx, selected) {
                     Ok(effect) => effect,
@@ -305,7 +305,7 @@ impl PaletteManager {
             return Ok(());
         };
         let kind = existing.kind;
-        let seed = existing.seed.clone();
+        let payload = existing.payload.clone();
         let input_mode = existing.input_mode;
         let input_text = existing.input.value().to_string();
         let current_selected = existing.selected;
@@ -316,7 +316,7 @@ impl PaletteManager {
             extensions,
             kind,
             input: &input_text,
-            seed: seed.as_deref(),
+            open_payload: payload.as_ref(),
         };
 
         let title = provider.title(&ctx);
@@ -441,7 +441,7 @@ mod tests {
         app::AppState,
         extension::ExtensionUiSnapshot,
         input::InputHistorySnapshot,
-        palette::{PaletteKind, PaletteRegistry},
+        palette::{PaletteKind, PaletteOpenPayload, PaletteRegistry},
     };
 
     use super::PaletteManager;
@@ -700,7 +700,9 @@ mod tests {
                 &app,
                 &extensions,
                 PaletteKind::History,
-                Some("f:5,Search: later|c:4|b:3,Search: earlier".to_string()),
+                Some(PaletteOpenPayload::HistorySeed(
+                    "f:5,Search: later|c:4|b:3,Search: earlier".to_string(),
+                )),
                 None,
             )
             .expect("history palette should open");

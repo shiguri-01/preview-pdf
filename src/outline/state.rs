@@ -28,7 +28,7 @@ impl OutlineState {
         self.ensure_loaded(pdf.as_ref())?;
         palette_requests.push_back(PaletteRequest::Open {
             kind: PaletteKind::Outline,
-            seed: None,
+            payload: None,
         });
         Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }

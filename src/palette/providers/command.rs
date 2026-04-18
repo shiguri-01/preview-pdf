@@ -11,9 +11,9 @@ use crate::input::shortcut::{
     ShortcutKey, format_shortcut_alternatives_tight, format_shortcut_key,
 };
 use crate::palette::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTabEffect,
-    PaletteTextPart,
+    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteOpenPayload,
+    PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect,
+    PaletteTabEffect, PaletteTextPart,
 };
 
 pub struct CommandPaletteProvider;
@@ -123,7 +123,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 // Args required: reopen with command name pre-filled.
                 return Ok(PaletteSubmitEffect::Reopen {
                     kind: self.kind(),
-                    seed: Some(format!("{} ", spec.id)),
+                    payload: Some(PaletteOpenPayload::CommandInput(format!("{} ", spec.id))),
                 });
             }
         }
@@ -135,7 +135,7 @@ impl PaletteProvider for CommandPaletteProvider {
         // 3. Fallback: reopen preserving current input.
         Ok(PaletteSubmitEffect::Reopen {
             kind: self.kind(),
-            seed: Some(ctx.input.to_string()),
+            payload: Some(PaletteOpenPayload::CommandInput(ctx.input.to_string())),
         })
     }
 
@@ -420,7 +420,7 @@ fn submit_selected_enum_candidate(
         })),
         Err(_) => Ok(Some(PaletteSubmitEffect::Reopen {
             kind: PaletteKind::Command,
-            seed: Some(synthesized),
+            payload: Some(PaletteOpenPayload::CommandInput(synthesized)),
         })),
     }
 }
@@ -596,8 +596,8 @@ mod tests {
     use crate::extension::ExtensionUiSnapshot;
     use crate::input::InputHistoryRecord;
     use crate::palette::{
-        PaletteContext, PaletteKind, PalettePostAction, PaletteProvider, PaletteSubmitEffect,
-        PaletteTabEffect,
+        PaletteContext, PaletteKind, PaletteOpenPayload, PalettePostAction, PaletteProvider,
+        PaletteSubmitEffect, PaletteTabEffect,
     };
 
     use super::CommandPaletteProvider;
@@ -618,7 +618,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
-            seed: None,
+            open_payload: None,
         };
         provider.list(&ctx).expect("list should be built")
     }
@@ -636,7 +636,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
-            seed: None,
+            open_payload: None,
         };
         let candidates = provider.list(&ctx).expect("list should be built");
         let selected = candidates
@@ -657,7 +657,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
-            seed: None,
+            open_payload: None,
         };
         let candidates = provider.list(&ctx).expect("list should be built");
         let selected = candidates
@@ -678,7 +678,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
-            seed: None,
+            open_payload: None,
         };
         provider.assistive_text(&ctx, None)
     }
@@ -693,7 +693,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
-            seed: None,
+            open_payload: None,
         };
 
         let list = provider.list(&ctx).expect("list should be built");
@@ -722,7 +722,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
-            seed: None,
+            open_payload: None,
         };
 
         let list = provider.list(&ctx).expect("list should be built");
@@ -881,7 +881,7 @@ mod tests {
             effect,
             PaletteSubmitEffect::Reopen {
                 kind: PaletteKind::Command,
-                seed: Some("zoom ".to_string()),
+                payload: Some(PaletteOpenPayload::CommandInput("zoom ".to_string())),
             }
         );
     }
@@ -909,7 +909,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "quit",
-            seed: None,
+            open_payload: None,
         };
 
         let effect = provider
@@ -936,7 +936,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "page-layout-spread",
-            seed: None,
+            open_payload: None,
         };
 
         let effect = provider
@@ -1062,7 +1062,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "submit-search hello",
-            seed: None,
+            open_payload: None,
         };
 
         let err = provider
@@ -1084,7 +1084,7 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "first-page hoge",
-            seed: None,
+            open_payload: None,
         };
 
         let err = provider

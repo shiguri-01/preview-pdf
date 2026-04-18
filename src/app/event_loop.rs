@@ -591,6 +591,11 @@ impl App {
                     current_scale: step.current_scale,
                     initial_preview: step.initial_preview.clone(),
                     presenter_key: step.presenter_key,
+                    highlight_overlay: self
+                        .interaction
+                        .extensions
+                        .host
+                        .highlight_overlay_for(step.visible_pages.existing_pages()),
                     generation: runtime.render_actor.generation(),
                     nav_streak: runtime.render_actor.nav_streak(),
                 },
@@ -918,6 +923,7 @@ mod tests {
             _frame: &crate::backend::RgbaFrame,
             _viewport: Viewport,
             _pan: PanOffset,
+            _overlay_stamp: u64,
             _generation: u64,
         ) -> crate::error::AppResult<()> {
             Ok(())

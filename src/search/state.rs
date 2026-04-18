@@ -5,9 +5,12 @@ use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
+use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
 use crate::palette::PaletteKind;
 
-use super::engine::{SearchEngine, SearchEvent, SearchMatcher};
+use super::engine::{
+    SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit, locate_occurrences,
+};
 
 #[derive(Default)]
 pub struct SearchRuntime {
@@ -73,6 +76,14 @@ impl SearchRuntime {
     pub fn status_bar_segment(&self) -> Option<String> {
         self.state.status_bar_segment()
     }
+
+    pub fn highlight_overlay_for_visible_pages(
+        &self,
+        visible_pages: [Option<usize>; 2],
+    ) -> HighlightOverlaySnapshot {
+        self.state
+            .highlight_overlay_for_visible_pages(visible_pages)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -88,8 +99,8 @@ pub struct SearchState {
     /// Number of matched pages observed so far while scanning.
     /// This is progress-oriented and may change before completion.
     hit_pages_progress: usize,
-    /// Final matched page list (0-based page indexes), available on completion.
-    hits: Vec<usize>,
+    /// Final matched page list with occurrence rects, available on completion.
+    hits: Vec<SearchPageHit>,
     current_hit: Option<usize>,
     last_error: Option<String>,
 }
@@ -308,10 +319,36 @@ impl SearchState {
         };
 
         self.current_hit = Some(next_index);
-        let hit_page = self.hits[next_index];
+        let hit_page = self.hits[next_index].page;
         let page_count = self.total_pages.max(hit_page + 1);
         app.current_page = app.normalize_page_for_layout(hit_page, page_count);
         (CommandOutcome::Applied, NoticeAction::Clear)
+    }
+
+    pub fn highlight_overlay_for_visible_pages(
+        &self,
+        visible_pages: [Option<usize>; 2],
+    ) -> HighlightOverlaySnapshot {
+        if self.query.is_empty() {
+            return HighlightOverlaySnapshot::default();
+        }
+
+        let spans = self
+            .hits
+            .iter()
+            .filter(|hit| visible_pages.contains(&Some(hit.page)))
+            .flat_map(|hit| {
+                hit.occurrences.iter().filter_map(move |occurrence| {
+                    (!occurrence.rects.is_empty()).then_some(HighlightSpan {
+                        source: HighlightSource::Search,
+                        page: hit.page,
+                        rects: occurrence.rects.clone(),
+                        style: HighlightStyle::SEARCH_HIT,
+                    })
+                })
+            })
+            .collect();
+        HighlightOverlaySnapshot::new(spans)
     }
 
     fn clear_results(&mut self) {
@@ -345,23 +382,13 @@ impl SearchMatcher for ContainsMatcher {
         }
     }
 
-    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
-        let prepared_page = if self.case_sensitive {
-            page_text.to_string()
-        } else {
-            page_text.to_lowercase()
-        };
-
-        if prepared_page.contains(prepared_query) {
-            return true;
-        }
-
-        remove_whitespace(&prepared_page).contains(&remove_whitespace(prepared_query))
+    fn locate_matches(
+        &self,
+        page: &crate::backend::TextPage,
+        prepared_query: &str,
+    ) -> Vec<SearchOccurrence> {
+        locate_occurrences(&page.glyphs, prepared_query, self.case_sensitive)
     }
-}
-
-fn remove_whitespace(input: &str) -> String {
-    input.chars().filter(|ch| !ch.is_whitespace()).collect()
 }
 
 #[cfg(test)]
@@ -370,7 +397,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::app::{AppState, NoticeAction};
-    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
+    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{CommandOutcome, SearchMatcherKind};
     use crate::search::engine::SearchEngine;
 
@@ -415,8 +442,12 @@ mod tests {
             })
         }
 
-        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
-            Ok(String::new())
+        fn extract_text_page(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(TextPage {
+                width_pt: 612.0,
+                height_pt: 792.0,
+                glyphs: Vec::new(),
+            })
         }
 
         fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {

@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use crate::backend::{PdfBackend, RgbaFrame};
 use crate::config::CacheConfig;
 use crate::error::{AppError, AppResult};
+use crate::highlight::HighlightOverlaySnapshot;
 use crate::perf::PerfStats;
 use crate::presenter::{ImagePresenter, PanOffset, Viewport};
 use crate::render::cache::{RenderedPageCache, RenderedPageKey};
@@ -11,7 +12,9 @@ use crate::render::scheduler::{
 };
 use crate::work::WorkClass;
 
-use super::frame_ops::{compose_spread_frame, prepare_presenter_frame};
+use super::frame_ops::{
+    PageRenderSpace, apply_highlight_overlay, compose_spread_frame, prepare_presenter_frame,
+};
 use super::state::VisiblePageSlots;
 
 #[derive(Debug, Default)]
@@ -110,6 +113,7 @@ impl RenderRuntime {
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
+        overlay: &HighlightOverlaySnapshot,
     ) -> AppResult<()> {
         let task = RenderTask {
             doc_id: doc.doc_id(),
@@ -120,6 +124,8 @@ impl RenderRuntime {
             reason: "current-page",
         };
         let frame = self.resolve_task_frame(doc, &task)?;
+        let page_space = page_render_space(doc, task.page, &frame, 0);
+        let frame = decorate_frame(&frame, overlay, &[page_space]);
         let (frame, pan_for_presenter) =
             prepare_presenter_frame(&frame, viewport, pan, cell_px, enable_crop);
         presenter.prepare(
@@ -127,6 +133,7 @@ impl RenderRuntime {
             &frame,
             viewport,
             pan_for_presenter,
+            overlay.stamp,
             task.generation,
         )?;
         Ok(())
@@ -143,16 +150,19 @@ impl RenderRuntime {
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
+        overlay: &HighlightOverlaySnapshot,
         generation: u64,
     ) -> AppResult<bool> {
         let key = RenderedPageKey::new(doc.doc_id(), page, scale);
         self.try_prepare_cached_page_from_cache(
+            doc,
             presenter,
             viewport,
             key,
             pan,
             cell_px,
             enable_crop,
+            overlay,
             generation,
         )
     }
@@ -160,18 +170,29 @@ impl RenderRuntime {
     #[allow(clippy::too_many_arguments)]
     pub fn try_prepare_cached_page_from_cache(
         &mut self,
+        doc: &dyn PdfBackend,
         presenter: &mut dyn ImagePresenter,
         viewport: Viewport,
         key: RenderedPageKey,
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
+        overlay: &HighlightOverlaySnapshot,
         generation: u64,
     ) -> AppResult<bool> {
         let prepared = if let Some(frame) = self.l1_cache.get(&key) {
+            let page_space = page_render_space(doc, key.page, frame, 0);
+            let frame = decorate_frame(frame, overlay, &[page_space]);
             let (frame, pan_for_presenter) =
-                prepare_presenter_frame(frame, viewport, pan, cell_px, enable_crop);
-            presenter.prepare(key, &frame, viewport, pan_for_presenter, generation)?;
+                prepare_presenter_frame(&frame, viewport, pan, cell_px, enable_crop);
+            presenter.prepare(
+                key,
+                &frame,
+                viewport,
+                pan_for_presenter,
+                overlay.stamp,
+                generation,
+            )?;
             true
         } else {
             false
@@ -192,6 +213,7 @@ impl RenderRuntime {
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
+        overlay: &HighlightOverlaySnapshot,
         generation: u64,
         gap_px: u32,
     ) -> AppResult<bool> {
@@ -228,13 +250,19 @@ impl RenderRuntime {
             None => None,
         };
         let spread_frame = compose_spread_frame(left_frame, right_frame, gap_px);
+        let decorated = decorate_frame(
+            &spread_frame,
+            overlay,
+            &spread_render_spaces(doc, slots, left_frame, right_frame, gap_px)?,
+        );
         let (frame, pan_for_presenter) =
-            prepare_presenter_frame(&spread_frame, viewport, pan, cell_px, enable_crop);
+            prepare_presenter_frame(&decorated, viewport, pan, cell_px, enable_crop);
         presenter.prepare(
             presenter_key,
             &frame,
             viewport,
             pan_for_presenter,
+            overlay.stamp,
             generation,
         )?;
         Ok(true)
@@ -260,6 +288,7 @@ impl RenderRuntime {
                 &frame,
                 viewport,
                 pan_for_presenter,
+                0,
                 class,
                 generation,
             )?;
@@ -336,4 +365,72 @@ impl RenderRuntime {
             self.perf_stats.absorb_presenter_metrics(&snapshot);
         }
     }
+}
+
+fn decorate_frame(
+    frame: &RgbaFrame,
+    overlay: &HighlightOverlaySnapshot,
+    pages: &[PageRenderSpace],
+) -> RgbaFrame {
+    if overlay.is_empty() {
+        frame.clone()
+    } else {
+        apply_highlight_overlay(frame, overlay, pages)
+    }
+}
+
+fn page_render_space(
+    doc: &dyn PdfBackend,
+    page: usize,
+    frame: &RgbaFrame,
+    origin_x_px: u32,
+) -> PageRenderSpace {
+    let (width_pt, height_pt) = doc.page_dimensions(page).unwrap_or((1.0, 1.0));
+    PageRenderSpace {
+        page,
+        origin_x_px,
+        origin_y_px: 0,
+        width_px: frame.width,
+        height_px: frame.height,
+        width_pt,
+        height_pt,
+    }
+}
+
+fn spread_render_spaces(
+    doc: &dyn PdfBackend,
+    slots: VisiblePageSlots,
+    left_frame: Option<&RgbaFrame>,
+    right_frame: Option<&RgbaFrame>,
+    gap_px: u32,
+) -> AppResult<Vec<PageRenderSpace>> {
+    let mut pages = Vec::new();
+    if let (Some(page), Some(frame)) = (slots.left_page, left_frame) {
+        let (width_pt, height_pt) = doc.page_dimensions(page)?;
+        pages.push(PageRenderSpace {
+            page,
+            origin_x_px: 0,
+            origin_y_px: 0,
+            width_px: frame.width,
+            height_px: frame.height,
+            width_pt,
+            height_pt,
+        });
+    }
+    if let (Some(page), Some(frame)) = (slots.right_page, right_frame) {
+        let origin_x_px = left_frame
+            .map(|left| left.width.saturating_add(gap_px))
+            .unwrap_or(0);
+        let (width_pt, height_pt) = doc.page_dimensions(page)?;
+        pages.push(PageRenderSpace {
+            page,
+            origin_x_px,
+            origin_y_px: 0,
+            width_px: frame.width,
+            height_px: frame.height,
+            width_pt,
+            height_pt,
+        });
+    }
+    Ok(pages)
 }

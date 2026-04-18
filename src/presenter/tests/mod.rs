@@ -41,6 +41,7 @@ fn l2_key(page: usize) -> TerminalFrameKey {
             height: 24,
         },
         pan: PanOffset::default(),
+        overlay_stamp: 0,
     }
 }
 
@@ -100,6 +101,7 @@ fn presenter_uses_l2_cache_between_same_frames() {
             viewport,
             PanOffset::default(),
             0,
+            0,
         )
         .expect("first prepare should pass");
     presenter
@@ -108,6 +110,7 @@ fn presenter_uses_l2_cache_between_same_frames() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             0,
         )
         .expect("second prepare should pass");
@@ -133,6 +136,7 @@ fn presenter_cache_key_distinguishes_pages_even_with_same_pixels() {
             viewport,
             PanOffset::default(),
             0,
+            0,
         )
         .expect("first prepare should pass");
     presenter
@@ -141,6 +145,7 @@ fn presenter_cache_key_distinguishes_pages_even_with_same_pixels() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             0,
         )
         .expect("second page prepare should pass");
@@ -163,6 +168,7 @@ fn presenter_renders_after_prepare() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             0,
         )
         .expect("prepare should pass");
@@ -205,6 +211,7 @@ fn prefetch_encode_advances_entry_to_ready() {
         rendered_page,
         viewport,
         pan: PanOffset::default(),
+        overlay_stamp: 0,
     };
 
     presenter
@@ -213,6 +220,7 @@ fn prefetch_encode_advances_entry_to_ready() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             WorkClass::DirectionalLead,
             1,
         )
@@ -252,7 +260,7 @@ fn prefetch_encode_does_not_change_current_key() {
     let prefetch = RenderedPageKey::new(1, 1, 1.0);
 
     presenter
-        .prepare(current, &frame(), viewport, PanOffset::default(), 0)
+        .prepare(current, &frame(), viewport, PanOffset::default(), 0, 0)
         .expect("prepare should pass");
     let before = presenter.state.current_key;
 
@@ -262,6 +270,7 @@ fn prefetch_encode_does_not_change_current_key() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             WorkClass::DirectionalLead,
             1,
         )
@@ -287,6 +296,7 @@ fn presenter_has_pending_work_tracks_encode_progress() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             WorkClass::DirectionalLead,
             1,
         )
@@ -319,6 +329,7 @@ fn recv_background_event_requests_redraw_for_current_encode_completion() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             1,
         )
         .expect("prepare should pass");
@@ -368,6 +379,7 @@ fn render_pending_uses_stale_fallback_when_allowed() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             1,
         )
         .expect("first prepare should pass");
@@ -378,6 +390,7 @@ fn render_pending_uses_stale_fallback_when_allowed() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             2,
         )
         .expect("second prepare should pass");
@@ -421,6 +434,7 @@ fn render_pending_keeps_stale_fallback_when_new_oversize_entry_arrives() {
             &oversize,
             viewport,
             PanOffset::default(),
+            0,
             1,
         )
         .expect("preview prepare should pass");
@@ -432,6 +446,7 @@ fn render_pending_keeps_stale_fallback_when_new_oversize_entry_arrives() {
             &oversize,
             viewport,
             PanOffset::default(),
+            0,
             2,
         )
         .expect("full prepare should pass");
@@ -473,6 +488,7 @@ fn render_pending_does_not_use_stale_fallback_when_disallowed() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             1,
         )
         .expect("first prepare should pass");
@@ -483,6 +499,7 @@ fn render_pending_does_not_use_stale_fallback_when_disallowed() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             2,
         )
         .expect("second prepare should pass");
@@ -524,6 +541,7 @@ fn render_returns_failed_feedback_for_failed_current_entry() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             1,
         )
         .expect("prepare should pass");
@@ -534,6 +552,7 @@ fn render_returns_failed_feedback_for_failed_current_entry() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             2,
         )
         .expect("second prepare should pass");
@@ -582,6 +601,7 @@ fn render_failed_does_not_use_stale_fallback_when_disallowed() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             1,
         )
         .expect("prepare should pass");
@@ -592,6 +612,7 @@ fn render_failed_does_not_use_stale_fallback_when_disallowed() {
             &frame(),
             viewport,
             PanOffset::default(),
+            0,
             2,
         )
         .expect("second prepare should pass");
@@ -635,12 +656,20 @@ fn render_reports_failed_feedback_when_encode_worker_is_disconnected() {
     };
     let rendered_page = RenderedPageKey::new(7, 1, 1.0);
     presenter
-        .prepare(rendered_page, &frame(), viewport, PanOffset::default(), 0)
+        .prepare(
+            rendered_page,
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            0,
+            0,
+        )
         .expect("prepare should pass");
     let key = TerminalFrameKey {
         rendered_page,
         viewport,
         pan: PanOffset::default(),
+        overlay_stamp: 0,
     };
     presenter.state.current_key = Some(key);
     presenter.shutdown_worker();
@@ -690,16 +719,19 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         rendered_page: RenderedPageKey::new(1, 1, 1.0),
         viewport,
         pan: PanOffset::default(),
+        overlay_stamp: 0,
     };
     let low_key_2 = TerminalFrameKey {
         rendered_page: RenderedPageKey::new(1, 2, 1.0),
         viewport,
         pan: PanOffset::default(),
+        overlay_stamp: 0,
     };
     let high_key = TerminalFrameKey {
         rendered_page: RenderedPageKey::new(1, 3, 1.0),
         viewport,
         pan: PanOffset::default(),
+        overlay_stamp: 0,
     };
 
     let low_req_1 = EncodeWorkerRequest::Encode {
@@ -775,6 +807,7 @@ fn current_encode_queue_cancels_stale_generation() {
             rendered_page: RenderedPageKey::new(1, 1, 1.0),
             viewport,
             pan: PanOffset::default(),
+            overlay_stamp: 0,
         },
         picker: presenter.config.picker.clone(),
         frame: frame(),
@@ -789,6 +822,7 @@ fn current_encode_queue_cancels_stale_generation() {
             rendered_page: RenderedPageKey::new(1, 2, 1.0),
             viewport,
             pan: PanOffset::default(),
+            overlay_stamp: 0,
         },
         picker: presenter.config.picker.clone(),
         frame: frame(),
@@ -803,6 +837,7 @@ fn current_encode_queue_cancels_stale_generation() {
             rendered_page: RenderedPageKey::new(1, 3, 1.0),
             viewport,
             pan: PanOffset::default(),
+            overlay_stamp: 0,
         },
         picker: presenter.config.picker.clone(),
         frame: frame(),

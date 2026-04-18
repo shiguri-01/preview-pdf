@@ -5,6 +5,7 @@ pub mod config;
 pub mod error;
 pub mod event;
 pub mod extension;
+pub mod highlight;
 pub mod history;
 pub mod input;
 pub mod outline;

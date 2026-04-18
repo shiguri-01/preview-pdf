@@ -446,6 +446,7 @@ mod tests {
                 height: 6,
             },
             pan: PanOffset::default(),
+            overlay_stamp: 0,
         }
     }
 

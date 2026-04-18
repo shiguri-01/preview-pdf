@@ -116,6 +116,7 @@ pub trait ImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
+        overlay_stamp: u64,
         generation: u64,
     ) -> AppResult<()>;
 
@@ -125,10 +126,19 @@ pub trait ImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
+        overlay_stamp: u64,
         class: WorkClass,
         generation: u64,
     ) -> AppResult<()> {
-        let _ = (cache_key, frame, viewport, pan, class, generation);
+        let _ = (
+            cache_key,
+            frame,
+            viewport,
+            pan,
+            overlay_stamp,
+            class,
+            generation,
+        );
         Ok(())
     }
 

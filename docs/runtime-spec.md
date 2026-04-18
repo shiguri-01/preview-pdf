@@ -59,6 +59,8 @@ Rules:
   - full-text substring search supports case-insensitive and case-sensitive
     matchers
   - search runs asynchronously and reports progress while active
+  - visible search hits are highlighted through the generic highlight overlay
+    layer
   - `search` opens the search palette
   - `next-search-hit` and `prev-search-hit` are available only while search is
     active

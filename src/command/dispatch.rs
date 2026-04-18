@@ -255,7 +255,7 @@ mod tests {
 
     use crate::app::scale::zoom_eq;
     use crate::app::{AppState, Notice, NoticeLevel, PaletteRequest};
-    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
+    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{
         ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg, PanAmount,
         PanDirection, SearchMatcherKind,
@@ -306,8 +306,12 @@ mod tests {
             })
         }
 
-        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
-            Ok(String::new())
+        fn extract_text_page(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(TextPage {
+                width_pt: 612.0,
+                height_pt: 792.0,
+                glyphs: Vec::new(),
+            })
         }
 
         fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {

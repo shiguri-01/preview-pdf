@@ -12,6 +12,7 @@ use ratatui::layout::Rect;
 use super::super::runtime::RenderRuntime;
 use crate::backend::{PdfBackend, PdfDoc, RgbaFrame, SharedPdfBackend};
 use crate::error::AppResult;
+use crate::highlight::HighlightOverlaySnapshot;
 use crate::perf::PerfStats;
 use crate::presenter::{
     ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
@@ -37,6 +38,7 @@ impl ImagePresenter for TestPresenter {
         _frame: &RgbaFrame,
         _viewport: Viewport,
         _pan: PanOffset,
+        _overlay_stamp: u64,
         _generation: u64,
     ) -> AppResult<()> {
         self.prepare_calls += 1;
@@ -66,6 +68,7 @@ impl ImagePresenter for TestPresenter {
         _frame: &RgbaFrame,
         _viewport: Viewport,
         _pan: PanOffset,
+        _overlay_stamp: u64,
         _class: WorkClass,
         _generation: u64,
     ) -> AppResult<()> {
@@ -150,6 +153,7 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
             &mut pan,
             None,
             false,
+            &HighlightOverlaySnapshot::default(),
         )
         .expect("first prepare should succeed");
     runtime
@@ -162,6 +166,7 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
             &mut pan,
             None,
             false,
+            &HighlightOverlaySnapshot::default(),
         )
         .expect("second prepare should succeed");
     let backend = TestBackend::new(80, 24);

@@ -1,6 +1,7 @@
 use std::sync::OnceLock;
 
-use crate::backend::{PixelBuffer, PixelBufferPool, RgbaFrame};
+use crate::backend::{PdfRect, PixelBuffer, PixelBufferPool, RgbaFrame};
+use crate::highlight::{HighlightOverlaySnapshot, HighlightSpan};
 use crate::presenter::{PanOffset, Viewport};
 use crate::work::WorkClass;
 
@@ -10,6 +11,44 @@ static FRAME_OPS_PIXEL_POOL: OnceLock<PixelBufferPool> = OnceLock::new();
 
 fn frame_ops_pixel_pool() -> &'static PixelBufferPool {
     FRAME_OPS_PIXEL_POOL.get_or_init(PixelBufferPool::default)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct PageRenderSpace {
+    pub(crate) page: usize,
+    pub(crate) origin_x_px: u32,
+    pub(crate) origin_y_px: u32,
+    pub(crate) width_px: u32,
+    pub(crate) height_px: u32,
+    pub(crate) width_pt: f32,
+    pub(crate) height_pt: f32,
+}
+
+pub(crate) fn apply_highlight_overlay(
+    frame: &RgbaFrame,
+    overlay: &HighlightOverlaySnapshot,
+    pages: &[PageRenderSpace],
+) -> RgbaFrame {
+    if overlay.is_empty() || pages.is_empty() {
+        return frame.clone();
+    }
+
+    let mut pixels = frame_ops_pixel_pool().take(frame.byte_len());
+    pixels.copy_from_slice(&frame.pixels);
+    for span in &overlay.spans {
+        for page in pages {
+            if page.page != span.page {
+                continue;
+            }
+            draw_span(&mut pixels, frame.width, frame.height, span, *page);
+        }
+    }
+
+    RgbaFrame {
+        width: frame.width,
+        height: frame.height,
+        pixels: PixelBuffer::from_pooled_vec(pixels, frame_ops_pixel_pool()),
+    }
 }
 
 pub(crate) fn prepare_presenter_frame(
@@ -163,6 +202,75 @@ fn blit_side(
         let src_start = row * src_stride;
         let src_end = src_start + row_bytes;
         out_pixels[out_start..out_end].copy_from_slice(&src.pixels[src_start..src_end]);
+    }
+}
+
+fn draw_span(
+    pixels: &mut [u8],
+    frame_width: u32,
+    frame_height: u32,
+    span: &HighlightSpan,
+    page: PageRenderSpace,
+) {
+    for rect in &span.rects {
+        let Some((x0, y0, x1, y1)) = rect_to_pixels(*rect, page, frame_width, frame_height) else {
+            continue;
+        };
+        fill_rect(
+            pixels,
+            frame_width as usize,
+            x0,
+            y0,
+            x1,
+            y1,
+            span.style.fill_rgba,
+        );
+    }
+}
+
+fn rect_to_pixels(
+    rect: PdfRect,
+    page: PageRenderSpace,
+    frame_width: u32,
+    frame_height: u32,
+) -> Option<(u32, u32, u32, u32)> {
+    if page.width_px == 0 || page.height_px == 0 || page.width_pt <= 0.0 || page.height_pt <= 0.0 {
+        return None;
+    }
+
+    let scale_x = page.width_px as f32 / page.width_pt;
+    let scale_y = page.height_px as f32 / page.height_pt;
+    let x0 = page.origin_x_px + (rect.x0.max(0.0) * scale_x).floor().max(0.0) as u32;
+    let y0 = page.origin_y_px + (rect.y0.max(0.0) * scale_y).floor().max(0.0) as u32;
+    let x1 = page.origin_x_px + (rect.x1.max(0.0) * scale_x).ceil().max(0.0) as u32;
+    let y1 = page.origin_y_px + (rect.y1.max(0.0) * scale_y).ceil().max(0.0) as u32;
+    let x0 = x0.min(frame_width);
+    let y0 = y0.min(frame_height);
+    let x1 = x1.min(frame_width);
+    let y1 = y1.min(frame_height);
+    (x1 > x0 && y1 > y0).then_some((x0, y0, x1, y1))
+}
+
+fn fill_rect(
+    pixels: &mut [u8],
+    stride_width: usize,
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
+    color: [u8; 4],
+) {
+    let alpha = color[3] as u16;
+    for y in y0 as usize..y1 as usize {
+        for x in x0 as usize..x1 as usize {
+            let idx = (y * stride_width + x) * 4;
+            for (channel, value) in color.iter().take(3).enumerate() {
+                let base = pixels[idx + channel] as u16;
+                let fill = *value as u16;
+                pixels[idx + channel] = (((base * (255 - alpha)) + (fill * alpha)) / 255) as u8;
+            }
+            pixels[idx + 3] = 255;
+        }
     }
 }
 

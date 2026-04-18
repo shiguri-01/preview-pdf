@@ -65,6 +65,7 @@ impl RenderSubsystem {
                         &frame,
                         viewport,
                         pan_for_presenter,
+                        0,
                         encode_work_class_for_completed_render(completed.class),
                         completed.generation,
                     ) {
@@ -291,6 +292,7 @@ mod tests {
             _frame: &RgbaFrame,
             _viewport: Viewport,
             _pan: PanOffset,
+            _overlay_stamp: u64,
             _generation: u64,
         ) -> AppResult<()> {
             Ok(())
@@ -315,6 +317,7 @@ mod tests {
             _frame: &RgbaFrame,
             _viewport: Viewport,
             _pan: PanOffset,
+            _overlay_stamp: u64,
             _class: crate::work::WorkClass,
             _generation: u64,
         ) -> AppResult<()> {

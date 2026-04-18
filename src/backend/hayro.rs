@@ -19,11 +19,11 @@ use hayro::hayro_syntax::page::Page;
 use hayro::vello_cpu::color::palette::css::WHITE;
 use hayro::vello_cpu::{Pixmap, color::PremulRgba8};
 use hayro::{RenderSettings, render};
-use kurbo::{Affine, BezPath, Point};
+use kurbo::{Affine, BezPath, Point, Shape};
 
 use crate::error::{AppError, AppResult};
 
-use super::traits::{OutlineNode, PdfBackend, RgbaFrame};
+use super::traits::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
 
 pub struct PdfDoc {
     path: PathBuf,
@@ -54,8 +54,8 @@ impl PdfBackend for PdfDoc {
         PdfDoc::render_page(self, page, scale)
     }
 
-    fn extract_text(&self, page: usize) -> AppResult<String> {
-        PdfDoc::extract_text(self, page)
+    fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
+        PdfDoc::extract_text_page(self, page)
     }
 
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
@@ -173,7 +173,7 @@ impl PdfDoc {
         })
     }
 
-    pub fn extract_text(&self, page: usize) -> AppResult<String> {
+    pub fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
         if page >= self.page_count() {
             return Err(AppError::invalid_argument("page index is out of range"));
         }
@@ -184,7 +184,7 @@ impl PdfDoc {
             .get(page)
             .ok_or(AppError::invalid_argument("page index is out of range"))?;
 
-        Ok(extract_text_with_device(page_ref).trim().to_owned())
+        Ok(extract_text_page_with_device(page_ref))
     }
 
     pub fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
@@ -588,51 +588,32 @@ impl<'a> NamedDestination<'a> {
     }
 }
 
-fn extract_text_with_device(page: &Page<'_>) -> String {
+fn extract_text_page_with_device(page: &Page<'_>) -> TextPage {
     let mut context = Context::new(
         page.initial_transform(true),
         page.intersected_crop_box().to_kurbo(),
         page.xref(),
         InterpreterSettings::default(),
     );
+    let (width_pt, height_pt) = page.render_dimensions();
     let mut device = TextExtractDevice::default();
     interpret_page(page, &mut context, &mut device);
-    device.finish()
+    device.finish(width_pt, height_pt)
 }
 
 #[derive(Default)]
 struct TextExtractDevice {
-    text: String,
-    last_point: Option<Point>,
     last_glyph: Option<(char, i32, i32)>,
+    glyphs: Vec<TextGlyph>,
 }
 
 impl TextExtractDevice {
-    fn finish(self) -> String {
-        self.text
-    }
-
-    fn push_char(&mut self, ch: char, x: f64, y: f64) {
-        if ch == '\n' || ch == '\r' {
-            push_newline(&mut self.text);
-            self.last_point = Some(Point::new(x, y));
-            return;
+    fn finish(self, width_pt: f32, height_pt: f32) -> TextPage {
+        TextPage {
+            width_pt,
+            height_pt,
+            glyphs: self.glyphs,
         }
-        if ch.is_whitespace() {
-            push_space(&mut self.text);
-            self.last_point = Some(Point::new(x, y));
-            return;
-        }
-
-        if let Some(last) = self.last_point {
-            let y_delta = (y - last.y).abs();
-            if y_delta > LINE_BREAK_THRESHOLD {
-                push_newline(&mut self.text);
-            }
-        }
-
-        self.text.push(ch);
-        self.last_point = Some(Point::new(x, y));
     }
 
     fn is_duplicate_glyph(&self, ch: char, x: f64, y: f64) -> bool {
@@ -686,7 +667,9 @@ impl<'a> Device<'a> for TextExtractDevice {
         }
 
         self.set_last_glyph(ch, position.x, position.y);
-        self.push_char(ch, position.x, position.y);
+        if let Some(bbox) = glyph_bbox(glyph, transform, glyph_transform) {
+            self.glyphs.push(TextGlyph { ch, bbox });
+        }
     }
 
     fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
@@ -700,18 +683,22 @@ fn quantize_coord(value: f64) -> i32 {
     (value * 100.0).round() as i32
 }
 
-const LINE_BREAK_THRESHOLD: f64 = 6.0;
-
-fn push_newline(out: &mut String) {
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
+fn glyph_bbox(glyph: &Glyph<'_>, transform: Affine, glyph_transform: Affine) -> Option<PdfRect> {
+    let outline = match glyph {
+        Glyph::Outline(outline) => outline.outline(),
+        Glyph::Type3(_) => return None,
+    };
+    let bbox = (transform * glyph_transform * outline).bounding_box();
+    if bbox.is_zero_area() {
+        return None;
     }
-}
 
-fn push_space(out: &mut String) {
-    if !out.ends_with([' ', '\n']) {
-        out.push(' ');
-    }
+    Some(PdfRect {
+        x0: bbox.x0 as f32,
+        y0: bbox.y0 as f32,
+        x1: bbox.x1 as f32,
+        y1: bbox.y1 as f32,
+    })
 }
 
 fn calculate_doc_id(path: &Path, byte_len: usize) -> u64 {
@@ -739,6 +726,7 @@ mod tests {
 
     use hayro::vello_cpu::Pixmap;
 
+    use crate::backend::PdfBackend;
     use crate::error::AppError;
 
     use super::{PdfDoc, decode_pdf_text_string, pixel_buffer_from_pixmap};

@@ -28,6 +28,7 @@ pub(crate) struct TerminalFrameKey {
     pub(crate) rendered_page: RenderedPageKey,
     pub(crate) viewport: Viewport,
     pub(crate) pan: PanOffset,
+    pub(crate) overlay_stamp: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

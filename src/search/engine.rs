@@ -377,6 +377,7 @@ fn locate_occurrences_with_strategy(
         return Vec::new();
     }
 
+    // `prepared_query` already has case handling applied by prepare_query/prepare_contains_query.
     let query_text = normalize_text_for_search(prepared_query, true, ignore_whitespace);
     if query_text.is_empty() {
         return Vec::new();

@@ -276,6 +276,8 @@ impl RenderRuntime {
         generation: u64,
     ) -> AppResult<bool> {
         if overlay_stamp != 0 {
+            // Prefetch encoding has no overlay snapshot to apply, so skip it while highlights are
+            // active instead of caching an undecorated frame under the highlighted identity.
             return Ok(false);
         }
         let prepared = if let Some(frame) = self.l1_cache.get(&key) {
@@ -439,8 +441,9 @@ fn spread_render_spaces(
     gap_px: u32,
 ) -> AppResult<Vec<PageRenderSpace>> {
     let mut pages = Vec::new();
-    if let (Some(page), Some(frame)) = (slots.left_page, left_frame) {
-        let (width_pt, height_pt) = doc.page_dimensions(page)?;
+    if let (Some(page), Some(frame)) = (slots.left_page, left_frame)
+        && let Ok((width_pt, height_pt)) = doc.page_dimensions(page)
+    {
         pages.push(PageRenderSpace {
             page,
             origin_x_px: 0,
@@ -453,16 +456,17 @@ fn spread_render_spaces(
     }
     if let (Some(page), Some(frame)) = (slots.right_page, right_frame) {
         let origin_x_px = spread_left_slot_width_px(left_frame, right_frame).saturating_add(gap_px);
-        let (width_pt, height_pt) = doc.page_dimensions(page)?;
-        pages.push(PageRenderSpace {
-            page,
-            origin_x_px,
-            origin_y_px: 0,
-            width_px: frame.width,
-            height_px: frame.height,
-            width_pt,
-            height_pt,
-        });
+        if let Ok((width_pt, height_pt)) = doc.page_dimensions(page) {
+            pages.push(PageRenderSpace {
+                page,
+                origin_x_px,
+                origin_y_px: 0,
+                width_px: frame.width,
+                height_px: frame.height,
+                width_pt,
+                height_pt,
+            });
+        }
     }
     Ok(pages)
 }
@@ -558,5 +562,89 @@ mod tests {
         assert_eq!(spaces.len(), 1);
         assert_eq!(spaces[0].page, 1);
         assert_eq!(spaces[0].origin_x_px, 128);
+    }
+
+    #[derive(Debug)]
+    struct PartialDimensionsBackend {
+        path: PathBuf,
+    }
+
+    impl Default for PartialDimensionsBackend {
+        fn default() -> Self {
+            Self {
+                path: PathBuf::from("partial-dimensions.pdf"),
+            }
+        }
+    }
+
+    impl PdfBackend for PartialDimensionsBackend {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            2
+        }
+
+        fn page_count(&self) -> usize {
+            2
+        }
+
+        fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)> {
+            match page {
+                0 => Err(AppError::unsupported("missing page dimensions")),
+                1 => Ok((120.0, 240.0)),
+                _ => Err(AppError::invalid_argument("unexpected page")),
+            }
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_text(&self, _page: usize) -> AppResult<String> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> AppResult<TextPage> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+    }
+
+    #[test]
+    fn spread_render_spaces_skips_page_dimension_failures_per_page() {
+        let doc = PartialDimensionsBackend::default();
+        let left = RgbaFrame {
+            width: 100,
+            height: 200,
+            pixels: vec![0; 100 * 200 * 4].into(),
+        };
+        let right = RgbaFrame {
+            width: 120,
+            height: 240,
+            pixels: vec![0; 120 * 240 * 4].into(),
+        };
+
+        let spaces = spread_render_spaces(
+            &doc,
+            VisiblePageSlots {
+                anchor_page: 0,
+                trailing_page: Some(1),
+                left_page: Some(0),
+                right_page: Some(1),
+            },
+            Some(&left),
+            Some(&right),
+            8,
+        )
+        .expect("spread spaces should still resolve when one page fails");
+
+        assert_eq!(spaces.len(), 1);
+        assert_eq!(spaces[0].page, 1);
+        assert_eq!(spaces[0].origin_x_px, 108);
     }
 }

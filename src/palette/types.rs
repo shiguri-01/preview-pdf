@@ -22,6 +22,7 @@ pub enum PalettePayload {
 pub enum PaletteTextTone {
     Primary,
     Secondary,
+    Highlight,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +54,13 @@ impl PaletteTextPart {
         Self {
             text: text.into(),
             tone: PaletteTextTone::Secondary,
+        }
+    }
+
+    pub fn highlight(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            tone: PaletteTextTone::Highlight,
         }
     }
 }
@@ -102,6 +110,7 @@ pub enum PaletteOpenPayload {
     CommandInput(String),
     HistorySeed(String),
     OutlineQuery(String),
+    SearchResultsQuery(String),
     Search {
         query: String,
         matcher: SearchMatcherKind,
@@ -114,6 +123,7 @@ impl PaletteOpenPayload {
             Self::CommandInput(input) => Some(input.as_str()),
             Self::HistorySeed(_) => None,
             Self::OutlineQuery(query) => Some(query.as_str()),
+            Self::SearchResultsQuery(query) => Some(query.as_str()),
             Self::Search { query, .. } => Some(query.as_str()),
         }
     }
@@ -344,6 +354,10 @@ mod tests {
         assert_eq!(
             PaletteTextPart::secondary("b").tone,
             PaletteTextTone::Secondary
+        );
+        assert_eq!(
+            PaletteTextPart::highlight("c").tone,
+            PaletteTextTone::Highlight
         );
     }
 }

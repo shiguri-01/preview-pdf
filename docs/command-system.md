@@ -120,6 +120,8 @@ Command-specific parsing rules:
 - `submit-search <query> [matcher]`
   - requires a non-empty query
   - if the last token matches a known matcher id, it is parsed as matcher
+- `search-goto <page>`
+  - requires exactly one integer page argument
 - `history-goto <page>`
   - requires exactly one integer page argument
 - `outline-goto <page> <title>`
@@ -190,6 +192,7 @@ Public commands:
 - Help and search
   - `help`
   - `search`
+  - `search-results`
   - `next-search-hit`
   - `prev-search-hit`
   - `cancel-search`
@@ -209,6 +212,7 @@ Internal commands:
 - `close-palette`
 - `close-help`
 - `submit-search <query> [matcher]`
+- `search-goto <page>`
 - `history-goto <page>`
 - `outline-goto <page> <title>`
 
@@ -216,6 +220,7 @@ Availability-gated public commands:
 
 - `next-search-hit`
 - `prev-search-hit`
+- `search-results`
 
 These are available only while search is active.
 

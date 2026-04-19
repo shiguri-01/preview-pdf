@@ -37,6 +37,9 @@ pub struct SearchOccurrence {
     pub glyph_start: usize,
     pub glyph_end: usize,
     pub rects: Vec<PdfRect>,
+    pub snippet: String,
+    pub snippet_match_start: Option<usize>,
+    pub snippet_match_end: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -306,7 +309,10 @@ fn run_job(
                     if text_page.dropped_glyphs > 0 {
                         highlight_unavailable = true;
                     }
-                    let occurrences = job.matcher.locate_matches(&text_page, &query);
+                    let mut occurrences = job.matcher.locate_matches(&text_page, &query);
+                    for occurrence in &mut occurrences {
+                        apply_hit_snippet(occurrence, &text_page.glyphs);
+                    }
                     if occurrences.is_empty() {
                         highlight_unavailable = true;
                     }
@@ -364,6 +370,80 @@ pub(crate) fn locate_occurrences(
     occurrences
 }
 
+struct SnippetPresentation {
+    text: String,
+    match_start: Option<usize>,
+    match_end: Option<usize>,
+}
+
+fn apply_hit_snippet(occurrence: &mut SearchOccurrence, glyphs: &[TextGlyph]) {
+    let snippet = build_hit_snippet(glyphs, occurrence.glyph_start, occurrence.glyph_end);
+    occurrence.snippet = snippet.text;
+    occurrence.snippet_match_start = snippet.match_start;
+    occurrence.snippet_match_end = snippet.match_end;
+}
+
+fn build_hit_snippet(
+    glyphs: &[TextGlyph],
+    glyph_start: usize,
+    glyph_end: usize,
+) -> SnippetPresentation {
+    const CONTEXT_CHARS: usize = 16;
+
+    if glyphs.is_empty() || glyph_start >= glyphs.len() || glyph_end < glyph_start {
+        return SnippetPresentation {
+            text: String::new(),
+            match_start: None,
+            match_end: None,
+        };
+    }
+
+    let glyph_end = glyph_end.min(glyphs.len() - 1);
+    let context_start = glyph_start.saturating_sub(CONTEXT_CHARS);
+    let context_end = glyph_end
+        .saturating_add(CONTEXT_CHARS)
+        .saturating_add(1)
+        .min(glyphs.len());
+
+    let before = glyphs[context_start..glyph_start]
+        .iter()
+        .map(|glyph| glyph.ch)
+        .collect::<String>();
+    let matched = glyphs[glyph_start..=glyph_end]
+        .iter()
+        .map(|glyph| glyph.ch)
+        .collect::<String>();
+    let after = glyphs[glyph_end + 1..context_end]
+        .iter()
+        .map(|glyph| glyph.ch)
+        .collect::<String>();
+
+    let mut snippet = String::new();
+    let mut match_start = None;
+    let mut match_end = None;
+    if context_start > 0 {
+        snippet.push('…');
+    }
+    snippet.push_str(&before);
+    if !matched.is_empty() {
+        match_start = Some(snippet.len());
+    }
+    snippet.push_str(&matched);
+    if !matched.is_empty() {
+        match_end = Some(snippet.len());
+    }
+    snippet.push_str(&after);
+    if context_end < glyphs.len() {
+        snippet.push('…');
+    }
+
+    SnippetPresentation {
+        text: snippet,
+        match_start,
+        match_end,
+    }
+}
+
 fn locate_occurrences_with_strategy(
     glyphs: &[TextGlyph],
     prepared_query: &str,
@@ -408,6 +488,9 @@ fn locate_occurrences_with_strategy(
                     glyph_start,
                     glyph_end,
                     rects,
+                    snippet: String::new(),
+                    snippet_match_start: None,
+                    snippet_match_end: None,
                 });
             }
             // Empty rects can come from all-whitespace glyph slices; we intentionally drop that
@@ -1140,6 +1223,33 @@ mod tests {
         assert_eq!(occurrences.len(), 1);
         assert_eq!(occurrences[0].glyph_start, 0);
         assert_eq!(occurrences[0].glyph_end, 0);
+    }
+
+    #[test]
+    fn apply_hit_snippet_uses_original_glyph_boundaries_after_case_fold_expansion() {
+        let glyphs = vec![
+            glyph('İ', 10.0, 20.0, 18.0, 32.0),
+            glyph('x', 20.0, 20.0, 28.0, 32.0),
+        ];
+        let mut occurrence = SearchOccurrence {
+            glyph_start: 0,
+            glyph_end: 0,
+            rects: vec![PdfRect {
+                x0: 10.0,
+                y0: 20.0,
+                x1: 18.0,
+                y1: 32.0,
+            }],
+            snippet: String::new(),
+            snippet_match_start: None,
+            snippet_match_end: None,
+        };
+
+        super::apply_hit_snippet(&mut occurrence, &glyphs);
+
+        assert_eq!(occurrence.snippet, "İx");
+        assert_eq!(occurrence.snippet_match_start, Some(0));
+        assert_eq!(occurrence.snippet_match_end, Some('İ'.len_utf8()));
     }
 
     fn wait_for_completed_hits(

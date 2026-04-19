@@ -46,6 +46,23 @@ impl SearchRuntime {
             .submit(app, pdf, &mut self.engine, query, matcher)
     }
 
+    pub fn open_results_palette(
+        &mut self,
+        app: &mut AppState,
+        palette_requests: &mut VecDeque<PaletteRequest>,
+    ) -> (CommandOutcome, NoticeAction) {
+        self.state.open_results_palette(app, palette_requests)
+    }
+
+    pub fn goto_result(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+        page: usize,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        self.state.goto_result(app, page_count, page)
+    }
+
     pub fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
         self.state.cancel(pdf, &mut self.engine)
     }
@@ -78,6 +95,10 @@ impl SearchRuntime {
         self.state.status_bar_segment()
     }
 
+    pub fn palette_entries(&self) -> Arc<[SearchPaletteEntry]> {
+        self.state.palette_entries()
+    }
+
     pub fn highlight_overlay_for_visible_pages(
         &self,
         visible_pages: [Option<usize>; 2],
@@ -85,6 +106,15 @@ impl SearchRuntime {
         self.state
             .highlight_overlay_for_visible_pages(visible_pages)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchPaletteEntry {
+    pub index: usize,
+    pub page: usize,
+    pub snippet: String,
+    pub snippet_match_start: Option<usize>,
+    pub snippet_match_end: Option<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -102,6 +132,8 @@ pub struct SearchState {
     hit_pages_progress: usize,
     /// Final matched page list with occurrence rects, available on completion.
     hits: Vec<SearchPageHit>,
+    /// Final matched occurrences for the results palette, ordered by page/match order.
+    palette_entries: Arc<[SearchPaletteEntry]>,
     current_hit: Option<usize>,
     last_error: Option<String>,
 }
@@ -117,6 +149,7 @@ impl Default for SearchState {
             total_pages: 0,
             hit_pages_progress: 0,
             hits: Vec::new(),
+            palette_entries: Arc::from([]),
             current_hit: None,
             last_error: None,
         }
@@ -142,6 +175,21 @@ impl SearchState {
         palette_requests.push_back(PaletteRequest::Open {
             kind: PaletteKind::Search,
             payload,
+        });
+        (CommandOutcome::Applied, NoticeAction::Clear)
+    }
+
+    pub fn open_results_palette(
+        &mut self,
+        _app: &mut AppState,
+        palette_requests: &mut VecDeque<PaletteRequest>,
+    ) -> (CommandOutcome, NoticeAction) {
+        if self.query.is_empty() {
+            return (CommandOutcome::Noop, NoticeAction::Clear);
+        }
+        palette_requests.push_back(PaletteRequest::Open {
+            kind: PaletteKind::SearchResults,
+            payload: None,
         });
         (CommandOutcome::Applied, NoticeAction::Clear)
     }
@@ -175,6 +223,7 @@ impl SearchState {
         self.total_pages = pdf.page_count();
         self.hit_pages_progress = 0;
         self.hits.clear();
+        self.palette_entries = Arc::from([]);
         self.current_hit = None;
         self.last_error = None;
         Ok((CommandOutcome::Applied, NoticeAction::Clear))
@@ -186,6 +235,31 @@ impl SearchState {
 
     pub fn prev_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
         self.move_hit(app, false)
+    }
+
+    pub fn goto_result(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+        page: usize,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        if page < 1 {
+            return Err(crate::error::AppError::invalid_argument(
+                "page number must be >= 1",
+            ));
+        }
+        if page > page_count {
+            return Err(crate::error::AppError::page_out_of_range(page, page_count));
+        }
+        let hit_page = page - 1;
+        let target = app.normalize_page_for_layout(hit_page, page_count);
+        if app.current_page == target {
+            self.current_hit = self.hits.iter().position(|hit| hit.page == hit_page);
+            return Ok((CommandOutcome::Noop, NoticeAction::Clear));
+        }
+        app.current_page = target;
+        self.current_hit = self.hits.iter().position(|hit| hit.page == hit_page);
+        Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }
 
     pub fn cancel(
@@ -239,6 +313,7 @@ impl SearchState {
                     self.scanned_pages_progress = self.total_pages.max(self.scanned_pages_progress);
                     self.hit_pages_progress = hits.len();
                     self.current_hit = None;
+                    self.palette_entries = build_palette_entries(&hits);
                     self.hits = hits;
                     if highlight_unavailable {
                         app.apply_notice_action(NoticeAction::warning(
@@ -300,6 +375,10 @@ impl SearchState {
         }
 
         Some(format!("SEARCH {} hits", self.hit_pages_progress))
+    }
+
+    pub fn palette_entries(&self) -> Arc<[SearchPaletteEntry]> {
+        Arc::clone(&self.palette_entries)
     }
 
     fn move_hit(&mut self, app: &mut AppState, forward: bool) -> (CommandOutcome, NoticeAction) {
@@ -372,9 +451,33 @@ impl SearchState {
         self.total_pages = 0;
         self.hit_pages_progress = 0;
         self.hits.clear();
+        self.palette_entries = Arc::from([]);
         self.current_hit = None;
         self.last_error = None;
     }
+}
+
+fn build_palette_entries(hits: &[SearchPageHit]) -> Arc<[SearchPaletteEntry]> {
+    Arc::from(
+        hits.iter()
+            .flat_map(|hit| {
+                hit.occurrences
+                    .iter()
+                    .map(move |occurrence| SearchPaletteEntry {
+                        index: 0,
+                        page: hit.page,
+                        snippet: occurrence.snippet.clone(),
+                        snippet_match_start: occurrence.snippet_match_start,
+                        snippet_match_end: occurrence.snippet_match_end,
+                    })
+            })
+            .enumerate()
+            .map(|(idx, mut entry)| {
+                entry.index = idx + 1;
+                entry
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn matcher_for_kind(kind: SearchMatcherKind) -> Arc<dyn SearchMatcher> {
@@ -412,12 +515,12 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::{AppState, NoticeAction, NoticeLevel, PaletteRequest};
+    use crate::app::{AppState, NoticeAction, NoticeLevel, PageLayoutMode, PaletteRequest};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{CommandOutcome, SearchMatcherKind};
     use crate::error::AppError;
     use crate::palette::{PaletteKind, PaletteOpenPayload};
-    use crate::search::engine::SearchEngine;
+    use crate::search::engine::{SearchEngine, SearchPageHit};
 
     use super::SearchState;
 
@@ -584,6 +687,41 @@ mod tests {
     }
 
     #[test]
+    fn open_results_palette_requires_active_search() {
+        let mut state = SearchState::default();
+        let mut app = AppState::default();
+        let mut requests = VecDeque::new();
+
+        let (outcome, notice) = state.open_results_palette(&mut app, &mut requests);
+
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn open_results_palette_is_available_with_zero_hits_when_search_is_active() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            ..SearchState::default()
+        };
+        let mut app = AppState::default();
+        let mut requests = VecDeque::new();
+
+        let (outcome, notice) = state.open_results_palette(&mut app, &mut requests);
+
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(
+            requests.pop_front(),
+            Some(PaletteRequest::Open {
+                kind: PaletteKind::SearchResults,
+                payload: None,
+            })
+        );
+    }
+
+    #[test]
     fn submit_empty_query_clears_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
@@ -641,6 +779,48 @@ mod tests {
         assert!(canceled);
         assert!(!state.is_active());
         assert_eq!(state.status_bar_segment(), None);
+    }
+
+    #[test]
+    fn goto_result_moves_to_selected_page() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            hits: vec![page_hit(1), page_hit(4)],
+            ..SearchState::default()
+        };
+        let mut app = AppState::default();
+
+        let (outcome, notice) = state
+            .goto_result(&mut app, 10, 5)
+            .expect("goto result should succeed");
+
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(app.current_page, 4);
+    }
+
+    #[test]
+    fn goto_result_keeps_right_page_hit_selected_in_spread_layout() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            hits: vec![page_hit(5)],
+            hit_pages_progress: 1,
+            ..SearchState::default()
+        };
+        let mut app = AppState {
+            page_layout_mode: PageLayoutMode::Spread,
+            ..AppState::default()
+        };
+
+        let (outcome, notice) = state
+            .goto_result(&mut app, 10, 6)
+            .expect("goto result should succeed");
+
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(app.current_page, 4);
+        assert_eq!(state.current_hit, Some(0));
+        assert_eq!(state.status_bar_segment(), Some("SEARCH 1/1".to_string()));
     }
 
     #[test]
@@ -751,6 +931,13 @@ mod tests {
             app.notice.expect("existing notice should stay").message,
             "search failed: backend failed"
         );
+    }
+
+    fn page_hit(page: usize) -> SearchPageHit {
+        SearchPageHit {
+            page,
+            occurrences: Vec::new(),
+        }
     }
 
     #[test]

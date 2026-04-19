@@ -47,7 +47,9 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         "help" => parse_no_args(id, args_text, Command::OpenHelp),
         "close-help" => parse_no_args(id, args_text, Command::CloseHelp),
         "search" => parse_no_args(id, args_text, Command::OpenSearch),
+        "search-results" => parse_no_args(id, args_text, Command::OpenSearchResults),
         "submit-search" => parse_submit_search(args_text),
+        "search-goto" => parse_search_goto(args_text),
         "next-search-hit" => parse_no_args(id, args_text, Command::NextSearchHit),
         "prev-search-hit" => parse_no_args(id, args_text, Command::PrevSearchHit),
         "history-back" => parse_no_args(id, args_text, Command::HistoryBack),
@@ -114,6 +116,7 @@ fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResult<Command> 
         "help" => "help does not accept arguments",
         "close-help" => "close-help does not accept arguments",
         "search" => "search does not accept arguments",
+        "search-results" => "search-results does not accept arguments",
         "next-search-hit" => "next-search-hit does not accept arguments",
         "prev-search-hit" => "prev-search-hit does not accept arguments",
         "history-back" => "history-back does not accept arguments",
@@ -161,6 +164,7 @@ fn parse_open_palette_payload(kind: PaletteKind, input: &str) -> Option<PaletteO
             query: input.to_string(),
             matcher: SearchMatcherKind::ContainsInsensitive,
         },
+        PaletteKind::SearchResults => PaletteOpenPayload::SearchResultsQuery(input.to_string()),
         PaletteKind::History => PaletteOpenPayload::HistorySeed(input.to_string()),
         PaletteKind::Outline => PaletteOpenPayload::OutlineQuery(input.to_string()),
     })
@@ -325,6 +329,31 @@ fn parse_submit_search(args_text: &str) -> AppResult<Command> {
     Ok(Command::SubmitSearch { query, matcher })
 }
 
+fn parse_search_goto(args_text: &str) -> AppResult<Command> {
+    let mut parts = args_text.split_whitespace();
+    let Some(page_text) = parts.next() else {
+        return Err(AppError::invalid_argument(
+            "search-goto requires 1 argument: page",
+        ));
+    };
+    if parts.next().is_some() {
+        return Err(AppError::invalid_argument(
+            "search-goto accepts exactly 1 argument",
+        ));
+    }
+
+    let page = page_text
+        .parse::<i32>()
+        .map_err(|_| AppError::invalid_argument("search-goto page must be an integer"))?;
+    if page < 1 {
+        return Err(AppError::invalid_argument("page number must be >= 1"));
+    }
+
+    Ok(Command::SearchResultGoto {
+        page: page as usize,
+    })
+}
+
 fn parse_history_goto(args_text: &str) -> AppResult<Command> {
     let mut parts = args_text.split_whitespace();
     let Some(page_text) = parts.next() else {
@@ -452,6 +481,13 @@ mod tests {
                 payload: Some(PaletteOpenPayload::OutlineQuery("appendix".to_string())),
             }
         );
+        assert_eq!(
+            parse_command_text("open-palette search-results needle").expect("parse should succeed"),
+            Command::OpenPalette {
+                kind: PaletteKind::SearchResults,
+                payload: Some(PaletteOpenPayload::SearchResultsQuery("needle".to_string())),
+            }
+        );
     }
 
     #[test]
@@ -459,6 +495,10 @@ mod tests {
         assert_eq!(
             parse_command_text("search").expect("parse should succeed"),
             Command::OpenSearch
+        );
+        assert_eq!(
+            parse_command_text("search-results").expect("parse should succeed"),
+            Command::OpenSearchResults
         );
     }
 
@@ -486,6 +526,14 @@ mod tests {
                 query: "hello".to_string(),
                 matcher: SearchMatcherKind::ContainsSensitive,
             }
+        );
+    }
+
+    #[test]
+    fn parse_search_goto_accepts_page() {
+        assert_eq!(
+            parse_command_text("search-goto 8").expect("parse should succeed"),
+            Command::SearchResultGoto { page: 8 }
         );
     }
 

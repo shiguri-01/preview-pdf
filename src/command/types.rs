@@ -206,9 +206,13 @@ pub enum Command {
     OpenHelp,
     CloseHelp,
     OpenSearch,
+    OpenSearchResults,
     SubmitSearch {
         query: String,
         matcher: SearchMatcherKind,
+    },
+    SearchResultGoto {
+        page: usize,
     },
     NextSearchHit,
     PrevSearchHit,
@@ -252,7 +256,9 @@ impl Command {
             Self::OpenHelp => "help",
             Self::CloseHelp => "close-help",
             Self::OpenSearch => "search",
+            Self::OpenSearchResults => "search-results",
             Self::SubmitSearch { .. } => "submit-search",
+            Self::SearchResultGoto { .. } => "search-goto",
             Self::NextSearchHit => "next-search-hit",
             Self::PrevSearchHit => "prev-search-hit",
             Self::HistoryBack => "history-back",
@@ -331,7 +337,9 @@ pub enum ActionId {
     Help,
     CloseHelp,
     Search,
+    SearchResults,
     SubmitSearch,
+    SearchResultGoto,
     NextSearchHit,
     PrevSearchHit,
     HistoryBack,
@@ -376,7 +384,9 @@ impl ActionId {
             Self::Help => "help",
             Self::CloseHelp => "close-help",
             Self::Search => "search",
+            Self::SearchResults => "search-results",
             Self::SubmitSearch => "submit-search",
+            Self::SearchResultGoto => "search-goto",
             Self::NextSearchHit => "next-search-hit",
             Self::PrevSearchHit => "prev-search-hit",
             Self::HistoryBack => "history-back",
@@ -423,7 +433,9 @@ impl Command {
             Self::OpenHelp => ActionId::Help,
             Self::CloseHelp => ActionId::CloseHelp,
             Self::OpenSearch => ActionId::Search,
+            Self::OpenSearchResults => ActionId::SearchResults,
             Self::SubmitSearch { .. } => ActionId::SubmitSearch,
+            Self::SearchResultGoto { .. } => ActionId::SearchResultGoto,
             Self::NextSearchHit => ActionId::NextSearchHit,
             Self::PrevSearchHit => ActionId::PrevSearchHit,
             Self::HistoryBack => ActionId::HistoryBack,
@@ -515,12 +527,20 @@ mod tests {
     fn command_action_id_maps_search_and_history_variants() {
         assert_eq!(Command::OpenSearch.action_id(), ActionId::Search);
         assert_eq!(
+            Command::OpenSearchResults.action_id(),
+            ActionId::SearchResults
+        );
+        assert_eq!(
             Command::SubmitSearch {
                 query: "q".to_string(),
                 matcher: SearchMatcherKind::ContainsInsensitive,
             }
             .action_id(),
             ActionId::SubmitSearch
+        );
+        assert_eq!(
+            Command::SearchResultGoto { page: 3 }.action_id(),
+            ActionId::SearchResultGoto
         );
         assert_eq!(Command::ZoomReset.action_id(), ActionId::ZoomReset);
         assert_eq!(Command::HistoryBack.action_id(), ActionId::HistoryBack);

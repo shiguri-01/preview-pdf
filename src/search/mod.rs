@@ -6,7 +6,8 @@ use crate::app::AppState;
 use crate::event::AppEvent;
 use crate::extension::Extension;
 pub use palette::SearchPaletteProvider;
-pub use state::{SearchRuntime, SearchState};
+pub use palette::SearchResultsPaletteProvider;
+pub use state::{SearchPaletteEntry, SearchRuntime, SearchState};
 
 pub struct SearchExtension;
 

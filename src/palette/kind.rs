@@ -2,6 +2,7 @@
 pub enum PaletteKind {
     Command,
     Search,
+    SearchResults,
     History,
     Outline,
 }
@@ -11,6 +12,7 @@ impl PaletteKind {
         match self {
             Self::Command => "command",
             Self::Search => "search",
+            Self::SearchResults => "search-results",
             Self::History => "history",
             Self::Outline => "outline",
         }
@@ -20,6 +22,7 @@ impl PaletteKind {
         match value {
             "command" => Some(Self::Command),
             "search" => Some(Self::Search),
+            "search-results" => Some(Self::SearchResults),
             "history" => Some(Self::History),
             "outline" => Some(Self::Outline),
             _ => None,

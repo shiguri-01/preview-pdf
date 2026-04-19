@@ -77,6 +77,12 @@ const ARGS_HISTORY_GOTO: [ArgSpec; 1] = [ArgSpec {
     required: true,
     hint: ArgHint::None,
 }];
+const ARGS_SEARCH_GOTO: [ArgSpec; 1] = [ArgSpec {
+    name: "page",
+    kind: ArgKind::I32,
+    required: true,
+    hint: ArgHint::None,
+}];
 const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
     ArgSpec {
         name: "page",
@@ -92,7 +98,7 @@ const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
     },
 ];
 
-const COMMAND_SPECS: [CommandSpec; 31] = [
+const COMMAND_SPECS: [CommandSpec; 33] = [
     CommandSpec {
         id: "next-page",
         title: "Next Page",
@@ -254,12 +260,28 @@ const COMMAND_SPECS: [CommandSpec; 31] = [
         availability: CommandAvailability::Always,
     },
     CommandSpec {
+        id: "search-results",
+        title: "Open Search Results",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+    },
+    CommandSpec {
         id: "submit-search",
         title: "Submit Search",
         args: &ARGS_SUBMIT_SEARCH,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
         availability: CommandAvailability::Always,
+    },
+    CommandSpec {
+        id: "search-goto",
+        title: "Search Go to Result",
+        args: &ARGS_SEARCH_GOTO,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::InternalOnly,
+        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
     },
     CommandSpec {
         id: "next-search-hit",
@@ -513,6 +535,10 @@ mod tests {
         };
 
         let err = validate_command_id_for_source("next-search-hit", &ctx)
+            .expect_err("command should be unavailable");
+        assert!(err.to_string().contains("search is inactive"));
+
+        let err = validate_command_id_for_source("search-results", &ctx)
             .expect_err("command should be unavailable");
         assert!(err.to_string().contains("search is inactive"));
     }

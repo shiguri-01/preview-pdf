@@ -347,6 +347,9 @@ pub(crate) fn locate_occurrences(
     let mut occurrences =
         locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, false);
 
+    // `SearchOccurrence` dedups by `(glyph_start, glyph_end)` because
+    // locate_occurrences_with_strategy/merge_occurrence_rects are pure for a glyph slice; keep it
+    // that way and avoid adding path-dependent fields that would make equal ranges diverge.
     for occurrence in locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
     {
         let duplicate = occurrences.iter().any(|existing| {
@@ -392,6 +395,9 @@ fn locate_occurrences_with_strategy(
 
     let mut occurrences = Vec::new();
     let mut cursor = 0;
+    // Matches are intentionally non-overlapping "find in page" hits: after matching
+    // `search_chars[cursor..cursor + query_len]` against `query_chars`, we advance `cursor` by
+    // `query_len`, so overlapping occurrences are skipped by design.
     while cursor + query_len <= search_chars.len() {
         if search_chars[cursor..cursor + query_len] == query_chars[..] {
             let glyph_start = char_map[cursor];
@@ -404,6 +410,8 @@ fn locate_occurrences_with_strategy(
                     rects,
                 });
             }
+            // Empty rects can come from all-whitespace glyph slices; we intentionally drop that
+            // occurrence and still advance the cursor, leaving highlight_unavailable to the caller.
             cursor += query_len;
         } else {
             cursor += 1;

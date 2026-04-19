@@ -6,7 +6,7 @@ use tokio::sync::mpsc::{
 };
 use tokio::task::JoinHandle;
 
-use crate::backend::SharedPdfBackend;
+use crate::backend::{PdfRect, SharedPdfBackend, TextGlyph, TextPage};
 use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,16 +18,56 @@ pub struct SearchSnapshot {
     pub done: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SearchEvent {
     Snapshot(SearchSnapshot),
-    Completed { generation: u64, hits: Vec<usize> },
-    Failed { generation: u64, message: String },
+    Completed {
+        generation: u64,
+        hits: Vec<SearchPageHit>,
+        highlight_unavailable: bool,
+    },
+    Failed {
+        generation: u64,
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchOccurrence {
+    pub glyph_start: usize,
+    pub glyph_end: usize,
+    pub rects: Vec<PdfRect>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchPageHit {
+    pub page: usize,
+    pub occurrences: Vec<SearchOccurrence>,
 }
 
 pub trait SearchMatcher: Send + Sync {
     fn prepare_query(&self, raw_query: &str) -> String;
     fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool;
+    fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence>;
+}
+
+pub(crate) fn prepare_contains_query(raw_query: &str, case_sensitive: bool) -> String {
+    normalize_text_for_search(raw_query, case_sensitive, false)
+}
+
+pub(crate) fn page_matches_contains(
+    page_text: &str,
+    prepared_query: &str,
+    case_sensitive: bool,
+) -> bool {
+    let prepared_page = normalize_text_for_search(page_text, case_sensitive, false);
+    if prepared_page.contains(prepared_query) {
+        return true;
+    }
+
+    let whitespace_insensitive_page = normalize_text_for_search(page_text, case_sensitive, true);
+    let whitespace_insensitive_query = normalize_text_for_search(prepared_query, true, true);
+    whitespace_insensitive_page.contains(&whitespace_insensitive_query)
 }
 
 #[derive(Clone)]
@@ -165,6 +205,10 @@ impl SearchMatcher for CancelMatcher {
     fn matches_page(&self, _page_text: &str, _prepared_query: &str) -> bool {
         false
     }
+
+    fn locate_matches(&self, _page: &TextPage, _prepared_query: &str) -> Vec<SearchOccurrence> {
+        Vec::new()
+    }
 }
 
 impl Drop for SearchEngine {
@@ -224,6 +268,7 @@ fn run_job(
         let _ = event_tx.send(SearchEvent::Completed {
             generation: job.generation,
             hits: Vec::new(),
+            highlight_unavailable: false,
         });
         return WorkerControl::Continue;
     }
@@ -233,6 +278,7 @@ fn run_job(
     let total_pages = doc.page_count();
 
     let mut hits = Vec::new();
+    let mut highlight_unavailable = false;
     for page in 0..total_pages {
         match flush_requests(request_rx, pending) {
             WorkerControl::Continue => {
@@ -255,7 +301,23 @@ fn run_job(
         };
 
         if job.matcher.matches_page(&text, &query) {
-            hits.push(page);
+            let occurrences = match doc.extract_positioned_text(page) {
+                Ok(text_page) => {
+                    if text_page.dropped_glyphs > 0 {
+                        highlight_unavailable = true;
+                    }
+                    let occurrences = job.matcher.locate_matches(&text_page, &query);
+                    if occurrences.is_empty() {
+                        highlight_unavailable = true;
+                    }
+                    occurrences
+                }
+                Err(_) => {
+                    highlight_unavailable = true;
+                    Vec::new()
+                }
+            };
+            hits.push(SearchPageHit { page, occurrences });
         }
 
         let scanned_pages = page + 1;
@@ -272,8 +334,253 @@ fn run_job(
     let _ = event_tx.send(SearchEvent::Completed {
         generation: job.generation,
         hits,
+        highlight_unavailable,
     });
     WorkerControl::Continue
+}
+
+pub(crate) fn locate_occurrences(
+    glyphs: &[TextGlyph],
+    prepared_query: &str,
+    case_sensitive: bool,
+) -> Vec<SearchOccurrence> {
+    let mut occurrences =
+        locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, false);
+
+    // `SearchOccurrence` dedups by `(glyph_start, glyph_end)` because
+    // locate_occurrences_with_strategy/merge_occurrence_rects are pure for a glyph slice; keep it
+    // that way and avoid adding path-dependent fields that would make equal ranges diverge.
+    for occurrence in locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
+    {
+        let duplicate = occurrences.iter().any(|existing| {
+            existing.glyph_start == occurrence.glyph_start
+                && existing.glyph_end == occurrence.glyph_end
+        });
+        if !duplicate {
+            occurrences.push(occurrence);
+        }
+    }
+
+    occurrences
+}
+
+fn locate_occurrences_with_strategy(
+    glyphs: &[TextGlyph],
+    prepared_query: &str,
+    case_sensitive: bool,
+    ignore_whitespace: bool,
+) -> Vec<SearchOccurrence> {
+    if prepared_query.is_empty() {
+        return Vec::new();
+    }
+
+    let (search_text, char_map) =
+        normalize_glyphs_for_search(glyphs, case_sensitive, ignore_whitespace);
+    if search_text.is_empty() {
+        return Vec::new();
+    }
+
+    // `prepared_query` already has case handling applied by prepare_query/prepare_contains_query.
+    let query_text = normalize_text_for_search(prepared_query, true, ignore_whitespace);
+    if query_text.is_empty() {
+        return Vec::new();
+    }
+
+    let search_chars: Vec<char> = search_text.chars().collect();
+    let query_chars: Vec<char> = query_text.chars().collect();
+    let query_len = query_chars.len();
+    if query_len == 0 || query_len > search_chars.len() {
+        return Vec::new();
+    }
+
+    let mut occurrences = Vec::new();
+    let mut cursor = 0;
+    // Matches are intentionally non-overlapping "find in page" hits: after matching
+    // `search_chars[cursor..cursor + query_len]` against `query_chars`, we advance `cursor` by
+    // `query_len`, so overlapping occurrences are skipped by design.
+    while cursor + query_len <= search_chars.len() {
+        if search_chars[cursor..cursor + query_len] == query_chars[..] {
+            let glyph_start = char_map[cursor];
+            let glyph_end = char_map[cursor + query_len - 1];
+            let rects = merge_occurrence_rects(&glyphs[glyph_start..=glyph_end]);
+            if !rects.is_empty() {
+                occurrences.push(SearchOccurrence {
+                    glyph_start,
+                    glyph_end,
+                    rects,
+                });
+            }
+            // Empty rects can come from all-whitespace glyph slices; we intentionally drop that
+            // occurrence and still advance the cursor, leaving highlight_unavailable to the caller.
+            cursor += query_len;
+        } else {
+            cursor += 1;
+        }
+    }
+
+    occurrences
+}
+
+fn normalize_glyphs_for_search(
+    glyphs: &[TextGlyph],
+    case_sensitive: bool,
+    ignore_whitespace: bool,
+) -> (String, Vec<usize>) {
+    let mut search_text = String::new();
+    let mut char_map = Vec::new();
+
+    for (glyph_index, glyph) in glyphs.iter().enumerate() {
+        if ignore_whitespace && glyph.ch.is_whitespace() {
+            continue;
+        }
+        for normalized in normalize_chars(glyph.ch, case_sensitive) {
+            if !ignore_whitespace || !normalized.is_whitespace() {
+                search_text.push(normalized);
+                char_map.push(glyph_index);
+            }
+        }
+    }
+
+    (search_text, char_map)
+}
+
+fn merge_occurrence_rects(glyphs: &[TextGlyph]) -> Vec<PdfRect> {
+    let glyphs: Vec<&TextGlyph> = glyphs
+        .iter()
+        .filter(|glyph| !glyph.ch.is_whitespace())
+        .collect();
+    if glyphs.is_empty() {
+        return Vec::new();
+    }
+
+    let merge_axis = infer_merge_axis(&glyphs);
+    let median_width = median_rect_extent(&glyphs, RectExtent::Width);
+    let median_height = median_rect_extent(&glyphs, RectExtent::Height);
+    let mut rects = Vec::new();
+    let mut current = glyphs[0].bbox;
+
+    for glyph in glyphs.iter().skip(1) {
+        if belongs_to_run(current, glyph.bbox, merge_axis, median_width, median_height) {
+            current = union_rects(current, glyph.bbox);
+        } else {
+            rects.push(current);
+            current = glyph.bbox;
+        }
+    }
+
+    rects.push(current);
+    rects
+}
+
+// Choose the screen-space axis used to merge highlight rectangles.
+// This is not a writing-mode detector: rotated horizontal text may still merge
+// on the vertical axis if that better matches the glyph layout on the page.
+fn infer_merge_axis(glyphs: &[&TextGlyph]) -> MergeAxis {
+    let mut horizontal_score = 0.0f32;
+    let mut vertical_score = 0.0f32;
+
+    for pair in glyphs.windows(2) {
+        let [left, right] = pair else {
+            continue;
+        };
+        horizontal_score +=
+            overlap_ratio_1d(left.bbox.y0, left.bbox.y1, right.bbox.y0, right.bbox.y1);
+        vertical_score +=
+            overlap_ratio_1d(left.bbox.x0, left.bbox.x1, right.bbox.x0, right.bbox.x1);
+    }
+
+    if vertical_score > horizontal_score {
+        MergeAxis::Vertical
+    } else {
+        MergeAxis::Horizontal
+    }
+}
+
+fn belongs_to_run(
+    current: PdfRect,
+    next: PdfRect,
+    merge_axis: MergeAxis,
+    median_width: f32,
+    median_height: f32,
+) -> bool {
+    match merge_axis {
+        MergeAxis::Horizontal => {
+            let same_band = overlap_ratio_1d(current.y0, current.y1, next.y0, next.y1) >= 0.45
+                || center_distance(current.y0, current.y1, next.y0, next.y1)
+                    <= median_height * 0.35;
+            let gap_ok =
+                interval_gap(current.x0, current.x1, next.x0, next.x1) <= median_width * 4.0;
+            same_band && gap_ok
+        }
+        MergeAxis::Vertical => {
+            let same_band = overlap_ratio_1d(current.x0, current.x1, next.x0, next.x1) >= 0.45
+                || center_distance(current.x0, current.x1, next.x0, next.x1) <= median_width * 0.35;
+            let gap_ok =
+                interval_gap(current.y0, current.y1, next.y0, next.y1) <= median_height * 4.0;
+            same_band && gap_ok
+        }
+    }
+}
+
+fn overlap_ratio_1d(a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
+    let overlap = (a1.min(b1) - a0.max(b0)).max(0.0);
+    let min_extent = (a1 - a0).abs().min((b1 - b0).abs()).max(1e-3);
+    overlap / min_extent
+}
+
+fn center_distance(a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
+    (((a0 + a1) * 0.5) - ((b0 + b1) * 0.5)).abs()
+}
+
+fn interval_gap(a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
+    if b0 > a1 {
+        b0 - a1
+    } else if a0 > b1 {
+        a0 - b1
+    } else {
+        0.0
+    }
+}
+
+fn union_rects(left: PdfRect, right: PdfRect) -> PdfRect {
+    PdfRect {
+        x0: left.x0.min(right.x0),
+        y0: left.y0.min(right.y0),
+        x1: left.x1.max(right.x1),
+        y1: left.y1.max(right.y1),
+    }
+}
+
+fn median_rect_extent(glyphs: &[&TextGlyph], extent: RectExtent) -> f32 {
+    let mut values: Vec<f32> = glyphs
+        .iter()
+        .map(|glyph| match extent {
+            RectExtent::Width => glyph.bbox.width(),
+            RectExtent::Height => glyph.bbox.height(),
+        })
+        .filter(|value| *value > 0.0)
+        .collect();
+    if values.is_empty() {
+        return 1.0;
+    }
+
+    values.sort_by(|left, right| left.total_cmp(right));
+    values[values.len() / 2]
+}
+
+fn normalize_chars(ch: char, case_sensitive: bool) -> Vec<char> {
+    if case_sensitive {
+        vec![ch]
+    } else {
+        ch.to_lowercase().collect()
+    }
+}
+
+fn normalize_text_for_search(text: &str, case_sensitive: bool, ignore_whitespace: bool) -> String {
+    text.chars()
+        .flat_map(|ch| normalize_chars(ch, case_sensitive))
+        .filter(|ch| !ignore_whitespace || !ch.is_whitespace())
+        .collect()
 }
 
 fn flush_requests(
@@ -292,17 +599,35 @@ fn flush_requests(
     WorkerControl::Continue
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MergeAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RectExtent {
+    Width,
+    Height,
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
     use std::path::PathBuf;
     use std::process;
     use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-    use super::{SearchEngine, SearchEvent, SearchMatcher};
+    use super::{
+        SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit,
+        locate_occurrences, merge_occurrence_rects, page_matches_contains, prepare_contains_query,
+    };
     use crate::backend::open_default_backend;
+    use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
+    use crate::error::{AppError, AppResult};
 
     #[derive(Debug)]
     struct ContainsMatcher {
@@ -311,30 +636,114 @@ mod tests {
 
     impl SearchMatcher for ContainsMatcher {
         fn prepare_query(&self, raw_query: &str) -> String {
-            if self.case_sensitive {
-                raw_query.to_string()
-            } else {
-                raw_query.to_lowercase()
-            }
+            prepare_contains_query(raw_query, self.case_sensitive)
         }
 
         fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
-            let prepared_page = if self.case_sensitive {
-                page_text.to_string()
-            } else {
-                page_text.to_lowercase()
-            };
+            page_matches_contains(page_text, prepared_query, self.case_sensitive)
+        }
 
-            if prepared_page.contains(prepared_query) {
-                return true;
-            }
-
-            remove_whitespace(&prepared_page).contains(&remove_whitespace(prepared_query))
+        fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence> {
+            locate_occurrences(&page.glyphs, prepared_query, self.case_sensitive)
         }
     }
 
-    fn remove_whitespace(input: &str) -> String {
-        input.chars().filter(|ch| !ch.is_whitespace()).collect()
+    struct SearchOnlyStubPdf {
+        path: PathBuf,
+        text: String,
+    }
+
+    impl SearchOnlyStubPdf {
+        fn new(text: &str) -> Self {
+            Self {
+                path: PathBuf::from("search-only.pdf"),
+                text: text.to_string(),
+            }
+        }
+    }
+
+    impl PdfBackend for SearchOnlyStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            42
+        }
+
+        fn page_count(&self) -> usize {
+            1
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+
+        fn extract_text(&self, _page: usize) -> AppResult<String> {
+            Ok(self.text.clone())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> AppResult<TextPage> {
+            Err(AppError::unsupported("positioned text unavailable"))
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+    }
+
+    struct SearchPositionedStubPdf {
+        path: PathBuf,
+        text: String,
+        positioned_text: TextPage,
+    }
+
+    impl SearchPositionedStubPdf {
+        fn new(text: &str, positioned_text: TextPage) -> Self {
+            Self {
+                path: PathBuf::from("search-positioned.pdf"),
+                text: text.to_string(),
+                positioned_text,
+            }
+        }
+    }
+
+    impl PdfBackend for SearchPositionedStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            43
+        }
+
+        fn page_count(&self) -> usize {
+            1
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+
+        fn extract_text(&self, _page: usize) -> AppResult<String> {
+            Ok(self.text.clone())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> AppResult<TextPage> {
+            Ok(self.positioned_text.clone())
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
     }
 
     #[test]
@@ -388,7 +797,7 @@ mod tests {
         let cancel_generation = engine.cancel(pdf).expect("cancel should succeed");
 
         assert_eq!(cancel_generation, running_generation + 1);
-        let hits = wait_for_completed_hits(&mut engine, cancel_generation);
+        let (hits, _) = wait_for_completed_hits(&mut engine, cancel_generation);
         assert!(hits.is_empty());
 
         fs::remove_file(&file).expect("test file should be removed");
@@ -412,8 +821,8 @@ mod tests {
             )
             .expect("submit should succeed");
 
-        let hits = wait_for_completed_hits(&mut engine, generation);
-        assert_eq!(hits, vec![0, 1]);
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![0, 1]);
 
         fs::remove_file(&file).expect("test file should be removed");
     }
@@ -436,8 +845,8 @@ mod tests {
             )
             .expect("submit should succeed");
 
-        let hits = wait_for_completed_hits(&mut engine, generation);
-        assert_eq!(hits, vec![1]);
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![1]);
 
         fs::remove_file(&file).expect("test file should be removed");
     }
@@ -463,13 +872,280 @@ mod tests {
             )
             .expect("submit should succeed");
 
-        let hits = wait_for_completed_hits(&mut engine, generation);
-        assert_eq!(hits, vec![0]);
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![0]);
 
         fs::remove_file(&file).expect("test file should be removed");
     }
 
-    fn wait_for_completed_hits(engine: &mut SearchEngine, generation: u64) -> Vec<usize> {
+    #[test]
+    fn search_keeps_hit_pages_when_positioned_text_is_unavailable() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchOnlyStubPdf::new("alpha beta"));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].page, 0);
+        assert!(hits[0].occurrences.is_empty());
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
+    fn search_marks_highlight_unavailable_when_match_has_no_geometry() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "alpha beta",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: Vec::new(),
+                dropped_glyphs: 0,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].occurrences.is_empty());
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
+    fn search_treats_dropped_positioned_glyphs_as_highlight_failure() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "alpha beta",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: vec![glyph('a', 0.0, 0.0, 10.0, 10.0)],
+                dropped_glyphs: 1,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].occurrences.is_empty());
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
+    fn search_marks_highlight_unavailable_when_dropped_glyphs_and_occurrences_exist() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "alpha beta",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: vec![
+                    glyph('a', 0.0, 0.0, 10.0, 10.0),
+                    glyph('l', 10.0, 0.0, 20.0, 10.0),
+                    glyph('p', 20.0, 0.0, 30.0, 10.0),
+                    glyph('h', 30.0, 0.0, 40.0, 10.0),
+                    glyph('a', 40.0, 0.0, 50.0, 10.0),
+                ],
+                dropped_glyphs: 1,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
+    fn merge_occurrence_rects_merges_same_line_with_spaces() {
+        let glyphs = vec![
+            glyph('a', 10.0, 20.0, 18.0, 32.0),
+            glyph('b', 20.0, 20.0, 28.0, 32.0),
+            glyph(' ', 29.0, 20.0, 33.0, 32.0),
+            glyph('c', 34.0, 20.0, 42.0, 32.0),
+            glyph('d', 44.0, 20.0, 52.0, 32.0),
+        ];
+
+        let rects = merge_occurrence_rects(&glyphs);
+
+        assert_eq!(rects.len(), 1);
+        assert_eq!(
+            rects[0],
+            PdfRect {
+                x0: 10.0,
+                y0: 20.0,
+                x1: 52.0,
+                y1: 32.0
+            }
+        );
+    }
+
+    #[test]
+    fn merge_occurrence_rects_splits_wrapped_horizontal_lines() {
+        let glyphs = vec![
+            glyph('a', 10.0, 20.0, 18.0, 32.0),
+            glyph('b', 20.0, 20.0, 28.0, 32.0),
+            glyph('c', 30.0, 20.0, 38.0, 32.0),
+            glyph('d', 10.0, 36.0, 18.0, 48.0),
+            glyph('e', 20.0, 36.0, 28.0, 48.0),
+            glyph('f', 30.0, 36.0, 38.0, 48.0),
+        ];
+
+        let rects = merge_occurrence_rects(&glyphs);
+
+        assert_eq!(rects.len(), 2);
+        assert_eq!(
+            rects[0],
+            PdfRect {
+                x0: 10.0,
+                y0: 20.0,
+                x1: 38.0,
+                y1: 32.0
+            }
+        );
+        assert_eq!(
+            rects[1],
+            PdfRect {
+                x0: 10.0,
+                y0: 36.0,
+                x1: 38.0,
+                y1: 48.0
+            }
+        );
+    }
+
+    #[test]
+    fn merge_occurrence_rects_merges_vertical_column() {
+        let glyphs = vec![
+            glyph('縦', 80.0, 10.0, 92.0, 22.0),
+            glyph('書', 80.0, 24.0, 92.0, 36.0),
+            glyph('き', 80.0, 38.0, 92.0, 50.0),
+        ];
+
+        let rects = merge_occurrence_rects(&glyphs);
+
+        assert_eq!(rects.len(), 1);
+        assert_eq!(
+            rects[0],
+            PdfRect {
+                x0: 80.0,
+                y0: 10.0,
+                x1: 92.0,
+                y1: 50.0
+            }
+        );
+    }
+
+    #[test]
+    fn merge_occurrence_rects_splits_wrapped_vertical_columns() {
+        let glyphs = vec![
+            glyph('縦', 80.0, 10.0, 92.0, 22.0),
+            glyph('書', 80.0, 24.0, 92.0, 36.0),
+            glyph('き', 80.0, 38.0, 92.0, 50.0),
+            glyph('折', 62.0, 10.0, 74.0, 22.0),
+            glyph('返', 62.0, 24.0, 74.0, 36.0),
+            glyph('し', 62.0, 38.0, 74.0, 50.0),
+        ];
+
+        let rects = merge_occurrence_rects(&glyphs);
+
+        assert_eq!(rects.len(), 2);
+        assert_eq!(
+            rects[0],
+            PdfRect {
+                x0: 80.0,
+                y0: 10.0,
+                x1: 92.0,
+                y1: 50.0
+            }
+        );
+        assert_eq!(
+            rects[1],
+            PdfRect {
+                x0: 62.0,
+                y0: 10.0,
+                x1: 74.0,
+                y1: 50.0
+            }
+        );
+    }
+
+    #[test]
+    fn locate_occurrences_keeps_direct_and_whitespace_insensitive_matches() {
+        let glyphs = vec![
+            glyph('f', 10.0, 20.0, 18.0, 32.0),
+            glyph('o', 20.0, 20.0, 28.0, 32.0),
+            glyph('o', 30.0, 20.0, 38.0, 32.0),
+            glyph('b', 40.0, 20.0, 48.0, 32.0),
+            glyph('a', 50.0, 20.0, 58.0, 32.0),
+            glyph('r', 60.0, 20.0, 68.0, 32.0),
+            glyph(' ', 70.0, 20.0, 74.0, 32.0),
+            glyph('f', 80.0, 20.0, 88.0, 32.0),
+            glyph('o', 90.0, 20.0, 98.0, 32.0),
+            glyph('o', 100.0, 20.0, 108.0, 32.0),
+            glyph(' ', 110.0, 20.0, 114.0, 32.0),
+            glyph('b', 120.0, 20.0, 128.0, 32.0),
+            glyph('a', 130.0, 20.0, 138.0, 32.0),
+            glyph('r', 140.0, 20.0, 148.0, 32.0),
+        ];
+
+        let occurrences = locate_occurrences(&glyphs, "foobar", false);
+
+        assert_eq!(occurrences.len(), 2);
+        assert_eq!(occurrences[0].glyph_start, 0);
+        assert_eq!(occurrences[0].glyph_end, 5);
+        assert_eq!(occurrences[1].glyph_start, 7);
+        assert_eq!(occurrences[1].glyph_end, 13);
+    }
+
+    #[test]
+    fn locate_occurrences_preserves_multi_char_lowercase_expansion() {
+        let glyphs = vec![glyph('İ', 10.0, 20.0, 18.0, 32.0)];
+
+        let occurrences = locate_occurrences(&glyphs, "i\u{307}", false);
+
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].glyph_start, 0);
+        assert_eq!(occurrences[0].glyph_end, 0);
+    }
+
+    fn wait_for_completed_hits(
+        engine: &mut SearchEngine,
+        generation: u64,
+    ) -> (Vec<SearchPageHit>, bool) {
         let timeout = Duration::from_secs(3);
         let start = Instant::now();
 
@@ -478,10 +1154,11 @@ mod tests {
                 if let SearchEvent::Completed {
                     generation: event_generation,
                     hits,
+                    highlight_unavailable,
                 } = event
                     && event_generation == generation
                 {
-                    return hits;
+                    return (hits, highlight_unavailable);
                 }
             }
 
@@ -490,6 +1167,17 @@ mod tests {
                 "timed out waiting for search completion"
             );
             thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn hit_pages(hits: &[SearchPageHit]) -> Vec<usize> {
+        hits.iter().map(|hit| hit.page).collect()
+    }
+
+    fn glyph(ch: char, x0: f32, y0: f32, x1: f32, y1: f32) -> TextGlyph {
+        TextGlyph {
+            ch,
+            bbox: PdfRect { x0, y0, x1, y1 },
         }
     }
 

@@ -252,12 +252,19 @@ fn render_palette_row(item: &PaletteItemView, content_width: usize) -> RenderedP
             right_width,
             gap,
             trailing_padding,
-        } => RenderedPaletteRow {
-            left: render_palette_text_parts(&item.left, left_width, item.selected),
-            gap,
-            right: render_palette_text_parts(&item.right, right_width, item.selected),
-            trailing_padding,
-        },
+        } => {
+            let left = render_palette_text_parts(&item.left, left_width, item.selected);
+            let right = render_palette_text_parts(&item.right, right_width, item.selected);
+            let gap = gap
+                .saturating_add(left_width.saturating_sub(left.width))
+                .saturating_add(right_width.saturating_sub(right.width));
+            RenderedPaletteRow {
+                left,
+                gap,
+                right,
+                trailing_padding,
+            }
+        }
     }
 }
 
@@ -756,6 +763,26 @@ mod tests {
         );
 
         assert_eq!(rendered_candidate_width(&line), 17);
+    }
+
+    #[test]
+    fn palette_item_line_fills_full_row_width_when_wide_text_truncates_in_split_layout() {
+        let line = build_palette_item_line(
+            &PaletteItemView {
+                left: vec![crate::palette::PaletteTextPart {
+                    text: "界".repeat(10),
+                    tone: crate::palette::PaletteTextTone::Primary,
+                }],
+                right: vec![crate::palette::PaletteTextPart {
+                    text: "p.9".to_string(),
+                    tone: crate::palette::PaletteTextTone::Secondary,
+                }],
+                selected: false,
+            },
+            18,
+        );
+
+        assert_eq!(rendered_candidate_width(&line), 15);
     }
 
     #[test]

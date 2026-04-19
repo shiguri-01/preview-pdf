@@ -191,12 +191,14 @@ impl RatatuiImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
+        overlay_stamp: u64,
         allow_single_oversize: bool,
     ) -> AppResult<Option<TerminalFrameKey>> {
         let key = TerminalFrameKey {
             rendered_page: cache_key,
             viewport,
             pan,
+            overlay_stamp,
         };
 
         if self.state.l2_cache.lookup_mut(&key).is_none() {
@@ -471,10 +473,13 @@ impl ImagePresenter for RatatuiImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
+        overlay_stamp: u64,
         generation: u64,
     ) -> AppResult<()> {
         self.drain_encode_results();
-        let Some(key) = self.ensure_frame_entry(cache_key, frame, viewport, pan, true)? else {
+        let Some(key) =
+            self.ensure_frame_entry(cache_key, frame, viewport, pan, overlay_stamp, true)?
+        else {
             self.state.current_key = None;
             return Ok(());
         };
@@ -489,12 +494,15 @@ impl ImagePresenter for RatatuiImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
+        overlay_stamp: u64,
         class: WorkClass,
         generation: u64,
     ) -> AppResult<()> {
         self.drain_encode_results();
         debug_assert_ne!(class, WorkClass::CriticalCurrent);
-        let Some(key) = self.ensure_frame_entry(cache_key, frame, viewport, pan, false)? else {
+        let Some(key) =
+            self.ensure_frame_entry(cache_key, frame, viewport, pan, overlay_stamp, false)?
+        else {
             return Ok(());
         };
 

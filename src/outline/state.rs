@@ -107,7 +107,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::backend::{OutlineNode, PdfBackend, RgbaFrame, SharedPdfBackend};
+    use crate::backend::{OutlineNode, PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
 
     use super::OutlineState;
 
@@ -144,6 +144,15 @@ mod tests {
 
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(TextPage {
+                width_pt: 1.0,
+                height_pt: 1.0,
+                glyphs: Vec::new(),
+                dropped_glyphs: 0,
+            })
         }
 
         fn extract_outline(&self) -> crate::error::AppResult<Vec<OutlineNode>> {

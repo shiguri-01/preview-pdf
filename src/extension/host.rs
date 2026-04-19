@@ -6,6 +6,7 @@ use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::event::AppEvent;
+use crate::highlight::HighlightOverlaySnapshot;
 use crate::history::{HistoryExtension, HistoryState};
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::outline::{OutlineExtension, OutlinePaletteEntry, OutlineState};
@@ -198,6 +199,14 @@ impl ExtensionHost {
             outline_entries: self.outline.palette_entries(),
         }
     }
+
+    pub fn highlight_overlay_for(
+        &self,
+        visible_pages: [Option<usize>; 2],
+    ) -> HighlightOverlaySnapshot {
+        self.search
+            .highlight_overlay_for_visible_pages(visible_pages)
+    }
 }
 
 impl Default for ExtensionHost {
@@ -211,7 +220,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
+    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::SearchMatcherKind;
 
     use super::ExtensionHost;
@@ -257,6 +266,15 @@ mod tests {
 
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(TextPage {
+                width_pt: 612.0,
+                height_pt: 792.0,
+                glyphs: Vec::new(),
+                dropped_glyphs: 0,
+            })
         }
 
         fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {

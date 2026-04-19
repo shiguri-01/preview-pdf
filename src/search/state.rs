@@ -5,10 +5,12 @@ use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
+use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::engine::{
-    SearchEngine, SearchEvent, SearchHitOccurrence, SearchMatchSpan, SearchMatcher,
+    SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit, locate_occurrences,
+    page_matches_contains, prepare_contains_query,
 };
 
 #[derive(Default)]
@@ -96,6 +98,14 @@ impl SearchRuntime {
     pub fn palette_entries(&self) -> Arc<[SearchPaletteEntry]> {
         self.state.palette_entries()
     }
+
+    pub fn highlight_overlay_for_visible_pages(
+        &self,
+        visible_pages: [Option<usize>; 2],
+    ) -> HighlightOverlaySnapshot {
+        self.state
+            .highlight_overlay_for_visible_pages(visible_pages)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,9 +130,9 @@ pub struct SearchState {
     /// Number of matched pages observed so far while scanning.
     /// This is progress-oriented and may change before completion.
     hit_pages_progress: usize,
-    /// Final matched page list (0-based page indexes), available on completion.
-    hits: Vec<usize>,
-    /// Final matched occurrences (ordered by scan/page/match order), available on completion.
+    /// Final matched page list with occurrence rects, available on completion.
+    hits: Vec<SearchPageHit>,
+    /// Final matched occurrences for the results palette, ordered by page/match order.
     palette_entries: Arc<[SearchPaletteEntry]>,
     current_hit: Option<usize>,
     last_error: Option<String>,
@@ -147,6 +157,8 @@ impl Default for SearchState {
 }
 
 impl SearchState {
+    const HIGHLIGHT_UNAVAILABLE_NOTICE: &str = "some search highlights are unavailable";
+
     pub fn open_palette(
         &mut self,
         _app: &mut AppState,
@@ -239,13 +251,14 @@ impl SearchState {
         if page > page_count {
             return Err(crate::error::AppError::page_out_of_range(page, page_count));
         }
-        let target = app.normalize_page_for_layout(page - 1, page_count);
+        let hit_page = page - 1;
+        let target = app.normalize_page_for_layout(hit_page, page_count);
         if app.current_page == target {
-            self.current_hit = self.hits.iter().position(|hit_page| *hit_page == target);
+            self.current_hit = self.hits.iter().position(|hit| hit.page == hit_page);
             return Ok((CommandOutcome::Noop, NoticeAction::Clear));
         }
         app.current_page = target;
-        self.current_hit = self.hits.iter().position(|hit_page| *hit_page == target);
+        self.current_hit = self.hits.iter().position(|hit| hit.page == hit_page);
         Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }
 
@@ -290,18 +303,23 @@ impl SearchState {
                 }
                 SearchEvent::Completed {
                     generation,
-                    page_hits,
-                    occurrences,
+                    hits,
+                    highlight_unavailable,
                 } => {
                     if generation != self.generation {
                         continue;
                     }
                     self.in_progress = false;
                     self.scanned_pages_progress = self.total_pages.max(self.scanned_pages_progress);
-                    self.hit_pages_progress = page_hits.len();
+                    self.hit_pages_progress = hits.len();
                     self.current_hit = None;
-                    self.hits = page_hits;
-                    self.palette_entries = build_palette_entries(occurrences);
+                    self.palette_entries = build_palette_entries(&hits);
+                    self.hits = hits;
+                    if highlight_unavailable {
+                        app.apply_notice_action(NoticeAction::warning(
+                            Self::HIGHLIGHT_UNAVAILABLE_NOTICE,
+                        ));
+                    }
                     changed = true;
                 }
                 SearchEvent::Failed {
@@ -395,10 +413,36 @@ impl SearchState {
         };
 
         self.current_hit = Some(next_index);
-        let hit_page = self.hits[next_index];
+        let hit_page = self.hits[next_index].page;
         let page_count = self.total_pages.max(hit_page + 1);
         app.current_page = app.normalize_page_for_layout(hit_page, page_count);
         (CommandOutcome::Applied, NoticeAction::Clear)
+    }
+
+    pub fn highlight_overlay_for_visible_pages(
+        &self,
+        visible_pages: [Option<usize>; 2],
+    ) -> HighlightOverlaySnapshot {
+        if self.query.is_empty() {
+            return HighlightOverlaySnapshot::default();
+        }
+
+        let spans = self
+            .hits
+            .iter()
+            .filter(|hit| visible_pages.contains(&Some(hit.page)))
+            .flat_map(|hit| {
+                hit.occurrences.iter().filter_map(move |occurrence| {
+                    (!occurrence.rects.is_empty()).then_some(HighlightSpan {
+                        source: HighlightSource::Search,
+                        page: hit.page,
+                        rects: occurrence.rects.clone(),
+                        style: HighlightStyle::SEARCH_HIT,
+                    })
+                })
+            })
+            .collect();
+        HighlightOverlaySnapshot::new(spans)
     }
 
     fn clear_results(&mut self) {
@@ -413,17 +457,24 @@ impl SearchState {
     }
 }
 
-fn build_palette_entries(occurrences: Vec<SearchHitOccurrence>) -> Arc<[SearchPaletteEntry]> {
+fn build_palette_entries(hits: &[SearchPageHit]) -> Arc<[SearchPaletteEntry]> {
     Arc::from(
-        occurrences
-            .into_iter()
+        hits.iter()
+            .flat_map(|hit| {
+                hit.occurrences
+                    .iter()
+                    .map(move |occurrence| SearchPaletteEntry {
+                        index: 0,
+                        page: hit.page,
+                        snippet: occurrence.snippet.clone(),
+                        snippet_match_start: occurrence.snippet_match_start,
+                        snippet_match_end: occurrence.snippet_match_end,
+                    })
+            })
             .enumerate()
-            .map(|(idx, hit)| SearchPaletteEntry {
-                index: idx + 1,
-                page: hit.page,
-                snippet: hit.snippet,
-                snippet_match_start: hit.snippet_match_start,
-                snippet_match_end: hit.snippet_match_end,
+            .map(|(idx, mut entry)| {
+                entry.index = idx + 1;
+                entry
             })
             .collect::<Vec<_>>(),
     )
@@ -442,97 +493,20 @@ struct ContainsMatcher {
 
 impl SearchMatcher for ContainsMatcher {
     fn prepare_query(&self, raw_query: &str) -> String {
-        if self.case_sensitive {
-            raw_query.to_string()
-        } else {
-            raw_query.to_lowercase()
-        }
+        prepare_contains_query(raw_query, self.case_sensitive)
     }
 
-    fn find_matches(&self, page_text: &str, prepared_query: &str) -> Vec<SearchMatchSpan> {
-        if prepared_query.is_empty() {
-            return Vec::new();
-        }
-        let prepared_page = if self.case_sensitive {
-            page_text.to_string()
-        } else {
-            page_text.to_lowercase()
-        };
-
-        let direct_matches = find_non_overlapping_matches(&prepared_page, prepared_query);
-        if !direct_matches.is_empty() {
-            return direct_matches;
-        }
-
-        let compact_matches = find_compact_matches(&prepared_page, prepared_query);
-        if compact_matches.is_empty() {
-            return Vec::new();
-        }
-        compact_matches
-    }
-}
-
-fn remove_whitespace(input: &str) -> String {
-    input.chars().filter(|ch| !ch.is_whitespace()).collect()
-}
-
-fn find_non_overlapping_matches(page_text: &str, prepared_query: &str) -> Vec<SearchMatchSpan> {
-    let mut matches = Vec::new();
-    let mut offset = 0usize;
-    while offset < page_text.len() {
-        let Some(relative) = page_text[offset..].find(prepared_query) else {
-            break;
-        };
-        let start = offset + relative;
-        let end = start + prepared_query.len();
-        matches.push(SearchMatchSpan { start, end });
-        offset = end;
-    }
-    matches
-}
-
-fn find_compact_matches(page_text: &str, prepared_query: &str) -> Vec<SearchMatchSpan> {
-    let compact_query = remove_whitespace(prepared_query);
-    if compact_query.is_empty() {
-        return Vec::new();
-    }
-    let compact_query_chars = compact_query.chars().collect::<Vec<_>>();
-    if compact_query_chars.is_empty() {
-        return Vec::new();
+    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
+        page_matches_contains(page_text, prepared_query, self.case_sensitive)
     }
 
-    let compact_page = page_text
-        .char_indices()
-        .filter_map(|(start, ch)| {
-            if ch.is_whitespace() {
-                None
-            } else {
-                Some((ch, start, start + ch.len_utf8()))
-            }
-        })
-        .collect::<Vec<_>>();
-    if compact_page.is_empty() {
-        return Vec::new();
+    fn locate_matches(
+        &self,
+        page: &crate::backend::TextPage,
+        prepared_query: &str,
+    ) -> Vec<SearchOccurrence> {
+        locate_occurrences(&page.glyphs, prepared_query, self.case_sensitive)
     }
-
-    let mut matches = Vec::new();
-    let mut i = 0usize;
-    while i + compact_query_chars.len() <= compact_page.len() {
-        let is_match = compact_query_chars
-            .iter()
-            .enumerate()
-            .all(|(offset, query_ch)| compact_page[i + offset].0 == *query_ch);
-        if is_match {
-            let start = compact_page[i].1;
-            let end = compact_page[i + compact_query_chars.len() - 1].2;
-            matches.push(SearchMatchSpan { start, end });
-            i += compact_query_chars.len();
-        } else {
-            i += 1;
-        }
-    }
-
-    matches
 }
 
 #[cfg(test)]
@@ -541,11 +515,12 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::{AppState, NoticeAction, PaletteRequest};
-    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend};
+    use crate::app::{AppState, NoticeAction, NoticeLevel, PageLayoutMode, PaletteRequest};
+    use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{CommandOutcome, SearchMatcherKind};
+    use crate::error::AppError;
     use crate::palette::{PaletteKind, PaletteOpenPayload};
-    use crate::search::engine::SearchEngine;
+    use crate::search::engine::{SearchEngine, SearchPageHit};
 
     use super::SearchState;
 
@@ -590,6 +565,67 @@ mod tests {
 
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(TextPage {
+                width_pt: 612.0,
+                height_pt: 792.0,
+                glyphs: Vec::new(),
+                dropped_glyphs: 0,
+            })
+        }
+
+        fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
+            Ok(Vec::new())
+        }
+    }
+
+    struct HighlightUnavailableStubPdf {
+        path: PathBuf,
+        text: String,
+    }
+
+    impl HighlightUnavailableStubPdf {
+        fn new(text: &str) -> Self {
+            Self {
+                path: PathBuf::from("highlight-unavailable.pdf"),
+                text: text.to_string(),
+            }
+        }
+    }
+
+    impl PdfBackend for HighlightUnavailableStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            10
+        }
+
+        fn page_count(&self) -> usize {
+            1
+        }
+
+        fn page_dimensions(&self, _page: usize) -> crate::error::AppResult<(f32, f32)> {
+            Ok((612.0, 792.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> crate::error::AppResult<RgbaFrame> {
+            Ok(RgbaFrame {
+                width: 1,
+                height: 1,
+                pixels: vec![0, 0, 0, 0].into(),
+            })
+        }
+
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(self.text.clone())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Err(AppError::unsupported("positioned text unavailable"))
         }
 
         fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
@@ -686,24 +722,6 @@ mod tests {
     }
 
     #[test]
-    fn goto_result_moves_to_selected_page() {
-        let mut state = SearchState {
-            query: "needle".to_string(),
-            hits: vec![1, 4],
-            ..SearchState::default()
-        };
-        let mut app = AppState::default();
-
-        let (outcome, notice) = state
-            .goto_result(&mut app, 10, 5)
-            .expect("goto result should succeed");
-
-        assert_eq!(outcome, CommandOutcome::Applied);
-        assert_eq!(notice, NoticeAction::Clear);
-        assert_eq!(app.current_page, 4);
-    }
-
-    #[test]
     fn submit_empty_query_clears_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
@@ -764,6 +782,48 @@ mod tests {
     }
 
     #[test]
+    fn goto_result_moves_to_selected_page() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            hits: vec![page_hit(1), page_hit(4)],
+            ..SearchState::default()
+        };
+        let mut app = AppState::default();
+
+        let (outcome, notice) = state
+            .goto_result(&mut app, 10, 5)
+            .expect("goto result should succeed");
+
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(app.current_page, 4);
+    }
+
+    #[test]
+    fn goto_result_keeps_right_page_hit_selected_in_spread_layout() {
+        let mut state = SearchState {
+            query: "needle".to_string(),
+            hits: vec![page_hit(5)],
+            hit_pages_progress: 1,
+            ..SearchState::default()
+        };
+        let mut app = AppState {
+            page_layout_mode: PageLayoutMode::Spread,
+            ..AppState::default()
+        };
+
+        let (outcome, notice) = state
+            .goto_result(&mut app, 10, 6)
+            .expect("goto result should succeed");
+
+        assert_eq!(outcome, CommandOutcome::Applied);
+        assert_eq!(notice, NoticeAction::Clear);
+        assert_eq!(app.current_page, 4);
+        assert_eq!(state.current_hit, Some(0));
+        assert_eq!(state.status_bar_segment(), Some("SEARCH 1/1".to_string()));
+    }
+
+    #[test]
     fn status_bar_segment_only_shows_position_after_hit_selection() {
         let state = SearchState {
             query: "needle".to_string(),
@@ -815,6 +875,45 @@ mod tests {
     }
 
     #[test]
+    fn on_background_warns_when_highlight_is_unavailable() {
+        let mut state = SearchState::default();
+        let mut app = AppState::default();
+        let pdf = Arc::new(HighlightUnavailableStubPdf::new("alpha beta")) as SharedPdfBackend;
+        let mut engine = SearchEngine::new();
+
+        state
+            .submit(
+                &mut app,
+                Arc::clone(&pdf),
+                &mut engine,
+                "alpha".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit should succeed");
+
+        let timeout = std::time::Duration::from_secs(3);
+        let start = std::time::Instant::now();
+        while state.in_progress() {
+            let _ = state.on_background(&mut app, &mut engine);
+            assert!(
+                start.elapsed() <= timeout,
+                "timed out waiting for search completion"
+            );
+            if state.in_progress() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        assert_eq!(
+            state.status_bar_segment(),
+            Some("SEARCH 1 hits".to_string())
+        );
+        let notice = app.notice.expect("warning notice should be set");
+        assert_eq!(notice.level, NoticeLevel::Warning);
+        assert_eq!(notice.message, SearchState::HIGHLIGHT_UNAVAILABLE_NOTICE);
+    }
+
+    #[test]
     fn next_hit_keeps_active_error_notice_when_no_hits_exist() {
         let mut state = SearchState {
             query: "needle".to_string(),
@@ -832,6 +931,13 @@ mod tests {
             app.notice.expect("existing notice should stay").message,
             "search failed: backend failed"
         );
+    }
+
+    fn page_hit(page: usize) -> SearchPageHit {
+        SearchPageHit {
+            page,
+            occurrences: Vec::new(),
+        }
     }
 
     #[test]

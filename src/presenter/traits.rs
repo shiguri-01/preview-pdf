@@ -116,19 +116,30 @@ pub trait ImagePresenter {
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
+        overlay_stamp: u64,
         generation: u64,
     ) -> AppResult<()>;
 
+    #[allow(clippy::too_many_arguments)]
     fn prefetch_encode(
         &mut self,
         cache_key: RenderedPageKey,
         frame: &RgbaFrame,
         viewport: Viewport,
         pan: PanOffset,
+        overlay_stamp: u64,
         class: WorkClass,
         generation: u64,
     ) -> AppResult<()> {
-        let _ = (cache_key, frame, viewport, pan, class, generation);
+        let _ = (
+            cache_key,
+            frame,
+            viewport,
+            pan,
+            overlay_stamp,
+            class,
+            generation,
+        );
         Ok(())
     }
 

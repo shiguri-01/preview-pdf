@@ -59,6 +59,10 @@ Rules:
   - full-text substring search supports case-insensitive and case-sensitive
     matchers
   - search runs asynchronously and reports progress while active
+  - visible search hits are highlighted through the generic highlight overlay
+    layer
+  - if highlight extraction fails for matched pages, search results are kept and
+    a concise warning notice is shown
   - `search` opens the search palette
   - `search-results` opens the search hit list palette while search is active
   - search-results rows show hit index, context snippet, and page label

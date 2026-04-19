@@ -46,6 +46,7 @@ struct LoopRuntime<S> {
 
 struct LoopStep {
     current_scale: f32,
+    overlay_stamp: u64,
     prefetch_viewport: Option<Viewport>,
     base_pan: PanOffset,
     enable_crop: bool,
@@ -398,6 +399,7 @@ impl App {
             PrefetchDispatchContext {
                 required_keys: step.required_render_keys.clone(),
                 current_cached: step.current_cached,
+                overlay_stamp: step.overlay_stamp,
                 prefetch_viewport: step.prefetch_viewport,
                 base_pan: step.base_pan,
                 enable_crop: step.enable_crop,
@@ -458,6 +460,12 @@ impl App {
         let visible_pages = self.state.visible_page_slots(pdf.page_count());
         let current_scale =
             self.compute_current_scale(pdf, visible_pages.anchor_page, prefetch_viewport);
+        let overlay_stamp = self
+            .interaction
+            .extensions
+            .host
+            .highlight_overlay_for(visible_pages.existing_pages())
+            .stamp;
         let base_pan = self.current_pan();
         let enable_crop = self.state.zoom > 1.0;
         let interactive = input_actor.is_interactive(prefetch_pause_after_input);
@@ -497,6 +505,7 @@ impl App {
 
         LoopStep {
             current_scale,
+            overlay_stamp,
             prefetch_viewport,
             base_pan,
             enable_crop,
@@ -591,6 +600,11 @@ impl App {
                     current_scale: step.current_scale,
                     initial_preview: step.initial_preview.clone(),
                     presenter_key: step.presenter_key,
+                    highlight_overlay: self
+                        .interaction
+                        .extensions
+                        .host
+                        .highlight_overlay_for(step.visible_pages.existing_pages()),
                     generation: runtime.render_actor.generation(),
                     nav_streak: runtime.render_actor.nav_streak(),
                 },
@@ -918,6 +932,7 @@ mod tests {
             _frame: &crate::backend::RgbaFrame,
             _viewport: Viewport,
             _pan: PanOffset,
+            _overlay_stamp: u64,
             _generation: u64,
         ) -> crate::error::AppResult<()> {
             Ok(())

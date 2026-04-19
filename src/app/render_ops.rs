@@ -23,6 +23,7 @@ pub(crate) struct CurrentTaskContext {
 pub(crate) struct PrefetchDispatchContext {
     pub(crate) required_keys: Vec<RenderedPageKey>,
     pub(crate) current_cached: bool,
+    pub(crate) overlay_stamp: u64,
     pub(crate) prefetch_viewport: Option<Viewport>,
     pub(crate) base_pan: PanOffset,
     pub(crate) enable_crop: bool,
@@ -65,6 +66,7 @@ impl RenderSubsystem {
                         &frame,
                         viewport,
                         pan_for_presenter,
+                        0,
                         encode_work_class_for_completed_render(completed.class),
                         completed.generation,
                     ) {
@@ -250,6 +252,7 @@ impl RenderSubsystem {
                         viewport,
                         key,
                         &mut prefetch_pan,
+                        ctx.overlay_stamp,
                         presenter_caps.cell_px,
                         ctx.enable_crop,
                         encode_work_class_for_completed_render(task.class),
@@ -291,6 +294,7 @@ mod tests {
             _frame: &RgbaFrame,
             _viewport: Viewport,
             _pan: PanOffset,
+            _overlay_stamp: u64,
             _generation: u64,
         ) -> AppResult<()> {
             Ok(())
@@ -315,6 +319,7 @@ mod tests {
             _frame: &RgbaFrame,
             _viewport: Viewport,
             _pan: PanOffset,
+            _overlay_stamp: u64,
             _class: crate::work::WorkClass,
             _generation: u64,
         ) -> AppResult<()> {

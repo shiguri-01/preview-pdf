@@ -20,10 +20,11 @@ This document owns:
 1. Open the PDF backend document.
 2. Rasterize the visible page or pages into `RgbaFrame`.
 3. Store raster output in the L1 rendered-page cache.
-4. Compose spread output and crop to the current viewport when needed.
-5. Prepare terminal-frame entries in the L2 cache.
-6. Encode the image for the active terminal protocol.
-7. Draw a ready terminal frame through the presenter.
+4. Apply current-view highlight overlays without mutating cached raster output.
+5. Compose spread output and crop to the current viewport when needed.
+6. Prepare terminal-frame entries in the L2 cache.
+7. Encode the image for the active terminal protocol.
+8. Draw a ready terminal frame through the presenter.
 
 Cold start may additionally render a lower-resolution preview for the current
 view before the full-resolution image is ready.
@@ -36,6 +37,9 @@ Primary backend API:
 fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>
 ```
 
+Search and overlay extraction use a separate text-page path that exposes glyph
+rectangles in page coordinates.
+
 Rules:
 
 - raster output uses RGBA pixel storage
@@ -43,6 +47,7 @@ Rules:
   identity
 - render-worker page tasks use layout tag `0` for source-page identity
 - text extraction is a separate backend path used by search
+- raw render cache entries do not include highlight overlays
 
 ## L1 rendered-page cache
 
@@ -97,6 +102,16 @@ Scheduling rules:
 
 ## Presenter encode and L2 cache
 
+Overlay rules:
+
+- highlight overlays are source-agnostic decorations applied after raw raster
+  retrieval and before presenter preparation
+- search is currently one overlay producer, but the pipeline does not depend on
+  search-specific types
+- search-hit rectangle merging uses glyph geometry in page coordinates; the
+  inferred merge axis is a screen-space layout heuristic, not a writing-mode classification
+- overlay differences do not affect L1 rendered-page cache identity
+
 Encode input:
 
 ```rust
@@ -115,7 +130,7 @@ Encode rules:
 
 L2 cache rules:
 
-- key: `TerminalFrameKey { rendered_page, viewport, pan }`
+- key: `TerminalFrameKey { rendered_page, viewport, pan, overlay_stamp }`
 - states:
   - `PendingFrame`
   - `Encoding`
@@ -125,8 +140,8 @@ L2 cache rules:
   entry may temporarily coexist with the currently visible ready frame to avoid
   regressing to a blank viewer
 
-`viewport` and `pan` are part of the L2 key because terminal output depends on
-both.
+`viewport`, `pan`, and `overlay_stamp` are part of the L2 key because terminal
+output depends on all three.
 
 ## Presenter draw contract
 

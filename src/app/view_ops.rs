@@ -4,6 +4,7 @@ use crate::app::PageLayoutMode;
 use crate::backend::PdfBackend;
 use crate::config::Config;
 use crate::error::AppResult;
+use crate::highlight::HighlightOverlaySnapshot;
 use crate::input::sequence::SequenceRegistrySnapshot;
 use crate::palette::PaletteView;
 use crate::presenter::{
@@ -40,6 +41,7 @@ pub(super) struct RenderFramePlan {
     pub(super) current_scale: f32,
     pub(super) initial_preview: Option<InitialPreviewPlan>,
     pub(super) presenter_key: RenderedPageKey,
+    pub(super) highlight_overlay: HighlightOverlaySnapshot,
     pub(super) generation: u64,
     pub(super) nav_streak: usize,
 }
@@ -112,6 +114,7 @@ impl RenderSubsystem {
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
+        highlight_overlay: &HighlightOverlaySnapshot,
         generation: u64,
     ) -> AppResult<Option<PresenterRenderMode>> {
         if self.runtime.try_prepare_current_page_from_cache(
@@ -123,6 +126,7 @@ impl RenderSubsystem {
             pan,
             cell_px,
             enable_crop,
+            highlight_overlay,
             generation,
         )? {
             return Ok(Some(PresenterRenderMode::Full));
@@ -133,12 +137,14 @@ impl RenderSubsystem {
         };
 
         if self.runtime.try_prepare_cached_page_from_cache(
+            pdf,
             self.presenter.as_mut(),
             viewport,
             preview_plan.page_keys[0],
             pan,
             cell_px,
             enable_crop,
+            highlight_overlay,
             generation,
         )? {
             return Ok(Some(PresenterRenderMode::InitialPreview));
@@ -159,6 +165,7 @@ impl RenderSubsystem {
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
+        highlight_overlay: &HighlightOverlaySnapshot,
         generation: u64,
         spread_gap_px: u32,
     ) -> AppResult<Option<PresenterRenderMode>> {
@@ -172,6 +179,7 @@ impl RenderSubsystem {
             pan,
             cell_px,
             enable_crop,
+            highlight_overlay,
             generation,
             spread_gap_px,
         )? {
@@ -192,6 +200,7 @@ impl RenderSubsystem {
             pan,
             cell_px,
             enable_crop,
+            highlight_overlay,
             generation,
             spread_gap_px,
         )? {
@@ -218,6 +227,7 @@ impl RenderSubsystem {
             current_scale,
             initial_preview,
             presenter_key,
+            highlight_overlay,
             generation,
             nav_streak: _nav_streak,
         } = plan;
@@ -280,6 +290,7 @@ impl RenderSubsystem {
                     &mut pan,
                     presenter_caps.cell_px,
                     enable_crop,
+                    &highlight_overlay,
                     generation,
                 ),
                 PageLayoutMode::Spread => self.prepare_spread_or_preview_from_cache(
@@ -292,6 +303,7 @@ impl RenderSubsystem {
                     &mut pan,
                     presenter_caps.cell_px,
                     enable_crop,
+                    &highlight_overlay,
                     generation,
                     spread_gap_px,
                 ),
@@ -574,7 +586,7 @@ mod tests {
         resolve_layout_dimensions, sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
-    use crate::backend::{PdfBackend, RgbaFrame};
+    use crate::backend::{PdfBackend, RgbaFrame, TextPage};
     use crate::presenter::{PresenterFeedback, PresenterRenderMode, PresenterRenderOutcome};
     use crate::render::cache::RenderedPageKey;
 
@@ -622,6 +634,15 @@ mod tests {
 
         fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
             Ok(String::new())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(TextPage {
+                width_pt: 612.0,
+                height_pt: 792.0,
+                glyphs: Vec::new(),
+                dropped_glyphs: 0,
+            })
         }
 
         fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {

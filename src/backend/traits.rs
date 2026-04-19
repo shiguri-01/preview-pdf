@@ -139,6 +139,88 @@ pub struct OutlineNode {
     pub children: Vec<OutlineNode>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PdfRect {
+    pub x0: f32,
+    pub y0: f32,
+    pub x1: f32,
+    pub y1: f32,
+}
+
+impl PdfRect {
+    pub fn width(self) -> f32 {
+        (self.x1 - self.x0).max(0.0)
+    }
+
+    pub fn height(self) -> f32 {
+        (self.y1 - self.y0).max(0.0)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextGlyph {
+    pub ch: char,
+    pub bbox: PdfRect,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextPage {
+    pub width_pt: f32,
+    pub height_pt: f32,
+    pub glyphs: Vec<TextGlyph>,
+    pub dropped_glyphs: usize,
+}
+
+impl TextPage {
+    pub fn extracted_text(&self) -> String {
+        let mut out = String::new();
+        let mut last_rect: Option<PdfRect> = None;
+        for glyph in &self.glyphs {
+            push_extracted_char(&mut out, glyph.ch, glyph.bbox, &mut last_rect);
+        }
+        out.trim().to_owned()
+    }
+}
+
+const LINE_BREAK_THRESHOLD: f32 = 6.0;
+
+fn push_extracted_char(out: &mut String, ch: char, bbox: PdfRect, last_rect: &mut Option<PdfRect>) {
+    if ch == '\n' || ch == '\r' {
+        push_newline(out);
+        *last_rect = Some(bbox);
+        return;
+    }
+    if ch.is_whitespace() {
+        push_space(out);
+        *last_rect = Some(bbox);
+        return;
+    }
+
+    if let Some(last) = last_rect
+        && (bbox.y0 - last.y0).abs() > LINE_BREAK_THRESHOLD
+    {
+        push_newline(out);
+    }
+
+    out.push(ch);
+    *last_rect = Some(bbox);
+}
+
+fn push_newline(out: &mut String) {
+    while out.ends_with(' ') {
+        out.pop();
+    }
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+}
+
+fn push_space(out: &mut String) {
+    if !out.ends_with([' ', '\n']) {
+        out.push(' ');
+    }
+}
+
 pub trait PdfBackend: Send + Sync {
     fn path(&self) -> &Path;
     fn doc_id(&self) -> u64;
@@ -146,12 +228,15 @@ pub trait PdfBackend: Send + Sync {
     fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)>;
     fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>;
     fn extract_text(&self, page: usize) -> AppResult<String>;
+    fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage>;
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>>;
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{PdfBackend, PixelBuffer, PixelBufferPool, RgbaFrame};
+    use super::{
+        PdfBackend, PdfRect, PixelBuffer, PixelBufferPool, RgbaFrame, TextGlyph, TextPage,
+    };
 
     #[test]
     fn into_pixels_vec_reuses_unique_allocation() {
@@ -213,4 +298,44 @@ mod tests {
     }
 
     fn _assert_pdf_backend_object_safe(_: &dyn PdfBackend) {}
+
+    #[test]
+    fn text_page_extracted_text_preserves_line_breaks() {
+        let page = TextPage {
+            width_pt: 100.0,
+            height_pt: 100.0,
+            glyphs: vec![
+                TextGlyph {
+                    ch: 'A',
+                    bbox: PdfRect {
+                        x0: 1.0,
+                        y0: 1.0,
+                        x1: 2.0,
+                        y1: 2.0,
+                    },
+                },
+                TextGlyph {
+                    ch: ' ',
+                    bbox: PdfRect {
+                        x0: 3.0,
+                        y0: 1.0,
+                        x1: 4.0,
+                        y1: 2.0,
+                    },
+                },
+                TextGlyph {
+                    ch: 'B',
+                    bbox: PdfRect {
+                        x0: 1.0,
+                        y0: 20.0,
+                        x1: 2.0,
+                        y1: 21.0,
+                    },
+                },
+            ],
+            dropped_glyphs: 0,
+        };
+
+        assert_eq!(page.extracted_text(), "A\nB");
+    }
 }

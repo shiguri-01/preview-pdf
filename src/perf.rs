@@ -569,7 +569,7 @@ pub async fn run_suite(config: PerfSuiteConfig) -> AppResult<PerfSuiteReport> {
     let doc_id = doc_id.ok_or_else(|| AppError::unsupported("perf run did not open the PDF"))?;
 
     Ok(PerfSuiteReport::new(
-        &PathBuf::from(&config.pdf_path),
+        &config.pdf_path,
         doc_id,
         &config,
         scenario_reports,

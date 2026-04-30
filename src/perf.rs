@@ -554,8 +554,9 @@ pub async fn run_suite(config: PerfSuiteConfig) -> AppResult<PerfSuiteReport> {
             let pdf = open_default_backend(&config.pdf_path)?;
             doc_id.get_or_insert(pdf.doc_id());
             let mut app = App::new(PresenterKind::RatatuiImage)?;
-            let mut snapshot = app.run_perf(pdf, scenario, parameters.clone()).await?;
-            snapshot.wall_time = iteration_started_at.elapsed();
+            let snapshot = app
+                .run_perf(pdf, scenario, parameters.clone(), iteration_started_at)
+                .await?;
             if iteration >= config.warmup_iterations {
                 measured.push(snapshot);
             }

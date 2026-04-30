@@ -1,6 +1,6 @@
 use std::convert::Infallible;
 use std::io;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ratatui::backend::TestBackend;
 use ratatui::layout::Size;
@@ -59,10 +59,15 @@ pub(crate) struct PerfLoopDriver {
     zoomed_in: bool,
     zoomed_out: bool,
     idle_started_at: Option<Instant>,
+    measured_started_at: Option<Instant>,
 }
 
 impl PerfLoopDriver {
-    pub(crate) fn new(scenario: PerfScenarioId, parameters: PerfScenarioParameters) -> Self {
+    pub(crate) fn new(
+        scenario: PerfScenarioId,
+        parameters: PerfScenarioParameters,
+        cold_started_at: Instant,
+    ) -> Self {
         Self {
             scenario,
             parameters,
@@ -73,11 +78,21 @@ impl PerfLoopDriver {
             zoomed_in: false,
             zoomed_out: false,
             idle_started_at: None,
+            measured_started_at: match scenario {
+                PerfScenarioId::ColdFirstPage => Some(cold_started_at),
+                _ => None,
+            },
         }
     }
 
     pub(crate) fn visited_steps(&self) -> usize {
         self.command_count
+    }
+
+    pub(crate) fn measured_elapsed(&self) -> Duration {
+        self.measured_started_at
+            .map(|started_at| started_at.elapsed())
+            .unwrap_or_default()
     }
 
     pub(crate) fn advance(
@@ -99,8 +114,10 @@ impl PerfLoopDriver {
                 if state.current_page >= last_page
                     || self.command_count >= self.parameters.page_steps
                 {
+                    self.start_measured_window();
                     return true;
                 }
+                self.start_measured_window();
                 let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                     Command::NextPage,
                     CommandInvocationSource::Keymap,
@@ -123,9 +140,11 @@ impl PerfLoopDriver {
                 }
 
                 if state.current_page == 0 || self.command_count >= self.parameters.page_steps {
+                    self.start_measured_window();
                     return true;
                 }
 
+                self.start_measured_window();
                 let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                     Command::PrevPage,
                     CommandInvocationSource::Keymap,
@@ -136,6 +155,7 @@ impl PerfLoopDriver {
             PerfScenarioId::RapidNextPage => {
                 if !self.initial_idle_seen {
                     self.initial_idle_seen = true;
+                    self.start_measured_window();
                     let last_page = page_count.saturating_sub(1);
                     let steps = self
                         .parameters
@@ -156,6 +176,7 @@ impl PerfLoopDriver {
             PerfScenarioId::ZoomStep => {
                 if !self.initial_idle_seen {
                     self.initial_idle_seen = true;
+                    self.start_measured_window();
                     let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                         Command::ZoomIn,
                         CommandInvocationSource::Keymap,
@@ -177,12 +198,18 @@ impl PerfLoopDriver {
             }
             PerfScenarioId::IdleSettledRedraw => {
                 let Some(started_at) = self.idle_started_at else {
-                    self.idle_started_at = Some(Instant::now());
+                    let started_at = Instant::now();
+                    self.idle_started_at = Some(started_at);
+                    self.measured_started_at = Some(started_at);
                     return false;
                 };
                 started_at.elapsed().as_millis() >= u128::from(self.parameters.idle_duration_ms)
             }
         }
+    }
+
+    fn start_measured_window(&mut self) {
+        self.measured_started_at.get_or_insert_with(Instant::now);
     }
 }
 
@@ -197,8 +224,11 @@ fn infallible_to_io<T>(result: Result<T, Infallible>) -> io::Result<T> {
 mod tests {
     use ratatui::layout::{Rect, Size};
     use ratatui::widgets::Paragraph;
+    use tokio::sync::mpsc::unbounded_channel;
 
-    use super::{HeadlessTerminalSession, TerminalSurface};
+    use crate::perf::{PerfScenarioId, PerfScenarioParameters};
+
+    use super::{HeadlessTerminalSession, PerfLoopDriver, TerminalSurface};
 
     #[test]
     fn headless_terminal_session_supports_terminal_surface_contract() {
@@ -213,5 +243,49 @@ mod tests {
                 frame.render_widget(Paragraph::new("ok"), Rect::new(0, 0, 2, 1));
             })
             .expect("draw should succeed");
+    }
+
+    #[test]
+    fn non_cold_scenario_starts_measured_window_after_initial_idle() {
+        let (tx, _rx) = unbounded_channel();
+        let mut driver = PerfLoopDriver::new(
+            PerfScenarioId::RapidNextPage,
+            PerfScenarioParameters {
+                page_steps: 2,
+                idle_duration_ms: 0,
+            },
+            std::time::Instant::now(),
+        );
+        let state = crate::app::state::AppState::default();
+
+        assert!(driver.measured_started_at.is_none());
+        assert!(!driver.advance(&state, 3, false, &tx));
+        assert!(driver.measured_started_at.is_none());
+
+        assert!(!driver.advance(&state, 3, true, &tx));
+        assert!(driver.measured_started_at.is_some());
+        assert_eq!(driver.visited_steps(), 2);
+    }
+
+    #[test]
+    fn steady_prev_starts_measured_window_after_last_page_positioning() {
+        let (tx, _rx) = unbounded_channel();
+        let mut driver = PerfLoopDriver::new(
+            PerfScenarioId::SteadyPrevPage,
+            PerfScenarioParameters {
+                page_steps: 1,
+                idle_duration_ms: 0,
+            },
+            std::time::Instant::now(),
+        );
+        let mut state = crate::app::state::AppState::default();
+
+        assert!(!driver.advance(&state, 3, true, &tx));
+        assert!(driver.measured_started_at.is_none());
+
+        state.current_page = 2;
+        assert!(!driver.advance(&state, 3, true, &tx));
+        assert!(driver.measured_started_at.is_some());
+        assert_eq!(driver.visited_steps(), 1);
     }
 }

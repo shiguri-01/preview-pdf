@@ -187,6 +187,7 @@ impl App {
         pdf: SharedPdfBackend,
         scenario: PerfScenarioId,
         parameters: PerfScenarioParameters,
+        cold_started_at: Instant,
     ) -> AppResult<PerfIterationSnapshot> {
         let page_count = pdf.page_count();
         if page_count == 0 {
@@ -208,7 +209,7 @@ impl App {
             loop_event_runtime,
         )?;
         let result = self
-            .run_perf_loop(&mut runtime, pdf, scenario, parameters)
+            .run_perf_loop(&mut runtime, pdf, scenario, parameters, cold_started_at)
             .await;
         runtime.loop_event_runtime.shutdown();
         let restore_result = runtime.session.restore();
@@ -306,9 +307,9 @@ impl App {
         pdf: SharedPdfBackend,
         scenario: PerfScenarioId,
         parameters: PerfScenarioParameters,
+        cold_started_at: Instant,
     ) -> AppResult<PerfIterationSnapshot> {
-        let started_at = Instant::now();
-        let mut perf_driver = PerfLoopDriver::new(scenario, parameters);
+        let mut perf_driver = PerfLoopDriver::new(scenario, parameters, cold_started_at);
 
         loop {
             let step = self.process_loop_iteration(runtime, pdf.as_ref())?;
@@ -326,7 +327,7 @@ impl App {
                 return Ok(PerfIterationSnapshot {
                     runtime: self.render.runtime.perf_stats.clone(),
                     presenter: self.render.presenter.perf_snapshot().unwrap_or_default(),
-                    wall_time: started_at.elapsed(),
+                    wall_time: perf_driver.measured_elapsed(),
                     final_page: self.state.current_page,
                     visited_steps: perf_driver.visited_steps(),
                 });

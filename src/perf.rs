@@ -318,6 +318,13 @@ pub struct PerfScenarioParameters {
     pub idle_duration_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageStepPolicy {
+    Unused,
+    Fixed(usize),
+    Configured,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PerfScenarioId {
@@ -349,15 +356,35 @@ impl PerfScenarioId {
 
     pub fn parameters(self, run: &PerfSuiteConfig) -> PerfScenarioParameters {
         PerfScenarioParameters {
-            page_steps: match self {
-                Self::ColdFirstPage | Self::IdleSettledRedraw => 0,
-                Self::ZoomStep => 2,
-                Self::SteadyNextPage | Self::SteadyPrevPage | Self::RapidNextPage => run.page_steps,
-            },
+            page_steps: self.page_step_policy().resolve(run.page_steps),
             idle_duration_ms: match self {
                 Self::IdleSettledRedraw => run.idle_ms,
                 _ => 0,
             },
+        }
+    }
+
+    fn uses_configured_page_steps(self) -> bool {
+        self.page_step_policy() == PageStepPolicy::Configured
+    }
+
+    fn page_step_policy(self) -> PageStepPolicy {
+        match self {
+            Self::ColdFirstPage | Self::IdleSettledRedraw => PageStepPolicy::Unused,
+            Self::ZoomStep => PageStepPolicy::Fixed(2),
+            Self::SteadyNextPage | Self::SteadyPrevPage | Self::RapidNextPage => {
+                PageStepPolicy::Configured
+            }
+        }
+    }
+}
+
+impl PageStepPolicy {
+    fn resolve(self, configured_page_steps: usize) -> usize {
+        match self {
+            Self::Unused => 0,
+            Self::Fixed(page_steps) => page_steps,
+            Self::Configured => configured_page_steps,
         }
     }
 }
@@ -590,7 +617,12 @@ fn validate_suite_config(config: &PerfSuiteConfig) -> AppResult<()> {
             "perf run requires at least one measured iteration",
         ));
     }
-    if config.page_steps == 0 {
+    if config.page_steps == 0
+        && config
+            .scenarios
+            .iter()
+            .any(|scenario| scenario.uses_configured_page_steps())
+    {
         return Err(AppError::invalid_argument(
             "--page-steps must be greater than zero",
         ));
@@ -963,6 +995,32 @@ mod tests {
     }
 
     #[test]
+    fn resolves_page_step_policy_per_scenario() {
+        let run = PerfSuiteConfig {
+            page_steps: 7,
+            ..PerfSuiteConfig::default()
+        };
+
+        assert_eq!(PerfScenarioId::ColdFirstPage.parameters(&run).page_steps, 0);
+        assert_eq!(
+            PerfScenarioId::IdleSettledRedraw
+                .parameters(&run)
+                .page_steps,
+            0
+        );
+        assert_eq!(PerfScenarioId::ZoomStep.parameters(&run).page_steps, 2);
+        assert_eq!(
+            PerfScenarioId::SteadyNextPage.parameters(&run).page_steps,
+            7
+        );
+        assert_eq!(
+            PerfScenarioId::SteadyPrevPage.parameters(&run).page_steps,
+            7
+        );
+        assert_eq!(PerfScenarioId::RapidNextPage.parameters(&run).page_steps, 7);
+    }
+
+    #[test]
     fn merge_stats_averages_cache_hit_rates() {
         let mut first = PerfStats::default();
         first.set_l1_hit_rate(0.25);
@@ -1024,6 +1082,35 @@ mod tests {
 
         let err = validate_suite_config(&run).expect_err("zero measured iterations should fail");
         assert!(err.to_string().contains("measured iteration"));
+    }
+
+    #[test]
+    fn allows_zero_page_steps_when_selected_scenarios_do_not_use_them() {
+        let run = PerfSuiteConfig {
+            pdf_path: "sample.pdf".into(),
+            scenarios: vec![
+                PerfScenarioId::ColdFirstPage,
+                PerfScenarioId::ZoomStep,
+                PerfScenarioId::IdleSettledRedraw,
+            ],
+            page_steps: 0,
+            ..PerfSuiteConfig::default()
+        };
+
+        validate_suite_config(&run).expect("zero page steps should be allowed");
+    }
+
+    #[test]
+    fn rejects_zero_page_steps_when_selected_scenarios_use_them() {
+        let run = PerfSuiteConfig {
+            pdf_path: "sample.pdf".into(),
+            scenarios: vec![PerfScenarioId::SteadyNextPage],
+            page_steps: 0,
+            ..PerfSuiteConfig::default()
+        };
+
+        let err = validate_suite_config(&run).expect_err("zero page steps should fail");
+        assert!(err.to_string().contains("--page-steps"));
     }
 
     #[test]

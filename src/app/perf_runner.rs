@@ -9,7 +9,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::command::{Command, CommandInvocationSource, CommandRequest};
 use crate::event::DomainEvent;
-use crate::perf::PerfScenarioId;
+use crate::perf::{PerfScenarioId, PerfScenarioParameters};
 
 use super::state::AppState;
 use super::terminal_session::TerminalSurface;
@@ -51,19 +51,33 @@ impl TerminalSurface for HeadlessTerminalSession {
 
 pub(crate) struct PerfLoopDriver {
     scenario: PerfScenarioId,
+    parameters: PerfScenarioParameters,
     command_count: usize,
     positioned_backward_start: bool,
+    rapid_commands_sent: bool,
+    initial_idle_seen: bool,
+    zoomed_in: bool,
+    zoomed_out: bool,
     idle_started_at: Option<Instant>,
 }
 
 impl PerfLoopDriver {
-    pub(crate) fn new(scenario: PerfScenarioId) -> Self {
+    pub(crate) fn new(scenario: PerfScenarioId, parameters: PerfScenarioParameters) -> Self {
         Self {
             scenario,
+            parameters,
             command_count: 0,
             positioned_backward_start: false,
+            rapid_commands_sent: false,
+            initial_idle_seen: false,
+            zoomed_in: false,
+            zoomed_out: false,
             idle_started_at: None,
         }
+    }
+
+    pub(crate) fn visited_steps(&self) -> usize {
+        self.command_count
     }
 
     pub(crate) fn advance(
@@ -79,10 +93,12 @@ impl PerfLoopDriver {
         }
 
         match self.scenario {
-            PerfScenarioId::PageFlipForward => {
-                let params = self.scenario.parameters();
+            PerfScenarioId::ColdFirstPage => true,
+            PerfScenarioId::SteadyNextPage => {
                 let last_page = page_count.saturating_sub(1);
-                if state.current_page >= last_page || self.command_count >= params.page_flip_limit {
+                if state.current_page >= last_page
+                    || self.command_count >= self.parameters.page_steps
+                {
                     return true;
                 }
                 let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
@@ -92,8 +108,7 @@ impl PerfLoopDriver {
                 self.command_count += 1;
                 false
             }
-            PerfScenarioId::PageFlipBackward => {
-                let params = self.scenario.parameters();
+            PerfScenarioId::SteadyPrevPage => {
                 let last_page = page_count.saturating_sub(1);
                 if !self.positioned_backward_start {
                     if state.current_page < last_page {
@@ -107,7 +122,7 @@ impl PerfLoopDriver {
                     self.positioned_backward_start = true;
                 }
 
-                if state.current_page == 0 || self.command_count >= params.page_flip_limit {
+                if state.current_page == 0 || self.command_count >= self.parameters.page_steps {
                     return true;
                 }
 
@@ -118,13 +133,54 @@ impl PerfLoopDriver {
                 self.command_count += 1;
                 false
             }
-            PerfScenarioId::IdlePendingRedraw => {
+            PerfScenarioId::RapidNextPage => {
+                if !self.initial_idle_seen {
+                    self.initial_idle_seen = true;
+                    let last_page = page_count.saturating_sub(1);
+                    let steps = self
+                        .parameters
+                        .page_steps
+                        .min(last_page.saturating_sub(state.current_page));
+                    for _ in 0..steps {
+                        let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
+                            Command::NextPage,
+                            CommandInvocationSource::Keymap,
+                        )));
+                    }
+                    self.command_count += steps;
+                    self.rapid_commands_sent = true;
+                    return steps == 0;
+                }
+                self.rapid_commands_sent
+            }
+            PerfScenarioId::ZoomStep => {
+                if !self.initial_idle_seen {
+                    self.initial_idle_seen = true;
+                    let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
+                        Command::ZoomIn,
+                        CommandInvocationSource::Keymap,
+                    )));
+                    self.command_count += 1;
+                    self.zoomed_in = true;
+                    return false;
+                }
+                if self.zoomed_in && !self.zoomed_out {
+                    let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
+                        Command::ZoomOut,
+                        CommandInvocationSource::Keymap,
+                    )));
+                    self.command_count += 1;
+                    self.zoomed_out = true;
+                    return false;
+                }
+                self.zoomed_out
+            }
+            PerfScenarioId::IdleSettledRedraw => {
                 let Some(started_at) = self.idle_started_at else {
                     self.idle_started_at = Some(Instant::now());
                     return false;
                 };
-                started_at.elapsed().as_millis()
-                    >= u128::from(self.scenario.parameters().idle_duration_ms)
+                started_at.elapsed().as_millis() >= u128::from(self.parameters.idle_duration_ms)
             }
         }
     }

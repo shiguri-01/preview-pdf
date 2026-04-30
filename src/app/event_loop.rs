@@ -8,7 +8,7 @@ use crate::backend::{PdfBackend, SharedPdfBackend};
 use crate::command::{Command, CommandOutcome, CommandRequest, PanAmount};
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
-use crate::perf::{PerfIterationSnapshot, PerfScenarioId, RedrawReason};
+use crate::perf::{PerfIterationSnapshot, PerfScenarioId, PerfScenarioParameters, RedrawReason};
 use crate::presenter::{ImagePresenter, PanOffset, PresenterBackgroundEvent, Viewport};
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::RenderTask;
@@ -186,6 +186,7 @@ impl App {
         &mut self,
         pdf: SharedPdfBackend,
         scenario: PerfScenarioId,
+        parameters: PerfScenarioParameters,
     ) -> AppResult<PerfIterationSnapshot> {
         let page_count = pdf.page_count();
         if page_count == 0 {
@@ -206,7 +207,9 @@ impl App {
             loop_event_rx,
             loop_event_runtime,
         )?;
-        let result = self.run_perf_loop(&mut runtime, pdf, scenario).await;
+        let result = self
+            .run_perf_loop(&mut runtime, pdf, scenario, parameters)
+            .await;
         runtime.loop_event_runtime.shutdown();
         let restore_result = runtime.session.restore();
         let snapshot = result?;
@@ -302,15 +305,18 @@ impl App {
         runtime: &mut LoopRuntime<HeadlessTerminalSession>,
         pdf: SharedPdfBackend,
         scenario: PerfScenarioId,
+        parameters: PerfScenarioParameters,
     ) -> AppResult<PerfIterationSnapshot> {
-        let mut perf_driver = PerfLoopDriver::new(scenario);
+        let started_at = Instant::now();
+        let mut perf_driver = PerfLoopDriver::new(scenario, parameters);
 
         loop {
             let step = self.process_loop_iteration(runtime, pdf.as_ref())?;
             let system_idle = step.current_cached
                 && runtime.render_worker.in_flight_len() == 0
                 && !self.render.presenter.has_pending_work()
-                && !runtime.ui_actor.needs_redraw();
+                && !runtime.ui_actor.needs_redraw()
+                && runtime.loop_event_rx.is_empty();
             if perf_driver.advance(
                 &self.state,
                 runtime.page_count,
@@ -320,6 +326,9 @@ impl App {
                 return Ok(PerfIterationSnapshot {
                     runtime: self.render.runtime.perf_stats.clone(),
                     presenter: self.render.presenter.perf_snapshot().unwrap_or_default(),
+                    wall_time: started_at.elapsed(),
+                    final_page: self.state.current_page,
+                    visited_steps: perf_driver.visited_steps(),
                 });
             }
 

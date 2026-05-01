@@ -33,6 +33,14 @@ pub(crate) fn apply_highlight_overlay(
         return frame.clone();
     }
 
+    if !overlay
+        .spans
+        .iter()
+        .any(|span| pages.iter().any(|page| page.page == span.page))
+    {
+        return frame.clone();
+    }
+
     let mut pixels = frame_ops_pixel_pool().take(frame.byte_len());
     pixels.copy_from_slice(&frame.pixels);
     for span in &overlay.spans {

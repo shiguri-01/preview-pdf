@@ -11,6 +11,10 @@ name = "pvf"
 name = "pvf"
 path = "src/main.rs"
 
+[[bench]]
+name = "perf"
+harness = false
+
 [dependencies]
 bytemuck = { version = "1.25.0", features = ["extern_crate_alloc"] }
 hayro = "0.5.0"

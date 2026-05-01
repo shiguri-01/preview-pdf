@@ -183,7 +183,9 @@ The runtime tracks:
 - canceled render and encode task counts
 - redraw request counts by reason
 
-These values feed perf JSON reports and offline diagnostics.
+These values feed the developer-only performance diagnostics JSON emitted by
+`cargo bench --bench perf`; the public viewer CLI does not expose a performance
+subcommand.
 
 ## Code references
 

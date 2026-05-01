@@ -18,19 +18,14 @@ Supported invocations:
 
 ```bash
 pvf <file.pdf>
-pvf perf <file.pdf> --scenario <scenario-id> [--out <path|->]
 ```
 
 Rules:
 
 - Exactly one PDF path argument is required.
 - The document is opened through the default backend factory.
-- `perf` runs a built-in scenario, emits JSON, and exits without opening the
-  interactive viewer.
-- Supported perf scenarios are:
-  - `page-flip-forward`
-  - `page-flip-backward`
-  - `idle-pending-redraw`
+- Performance diagnostics are developer tooling and are not part of the public
+  viewer CLI. See `performance-diagnostics.md`.
 
 ## Viewer behavior
 

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use fast_image_resize as fr;
 use image::{DynamicImage, RgbaImage};
 use ratatui::layout::Rect;
@@ -8,6 +10,10 @@ use crate::backend::RgbaFrame;
 use crate::error::{AppError, AppResult};
 
 pub(crate) const SIMD_DOWNSCALE_FILTER: fr::FilterType = fr::FilterType::CatmullRom;
+
+thread_local! {
+    static SIMD_RESIZER: RefCell<fr::Resizer> = RefCell::new(fr::Resizer::new());
+}
 
 pub(crate) fn create_protocol_with_picker(
     picker: &Picker,
@@ -121,13 +127,14 @@ fn resize_rgba_bytes_simd(
         })?;
 
     let mut dst = fr::images::Image::new(dst_width, dst_height, fr::PixelType::U8x4);
-    let mut resizer = fr::Resizer::new();
     let options =
         fr::ResizeOptions::new().resize_alg(fr::ResizeAlg::Convolution(SIMD_DOWNSCALE_FILTER));
 
-    resizer
-        .resize(&src, &mut dst, &options)
-        .map_err(|_| AppError::unsupported("failed to resize frame with SIMD"))?;
+    SIMD_RESIZER.with_borrow_mut(|resizer| {
+        resizer
+            .resize(&src, &mut dst, &options)
+            .map_err(|_| AppError::unsupported("failed to resize frame with SIMD"))
+    })?;
 
     Ok(dst.into_vec())
 }

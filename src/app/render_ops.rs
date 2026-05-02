@@ -11,17 +11,77 @@ use super::frame_ops::{encode_work_class_for_completed_render, prepare_presenter
 use super::scale::{scale_eq, zoom_eq};
 use super::state::AppState;
 
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct RequiredRenderPages {
+    pages: [usize; 2],
+    keys: [RenderedPageKey; 2],
+    len: usize,
+}
+
+impl RequiredRenderPages {
+    pub(crate) fn new(anchor_page: usize, anchor_key: RenderedPageKey) -> Self {
+        Self {
+            pages: [anchor_page, 0],
+            keys: [anchor_key, anchor_key],
+            len: 1,
+        }
+    }
+
+    pub(crate) fn push_trailing(&mut self, page: usize, key: RenderedPageKey) {
+        debug_assert!(self.len < self.pages.len());
+        self.pages[self.len] = page;
+        self.keys[self.len] = key;
+        self.len += 1;
+    }
+
+    pub(crate) fn keys(&self) -> &[RenderedPageKey] {
+        &self.keys[..self.len]
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (usize, usize, RenderedPageKey)> + '_ {
+        (0..self.len).map(|idx| (idx, self.pages[idx], self.keys[idx]))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CurrentInterestKeys {
+    keys: [RenderedPageKey; 4],
+    len: usize,
+}
+
+impl CurrentInterestKeys {
+    pub(crate) fn from_required(required: &RequiredRenderPages) -> Self {
+        let mut keys = [required.keys[0]; 4];
+        keys[..required.len].copy_from_slice(required.keys());
+        Self {
+            keys,
+            len: required.len,
+        }
+    }
+
+    pub(crate) fn extend(&mut self, keys: impl IntoIterator<Item = RenderedPageKey>) {
+        for key in keys {
+            debug_assert!(self.len < self.keys.len());
+            self.keys[self.len] = key;
+            self.len += 1;
+        }
+    }
+
+    pub(crate) fn as_slice(&self) -> &[RenderedPageKey] {
+        &self.keys[..self.len]
+    }
+}
+
 pub(crate) struct CurrentTaskContext {
     pub(crate) current_scale: f32,
-    pub(crate) required_pages: Vec<usize>,
-    pub(crate) required_keys: Vec<RenderedPageKey>,
-    pub(crate) current_interest_keys: Vec<RenderedPageKey>,
+    pub(crate) required: RequiredRenderPages,
+    pub(crate) current_interest_keys: CurrentInterestKeys,
     pub(crate) current_cached: bool,
     pub(crate) preview_tasks: Vec<RenderTask>,
 }
 
 pub(crate) struct PrefetchDispatchContext {
-    pub(crate) required_keys: Vec<RenderedPageKey>,
+    pub(crate) required: RequiredRenderPages,
     pub(crate) current_cached: bool,
     pub(crate) overlay_stamp: u64,
     pub(crate) prefetch_viewport: Option<Viewport>,
@@ -149,8 +209,10 @@ impl RenderSubsystem {
         render_worker: &mut RenderWorker,
         ctx: CurrentTaskContext,
     ) {
-        let canceled = render_worker
-            .cancel_stale_prefetch_except(render_actor.generation(), &ctx.current_interest_keys);
+        let canceled = render_worker.cancel_stale_prefetch_except(
+            render_actor.generation(),
+            ctx.current_interest_keys.as_slice(),
+        );
         if canceled > 0 {
             self.runtime.perf_stats.add_canceled_tasks(canceled);
         }
@@ -170,7 +232,7 @@ impl RenderSubsystem {
                 let (enqueued, preempted) = render_worker.enqueue_current_with_preemption(
                     preview_task,
                     render_actor.generation(),
-                    &ctx.current_interest_keys,
+                    ctx.current_interest_keys.as_slice(),
                 );
                 if preempted > 0 {
                     self.runtime.perf_stats.add_canceled_tasks(preempted);
@@ -183,13 +245,7 @@ impl RenderSubsystem {
             }
         }
 
-        debug_assert_eq!(
-            ctx.required_pages.len(),
-            ctx.required_keys.len(),
-            "required_pages and required_keys must have equal lengths"
-        );
-        for (idx, page) in ctx.required_pages.into_iter().enumerate() {
-            let key = ctx.required_keys[idx];
+        for (idx, page, key) in ctx.required.iter() {
             if self.runtime.has_cached_frame(&key) || render_worker.has_in_flight(&key) {
                 continue;
             }
@@ -208,7 +264,7 @@ impl RenderSubsystem {
                     },
                 },
                 render_actor.generation(),
-                &ctx.current_interest_keys,
+                ctx.current_interest_keys.as_slice(),
             );
             if preempted > 0 {
                 self.runtime.perf_stats.add_canceled_tasks(preempted);
@@ -235,7 +291,7 @@ impl RenderSubsystem {
                 };
                 ctx.dispatch_budget -= 1;
                 let key = RenderedPageKey::new(task.doc_id, task.page, task.scale);
-                if ctx.required_keys.contains(&key) {
+                if ctx.required.keys().contains(&key) {
                     continue;
                 }
                 if !self.runtime.has_cached_frame(&key) {

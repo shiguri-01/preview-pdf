@@ -21,7 +21,9 @@ use super::event_bus::EventBusRuntime;
 use super::perf_runner::{
     HeadlessTerminalSession, PERF_HEADLESS_HEIGHT, PERF_HEADLESS_WIDTH, PerfLoopDriver,
 };
-use super::render_ops::{CurrentTaskContext, PrefetchDispatchContext};
+use super::render_ops::{
+    CurrentInterestKeys, CurrentTaskContext, PrefetchDispatchContext, RequiredRenderPages,
+};
 use super::scale::select_input_poll_timeout;
 use super::state::notice_action_for_error;
 use super::terminal_session::{InteractiveTerminalSession, TerminalSurface};
@@ -52,9 +54,8 @@ struct LoopStep {
     enable_crop: bool,
     interactive: bool,
     visible_pages: super::state::VisiblePageSlots,
-    required_pages: Vec<usize>,
-    required_render_keys: Vec<RenderedPageKey>,
-    current_interest_keys: Vec<RenderedPageKey>,
+    required: RequiredRenderPages,
+    current_interest_keys: CurrentInterestKeys,
     initial_preview: Option<InitialPreviewPlan>,
     presenter_key: RenderedPageKey,
     current_cached: bool,
@@ -374,9 +375,8 @@ impl App {
             &mut runtime.render_worker,
             CurrentTaskContext {
                 current_scale: step.current_scale,
-                required_pages: step.required_pages.clone(),
-                required_keys: step.required_render_keys.clone(),
-                current_interest_keys: step.current_interest_keys.clone(),
+                required: step.required,
+                current_interest_keys: step.current_interest_keys,
                 current_cached: step.current_cached,
                 preview_tasks: step
                     .initial_preview
@@ -407,7 +407,7 @@ impl App {
             &mut runtime.render_actor,
             &mut runtime.render_worker,
             PrefetchDispatchContext {
-                required_keys: step.required_render_keys.clone(),
+                required: step.required,
                 current_cached: step.current_cached,
                 overlay_stamp: step.overlay_stamp,
                 prefetch_viewport: step.prefetch_viewport,
@@ -479,15 +479,18 @@ impl App {
         let base_pan = self.current_pan();
         let enable_crop = self.state.zoom > 1.0;
         let interactive = input_actor.is_interactive(prefetch_pause_after_input);
-        let mut required_pages = vec![visible_pages.anchor_page];
+        let mut required = RequiredRenderPages::new(
+            visible_pages.anchor_page,
+            RenderedPageKey::new(pdf.doc_id(), visible_pages.anchor_page, current_scale),
+        );
         if let Some(trailing_page) = visible_pages.trailing_page {
-            required_pages.push(trailing_page);
+            required.push_trailing(
+                trailing_page,
+                RenderedPageKey::new(pdf.doc_id(), trailing_page, current_scale),
+            );
         }
-        let required_render_keys = required_pages
-            .iter()
-            .map(|page| RenderedPageKey::new(pdf.doc_id(), *page, current_scale))
-            .collect::<Vec<_>>();
-        let current_cached = required_render_keys
+        let current_cached = required
+            .keys()
             .iter()
             .all(|key| self.render.runtime.has_cached_frame(key));
         let presenter_layout_tag = self
@@ -502,7 +505,7 @@ impl App {
             current_scale,
             presenter_layout_tag,
         );
-        let mut current_interest_keys = required_render_keys.clone();
+        let mut current_interest_keys = CurrentInterestKeys::from_required(&required);
         if let Some(preview_plan) = initial_preview.as_ref() {
             current_interest_keys.extend(preview_plan.page_keys.iter().copied());
         }
@@ -521,8 +524,7 @@ impl App {
             enable_crop,
             interactive,
             visible_pages,
-            required_pages,
-            required_render_keys,
+            required,
             current_interest_keys,
             initial_preview,
             presenter_key,

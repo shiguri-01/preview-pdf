@@ -6,6 +6,7 @@
 - `docs/`: specifications and plans. Read relevant docs before implementing features. Keep in sync with code changes.
 
 ## Commands
+- `nix develop`: enter the flake-provided development shell; direnv can load it via `.envrc`.
 - `cargo check`: fast compile validation during iteration.
 - `cargo build`: full debug build.
 - `cargo run`: run locally.

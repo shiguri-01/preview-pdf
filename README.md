@@ -6,6 +6,20 @@
 pvf <file.pdf>
 ```
 
+## Development
+
+With Nix flakes enabled, enter the project development shell:
+
+```bash
+nix develop
+```
+
+Or allow direnv to load it automatically:
+
+```bash
+direnv allow
+```
+
 ## Highlights
 
 - Keyboard-first PDF viewer for the terminal

@@ -38,6 +38,8 @@
 
               gh
               jq
+              python3
+              typst
             ];
           };
         }

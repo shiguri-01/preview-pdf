@@ -1,0 +1,4 @@
+interface:
+  display_name: "Bench"
+  short_description: "Run and interpret preview-pdf benchmark diagnostics"
+  default_prompt: "Use $bench to run preview-pdf benchmark diagnostics and summarize the performance results."

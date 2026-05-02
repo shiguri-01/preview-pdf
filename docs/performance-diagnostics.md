@@ -1,7 +1,9 @@
 # Performance Diagnostics
 
-This document owns developer-facing performance measurement. The public CLI is
-only `pvf <file.pdf>`; diagnostics run through Cargo's bench entry point.
+Use the performance diagnostics bench to measure headless viewer startup,
+navigation, zoom, redraw, render, encode, blit, queue, and cache behavior. The
+public CLI remains `pvf <file.pdf>`; diagnostics run through Cargo's bench entry
+point.
 
 ## Command
 
@@ -25,6 +27,33 @@ Options:
 The bench binary uses `harness = false` and does not use Criterion. It runs the
 same headless app event loop, render worker, presenter encode path, cache path,
 blit path, and redraw scheduling used by the viewer.
+
+## Fixtures
+
+Standard benchmark PDFs are generated from fixture definitions under `benches/fixtures/`.
+Generated PDFs, image assets, and JSON reports go under `target/bench/`.
+
+Generate the standard fixtures from the repository root:
+
+```bash
+mkdir -p target/bench/fixtures target/bench/assets
+typst compile --input pages=10 benches/fixtures/text.typ target/bench/fixtures/text-10-pages.pdf
+typst compile --input pages=1000 benches/fixtures/text.typ target/bench/fixtures/text-1000-pages.pdf
+python3 benches/fixtures/generate-high-res-image.py target/bench/assets/high-res-bench.png
+typst compile --root . --input pages=10 --input image=/target/bench/assets/high-res-bench.png benches/fixtures/high-res-image.typ target/bench/fixtures/high-res-image.pdf
+```
+
+Run the standard benchmark set and write JSON reports:
+
+```bash
+mkdir -p target/bench/reports
+cargo bench --bench perf -- --pdf target/bench/fixtures/text-10-pages.pdf --warmup 1 --iterations 5 --out target/bench/reports/text-10-pages.json
+cargo bench --bench perf -- --pdf target/bench/fixtures/text-1000-pages.pdf --warmup 1 --iterations 5 --out target/bench/reports/text-1000-pages.json
+cargo bench --bench perf -- --pdf target/bench/fixtures/high-res-image.pdf --warmup 1 --iterations 5 --out target/bench/reports/high-res-image.json
+```
+
+Run benchmarks sequentially when comparing results. Parallel runs are acceptable
+for smoke checks, but CPU contention can distort render and wall-clock timings.
 
 ## Scenarios
 
@@ -67,6 +96,7 @@ metrics, cache hit rates, redraw counts, final page, and visited step count.
 ## Code References
 
 - `benches/perf.rs`
+- `benches/fixtures/`
 - `src/perf.rs`
 - `src/app/perf_runner.rs`
 - `src/app/event_loop.rs`

@@ -516,12 +516,12 @@ fn normalize_glyphs_for_search(
         if ignore_whitespace && glyph.ch.is_whitespace() {
             continue;
         }
-        for normalized in normalize_chars(glyph.ch, case_sensitive) {
+        push_normalized_chars(glyph.ch, case_sensitive, |normalized| {
             if !ignore_whitespace || !normalized.is_whitespace() {
                 search_text.push(normalized);
                 char_map.push(glyph_index);
             }
-        }
+        });
     }
 
     (search_text, char_map)
@@ -651,19 +651,29 @@ fn median_rect_extent(glyphs: &[&TextGlyph], extent: RectExtent) -> f32 {
     values[values.len() / 2]
 }
 
-fn normalize_chars(ch: char, case_sensitive: bool) -> Vec<char> {
+fn push_normalized_chars(ch: char, case_sensitive: bool, mut push: impl FnMut(char)) {
     if case_sensitive {
-        vec![ch]
+        push(ch);
     } else {
-        ch.to_lowercase().collect()
+        for normalized in ch.to_lowercase() {
+            push(normalized);
+        }
     }
 }
 
 fn normalize_text_for_search(text: &str, case_sensitive: bool, ignore_whitespace: bool) -> String {
-    text.chars()
-        .flat_map(|ch| normalize_chars(ch, case_sensitive))
-        .filter(|ch| !ignore_whitespace || !ch.is_whitespace())
-        .collect()
+    let mut normalized_text = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if ignore_whitespace && ch.is_whitespace() {
+            continue;
+        }
+        push_normalized_chars(ch, case_sensitive, |normalized| {
+            if !ignore_whitespace || !normalized.is_whitespace() {
+                normalized_text.push(normalized);
+            }
+        });
+    }
+    normalized_text
 }
 
 fn flush_requests(
@@ -1223,6 +1233,36 @@ mod tests {
         assert_eq!(occurrences.len(), 1);
         assert_eq!(occurrences[0].glyph_start, 0);
         assert_eq!(occurrences[0].glyph_end, 0);
+    }
+
+    #[test]
+    fn normalize_text_for_search_preserves_search_semantics() {
+        assert_eq!(
+            super::normalize_text_for_search("İ", false, false),
+            "i\u{307}"
+        );
+        assert_eq!(super::normalize_text_for_search("İ", true, false), "İ");
+        assert_eq!(
+            super::normalize_text_for_search("A \tİ\nB", false, true),
+            "ai\u{307}b"
+        );
+    }
+
+    #[test]
+    #[ignore = "manual timing aid for search normalization changes"]
+    fn normalize_text_for_search_perf() {
+        let sample = "Alpha βeta İSTANBUL  \tfoo\nbar ".repeat(20_000);
+        let started = Instant::now();
+        let mut bytes = 0;
+
+        for _ in 0..100 {
+            bytes += super::normalize_text_for_search(&sample, false, true).len();
+        }
+
+        eprintln!(
+            "normalize_text_for_search_perf: {:?}, output bytes={bytes}",
+            started.elapsed()
+        );
     }
 
     #[test]

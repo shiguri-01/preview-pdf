@@ -33,16 +33,24 @@ pub(crate) fn apply_highlight_overlay(
         return frame.clone();
     }
 
-    let mut pixels = frame_ops_pixel_pool().take(frame.byte_len());
-    pixels.copy_from_slice(&frame.pixels);
+    let mut pixels = None;
     for span in &overlay.spans {
         for page in pages {
             if page.page != span.page {
                 continue;
             }
-            draw_span(&mut pixels, frame.width, frame.height, span, *page);
+            let pixels = pixels.get_or_insert_with(|| {
+                let mut pixels = frame_ops_pixel_pool().take(frame.byte_len());
+                pixels.copy_from_slice(&frame.pixels);
+                pixels
+            });
+            draw_span(pixels, frame.width, frame.height, span, *page);
         }
     }
+
+    let Some(pixels) = pixels else {
+        return frame.clone();
+    };
 
     RgbaFrame {
         width: frame.width,
@@ -276,9 +284,48 @@ fn fill_rect(
 
 #[cfg(test)]
 mod tests {
-    use super::{compose_spread_frame, crop_frame_for_viewport, prepare_presenter_frame};
-    use crate::backend::RgbaFrame;
+    use super::{
+        PageRenderSpace, apply_highlight_overlay, compose_spread_frame, crop_frame_for_viewport,
+        prepare_presenter_frame,
+    };
+    use crate::backend::{PdfRect, RgbaFrame};
+    use crate::highlight::{
+        HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle,
+    };
     use crate::presenter::{PanOffset, Viewport};
+
+    #[test]
+    fn apply_highlight_overlay_without_visible_span_reuses_pixel_buffer() {
+        let frame = RgbaFrame {
+            width: 2,
+            height: 2,
+            pixels: vec![7; 16].into(),
+        };
+        let overlay = HighlightOverlaySnapshot::new(vec![HighlightSpan {
+            source: HighlightSource::Search,
+            page: 3,
+            rects: vec![PdfRect {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 1.0,
+                y1: 1.0,
+            }],
+            style: HighlightStyle::SEARCH_HIT,
+        }]);
+        let pages = [PageRenderSpace {
+            page: 1,
+            origin_x_px: 0,
+            origin_y_px: 0,
+            width_px: 2,
+            height_px: 2,
+            width_pt: 2.0,
+            height_pt: 2.0,
+        }];
+
+        let highlighted = apply_highlight_overlay(&frame, &overlay, &pages);
+
+        assert!(frame.pixels.ptr_eq(&highlighted.pixels));
+    }
 
     #[test]
     fn crop_frame_for_viewport_applies_pan_offset() {

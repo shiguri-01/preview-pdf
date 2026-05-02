@@ -19,8 +19,15 @@ pub(crate) enum TerminalFrameState {
 }
 
 pub(crate) struct TerminalFrameEntry {
-    pub(crate) state: TerminalFrameState,
-    pub(crate) approx_bytes: usize,
+    state: TerminalFrameState,
+    approx_bytes: usize,
+}
+
+impl TerminalFrameEntry {
+    #[cfg(test)]
+    pub(crate) fn state(&self) -> &TerminalFrameState {
+        &self.state
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,6 +49,7 @@ pub(crate) struct TerminalFrameCache {
     memory_budget_bytes: usize,
     pub(crate) entries: LruCache<TerminalFrameKey, TerminalFrameEntry>,
     pub(crate) memory_bytes: usize,
+    pending_work_count: usize,
     counters: CacheCounters,
 }
 
@@ -61,6 +69,7 @@ impl TerminalFrameCache {
                 NonZeroUsize::new(max_entries).expect("l2 cache entries is non-zero"),
             ),
             memory_bytes: 0,
+            pending_work_count: 0,
             counters: CacheCounters::default(),
         }
     }
@@ -92,9 +101,7 @@ impl TerminalFrameCache {
                 return false;
             }
 
-            if let Some(prev) = self.entries.pop(&key) {
-                self.memory_bytes = self.memory_bytes.saturating_sub(prev.approx_bytes);
-            }
+            self.pop_entry(&key);
 
             // Keep the visible ready frame resident while swapping in an oversize current
             // entry. We allow this narrow over-budget state so the viewer never regresses
@@ -107,13 +114,17 @@ impl TerminalFrameCache {
                 .filter(|protected| *protected != key);
             self.retain_only(protected_key);
             self.memory_bytes = self.memory_bytes.saturating_add(approx_bytes);
-            self.entries.put(
+            self.pending_work_count += 1;
+            if let Some((_evicted_key, evicted)) = self.entries.push(
                 key,
                 TerminalFrameEntry {
                     state: TerminalFrameState::PendingFrame(frame),
                     approx_bytes,
                 },
-            );
+            ) {
+                self.memory_bytes = self.memory_bytes.saturating_sub(evicted.approx_bytes);
+                self.note_removed_state(&evicted.state);
+            }
             return true;
         }
 
@@ -127,29 +138,19 @@ impl TerminalFrameCache {
             return false;
         }
 
-        if let Some(prev) = self.entries.pop(&key) {
-            self.memory_bytes = self.memory_bytes.saturating_sub(prev.approx_bytes);
-        }
-
-        let implicit_evicted_bytes =
-            if self.entries.len() >= self.max_entries && self.entries.peek(&key).is_none() {
-                self.entries
-                    .peek_lru()
-                    .map(|(_key, entry)| entry.approx_bytes)
-            } else {
-                None
-            };
+        self.pop_entry(&key);
 
         self.memory_bytes += approx_bytes;
-        self.entries.put(
+        self.pending_work_count += 1;
+        if let Some((_evicted_key, evicted)) = self.entries.push(
             key,
             TerminalFrameEntry {
                 state: TerminalFrameState::PendingFrame(frame),
                 approx_bytes,
             },
-        );
-        if let Some(evicted_bytes) = implicit_evicted_bytes {
-            self.memory_bytes = self.memory_bytes.saturating_sub(evicted_bytes);
+        ) {
+            self.memory_bytes = self.memory_bytes.saturating_sub(evicted.approx_bytes);
+            self.note_removed_state(&evicted.state);
         }
         self.evict_while_needed(protected_key);
         true
@@ -178,25 +179,38 @@ impl TerminalFrameCache {
     }
 
     pub(crate) fn has_pending_work(&self) -> bool {
-        self.entries.iter().any(|(_key, entry)| {
-            matches!(
-                &entry.state,
-                TerminalFrameState::PendingFrame(_) | TerminalFrameState::Encoding
-            )
-        })
+        self.pending_work_count > 0
+    }
+
+    pub(crate) fn set_state(&mut self, key: &TerminalFrameKey, state: TerminalFrameState) -> bool {
+        self.replace_state(key, state).is_some()
+    }
+
+    pub(crate) fn replace_state(
+        &mut self,
+        key: &TerminalFrameKey,
+        state: TerminalFrameState,
+    ) -> Option<TerminalFrameState> {
+        let entry = self.entries.peek_mut(key)?;
+        let old_state = std::mem::replace(&mut entry.state, state);
+        let old_pending = state_has_pending_work(&old_state);
+        let new_pending = state_has_pending_work(&entry.state);
+        match (old_pending, new_pending) {
+            (true, false) => self.pending_work_count = self.pending_work_count.saturating_sub(1),
+            (false, true) => self.pending_work_count += 1,
+            _ => {}
+        }
+        Some(old_state)
     }
 
     pub(crate) fn clear(&mut self) {
         self.entries.clear();
         self.memory_bytes = 0;
+        self.pending_work_count = 0;
     }
 
     pub(crate) fn remove(&mut self, key: &TerminalFrameKey) -> bool {
-        let Some(entry) = self.entries.pop(key) else {
-            return false;
-        };
-        self.memory_bytes = self.memory_bytes.saturating_sub(entry.approx_bytes);
-        true
+        self.pop_entry(key).is_some()
     }
 
     fn evict_while_needed(&mut self, protected_key: Option<TerminalFrameKey>) {
@@ -211,6 +225,7 @@ impl TerminalFrameCache {
                 break;
             };
             self.memory_bytes = self.memory_bytes.saturating_sub(entry.approx_bytes);
+            self.note_removed_state(&entry.state);
         }
     }
 
@@ -256,4 +271,24 @@ impl TerminalFrameCache {
             }
         }
     }
+
+    fn pop_entry(&mut self, key: &TerminalFrameKey) -> Option<TerminalFrameEntry> {
+        let entry = self.entries.pop(key)?;
+        self.memory_bytes = self.memory_bytes.saturating_sub(entry.approx_bytes);
+        self.note_removed_state(&entry.state);
+        Some(entry)
+    }
+
+    fn note_removed_state(&mut self, state: &TerminalFrameState) {
+        if state_has_pending_work(state) {
+            self.pending_work_count = self.pending_work_count.saturating_sub(1);
+        }
+    }
+}
+
+fn state_has_pending_work(state: &TerminalFrameState) -> bool {
+    matches!(
+        state,
+        TerminalFrameState::PendingFrame(_) | TerminalFrameState::Encoding
+    )
 }

@@ -242,7 +242,7 @@ impl RatatuiImagePresenter {
                     self.state.perf_stats.record_convert(elapsed);
                 }
 
-                let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
+                if self.state.l2_cache.cached_mut(&key).is_none() {
                     self.state
                         .perf_stats
                         .set_l2_hit_rate(self.state.l2_cache.hit_rate());
@@ -251,15 +251,16 @@ impl RatatuiImagePresenter {
                     });
                 };
 
-                if succeeded {
+                let state = if succeeded {
                     if let Some(protocol) = protocol {
-                        entry.state = TerminalFrameState::Ready(protocol);
+                        TerminalFrameState::Ready(protocol)
                     } else {
-                        entry.state = TerminalFrameState::Failed;
+                        TerminalFrameState::Failed
                     }
                 } else {
-                    entry.state = TerminalFrameState::Failed;
-                }
+                    TerminalFrameState::Failed
+                };
+                self.state.l2_cache.set_state(&key, state);
 
                 Some(PresenterBackgroundEvent::EncodeComplete {
                     redraw_requested: Some(key) == current_key,
@@ -358,13 +359,17 @@ impl RatatuiImagePresenter {
         area: Rect,
         key: TerminalFrameKey,
     ) -> AppResult<bool> {
-        let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
+        if self.state.l2_cache.cached_mut(&key).is_none() {
             if Some(key) == self.state.last_ready_key {
                 self.state.last_ready_key = None;
             }
             return Ok(false);
         };
-        let state = std::mem::replace(&mut entry.state, TerminalFrameState::Encoding);
+        let state = self
+            .state
+            .l2_cache
+            .replace_state(&key, TerminalFrameState::Encoding)
+            .expect("entry existence checked above");
         match state {
             TerminalFrameState::Ready(mut protocol) => {
                 let blit_start = std::time::Instant::now();
@@ -372,14 +377,18 @@ impl RatatuiImagePresenter {
                 let render_area = center_rect_within(area, target_size.width, target_size.height);
                 frame.render_widget(Clear, area);
                 if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
-                    entry.state = TerminalFrameState::Failed;
+                    self.state
+                        .l2_cache
+                        .set_state(&key, TerminalFrameState::Failed);
                     self.state
                         .perf_stats
                         .set_l2_hit_rate(self.state.l2_cache.hit_rate());
                     return Err(err);
                 }
                 self.state.perf_stats.record_blit(blit_start.elapsed());
-                entry.state = TerminalFrameState::Ready(protocol);
+                self.state
+                    .l2_cache
+                    .set_state(&key, TerminalFrameState::Ready(protocol));
                 self.state.last_ready_key = Some(key);
                 self.state
                     .perf_stats
@@ -387,21 +396,27 @@ impl RatatuiImagePresenter {
                 Ok(true)
             }
             TerminalFrameState::PendingFrame(frame) => {
-                entry.state = TerminalFrameState::PendingFrame(frame);
+                self.state
+                    .l2_cache
+                    .set_state(&key, TerminalFrameState::PendingFrame(frame));
                 self.state
                     .perf_stats
                     .set_l2_hit_rate(self.state.l2_cache.hit_rate());
                 Ok(false)
             }
             TerminalFrameState::Encoding => {
-                entry.state = TerminalFrameState::Encoding;
+                self.state
+                    .l2_cache
+                    .set_state(&key, TerminalFrameState::Encoding);
                 self.state
                     .perf_stats
                     .set_l2_hit_rate(self.state.l2_cache.hit_rate());
                 Ok(false)
             }
             TerminalFrameState::Failed => {
-                entry.state = TerminalFrameState::Failed;
+                self.state
+                    .l2_cache
+                    .set_state(&key, TerminalFrameState::Failed);
                 if Some(key) == self.state.last_ready_key {
                     self.state.last_ready_key = None;
                 }
@@ -514,14 +529,18 @@ impl ImagePresenter for RatatuiImagePresenter {
         );
         let font_size = self.config.picker.font_size();
         let request_tx = self.encode_request_tx(EncodeLaneKind::Background);
-        let Some(entry) = self.state.l2_cache.cached_mut(&key) else {
+        if self.state.l2_cache.cached_mut(&key).is_none() {
             self.state
                 .perf_stats
                 .set_l2_hit_rate(self.state.l2_cache.hit_rate());
             return Ok(());
         };
 
-        let state = std::mem::replace(&mut entry.state, TerminalFrameState::Encoding);
+        let state = self
+            .state
+            .l2_cache
+            .replace_state(&key, TerminalFrameState::Encoding)
+            .expect("entry existence checked above");
         match state {
             TerminalFrameState::PendingFrame(frame) => {
                 let area = centered_fit_area(frame.width, frame.height, font_size, viewport_area);
@@ -535,28 +554,31 @@ impl ImagePresenter for RatatuiImagePresenter {
                     generation,
                     enqueued_at: Instant::now(),
                 };
-                match send_encode_request(&request_tx, request) {
-                    Ok(()) => {
-                        entry.state = TerminalFrameState::Encoding;
-                    }
+                let new_state = match send_encode_request(&request_tx, request) {
+                    Ok(()) => TerminalFrameState::Encoding,
                     Err(err) => match *err {
                         EncodeWorkerRequest::Encode { frame, .. } => {
-                            entry.state = TerminalFrameState::PendingFrame(frame);
+                            TerminalFrameState::PendingFrame(frame)
                         }
-                        EncodeWorkerRequest::Shutdown => {
-                            entry.state = TerminalFrameState::Failed;
-                        }
+                        EncodeWorkerRequest::Shutdown => TerminalFrameState::Failed,
                     },
-                }
+                };
+                self.state.l2_cache.set_state(&key, new_state);
             }
             TerminalFrameState::Encoding => {
-                entry.state = TerminalFrameState::Encoding;
+                self.state
+                    .l2_cache
+                    .set_state(&key, TerminalFrameState::Encoding);
             }
             TerminalFrameState::Ready(protocol) => {
-                entry.state = TerminalFrameState::Ready(protocol);
+                self.state
+                    .l2_cache
+                    .set_state(&key, TerminalFrameState::Ready(protocol));
             }
             TerminalFrameState::Failed => {
-                entry.state = TerminalFrameState::Failed;
+                self.state
+                    .l2_cache
+                    .set_state(&key, TerminalFrameState::Failed);
             }
         }
 
@@ -612,12 +634,11 @@ impl ImagePresenter for RatatuiImagePresenter {
         }
 
         let feedback = {
-            let entry = self
+            let state = self
                 .state
                 .l2_cache
-                .cached_mut(&key)
+                .replace_state(&key, TerminalFrameState::Encoding)
                 .expect("current key existence checked above");
-            let state = std::mem::replace(&mut entry.state, TerminalFrameState::Encoding);
             match state {
                 TerminalFrameState::Ready(mut protocol) => {
                     let blit_start = std::time::Instant::now();
@@ -629,14 +650,18 @@ impl ImagePresenter for RatatuiImagePresenter {
                     let render_area =
                         center_rect_within(area, target_size.width, target_size.height);
                     if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
-                        entry.state = TerminalFrameState::Failed;
+                        self.state
+                            .l2_cache
+                            .set_state(&key, TerminalFrameState::Failed);
                         self.state
                             .perf_stats
                             .set_l2_hit_rate(self.state.l2_cache.hit_rate());
                         return Err(err);
                     }
                     self.state.perf_stats.record_blit(blit_start.elapsed());
-                    entry.state = TerminalFrameState::Ready(protocol);
+                    self.state
+                        .l2_cache
+                        .set_state(&key, TerminalFrameState::Ready(protocol));
                     self.state.last_ready_key = Some(key);
                     self.state
                         .perf_stats
@@ -669,25 +694,27 @@ impl ImagePresenter for RatatuiImagePresenter {
                         enqueued_at: Instant::now(),
                     };
 
-                    match send_encode_request(&request_tx, request) {
-                        Ok(()) => {
-                            entry.state = TerminalFrameState::Encoding;
-                            PresenterFeedback::Pending
-                        }
+                    let (new_state, feedback) = match send_encode_request(&request_tx, request) {
+                        Ok(()) => (TerminalFrameState::Encoding, PresenterFeedback::Pending),
                         Err(err) => match *err {
                             EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown => {
-                                entry.state = TerminalFrameState::Failed;
-                                PresenterFeedback::Failed
+                                (TerminalFrameState::Failed, PresenterFeedback::Failed)
                             }
                         },
-                    }
+                    };
+                    self.state.l2_cache.set_state(&key, new_state);
+                    feedback
                 }
                 TerminalFrameState::Encoding => {
-                    entry.state = TerminalFrameState::Encoding;
+                    self.state
+                        .l2_cache
+                        .set_state(&key, TerminalFrameState::Encoding);
                     PresenterFeedback::Pending
                 }
                 TerminalFrameState::Failed => {
-                    entry.state = TerminalFrameState::Failed;
+                    self.state
+                        .l2_cache
+                        .set_state(&key, TerminalFrameState::Failed);
                     PresenterFeedback::Failed
                 }
             }

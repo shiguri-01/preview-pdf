@@ -271,7 +271,7 @@ fn prefetch_encode_advances_entry_to_ready() {
                 .l2_cache
                 .entries
                 .get(&key)
-                .map(|entry| &entry.state),
+                .map(|entry| entry.state()),
             Some(TerminalFrameState::Ready(_))
         );
         if ready {
@@ -596,9 +596,10 @@ fn render_returns_failed_feedback_for_failed_current_entry() {
         .state
         .current_key
         .expect("current key should exist");
-    if let Some(entry) = presenter.state.l2_cache.cached_mut(&key) {
-        entry.state = TerminalFrameState::Failed;
-    }
+    presenter
+        .state
+        .l2_cache
+        .set_state(&key, TerminalFrameState::Failed);
 
     let backend = TestBackend::new(20, 10);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
@@ -656,9 +657,10 @@ fn render_failed_does_not_use_stale_fallback_when_disallowed() {
         .state
         .current_key
         .expect("current key should exist");
-    if let Some(entry) = presenter.state.l2_cache.cached_mut(&key) {
-        entry.state = TerminalFrameState::Failed;
-    }
+    presenter
+        .state
+        .l2_cache
+        .set_state(&key, TerminalFrameState::Failed);
 
     let backend = TestBackend::new(20, 10);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
@@ -734,7 +736,7 @@ fn render_reports_failed_feedback_when_encode_worker_is_disconnected() {
             .l2_cache
             .entries
             .get(&key)
-            .map(|entry| &entry.state),
+            .map(|entry| entry.state()),
         Some(TerminalFrameState::Failed)
     ));
 }
@@ -940,11 +942,42 @@ fn l2_insert_keeps_pending_frame_buffer_shared() {
     let source = frame();
     let _ = cache.insert(key, source.clone(), source.byte_len(), false, None);
 
-    let stored_pixels = match cache.cached_mut(&key).map(|entry| &entry.state) {
+    let stored_pixels = match cache.cached_mut(&key).map(|entry| entry.state()) {
         Some(TerminalFrameState::PendingFrame(frame)) => &frame.pixels,
         _ => panic!("expected pending frame"),
     };
     assert!(source.pixels.ptr_eq(stored_pixels));
+}
+
+#[test]
+fn l2_pending_work_tracks_state_transitions() {
+    let mut cache = TerminalFrameCache::default();
+    let key = l2_key(0);
+    let _ = cache.insert(key, frame(), 16, false, None);
+    assert!(cache.has_pending_work());
+
+    assert!(cache.set_state(&key, TerminalFrameState::Failed));
+    assert!(!cache.has_pending_work());
+
+    assert!(cache.set_state(&key, TerminalFrameState::Encoding));
+    assert!(cache.has_pending_work());
+
+    assert!(cache.remove(&key));
+    assert!(!cache.has_pending_work());
+}
+
+#[test]
+fn l2_pending_work_tracks_eviction_and_clear() {
+    let mut cache = TerminalFrameCache::new(1, 64);
+    let first = l2_key(0);
+    let second = l2_key(1);
+    assert!(cache.insert(first, frame(), 16, false, None));
+    assert!(cache.insert(second, frame(), 16, false, None));
+    assert!(cache.cached_mut(&first).is_none());
+    assert!(cache.has_pending_work());
+
+    cache.clear();
+    assert!(!cache.has_pending_work());
 }
 
 #[test]

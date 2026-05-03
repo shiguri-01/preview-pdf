@@ -483,35 +483,47 @@ fn locate_occurrences_with_strategy(
         return Vec::new();
     }
 
-    let search_chars: Vec<char> = search_text.chars().collect();
-    let query_chars: Vec<char> = query_text.chars().collect();
-    let query_len = query_chars.len();
-    if query_len == 0 || query_len > search_chars.len() {
+    if query_text.len() > search_text.len() {
+        return Vec::new();
+    }
+
+    let char_byte_offsets: Vec<usize> = search_text
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .collect();
+    let query_char_len = query_text.chars().count();
+    if query_char_len == 0 || query_char_len > char_map.len() {
         return Vec::new();
     }
 
     let mut occurrences = Vec::new();
-    let mut cursor = 0;
+    let mut cursor_byte = 0;
     // Matches are intentionally non-overlapping "find in page" hits: after matching
-    // `search_chars[cursor..cursor + query_len]` against `query_chars`, we advance `cursor` by
-    // `query_len`, so overlapping occurrences are skipped by design.
-    while cursor + query_len <= search_chars.len() {
-        if search_chars[cursor..cursor + query_len] == query_chars[..] {
-            let glyph_start = char_map[cursor];
-            let glyph_end = char_map[cursor + query_len - 1];
-            let rects = merge_occurrence_rects(&glyphs[glyph_start..=glyph_end]);
-            occurrences.push(SearchOccurrence {
-                glyph_start,
-                glyph_end,
-                rects,
-                snippet: String::new(),
-                snippet_match_start: None,
-                snippet_match_end: None,
-            });
-            cursor += query_len;
-        } else {
-            cursor += 1;
-        }
+    // `query_text`, advance by its byte length so overlapping occurrences are skipped by design.
+    while cursor_byte <= search_text.len() {
+        let Some(relative_match_byte) = search_text[cursor_byte..].find(&query_text) else {
+            break;
+        };
+        let match_byte = cursor_byte + relative_match_byte;
+        let match_char_start = char_byte_offsets.binary_search(&match_byte);
+        debug_assert!(
+            match_char_start.is_ok(),
+            "str::find returned a non-character-boundary offset"
+        );
+        let match_char_start =
+            match_char_start.expect("str::find returned a non-character-boundary offset");
+        let glyph_start = char_map[match_char_start];
+        let glyph_end = char_map[match_char_start + query_char_len - 1];
+        let rects = merge_occurrence_rects(&glyphs[glyph_start..=glyph_end]);
+        occurrences.push(SearchOccurrence {
+            glyph_start,
+            glyph_end,
+            rects,
+            snippet: String::new(),
+            snippet_match_start: None,
+            snippet_match_end: None,
+        });
+        cursor_byte = match_byte + query_text.len();
     }
 
     occurrences
@@ -1330,6 +1342,37 @@ mod tests {
         assert_eq!(occurrences[0].glyph_end, 5);
         assert_eq!(occurrences[1].glyph_start, 7);
         assert_eq!(occurrences[1].glyph_end, 13);
+    }
+
+    #[test]
+    fn locate_occurrences_skips_overlapping_matches() {
+        let glyphs = vec![
+            glyph('a', 10.0, 20.0, 18.0, 32.0),
+            glyph('a', 20.0, 20.0, 28.0, 32.0),
+            glyph('a', 30.0, 20.0, 38.0, 32.0),
+        ];
+
+        let occurrences = locate_occurrences(&glyphs, "aa", true);
+
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].glyph_start, 0);
+        assert_eq!(occurrences[0].glyph_end, 1);
+    }
+
+    #[test]
+    fn locate_occurrences_maps_multibyte_byte_offsets_to_char_positions() {
+        let glyphs = vec![
+            glyph('a', 10.0, 20.0, 18.0, 32.0),
+            glyph('β', 20.0, 20.0, 28.0, 32.0),
+            glyph('a', 30.0, 20.0, 38.0, 32.0),
+            glyph('β', 40.0, 20.0, 48.0, 32.0),
+        ];
+
+        let occurrences = locate_occurrences(&glyphs, "βa", true);
+
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].glyph_start, 1);
+        assert_eq!(occurrences[0].glyph_end, 2);
     }
 
     #[test]

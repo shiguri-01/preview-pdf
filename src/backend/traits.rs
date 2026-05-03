@@ -195,12 +195,16 @@ fn push_extracted_char(
 ) {
     if ch == '\n' || ch == '\r' {
         push_newline(out);
-        *last_rect = bbox;
+        if bbox.is_some() {
+            *last_rect = bbox;
+        }
         return;
     }
     if ch.is_whitespace() {
         push_space(out);
-        *last_rect = bbox;
+        if bbox.is_some() {
+            *last_rect = bbox;
+        }
         return;
     }
 
@@ -211,7 +215,9 @@ fn push_extracted_char(
     }
 
     out.push(ch);
-    *last_rect = bbox;
+    if bbox.is_some() {
+        *last_rect = bbox;
+    }
 }
 
 fn push_newline(out: &mut String) {
@@ -342,6 +348,41 @@ mod tests {
                 },
             ],
             dropped_glyphs: 0,
+        };
+
+        assert_eq!(page.extracted_text(), "A\nB");
+    }
+
+    #[test]
+    fn text_page_extracted_text_keeps_line_context_across_unbounded_space() {
+        let page = TextPage {
+            width_pt: 100.0,
+            height_pt: 100.0,
+            glyphs: vec![
+                TextGlyph {
+                    ch: 'A',
+                    bbox: Some(PdfRect {
+                        x0: 1.0,
+                        y0: 1.0,
+                        x1: 2.0,
+                        y1: 2.0,
+                    }),
+                },
+                TextGlyph {
+                    ch: ' ',
+                    bbox: None,
+                },
+                TextGlyph {
+                    ch: 'B',
+                    bbox: Some(PdfRect {
+                        x0: 1.0,
+                        y0: 20.0,
+                        x1: 2.0,
+                        y1: 21.0,
+                    }),
+                },
+            ],
+            dropped_glyphs: 1,
         };
 
         assert_eq!(page.extracted_text(), "A\nB");

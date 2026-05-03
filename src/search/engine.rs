@@ -292,38 +292,41 @@ fn run_job(
             WorkerControl::Shutdown => return WorkerControl::Shutdown,
         }
 
-        let text = match doc.extract_text(page) {
-            Ok(text) => text,
-            Err(err) => {
-                let _ = event_tx.send(SearchEvent::Failed {
-                    generation: job.generation,
-                    message: err.to_string(),
-                });
-                return WorkerControl::Continue;
-            }
-        };
-
-        if job.matcher.matches_page(&text, &query) {
-            let occurrences = match doc.extract_positioned_text(page) {
-                Ok(text_page) => {
-                    if text_page.dropped_glyphs > 0 {
-                        highlight_unavailable = true;
-                    }
-                    let mut occurrences = job.matcher.locate_matches(&text_page, &query);
+        match doc.extract_positioned_text(page) {
+            Ok(text_page) => {
+                let mut occurrences = job.matcher.locate_matches(&text_page, &query);
+                // Keep `extract_text` out of the primary search path: once positioned text is
+                // available, the glyph stream is the searchable source of truth.
+                if !occurrences.is_empty() {
                     for occurrence in &mut occurrences {
+                        if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
+                            highlight_unavailable = true;
+                        }
                         apply_hit_snippet(occurrence, &text_page.glyphs);
                     }
-                    if occurrences.is_empty() {
-                        highlight_unavailable = true;
+                    hits.push(SearchPageHit { page, occurrences });
+                }
+            }
+            Err(_) => {
+                let text = match doc.extract_text(page) {
+                    Ok(text) => text,
+                    Err(err) => {
+                        let _ = event_tx.send(SearchEvent::Failed {
+                            generation: job.generation,
+                            message: err.to_string(),
+                        });
+                        return WorkerControl::Continue;
                     }
-                    occurrences
-                }
-                Err(_) => {
+                };
+
+                if job.matcher.matches_page(&text, &query) {
+                    hits.push(SearchPageHit {
+                        page,
+                        occurrences: Vec::new(),
+                    });
                     highlight_unavailable = true;
-                    Vec::new()
                 }
-            };
-            hits.push(SearchPageHit { page, occurrences });
+            }
         }
 
         let scanned_pages = page + 1;
@@ -343,6 +346,20 @@ fn run_job(
         highlight_unavailable,
     });
     WorkerControl::Continue
+}
+
+fn occurrence_highlight_unavailable(occurrence: &SearchOccurrence, glyphs: &[TextGlyph]) -> bool {
+    if occurrence.rects.is_empty() {
+        return true;
+    }
+
+    let Some(slice) = glyphs.get(occurrence.glyph_start..=occurrence.glyph_end) else {
+        return true;
+    };
+
+    slice
+        .iter()
+        .any(|glyph| !glyph.ch.is_whitespace() && glyph.bbox.is_none())
 }
 
 pub(crate) fn locate_occurrences(
@@ -483,18 +500,14 @@ fn locate_occurrences_with_strategy(
             let glyph_start = char_map[cursor];
             let glyph_end = char_map[cursor + query_len - 1];
             let rects = merge_occurrence_rects(&glyphs[glyph_start..=glyph_end]);
-            if !rects.is_empty() {
-                occurrences.push(SearchOccurrence {
-                    glyph_start,
-                    glyph_end,
-                    rects,
-                    snippet: String::new(),
-                    snippet_match_start: None,
-                    snippet_match_end: None,
-                });
-            }
-            // Empty rects can come from all-whitespace glyph slices; we intentionally drop that
-            // occurrence and still advance the cursor, leaving highlight_unavailable to the caller.
+            occurrences.push(SearchOccurrence {
+                glyph_start,
+                glyph_end,
+                rects,
+                snippet: String::new(),
+                snippet_match_start: None,
+                snippet_match_end: None,
+            });
             cursor += query_len;
         } else {
             cursor += 1;
@@ -528,9 +541,15 @@ fn normalize_glyphs_for_search(
 }
 
 fn merge_occurrence_rects(glyphs: &[TextGlyph]) -> Vec<PdfRect> {
-    let glyphs: Vec<&TextGlyph> = glyphs
+    let glyphs: Vec<HighlightGlyph> = glyphs
         .iter()
-        .filter(|glyph| !glyph.ch.is_whitespace())
+        .filter_map(|glyph| {
+            if glyph.ch.is_whitespace() {
+                None
+            } else {
+                glyph.bbox.map(|bbox| HighlightGlyph { bbox })
+            }
+        })
         .collect();
     if glyphs.is_empty() {
         return Vec::new();
@@ -543,11 +562,12 @@ fn merge_occurrence_rects(glyphs: &[TextGlyph]) -> Vec<PdfRect> {
     let mut current = glyphs[0].bbox;
 
     for glyph in glyphs.iter().skip(1) {
-        if belongs_to_run(current, glyph.bbox, merge_axis, median_width, median_height) {
-            current = union_rects(current, glyph.bbox);
+        let bbox = glyph.bbox;
+        if belongs_to_run(current, bbox, merge_axis, median_width, median_height) {
+            current = union_rects(current, bbox);
         } else {
             rects.push(current);
-            current = glyph.bbox;
+            current = bbox;
         }
     }
 
@@ -555,10 +575,15 @@ fn merge_occurrence_rects(glyphs: &[TextGlyph]) -> Vec<PdfRect> {
     rects
 }
 
+#[derive(Debug, Clone, Copy)]
+struct HighlightGlyph {
+    bbox: PdfRect,
+}
+
 // Choose the screen-space axis used to merge highlight rectangles.
 // This is not a writing-mode detector: rotated horizontal text may still merge
 // on the vertical axis if that better matches the glyph layout on the page.
-fn infer_merge_axis(glyphs: &[&TextGlyph]) -> MergeAxis {
+fn infer_merge_axis(glyphs: &[HighlightGlyph]) -> MergeAxis {
     let mut horizontal_score = 0.0f32;
     let mut vertical_score = 0.0f32;
 
@@ -566,10 +591,12 @@ fn infer_merge_axis(glyphs: &[&TextGlyph]) -> MergeAxis {
         let [left, right] = pair else {
             continue;
         };
+        let left_bbox = left.bbox;
+        let right_bbox = right.bbox;
         horizontal_score +=
-            overlap_ratio_1d(left.bbox.y0, left.bbox.y1, right.bbox.y0, right.bbox.y1);
+            overlap_ratio_1d(left_bbox.y0, left_bbox.y1, right_bbox.y0, right_bbox.y1);
         vertical_score +=
-            overlap_ratio_1d(left.bbox.x0, left.bbox.x1, right.bbox.x0, right.bbox.x1);
+            overlap_ratio_1d(left_bbox.x0, left_bbox.x1, right_bbox.x0, right_bbox.x1);
     }
 
     if vertical_score > horizontal_score {
@@ -634,7 +661,7 @@ fn union_rects(left: PdfRect, right: PdfRect) -> PdfRect {
     }
 }
 
-fn median_rect_extent(glyphs: &[&TextGlyph], extent: RectExtent) -> f32 {
+fn median_rect_extent(glyphs: &[HighlightGlyph], extent: RectExtent) -> f32 {
     let mut values: Vec<f32> = glyphs
         .iter()
         .map(|glyph| match extent {
@@ -993,14 +1020,20 @@ mod tests {
     }
 
     #[test]
-    fn search_marks_highlight_unavailable_when_match_has_no_geometry() {
+    fn search_uses_positioned_text_even_when_extract_text_does_not_match() {
         let mut engine = SearchEngine::new();
         let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
-            "alpha beta",
+            "",
             TextPage {
                 width_pt: 100.0,
                 height_pt: 100.0,
-                glyphs: Vec::new(),
+                glyphs: vec![
+                    glyph('a', 0.0, 0.0, 10.0, 10.0),
+                    glyph('l', 10.0, 0.0, 20.0, 10.0),
+                    glyph('p', 20.0, 0.0, 30.0, 10.0),
+                    glyph('h', 30.0, 0.0, 40.0, 10.0),
+                    glyph('a', 40.0, 0.0, 50.0, 10.0),
+                ],
                 dropped_glyphs: 0,
             },
         ));
@@ -1016,19 +1049,61 @@ mod tests {
 
         let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hits.len(), 1);
-        assert!(hits[0].occurrences.is_empty());
-        assert!(highlight_unavailable);
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert!(!highlight_unavailable);
     }
 
     #[test]
-    fn search_treats_dropped_positioned_glyphs_as_highlight_failure() {
+    fn search_keeps_occurrence_when_match_has_no_geometry() {
         let mut engine = SearchEngine::new();
         let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
             "alpha beta",
             TextPage {
                 width_pt: 100.0,
                 height_pt: 100.0,
-                glyphs: vec![glyph('a', 0.0, 0.0, 10.0, 10.0)],
+                glyphs: vec![
+                    glyph_without_bbox('a'),
+                    glyph_without_bbox('l'),
+                    glyph_without_bbox('p'),
+                    glyph_without_bbox('h'),
+                    glyph_without_bbox('a'),
+                ],
+                dropped_glyphs: 5,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert!(hits[0].occurrences[0].rects.is_empty());
+        assert_eq!(hits[0].occurrences[0].snippet, "alpha");
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
+    fn search_marks_highlight_unavailable_when_matched_glyph_lacks_geometry() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "alpha beta",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: vec![
+                    glyph('a', 0.0, 0.0, 10.0, 10.0),
+                    glyph('l', 10.0, 0.0, 20.0, 10.0),
+                    glyph_without_bbox('p'),
+                    glyph('h', 30.0, 0.0, 40.0, 10.0),
+                    glyph('a', 40.0, 0.0, 50.0, 10.0),
+                ],
                 dropped_glyphs: 1,
             },
         ));
@@ -1044,12 +1119,13 @@ mod tests {
 
         let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hits.len(), 1);
-        assert!(hits[0].occurrences.is_empty());
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert_eq!(hits[0].occurrences[0].rects.len(), 1);
         assert!(highlight_unavailable);
     }
 
     #[test]
-    fn search_marks_highlight_unavailable_when_dropped_glyphs_and_occurrences_exist() {
+    fn search_ignores_dropped_glyphs_when_matched_glyphs_have_geometry() {
         let mut engine = SearchEngine::new();
         let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
             "alpha beta",
@@ -1079,7 +1155,39 @@ mod tests {
         let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].occurrences.len(), 1);
-        assert!(highlight_unavailable);
+        assert!(!highlight_unavailable);
+    }
+
+    #[test]
+    fn search_uses_glyph_order_without_coordinate_newline_inference() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: vec![
+                    glyph('縦', 80.0, 10.0, 92.0, 22.0),
+                    glyph('書', 80.0, 24.0, 92.0, 36.0),
+                    glyph('き', 80.0, 38.0, 92.0, 50.0),
+                ],
+                dropped_glyphs: 0,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "縦書き",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert!(!highlight_unavailable);
     }
 
     #[test]
@@ -1327,8 +1435,12 @@ mod tests {
     fn glyph(ch: char, x0: f32, y0: f32, x1: f32, y1: f32) -> TextGlyph {
         TextGlyph {
             ch,
-            bbox: PdfRect { x0, y0, x1, y1 },
+            bbox: Some(PdfRect { x0, y0, x1, y1 }),
         }
+    }
+
+    fn glyph_without_bbox(ch: char) -> TextGlyph {
+        TextGlyph { ch, bbox: None }
     }
 
     fn unique_temp_path(suffix: &str) -> PathBuf {

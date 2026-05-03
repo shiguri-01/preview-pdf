@@ -159,8 +159,11 @@ impl PdfRect {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextGlyph {
+    /// Unicode text extracted from the PDF glyph stream.
     pub ch: char,
-    pub bbox: PdfRect,
+    /// Page-space glyph bounds when available. Missing bounds disable highlighting for affected
+    /// search hits, but the character remains searchable.
+    pub bbox: Option<PdfRect>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -184,26 +187,31 @@ impl TextPage {
 
 const LINE_BREAK_THRESHOLD: f32 = 6.0;
 
-fn push_extracted_char(out: &mut String, ch: char, bbox: PdfRect, last_rect: &mut Option<PdfRect>) {
+fn push_extracted_char(
+    out: &mut String,
+    ch: char,
+    bbox: Option<PdfRect>,
+    last_rect: &mut Option<PdfRect>,
+) {
     if ch == '\n' || ch == '\r' {
         push_newline(out);
-        *last_rect = Some(bbox);
+        *last_rect = bbox;
         return;
     }
     if ch.is_whitespace() {
         push_space(out);
-        *last_rect = Some(bbox);
+        *last_rect = bbox;
         return;
     }
 
-    if let Some(last) = last_rect
+    if let (Some(last), Some(bbox)) = (*last_rect, bbox)
         && (bbox.y0 - last.y0).abs() > LINE_BREAK_THRESHOLD
     {
         push_newline(out);
     }
 
     out.push(ch);
-    *last_rect = Some(bbox);
+    *last_rect = bbox;
 }
 
 fn push_newline(out: &mut String) {
@@ -307,30 +315,30 @@ mod tests {
             glyphs: vec![
                 TextGlyph {
                     ch: 'A',
-                    bbox: PdfRect {
+                    bbox: Some(PdfRect {
                         x0: 1.0,
                         y0: 1.0,
                         x1: 2.0,
                         y1: 2.0,
-                    },
+                    }),
                 },
                 TextGlyph {
                     ch: ' ',
-                    bbox: PdfRect {
+                    bbox: Some(PdfRect {
                         x0: 3.0,
                         y0: 1.0,
                         x1: 4.0,
                         y1: 2.0,
-                    },
+                    }),
                 },
                 TextGlyph {
                     ch: 'B',
-                    bbox: PdfRect {
+                    bbox: Some(PdfRect {
                         x0: 1.0,
                         y0: 20.0,
                         x1: 2.0,
                         y1: 21.0,
-                    },
+                    }),
                 },
             ],
             dropped_glyphs: 0,

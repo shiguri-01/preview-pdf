@@ -794,11 +794,11 @@ impl<'a> Device<'a> for PositionedTextExtractDevice {
         }
 
         self.set_last_glyph(ch, position.x, position.y);
-        if let Some(bbox) = glyph_bbox(glyph, transform, glyph_transform) {
-            self.glyphs.push(TextGlyph { ch, bbox });
-        } else {
+        let bbox = glyph_bbox(glyph, transform, glyph_transform);
+        if bbox.is_none() {
             self.dropped_glyphs += 1;
         }
+        self.glyphs.push(TextGlyph { ch, bbox });
     }
 
     fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}

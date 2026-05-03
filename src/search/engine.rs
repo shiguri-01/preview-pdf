@@ -367,24 +367,13 @@ pub(crate) fn locate_occurrences(
     prepared_query: &str,
     case_sensitive: bool,
 ) -> Vec<SearchOccurrence> {
-    let mut occurrences =
+    let occurrences =
         locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, false);
-
-    // `SearchOccurrence` dedups by `(glyph_start, glyph_end)` because
-    // locate_occurrences_with_strategy/merge_occurrence_rects are pure for a glyph slice; keep it
-    // that way and avoid adding path-dependent fields that would make equal ranges diverge.
-    for occurrence in locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
-    {
-        let duplicate = occurrences.iter().any(|existing| {
-            existing.glyph_start == occurrence.glyph_start
-                && existing.glyph_end == occurrence.glyph_end
-        });
-        if !duplicate {
-            occurrences.push(occurrence);
-        }
+    if !occurrences.is_empty() {
+        return occurrences;
     }
 
-    occurrences
+    locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
 }
 
 struct SnippetPresentation {
@@ -1317,7 +1306,7 @@ mod tests {
     }
 
     #[test]
-    fn locate_occurrences_keeps_direct_and_whitespace_insensitive_matches() {
+    fn locate_occurrences_skips_whitespace_insensitive_fallback_after_direct_match() {
         let glyphs = vec![
             glyph('f', 10.0, 20.0, 18.0, 32.0),
             glyph('o', 20.0, 20.0, 28.0, 32.0),
@@ -1337,11 +1326,27 @@ mod tests {
 
         let occurrences = locate_occurrences(&glyphs, "foobar", false);
 
-        assert_eq!(occurrences.len(), 2);
+        assert_eq!(occurrences.len(), 1);
         assert_eq!(occurrences[0].glyph_start, 0);
         assert_eq!(occurrences[0].glyph_end, 5);
-        assert_eq!(occurrences[1].glyph_start, 7);
-        assert_eq!(occurrences[1].glyph_end, 13);
+    }
+
+    #[test]
+    fn locate_occurrences_uses_whitespace_insensitive_fallback_without_direct_match() {
+        let glyphs = vec![
+            glyph('f', 10.0, 20.0, 18.0, 32.0),
+            glyph('o', 20.0, 20.0, 28.0, 32.0),
+            glyph('o', 30.0, 20.0, 38.0, 32.0),
+            glyph('b', 40.0, 20.0, 48.0, 32.0),
+            glyph('a', 50.0, 20.0, 58.0, 32.0),
+            glyph('r', 60.0, 20.0, 68.0, 32.0),
+        ];
+
+        let occurrences = locate_occurrences(&glyphs, "foo bar", false);
+
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].glyph_start, 0);
+        assert_eq!(occurrences[0].glyph_end, 5);
     }
 
     #[test]

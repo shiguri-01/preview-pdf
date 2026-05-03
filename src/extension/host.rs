@@ -94,6 +94,14 @@ impl ExtensionHost {
         self.search.prewarm(pdf);
     }
 
+    pub fn resolve_search_priority_geometry(
+        &mut self,
+        pdf: SharedPdfBackend,
+        visible_pages: [Option<usize>; 2],
+    ) {
+        self.search.resolve_priority_geometry(pdf, visible_pages);
+    }
+
     pub fn open_search_results_palette(
         &mut self,
         app: &mut AppState,

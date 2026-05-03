@@ -30,6 +30,12 @@ pub enum SearchEvent {
         hits: Vec<SearchPageHit>,
         highlight_unavailable: bool,
     },
+    GeometryResolved {
+        generation: u64,
+        page: usize,
+        occurrences: Vec<SearchOccurrence>,
+        highlight_unavailable: bool,
+    },
     Failed {
         generation: u64,
         message: String,
@@ -38,8 +44,8 @@ pub enum SearchEvent {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SearchOccurrence {
-    pub glyph_start: usize,
-    pub glyph_end: usize,
+    pub match_start: usize,
+    pub match_end: usize,
     pub rects: Vec<PdfRect>,
     pub snippet: String,
     pub snippet_match_start: Option<usize>,
@@ -55,6 +61,7 @@ pub struct SearchPageHit {
 pub trait SearchMatcher: Send + Sync {
     fn prepare_query(&self, raw_query: &str) -> String;
     fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool;
+    fn locate_text_matches(&self, page_text: &str, prepared_query: &str) -> Vec<SearchOccurrence>;
     fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence>;
 }
 
@@ -90,9 +97,26 @@ struct PrewarmJob {
     pdf: SharedPdfBackend,
 }
 
+#[derive(Clone)]
+struct GeometryJob {
+    generation: u64,
+    pdf: SharedPdfBackend,
+    query: String,
+    matcher: Arc<dyn SearchMatcher>,
+    pages: Vec<usize>,
+    priority: GeometryPriority,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GeometryPriority {
+    High,
+    Background,
+}
+
 enum WorkerRequest {
     Query(SearchJob),
     Prewarm(PrewarmJob),
+    ResolveGeometry(GeometryJob),
     Shutdown,
 }
 
@@ -107,21 +131,35 @@ struct SearchPageCacheKey {
     page: usize,
 }
 
-struct SearchPageCache {
+struct SearchTextPage {
+    text: Arc<str>,
+    estimated_bytes: usize,
+}
+
+struct SearchTextCache {
+    pages: LruCache<SearchPageCacheKey, SearchTextPage>,
+    memory_budget_bytes: usize,
+    memory_bytes: usize,
+}
+
+struct SearchGeometryCache {
     pages: LruCache<SearchPageCacheKey, CachedTextPage>,
     memory_budget_bytes: usize,
     memory_bytes: usize,
 }
+
+#[cfg(test)]
+type SearchPageCache = SearchGeometryCache;
 
 struct CachedTextPage {
     page: Arc<TextPage>,
     estimated_bytes: usize,
 }
 
-impl SearchPageCache {
+impl SearchTextCache {
     // Search wants broad page reuse; memory budget is the real safety limit.
     const DEFAULT_MAX_ENTRIES: usize = 16_384;
-    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 48 * 1024 * 1024;
 
     fn new() -> Self {
         Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
@@ -130,6 +168,70 @@ impl SearchPageCache {
     fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
         let max_entries =
             NonZeroUsize::new(max_entries).expect("search page cache entries must be non-zero");
+        Self {
+            pages: LruCache::new(max_entries),
+            memory_budget_bytes,
+            memory_bytes: 0,
+        }
+    }
+
+    fn get(&mut self, doc_id: u64, page: usize) -> Option<Arc<str>> {
+        self.pages
+            .get(&SearchPageCacheKey { doc_id, page })
+            .map(|cached| Arc::clone(&cached.text))
+    }
+
+    fn insert(&mut self, doc_id: u64, page: usize, text: Arc<str>) {
+        let estimated_bytes = estimate_search_text_bytes(&text);
+        let key = SearchPageCacheKey { doc_id, page };
+        if let Some(replaced) = self.pages.pop(&key) {
+            self.memory_bytes = self.memory_bytes.saturating_sub(replaced.estimated_bytes);
+        }
+        if let Some((_key, removed)) = self.pages.push(
+            key,
+            SearchTextPage {
+                text,
+                estimated_bytes,
+            },
+        ) {
+            self.memory_bytes = self.memory_bytes.saturating_sub(removed.estimated_bytes);
+        }
+        self.memory_bytes = self.memory_bytes.saturating_add(estimated_bytes);
+        self.enforce_memory_budget();
+    }
+
+    fn try_insert_without_eviction(&mut self, doc_id: u64, page: usize, text: Arc<str>) -> bool {
+        let estimated_bytes = estimate_search_text_bytes(&text);
+        if self.memory_bytes.saturating_add(estimated_bytes) > self.memory_budget_bytes {
+            return false;
+        }
+
+        self.insert(doc_id, page, text);
+        true
+    }
+
+    fn enforce_memory_budget(&mut self) {
+        while self.memory_bytes > self.memory_budget_bytes {
+            let Some((_key, evicted)) = self.pages.pop_lru() else {
+                self.memory_bytes = 0;
+                break;
+            };
+            self.memory_bytes = self.memory_bytes.saturating_sub(evicted.estimated_bytes);
+        }
+    }
+}
+
+impl SearchGeometryCache {
+    const DEFAULT_MAX_ENTRIES: usize = 16_384;
+    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 16 * 1024 * 1024;
+
+    fn new() -> Self {
+        Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
+    }
+
+    fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
+        let max_entries =
+            NonZeroUsize::new(max_entries).expect("search geometry cache entries must be non-zero");
         Self {
             pages: LruCache::new(max_entries),
             memory_budget_bytes,
@@ -196,6 +298,10 @@ impl SearchPageCache {
     fn memory_bytes(&self) -> usize {
         self.memory_bytes
     }
+}
+
+fn estimate_search_text_bytes(text: &Arc<str>) -> usize {
+    size_of::<Arc<str>>() + text.len()
 }
 
 fn estimate_text_page_bytes(text_page: &TextPage) -> usize {
@@ -299,6 +405,35 @@ impl SearchEngine {
             .send(WorkerRequest::Prewarm(PrewarmJob { pdf }));
     }
 
+    pub fn resolve_geometry(
+        &mut self,
+        pdf: SharedPdfBackend,
+        generation: u64,
+        query: impl Into<String>,
+        matcher: Arc<dyn SearchMatcher>,
+        pages: Vec<usize>,
+        high_priority: bool,
+    ) {
+        if pages.is_empty() {
+            return;
+        }
+        let priority = if high_priority {
+            GeometryPriority::High
+        } else {
+            GeometryPriority::Background
+        };
+        let _ = self
+            .request_tx
+            .send(WorkerRequest::ResolveGeometry(GeometryJob {
+                generation,
+                pdf,
+                query: query.into(),
+                matcher,
+                pages,
+                priority,
+            }));
+    }
+
     pub fn drain_events(&mut self) -> Vec<SearchEvent> {
         let mut drained = Vec::new();
 
@@ -326,6 +461,14 @@ impl SearchMatcher for CancelMatcher {
         false
     }
 
+    fn locate_text_matches(
+        &self,
+        _page_text: &str,
+        _prepared_query: &str,
+    ) -> Vec<SearchOccurrence> {
+        Vec::new()
+    }
+
     fn locate_matches(&self, _page: &TextPage, _prepared_query: &str) -> Vec<SearchOccurrence> {
         Vec::new()
     }
@@ -345,20 +488,57 @@ fn worker_main(
     event_tx: UnboundedSender<SearchEvent>,
 ) {
     let mut pending: Option<SearchJob> = None;
-    let mut page_cache = SearchPageCache::new();
+    let mut pending_geometry: Option<GeometryJob> = None;
+    let mut text_cache = SearchTextCache::new();
+    let mut geometry_cache = SearchGeometryCache::new();
     let mut prewarm_finished_doc_ids = HashSet::new();
 
     loop {
         let job = match pending.take() {
             Some(job) => job,
+            None if pending_geometry.is_some() => {
+                let job = pending_geometry
+                    .take()
+                    .expect("pending geometry checked above");
+                match run_geometry_job(
+                    job,
+                    &mut request_rx,
+                    &event_tx,
+                    &mut pending,
+                    &mut pending_geometry,
+                    &mut text_cache,
+                    &mut geometry_cache,
+                ) {
+                    WorkerControl::Continue => {}
+                    WorkerControl::Shutdown => break,
+                }
+                continue;
+            }
             None => match wait_for_job(&mut request_rx) {
                 Some(WorkerWork::Query(job)) => job,
+                Some(WorkerWork::Geometry(job)) => {
+                    match run_geometry_job(
+                        job,
+                        &mut request_rx,
+                        &event_tx,
+                        &mut pending,
+                        &mut pending_geometry,
+                        &mut text_cache,
+                        &mut geometry_cache,
+                    ) {
+                        WorkerControl::Continue => {}
+                        WorkerControl::Shutdown => break,
+                    }
+                    continue;
+                }
                 Some(WorkerWork::Prewarm(job)) => {
                     match run_prewarm_job(
                         job,
                         &mut request_rx,
                         &mut pending,
-                        &mut page_cache,
+                        &mut pending_geometry,
+                        &mut text_cache,
+                        &mut geometry_cache,
                         &mut prewarm_finished_doc_ids,
                     ) {
                         WorkerControl::Continue => {}
@@ -375,7 +555,9 @@ fn worker_main(
             &mut request_rx,
             &event_tx,
             &mut pending,
-            &mut page_cache,
+            &mut pending_geometry,
+            &mut text_cache,
+            &mut geometry_cache,
         ) {
             WorkerControl::Continue => {}
             WorkerControl::Shutdown => break,
@@ -386,12 +568,14 @@ fn worker_main(
 enum WorkerWork {
     Query(SearchJob),
     Prewarm(PrewarmJob),
+    Geometry(GeometryJob),
 }
 
 fn wait_for_job(request_rx: &mut UnboundedReceiver<WorkerRequest>) -> Option<WorkerWork> {
     match request_rx.blocking_recv() {
         Some(WorkerRequest::Query(job)) => Some(WorkerWork::Query(job)),
         Some(WorkerRequest::Prewarm(job)) => Some(WorkerWork::Prewarm(job)),
+        Some(WorkerRequest::ResolveGeometry(job)) => Some(WorkerWork::Geometry(job)),
         Some(WorkerRequest::Shutdown) | None => None,
     }
 }
@@ -400,7 +584,9 @@ fn run_prewarm_job(
     job: PrewarmJob,
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     pending: &mut Option<SearchJob>,
-    page_cache: &mut SearchPageCache,
+    pending_geometry: &mut Option<GeometryJob>,
+    text_cache: &mut SearchTextCache,
+    geometry_cache: &mut SearchGeometryCache,
     prewarm_finished_doc_ids: &mut HashSet<u64>,
 ) -> WorkerControl {
     let doc = job.pdf;
@@ -415,22 +601,29 @@ fn run_prewarm_job(
     }
 
     for page in 0..total_pages {
-        match flush_requests(request_rx, pending) {
+        match flush_requests(request_rx, pending, pending_geometry) {
             WorkerControl::Continue => {
-                if pending.is_some() {
+                if pending.is_some()
+                    || pending_geometry
+                        .as_ref()
+                        .is_some_and(|job| job.priority == GeometryPriority::High)
+                {
                     return WorkerControl::Continue;
                 }
             }
             WorkerControl::Shutdown => return WorkerControl::Shutdown,
         }
-        if page_cache.get(doc_id, page).is_some() {
+        if text_cache.get(doc_id, page).is_some() {
             continue;
         }
         if let Ok(text_page) = doc.extract_positioned_text(page) {
-            if !page_cache.try_insert_without_eviction(doc_id, page, Arc::new(text_page)) {
+            let text_page = Arc::new(text_page);
+            let text: Arc<str> = Arc::from(text_page.extracted_text());
+            if !text_cache.try_insert_without_eviction(doc_id, page, text) {
                 prewarm_finished_doc_ids.insert(doc_id);
                 break;
             }
+            geometry_cache.try_insert_without_eviction(doc_id, page, text_page);
         }
     }
 
@@ -443,7 +636,9 @@ fn run_job(
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     event_tx: &UnboundedSender<SearchEvent>,
     pending: &mut Option<SearchJob>,
-    page_cache: &mut SearchPageCache,
+    pending_geometry: &mut Option<GeometryJob>,
+    text_cache: &mut SearchTextCache,
+    geometry_cache: &mut SearchGeometryCache,
 ) -> WorkerControl {
     let query = job.matcher.prepare_query(job.query.trim());
     if query.is_empty() {
@@ -471,7 +666,7 @@ fn run_job(
     let mut hits = Vec::new();
     let mut highlight_unavailable = false;
     for page in 0..total_pages {
-        match flush_requests(request_rx, pending) {
+        match flush_requests(request_rx, pending, pending_geometry) {
             WorkerControl::Continue => {
                 if pending.is_some() {
                     return WorkerControl::Continue;
@@ -480,27 +675,34 @@ fn run_job(
             WorkerControl::Shutdown => return WorkerControl::Shutdown,
         }
 
-        let positioned_text = match page_cache.get(doc_id, page) {
-            Some(text_page) => Ok(text_page),
+        let page_text = match text_cache.get(doc_id, page) {
+            Some(text) => Ok(text),
             None => doc.extract_positioned_text(page).map(|text_page| {
                 let text_page = Arc::new(text_page);
-                page_cache.try_insert_without_eviction(doc_id, page, Arc::clone(&text_page));
-                text_page
+                let text: Arc<str> = Arc::from(text_page.extracted_text());
+                text_cache.try_insert_without_eviction(doc_id, page, Arc::clone(&text));
+                geometry_cache.try_insert_without_eviction(doc_id, page, text_page);
+                text
             }),
         };
 
-        match positioned_text {
-            Ok(text_page) => {
-                let mut occurrences = job.matcher.locate_matches(text_page.as_ref(), &query);
-                // Keep `extract_text` out of the primary search path: once positioned text is
-                // available, the glyph stream is the searchable source of truth.
-                if !occurrences.is_empty() {
-                    for occurrence in &mut occurrences {
-                        if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
-                            highlight_unavailable = true;
+        match page_text {
+            Ok(text) => {
+                let occurrences = match geometry_cache.get(doc_id, page) {
+                    Some(text_page) => {
+                        let mut occurrences =
+                            job.matcher.locate_matches(text_page.as_ref(), &query);
+                        for occurrence in &mut occurrences {
+                            if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
+                                highlight_unavailable = true;
+                            }
+                            apply_hit_snippet(occurrence, &text_page.glyphs);
                         }
-                        apply_hit_snippet(occurrence, &text_page.glyphs);
+                        occurrences
                     }
+                    None => job.matcher.locate_text_matches(&text, &query),
+                };
+                if !occurrences.is_empty() {
                     hits.push(SearchPageHit { page, occurrences });
                 }
             }
@@ -545,12 +747,84 @@ fn run_job(
     WorkerControl::Continue
 }
 
+fn run_geometry_job(
+    job: GeometryJob,
+    request_rx: &mut UnboundedReceiver<WorkerRequest>,
+    event_tx: &UnboundedSender<SearchEvent>,
+    pending: &mut Option<SearchJob>,
+    pending_geometry: &mut Option<GeometryJob>,
+    text_cache: &mut SearchTextCache,
+    geometry_cache: &mut SearchGeometryCache,
+) -> WorkerControl {
+    let query = job.matcher.prepare_query(job.query.trim());
+    if query.is_empty() {
+        return WorkerControl::Continue;
+    }
+
+    let doc = job.pdf;
+    let doc_id = doc.doc_id();
+    let total_pages = doc.page_count();
+    let mut seen = HashSet::new();
+
+    for page in job.pages.into_iter().filter(|page| *page < total_pages) {
+        if !seen.insert(page) {
+            continue;
+        }
+        match flush_requests(request_rx, pending, pending_geometry) {
+            WorkerControl::Continue => {
+                if pending.is_some()
+                    || pending_geometry
+                        .as_ref()
+                        .is_some_and(|queued| queued.priority == GeometryPriority::High)
+                {
+                    return WorkerControl::Continue;
+                }
+            }
+            WorkerControl::Shutdown => return WorkerControl::Shutdown,
+        }
+
+        let positioned_text = match geometry_cache.get(doc_id, page) {
+            Some(text_page) => Ok(text_page),
+            None => doc.extract_positioned_text(page).map(|text_page| {
+                let text_page = Arc::new(text_page);
+                if text_cache.get(doc_id, page).is_none() {
+                    let text: Arc<str> = Arc::from(text_page.extracted_text());
+                    text_cache.try_insert_without_eviction(doc_id, page, text);
+                }
+                geometry_cache.insert(doc_id, page, Arc::clone(&text_page));
+                text_page
+            }),
+        };
+
+        let Ok(text_page) = positioned_text else {
+            continue;
+        };
+
+        let mut occurrences = job.matcher.locate_matches(text_page.as_ref(), &query);
+        let mut highlight_unavailable = false;
+        for occurrence in &mut occurrences {
+            if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
+                highlight_unavailable = true;
+            }
+            apply_hit_snippet(occurrence, &text_page.glyphs);
+        }
+        let _ = event_tx.send(SearchEvent::GeometryResolved {
+            generation: job.generation,
+            page,
+            occurrences,
+            highlight_unavailable,
+        });
+    }
+
+    WorkerControl::Continue
+}
+
 fn occurrence_highlight_unavailable(occurrence: &SearchOccurrence, glyphs: &[TextGlyph]) -> bool {
     if occurrence.rects.is_empty() {
         return true;
     }
 
-    let Some(slice) = glyphs.get(occurrence.glyph_start..=occurrence.glyph_end) else {
+    let Some(slice) = glyphs.get(occurrence.match_start..=occurrence.match_end) else {
         return true;
     };
 
@@ -573,6 +847,20 @@ pub(crate) fn locate_occurrences(
     locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
 }
 
+pub(crate) fn locate_text_occurrences(
+    text: &str,
+    prepared_query: &str,
+    case_sensitive: bool,
+) -> Vec<SearchOccurrence> {
+    let occurrences =
+        locate_text_occurrences_with_strategy(text, prepared_query, case_sensitive, false);
+    if !occurrences.is_empty() {
+        return occurrences;
+    }
+
+    locate_text_occurrences_with_strategy(text, prepared_query, case_sensitive, true)
+}
+
 struct SnippetPresentation {
     text: String,
     match_start: Option<usize>,
@@ -580,7 +868,7 @@ struct SnippetPresentation {
 }
 
 fn apply_hit_snippet(occurrence: &mut SearchOccurrence, glyphs: &[TextGlyph]) {
-    let snippet = build_hit_snippet(glyphs, occurrence.glyph_start, occurrence.glyph_end);
+    let snippet = build_hit_snippet(glyphs, occurrence.match_start, occurrence.match_end);
     occurrence.snippet = snippet.text;
     occurrence.snippet_match_start = snippet.match_start;
     occurrence.snippet_match_end = snippet.match_end;
@@ -588,12 +876,12 @@ fn apply_hit_snippet(occurrence: &mut SearchOccurrence, glyphs: &[TextGlyph]) {
 
 fn build_hit_snippet(
     glyphs: &[TextGlyph],
-    glyph_start: usize,
-    glyph_end: usize,
+    match_start: usize,
+    match_end: usize,
 ) -> SnippetPresentation {
     const CONTEXT_CHARS: usize = 16;
 
-    if glyphs.is_empty() || glyph_start >= glyphs.len() || glyph_end < glyph_start {
+    if glyphs.is_empty() || match_start >= glyphs.len() || match_end < match_start {
         return SnippetPresentation {
             text: String::new(),
             match_start: None,
@@ -601,22 +889,22 @@ fn build_hit_snippet(
         };
     }
 
-    let glyph_end = glyph_end.min(glyphs.len() - 1);
-    let context_start = glyph_start.saturating_sub(CONTEXT_CHARS);
-    let context_end = glyph_end
+    let match_end = match_end.min(glyphs.len() - 1);
+    let context_start = match_start.saturating_sub(CONTEXT_CHARS);
+    let context_end = match_end
         .saturating_add(CONTEXT_CHARS)
         .saturating_add(1)
         .min(glyphs.len());
 
-    let before = glyphs[context_start..glyph_start]
+    let before = glyphs[context_start..match_start]
         .iter()
         .map(|glyph| glyph.ch)
         .collect::<String>();
-    let matched = glyphs[glyph_start..=glyph_end]
+    let matched = glyphs[match_start..=match_end]
         .iter()
         .map(|glyph| glyph.ch)
         .collect::<String>();
-    let after = glyphs[glyph_end + 1..context_end]
+    let after = glyphs[match_end + 1..context_end]
         .iter()
         .map(|glyph| glyph.ch)
         .collect::<String>();
@@ -637,6 +925,135 @@ fn build_hit_snippet(
     }
     snippet.push_str(&after);
     if context_end < glyphs.len() {
+        snippet.push('…');
+    }
+
+    SnippetPresentation {
+        text: snippet,
+        match_start,
+        match_end,
+    }
+}
+
+fn locate_text_occurrences_with_strategy(
+    text: &str,
+    prepared_query: &str,
+    case_sensitive: bool,
+    ignore_whitespace: bool,
+) -> Vec<SearchOccurrence> {
+    if prepared_query.is_empty() {
+        return Vec::new();
+    }
+
+    let (search_text, char_map) =
+        normalize_text_with_char_map(text, case_sensitive, ignore_whitespace);
+    if search_text.is_empty() {
+        return Vec::new();
+    }
+
+    let query_text = normalize_text_for_search(prepared_query, true, ignore_whitespace);
+    if query_text.is_empty() || query_text.len() > search_text.len() {
+        return Vec::new();
+    }
+
+    let char_byte_offsets: Vec<usize> = search_text
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .collect();
+    let query_char_len = query_text.chars().count();
+    if query_char_len == 0 || query_char_len > char_map.len() {
+        return Vec::new();
+    }
+
+    let mut occurrences = Vec::new();
+    let mut cursor_byte = 0;
+    while cursor_byte <= search_text.len() {
+        let Some(relative_match_byte) = search_text[cursor_byte..].find(&query_text) else {
+            break;
+        };
+        let match_byte = cursor_byte + relative_match_byte;
+        let match_char_start = char_byte_offsets
+            .binary_search(&match_byte)
+            .expect("str::find returned a non-character-boundary offset");
+        let char_start = char_map[match_char_start];
+        let char_end = char_map[match_char_start + query_char_len - 1];
+        let snippet = build_text_hit_snippet(text, char_start, char_end);
+        occurrences.push(SearchOccurrence {
+            match_start: char_start,
+            match_end: char_end,
+            rects: Vec::new(),
+            snippet: snippet.text,
+            snippet_match_start: snippet.match_start,
+            snippet_match_end: snippet.match_end,
+        });
+        cursor_byte = match_byte + query_text.len();
+    }
+
+    occurrences
+}
+
+fn normalize_text_with_char_map(
+    text: &str,
+    case_sensitive: bool,
+    ignore_whitespace: bool,
+) -> (String, Vec<usize>) {
+    let mut search_text = String::new();
+    let mut char_map = Vec::new();
+
+    for (char_index, ch) in text.chars().enumerate() {
+        if ignore_whitespace && ch.is_whitespace() {
+            continue;
+        }
+        push_normalized_chars(ch, case_sensitive, |normalized| {
+            if !ignore_whitespace || !normalized.is_whitespace() {
+                search_text.push(normalized);
+                char_map.push(char_index);
+            }
+        });
+    }
+
+    (search_text, char_map)
+}
+
+fn build_text_hit_snippet(text: &str, char_start: usize, char_end: usize) -> SnippetPresentation {
+    const CONTEXT_CHARS: usize = 16;
+
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() || char_start >= chars.len() || char_end < char_start {
+        return SnippetPresentation {
+            text: String::new(),
+            match_start: None,
+            match_end: None,
+        };
+    }
+
+    let char_end = char_end.min(chars.len() - 1);
+    let context_start = char_start.saturating_sub(CONTEXT_CHARS);
+    let context_end = char_end
+        .saturating_add(CONTEXT_CHARS)
+        .saturating_add(1)
+        .min(chars.len());
+
+    let before = chars[context_start..char_start].iter().collect::<String>();
+    let matched = chars[char_start..=char_end].iter().collect::<String>();
+    let after = chars[char_end + 1..context_end].iter().collect::<String>();
+
+    let mut snippet = String::new();
+    let mut match_start = None;
+    let mut match_end = None;
+    if context_start > 0 {
+        snippet.push('…');
+    }
+    snippet.push_str(&before);
+    if !matched.is_empty() {
+        match_start = Some(snippet.len());
+    }
+    snippet.push_str(&matched);
+    if !matched.is_empty() {
+        match_end = Some(snippet.len());
+    }
+    snippet.push_str(&after);
+    if context_end < chars.len() {
         snippet.push('…');
     }
 
@@ -702,8 +1119,8 @@ fn locate_occurrences_with_strategy(
         let glyph_end = char_map[match_char_start + query_char_len - 1];
         let rects = merge_occurrence_rects(&glyphs[glyph_start..=glyph_end]);
         occurrences.push(SearchOccurrence {
-            glyph_start,
-            glyph_end,
+            match_start: glyph_start,
+            match_end: glyph_end,
             rects,
             snippet: String::new(),
             snippet_match_start: None,
@@ -904,11 +1321,23 @@ fn normalize_text_for_search(text: &str, case_sensitive: bool, ignore_whitespace
 fn flush_requests(
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     pending: &mut Option<SearchJob>,
+    pending_geometry: &mut Option<GeometryJob>,
 ) -> WorkerControl {
     loop {
         match request_rx.try_recv() {
             Ok(WorkerRequest::Query(job)) => *pending = Some(job),
             Ok(WorkerRequest::Prewarm(_)) => {}
+            Ok(WorkerRequest::ResolveGeometry(job)) => {
+                // Geometry work is opportunistic. Keep only the newest high-priority request
+                // so navigation can preempt broad background hit-page warming.
+                if job.priority == GeometryPriority::High
+                    || pending_geometry
+                        .as_ref()
+                        .is_none_or(|queued| queued.priority == GeometryPriority::Background)
+                {
+                    *pending_geometry = Some(job);
+                }
+            }
             Ok(WorkerRequest::Shutdown) => return WorkerControl::Shutdown,
             Err(TryRecvError::Empty) => break,
             Err(TryRecvError::Disconnected) => return WorkerControl::Shutdown,
@@ -942,8 +1371,9 @@ mod tests {
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::{
-        PrewarmJob, SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageCache,
-        SearchPageHit, WorkerControl, estimate_text_page_bytes, locate_occurrences,
+        PrewarmJob, SearchEngine, SearchEvent, SearchGeometryCache, SearchMatcher,
+        SearchOccurrence, SearchPageCache, SearchPageHit, SearchTextCache, WorkerControl,
+        estimate_search_text_bytes, estimate_text_page_bytes, locate_occurrences,
         merge_occurrence_rects, page_matches_contains, prepare_contains_query, run_prewarm_job,
     };
     use crate::backend::open_default_backend;
@@ -963,6 +1393,14 @@ mod tests {
 
         fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
             page_matches_contains(page_text, prepared_query, self.case_sensitive)
+        }
+
+        fn locate_text_matches(
+            &self,
+            page_text: &str,
+            prepared_query: &str,
+        ) -> Vec<SearchOccurrence> {
+            super::locate_text_occurrences(page_text, prepared_query, self.case_sensitive)
         }
 
         fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence> {
@@ -1459,7 +1897,7 @@ mod tests {
     fn prewarm_does_not_retry_after_memory_budget_is_reached() {
         let first_page = text_page("alpha");
         let second_page = text_page("beta gamma");
-        let budget = estimate_text_page_bytes(&first_page);
+        let budget = estimate_search_text_bytes(&Arc::from(first_page.extracted_text()));
         let pdf = Arc::new(CountingPositionedStubPdf::new(
             302,
             vec![first_page, second_page],
@@ -1468,7 +1906,9 @@ mod tests {
         let (_event_tx, _event_rx) = unbounded_channel::<SearchEvent>();
         let mut request_rx = request_rx;
         let mut pending = None;
-        let mut page_cache = SearchPageCache::with_limits(4, budget);
+        let mut pending_geometry = None;
+        let mut text_cache = SearchTextCache::with_limits(4, budget);
+        let mut geometry_cache = SearchGeometryCache::with_limits(4, usize::MAX);
         let mut prewarm_finished_doc_ids = HashSet::new();
 
         assert!(matches!(
@@ -1476,7 +1916,9 @@ mod tests {
                 PrewarmJob { pdf: pdf.clone() },
                 &mut request_rx,
                 &mut pending,
-                &mut page_cache,
+                &mut pending_geometry,
+                &mut text_cache,
+                &mut geometry_cache,
                 &mut prewarm_finished_doc_ids,
             ),
             WorkerControl::Continue
@@ -1488,7 +1930,9 @@ mod tests {
                 PrewarmJob { pdf: pdf.clone() },
                 &mut request_rx,
                 &mut pending,
-                &mut page_cache,
+                &mut pending_geometry,
+                &mut text_cache,
+                &mut geometry_cache,
                 &mut prewarm_finished_doc_ids,
             ),
             WorkerControl::Continue
@@ -1844,8 +2288,8 @@ mod tests {
         let occurrences = locate_occurrences(&glyphs, "foobar", false);
 
         assert_eq!(occurrences.len(), 1);
-        assert_eq!(occurrences[0].glyph_start, 0);
-        assert_eq!(occurrences[0].glyph_end, 5);
+        assert_eq!(occurrences[0].match_start, 0);
+        assert_eq!(occurrences[0].match_end, 5);
     }
 
     #[test]
@@ -1862,8 +2306,8 @@ mod tests {
         let occurrences = locate_occurrences(&glyphs, "foo bar", false);
 
         assert_eq!(occurrences.len(), 1);
-        assert_eq!(occurrences[0].glyph_start, 0);
-        assert_eq!(occurrences[0].glyph_end, 5);
+        assert_eq!(occurrences[0].match_start, 0);
+        assert_eq!(occurrences[0].match_end, 5);
     }
 
     #[test]
@@ -1877,8 +2321,8 @@ mod tests {
         let occurrences = locate_occurrences(&glyphs, "aa", true);
 
         assert_eq!(occurrences.len(), 1);
-        assert_eq!(occurrences[0].glyph_start, 0);
-        assert_eq!(occurrences[0].glyph_end, 1);
+        assert_eq!(occurrences[0].match_start, 0);
+        assert_eq!(occurrences[0].match_end, 1);
     }
 
     #[test]
@@ -1893,8 +2337,8 @@ mod tests {
         let occurrences = locate_occurrences(&glyphs, "βa", true);
 
         assert_eq!(occurrences.len(), 1);
-        assert_eq!(occurrences[0].glyph_start, 1);
-        assert_eq!(occurrences[0].glyph_end, 2);
+        assert_eq!(occurrences[0].match_start, 1);
+        assert_eq!(occurrences[0].match_end, 2);
     }
 
     #[test]
@@ -1904,8 +2348,8 @@ mod tests {
         let occurrences = locate_occurrences(&glyphs, "i\u{307}", false);
 
         assert_eq!(occurrences.len(), 1);
-        assert_eq!(occurrences[0].glyph_start, 0);
-        assert_eq!(occurrences[0].glyph_end, 0);
+        assert_eq!(occurrences[0].match_start, 0);
+        assert_eq!(occurrences[0].match_end, 0);
     }
 
     #[test]
@@ -1945,8 +2389,8 @@ mod tests {
             glyph('x', 20.0, 20.0, 28.0, 32.0),
         ];
         let mut occurrence = SearchOccurrence {
-            glyph_start: 0,
-            glyph_end: 0,
+            match_start: 0,
+            match_end: 0,
             rects: vec![PdfRect {
                 x0: 10.0,
                 y0: 20.0,

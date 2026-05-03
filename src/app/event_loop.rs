@@ -715,6 +715,13 @@ impl App {
                         .extensions
                         .host
                         .prewarm_search_text(Arc::clone(&pdf));
+                    self.interaction
+                        .extensions
+                        .host
+                        .resolve_search_priority_geometry(
+                            Arc::clone(&pdf),
+                            [Some(self.state.current_page), None],
+                        );
                 }
                 match dispatch.outcome {
                     CommandOutcome::QuitRequested => {

@@ -59,6 +59,10 @@ Rules:
   - search runs asynchronously and reports progress while active
   - positioned text extraction may be prewarmed in the background from the
     start of the document so later searches can reuse cached page text
+  - search text and highlight geometry are cached separately; cached text can
+    complete later searches even when highlight geometry has been evicted
+  - missing cached highlight geometry is resolved in the background, with the
+    current visible page prioritized over broad prewarm work
   - visible search hits are highlighted through the generic highlight overlay
     layer
   - if highlight extraction fails for matched pages, search results are kept and

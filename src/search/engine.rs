@@ -1,5 +1,8 @@
+use std::mem::size_of;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use lru::LruCache;
 use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::mpsc::{
     UnboundedReceiver, UnboundedSender, error::TryRecvError, unbounded_channel,
@@ -89,6 +92,87 @@ enum WorkerRequest {
 enum WorkerControl {
     Continue,
     Shutdown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SearchPageCacheKey {
+    doc_id: u64,
+    page: usize,
+}
+
+struct SearchPageCache {
+    pages: LruCache<SearchPageCacheKey, CachedTextPage>,
+    memory_budget_bytes: usize,
+    memory_bytes: usize,
+}
+
+struct CachedTextPage {
+    page: Arc<TextPage>,
+    estimated_bytes: usize,
+}
+
+impl SearchPageCache {
+    const DEFAULT_MAX_ENTRIES: usize = 512;
+    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+
+    fn new() -> Self {
+        Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
+    }
+
+    fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
+        let max_entries =
+            NonZeroUsize::new(max_entries).expect("search page cache entries must be non-zero");
+        Self {
+            pages: LruCache::new(max_entries),
+            memory_budget_bytes,
+            memory_bytes: 0,
+        }
+    }
+
+    fn get(&mut self, doc_id: u64, page: usize) -> Option<Arc<TextPage>> {
+        self.pages
+            .get(&SearchPageCacheKey { doc_id, page })
+            .map(|cached| Arc::clone(&cached.page))
+    }
+
+    fn insert(&mut self, doc_id: u64, page: usize, text_page: Arc<TextPage>) {
+        let estimated_bytes = estimate_text_page_bytes(&text_page);
+        if let Some((_key, removed)) = self.pages.push(
+            SearchPageCacheKey { doc_id, page },
+            CachedTextPage {
+                page: text_page,
+                estimated_bytes,
+            },
+        ) {
+            self.memory_bytes = self.memory_bytes.saturating_sub(removed.estimated_bytes);
+        }
+        self.memory_bytes = self.memory_bytes.saturating_add(estimated_bytes);
+        self.enforce_memory_budget();
+    }
+
+    fn enforce_memory_budget(&mut self) {
+        while self.memory_bytes > self.memory_budget_bytes {
+            let Some((_key, evicted)) = self.pages.pop_lru() else {
+                self.memory_bytes = 0;
+                break;
+            };
+            self.memory_bytes = self.memory_bytes.saturating_sub(evicted.estimated_bytes);
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.pages.len()
+    }
+
+    #[cfg(test)]
+    fn memory_bytes(&self) -> usize {
+        self.memory_bytes
+    }
+}
+
+fn estimate_text_page_bytes(text_page: &TextPage) -> usize {
+    size_of::<TextPage>() + text_page.glyphs.len() * size_of::<TextGlyph>()
 }
 
 pub struct SearchEngine {
@@ -228,6 +312,7 @@ fn worker_main(
     event_tx: UnboundedSender<SearchEvent>,
 ) {
     let mut pending: Option<SearchJob> = None;
+    let mut page_cache = SearchPageCache::new();
 
     loop {
         let job = match pending.take() {
@@ -238,7 +323,13 @@ fn worker_main(
             },
         };
 
-        match run_job(job, &mut request_rx, &event_tx, &mut pending) {
+        match run_job(
+            job,
+            &mut request_rx,
+            &event_tx,
+            &mut pending,
+            &mut page_cache,
+        ) {
             WorkerControl::Continue => {}
             WorkerControl::Shutdown => break,
         }
@@ -257,6 +348,7 @@ fn run_job(
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     event_tx: &UnboundedSender<SearchEvent>,
     pending: &mut Option<SearchJob>,
+    page_cache: &mut SearchPageCache,
 ) -> WorkerControl {
     let query = job.matcher.prepare_query(job.query.trim());
     if query.is_empty() {
@@ -278,6 +370,7 @@ fn run_job(
 
     let doc = job.pdf;
 
+    let doc_id = doc.doc_id();
     let total_pages = doc.page_count();
 
     let mut hits = Vec::new();
@@ -292,9 +385,18 @@ fn run_job(
             WorkerControl::Shutdown => return WorkerControl::Shutdown,
         }
 
-        match doc.extract_positioned_text(page) {
+        let positioned_text = match page_cache.get(doc_id, page) {
+            Some(text_page) => Ok(text_page),
+            None => doc.extract_positioned_text(page).map(|text_page| {
+                let text_page = Arc::new(text_page);
+                page_cache.insert(doc_id, page, Arc::clone(&text_page));
+                text_page
+            }),
+        };
+
+        match positioned_text {
             Ok(text_page) => {
-                let mut occurrences = job.matcher.locate_matches(&text_page, &query);
+                let mut occurrences = job.matcher.locate_matches(text_page.as_ref(), &query);
                 // Keep `extract_text` out of the primary search path: once positioned text is
                 // available, the glyph stream is the searchable source of truth.
                 if !occurrences.is_empty() {
@@ -738,13 +840,14 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
     use std::process;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::{
-        SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit,
-        locate_occurrences, merge_occurrence_rects, page_matches_contains, prepare_contains_query,
+        SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageCache, SearchPageHit,
+        estimate_text_page_bytes, locate_occurrences, merge_occurrence_rects,
+        page_matches_contains, prepare_contains_query,
     };
     use crate::backend::open_default_backend;
     use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
@@ -831,6 +934,146 @@ mod tests {
                 positioned_text,
             }
         }
+    }
+
+    struct CountingPositionedStubPdf {
+        path: PathBuf,
+        doc_id: u64,
+        pages: Vec<TextPage>,
+        positioned_calls: Mutex<Vec<usize>>,
+    }
+
+    impl CountingPositionedStubPdf {
+        fn new(doc_id: u64, pages: Vec<TextPage>) -> Self {
+            let page_count = pages.len();
+            Self {
+                path: PathBuf::from(format!("counting-positioned-{doc_id}.pdf")),
+                doc_id,
+                pages,
+                positioned_calls: Mutex::new(vec![0; page_count]),
+            }
+        }
+
+        fn positioned_calls(&self) -> Vec<usize> {
+            self.positioned_calls
+                .lock()
+                .expect("positioned calls lock should not be poisoned")
+                .clone()
+        }
+    }
+
+    impl PdfBackend for CountingPositionedStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            self.doc_id
+        }
+
+        fn page_count(&self) -> usize {
+            self.pages.len()
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+
+        fn extract_text(&self, page: usize) -> AppResult<String> {
+            Ok(self.pages[page].extracted_text())
+        }
+
+        fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage> {
+            let mut calls = self
+                .positioned_calls
+                .lock()
+                .expect("positioned calls lock should not be poisoned");
+            calls[page] += 1;
+            Ok(self.pages[page].clone())
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+    }
+
+    #[test]
+    fn search_page_cache_hits_after_insert() {
+        let mut cache = SearchPageCache::with_limits(4, usize::MAX);
+        let page = text_page("alpha");
+
+        cache.insert(1, 0, Arc::new(page.clone()));
+
+        assert_eq!(cache.get(1, 0).as_deref(), Some(&page));
+    }
+
+    #[test]
+    fn search_page_cache_evicts_least_recently_used_over_max_entries() {
+        let mut cache = SearchPageCache::with_limits(2, usize::MAX);
+        cache.insert(1, 0, Arc::new(text_page("alpha")));
+        cache.insert(1, 1, Arc::new(text_page("beta")));
+        assert!(cache.get(1, 0).is_some());
+
+        cache.insert(1, 2, Arc::new(text_page("gamma")));
+
+        assert!(cache.get(1, 0).is_some());
+        assert!(cache.get(1, 1).is_none());
+        assert!(cache.get(1, 2).is_some());
+    }
+
+    #[test]
+    fn search_page_cache_evicts_over_memory_budget() {
+        let small = text_page("a");
+        let large = text_page("abcdef");
+        let budget = estimate_text_page_bytes(&small) + estimate_text_page_bytes(&large) - 1;
+        let mut cache = SearchPageCache::with_limits(4, budget);
+        cache.insert(1, 0, Arc::new(small));
+
+        cache.insert(1, 1, Arc::new(large));
+
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(1, 0).is_none());
+        assert!(cache.get(1, 1).is_some());
+        assert!(cache.memory_bytes() <= budget);
+    }
+
+    #[test]
+    fn search_page_cache_separates_documents() {
+        let mut cache = SearchPageCache::with_limits(4, usize::MAX);
+        cache.insert(1, 0, Arc::new(text_page("alpha")));
+        cache.insert(2, 0, Arc::new(text_page("beta")));
+
+        assert_eq!(
+            cache
+                .get(1, 0)
+                .expect("doc 1 page should exist")
+                .extracted_text(),
+            "alpha"
+        );
+        assert_eq!(
+            cache
+                .get(2, 0)
+                .expect("doc 2 page should exist")
+                .extracted_text(),
+            "beta"
+        );
+    }
+
+    #[test]
+    fn search_page_cache_reinsertion_replaces_memory_accounting() {
+        let mut cache = SearchPageCache::with_limits(4, usize::MAX);
+        let replacement = text_page("abcde");
+        let expected_bytes = estimate_text_page_bytes(&replacement);
+
+        cache.insert(1, 0, Arc::new(text_page("a")));
+        cache.insert(1, 0, Arc::new(replacement));
+
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.memory_bytes(), expected_bytes);
     }
 
     impl PdfBackend for SearchPositionedStubPdf {
@@ -1052,6 +1295,81 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].occurrences.len(), 1);
         assert!(!highlight_unavailable);
+    }
+
+    #[test]
+    fn search_reuses_cached_positioned_text_for_same_document() {
+        let mut engine = SearchEngine::new();
+        let pdf = Arc::new(CountingPositionedStubPdf::new(
+            101,
+            vec![text_page("alpha"), text_page("beta alpha")],
+        ));
+
+        let generation = engine
+            .submit(
+                pdf.clone(),
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("first submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![0, 1]);
+
+        let generation = engine
+            .submit(
+                pdf.clone(),
+                "beta",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("second submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![1]);
+
+        assert_eq!(pdf.positioned_calls(), vec![1, 1]);
+    }
+
+    #[test]
+    fn search_does_not_reuse_positioned_text_across_document_ids() {
+        let mut engine = SearchEngine::new();
+        let first = Arc::new(CountingPositionedStubPdf::new(
+            201,
+            vec![text_page("alpha")],
+        ));
+        let second = Arc::new(CountingPositionedStubPdf::new(
+            202,
+            vec![text_page("alpha")],
+        ));
+
+        let generation = engine
+            .submit(
+                first.clone(),
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("first submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![0]);
+
+        let generation = engine
+            .submit(
+                second.clone(),
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("second submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![0]);
+
+        assert_eq!(first.positioned_calls(), vec![1]);
+        assert_eq!(second.positioned_calls(), vec![1]);
     }
 
     #[test]
@@ -1489,6 +1807,22 @@ mod tests {
 
     fn glyph_without_bbox(ch: char) -> TextGlyph {
         TextGlyph { ch, bbox: None }
+    }
+
+    fn text_page(text: &str) -> TextPage {
+        TextPage {
+            width_pt: 100.0,
+            height_pt: 100.0,
+            glyphs: text
+                .chars()
+                .enumerate()
+                .map(|(index, ch)| {
+                    let x0 = index as f32 * 10.0;
+                    glyph(ch, x0, 0.0, x0 + 10.0, 10.0)
+                })
+                .collect(),
+            dropped_glyphs: 0,
+        }
     }
 
     fn unique_temp_path(suffix: &str) -> PathBuf {

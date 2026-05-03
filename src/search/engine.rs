@@ -1,5 +1,8 @@
+use std::mem::size_of;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
+use lru::LruCache;
 use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::mpsc::{
     UnboundedReceiver, UnboundedSender, error::TryRecvError, unbounded_channel,
@@ -89,6 +92,88 @@ enum WorkerRequest {
 enum WorkerControl {
     Continue,
     Shutdown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct SearchPageCacheKey {
+    doc_id: u64,
+    page: usize,
+}
+
+struct SearchPageCache {
+    pages: LruCache<SearchPageCacheKey, CachedTextPage>,
+    memory_budget_bytes: usize,
+    memory_bytes: usize,
+}
+
+struct CachedTextPage {
+    page: Arc<TextPage>,
+    estimated_bytes: usize,
+}
+
+impl SearchPageCache {
+    // Search wants broad page reuse; memory budget is the real safety limit.
+    const DEFAULT_MAX_ENTRIES: usize = 16_384;
+    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+
+    fn new() -> Self {
+        Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
+    }
+
+    fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
+        let max_entries =
+            NonZeroUsize::new(max_entries).expect("search page cache entries must be non-zero");
+        Self {
+            pages: LruCache::new(max_entries),
+            memory_budget_bytes,
+            memory_bytes: 0,
+        }
+    }
+
+    fn get(&mut self, doc_id: u64, page: usize) -> Option<Arc<TextPage>> {
+        self.pages
+            .get(&SearchPageCacheKey { doc_id, page })
+            .map(|cached| Arc::clone(&cached.page))
+    }
+
+    fn insert(&mut self, doc_id: u64, page: usize, text_page: Arc<TextPage>) {
+        let estimated_bytes = estimate_text_page_bytes(&text_page);
+        if let Some((_key, removed)) = self.pages.push(
+            SearchPageCacheKey { doc_id, page },
+            CachedTextPage {
+                page: text_page,
+                estimated_bytes,
+            },
+        ) {
+            self.memory_bytes = self.memory_bytes.saturating_sub(removed.estimated_bytes);
+        }
+        self.memory_bytes = self.memory_bytes.saturating_add(estimated_bytes);
+        self.enforce_memory_budget();
+    }
+
+    fn enforce_memory_budget(&mut self) {
+        while self.memory_bytes > self.memory_budget_bytes {
+            let Some((_key, evicted)) = self.pages.pop_lru() else {
+                self.memory_bytes = 0;
+                break;
+            };
+            self.memory_bytes = self.memory_bytes.saturating_sub(evicted.estimated_bytes);
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.pages.len()
+    }
+
+    #[cfg(test)]
+    fn memory_bytes(&self) -> usize {
+        self.memory_bytes
+    }
+}
+
+fn estimate_text_page_bytes(text_page: &TextPage) -> usize {
+    size_of::<TextPage>() + text_page.glyphs.len() * size_of::<TextGlyph>()
 }
 
 pub struct SearchEngine {
@@ -228,6 +313,7 @@ fn worker_main(
     event_tx: UnboundedSender<SearchEvent>,
 ) {
     let mut pending: Option<SearchJob> = None;
+    let mut page_cache = SearchPageCache::new();
 
     loop {
         let job = match pending.take() {
@@ -238,7 +324,13 @@ fn worker_main(
             },
         };
 
-        match run_job(job, &mut request_rx, &event_tx, &mut pending) {
+        match run_job(
+            job,
+            &mut request_rx,
+            &event_tx,
+            &mut pending,
+            &mut page_cache,
+        ) {
             WorkerControl::Continue => {}
             WorkerControl::Shutdown => break,
         }
@@ -257,6 +349,7 @@ fn run_job(
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     event_tx: &UnboundedSender<SearchEvent>,
     pending: &mut Option<SearchJob>,
+    page_cache: &mut SearchPageCache,
 ) -> WorkerControl {
     let query = job.matcher.prepare_query(job.query.trim());
     if query.is_empty() {
@@ -278,6 +371,7 @@ fn run_job(
 
     let doc = job.pdf;
 
+    let doc_id = doc.doc_id();
     let total_pages = doc.page_count();
 
     let mut hits = Vec::new();
@@ -292,38 +386,50 @@ fn run_job(
             WorkerControl::Shutdown => return WorkerControl::Shutdown,
         }
 
-        let text = match doc.extract_text(page) {
-            Ok(text) => text,
-            Err(err) => {
-                let _ = event_tx.send(SearchEvent::Failed {
-                    generation: job.generation,
-                    message: err.to_string(),
-                });
-                return WorkerControl::Continue;
-            }
+        let positioned_text = match page_cache.get(doc_id, page) {
+            Some(text_page) => Ok(text_page),
+            None => doc.extract_positioned_text(page).map(|text_page| {
+                let text_page = Arc::new(text_page);
+                page_cache.insert(doc_id, page, Arc::clone(&text_page));
+                text_page
+            }),
         };
 
-        if job.matcher.matches_page(&text, &query) {
-            let occurrences = match doc.extract_positioned_text(page) {
-                Ok(text_page) => {
-                    if text_page.dropped_glyphs > 0 {
-                        highlight_unavailable = true;
-                    }
-                    let mut occurrences = job.matcher.locate_matches(&text_page, &query);
+        match positioned_text {
+            Ok(text_page) => {
+                let mut occurrences = job.matcher.locate_matches(text_page.as_ref(), &query);
+                // Keep `extract_text` out of the primary search path: once positioned text is
+                // available, the glyph stream is the searchable source of truth.
+                if !occurrences.is_empty() {
                     for occurrence in &mut occurrences {
+                        if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
+                            highlight_unavailable = true;
+                        }
                         apply_hit_snippet(occurrence, &text_page.glyphs);
                     }
-                    if occurrences.is_empty() {
-                        highlight_unavailable = true;
+                    hits.push(SearchPageHit { page, occurrences });
+                }
+            }
+            Err(_) => {
+                let text = match doc.extract_text(page) {
+                    Ok(text) => text,
+                    Err(err) => {
+                        let _ = event_tx.send(SearchEvent::Failed {
+                            generation: job.generation,
+                            message: err.to_string(),
+                        });
+                        return WorkerControl::Continue;
                     }
-                    occurrences
-                }
-                Err(_) => {
+                };
+
+                if job.matcher.matches_page(&text, &query) {
+                    hits.push(SearchPageHit {
+                        page,
+                        occurrences: Vec::new(),
+                    });
                     highlight_unavailable = true;
-                    Vec::new()
                 }
-            };
-            hits.push(SearchPageHit { page, occurrences });
+            }
         }
 
         let scanned_pages = page + 1;
@@ -345,29 +451,32 @@ fn run_job(
     WorkerControl::Continue
 }
 
+fn occurrence_highlight_unavailable(occurrence: &SearchOccurrence, glyphs: &[TextGlyph]) -> bool {
+    if occurrence.rects.is_empty() {
+        return true;
+    }
+
+    let Some(slice) = glyphs.get(occurrence.glyph_start..=occurrence.glyph_end) else {
+        return true;
+    };
+
+    slice
+        .iter()
+        .any(|glyph| !glyph.ch.is_whitespace() && glyph.bbox.is_none())
+}
+
 pub(crate) fn locate_occurrences(
     glyphs: &[TextGlyph],
     prepared_query: &str,
     case_sensitive: bool,
 ) -> Vec<SearchOccurrence> {
-    let mut occurrences =
+    let occurrences =
         locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, false);
-
-    // `SearchOccurrence` dedups by `(glyph_start, glyph_end)` because
-    // locate_occurrences_with_strategy/merge_occurrence_rects are pure for a glyph slice; keep it
-    // that way and avoid adding path-dependent fields that would make equal ranges diverge.
-    for occurrence in locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
-    {
-        let duplicate = occurrences.iter().any(|existing| {
-            existing.glyph_start == occurrence.glyph_start
-                && existing.glyph_end == occurrence.glyph_end
-        });
-        if !duplicate {
-            occurrences.push(occurrence);
-        }
+    if !occurrences.is_empty() {
+        return occurrences;
     }
 
-    occurrences
+    locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
 }
 
 struct SnippetPresentation {
@@ -466,39 +575,47 @@ fn locate_occurrences_with_strategy(
         return Vec::new();
     }
 
-    let search_chars: Vec<char> = search_text.chars().collect();
-    let query_chars: Vec<char> = query_text.chars().collect();
-    let query_len = query_chars.len();
-    if query_len == 0 || query_len > search_chars.len() {
+    if query_text.len() > search_text.len() {
+        return Vec::new();
+    }
+
+    let char_byte_offsets: Vec<usize> = search_text
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .collect();
+    let query_char_len = query_text.chars().count();
+    if query_char_len == 0 || query_char_len > char_map.len() {
         return Vec::new();
     }
 
     let mut occurrences = Vec::new();
-    let mut cursor = 0;
+    let mut cursor_byte = 0;
     // Matches are intentionally non-overlapping "find in page" hits: after matching
-    // `search_chars[cursor..cursor + query_len]` against `query_chars`, we advance `cursor` by
-    // `query_len`, so overlapping occurrences are skipped by design.
-    while cursor + query_len <= search_chars.len() {
-        if search_chars[cursor..cursor + query_len] == query_chars[..] {
-            let glyph_start = char_map[cursor];
-            let glyph_end = char_map[cursor + query_len - 1];
-            let rects = merge_occurrence_rects(&glyphs[glyph_start..=glyph_end]);
-            if !rects.is_empty() {
-                occurrences.push(SearchOccurrence {
-                    glyph_start,
-                    glyph_end,
-                    rects,
-                    snippet: String::new(),
-                    snippet_match_start: None,
-                    snippet_match_end: None,
-                });
-            }
-            // Empty rects can come from all-whitespace glyph slices; we intentionally drop that
-            // occurrence and still advance the cursor, leaving highlight_unavailable to the caller.
-            cursor += query_len;
-        } else {
-            cursor += 1;
-        }
+    // `query_text`, advance by its byte length so overlapping occurrences are skipped by design.
+    while cursor_byte <= search_text.len() {
+        let Some(relative_match_byte) = search_text[cursor_byte..].find(&query_text) else {
+            break;
+        };
+        let match_byte = cursor_byte + relative_match_byte;
+        let match_char_start = char_byte_offsets.binary_search(&match_byte);
+        debug_assert!(
+            match_char_start.is_ok(),
+            "str::find returned a non-character-boundary offset"
+        );
+        let match_char_start =
+            match_char_start.expect("str::find returned a non-character-boundary offset");
+        let glyph_start = char_map[match_char_start];
+        let glyph_end = char_map[match_char_start + query_char_len - 1];
+        let rects = merge_occurrence_rects(&glyphs[glyph_start..=glyph_end]);
+        occurrences.push(SearchOccurrence {
+            glyph_start,
+            glyph_end,
+            rects,
+            snippet: String::new(),
+            snippet_match_start: None,
+            snippet_match_end: None,
+        });
+        cursor_byte = match_byte + query_text.len();
     }
 
     occurrences
@@ -528,9 +645,15 @@ fn normalize_glyphs_for_search(
 }
 
 fn merge_occurrence_rects(glyphs: &[TextGlyph]) -> Vec<PdfRect> {
-    let glyphs: Vec<&TextGlyph> = glyphs
+    let glyphs: Vec<HighlightGlyph> = glyphs
         .iter()
-        .filter(|glyph| !glyph.ch.is_whitespace())
+        .filter_map(|glyph| {
+            if glyph.ch.is_whitespace() {
+                None
+            } else {
+                glyph.bbox.map(|bbox| HighlightGlyph { bbox })
+            }
+        })
         .collect();
     if glyphs.is_empty() {
         return Vec::new();
@@ -543,11 +666,12 @@ fn merge_occurrence_rects(glyphs: &[TextGlyph]) -> Vec<PdfRect> {
     let mut current = glyphs[0].bbox;
 
     for glyph in glyphs.iter().skip(1) {
-        if belongs_to_run(current, glyph.bbox, merge_axis, median_width, median_height) {
-            current = union_rects(current, glyph.bbox);
+        let bbox = glyph.bbox;
+        if belongs_to_run(current, bbox, merge_axis, median_width, median_height) {
+            current = union_rects(current, bbox);
         } else {
             rects.push(current);
-            current = glyph.bbox;
+            current = bbox;
         }
     }
 
@@ -555,10 +679,15 @@ fn merge_occurrence_rects(glyphs: &[TextGlyph]) -> Vec<PdfRect> {
     rects
 }
 
+#[derive(Debug, Clone, Copy)]
+struct HighlightGlyph {
+    bbox: PdfRect,
+}
+
 // Choose the screen-space axis used to merge highlight rectangles.
 // This is not a writing-mode detector: rotated horizontal text may still merge
 // on the vertical axis if that better matches the glyph layout on the page.
-fn infer_merge_axis(glyphs: &[&TextGlyph]) -> MergeAxis {
+fn infer_merge_axis(glyphs: &[HighlightGlyph]) -> MergeAxis {
     let mut horizontal_score = 0.0f32;
     let mut vertical_score = 0.0f32;
 
@@ -566,10 +695,12 @@ fn infer_merge_axis(glyphs: &[&TextGlyph]) -> MergeAxis {
         let [left, right] = pair else {
             continue;
         };
+        let left_bbox = left.bbox;
+        let right_bbox = right.bbox;
         horizontal_score +=
-            overlap_ratio_1d(left.bbox.y0, left.bbox.y1, right.bbox.y0, right.bbox.y1);
+            overlap_ratio_1d(left_bbox.y0, left_bbox.y1, right_bbox.y0, right_bbox.y1);
         vertical_score +=
-            overlap_ratio_1d(left.bbox.x0, left.bbox.x1, right.bbox.x0, right.bbox.x1);
+            overlap_ratio_1d(left_bbox.x0, left_bbox.x1, right_bbox.x0, right_bbox.x1);
     }
 
     if vertical_score > horizontal_score {
@@ -634,7 +765,7 @@ fn union_rects(left: PdfRect, right: PdfRect) -> PdfRect {
     }
 }
 
-fn median_rect_extent(glyphs: &[&TextGlyph], extent: RectExtent) -> f32 {
+fn median_rect_extent(glyphs: &[HighlightGlyph], extent: RectExtent) -> f32 {
     let mut values: Vec<f32> = glyphs
         .iter()
         .map(|glyph| match extent {
@@ -710,13 +841,14 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
     use std::process;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::{
-        SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit,
-        locate_occurrences, merge_occurrence_rects, page_matches_contains, prepare_contains_query,
+        SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageCache, SearchPageHit,
+        estimate_text_page_bytes, locate_occurrences, merge_occurrence_rects,
+        page_matches_contains, prepare_contains_query,
     };
     use crate::backend::open_default_backend;
     use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
@@ -803,6 +935,146 @@ mod tests {
                 positioned_text,
             }
         }
+    }
+
+    struct CountingPositionedStubPdf {
+        path: PathBuf,
+        doc_id: u64,
+        pages: Vec<TextPage>,
+        positioned_calls: Mutex<Vec<usize>>,
+    }
+
+    impl CountingPositionedStubPdf {
+        fn new(doc_id: u64, pages: Vec<TextPage>) -> Self {
+            let page_count = pages.len();
+            Self {
+                path: PathBuf::from(format!("counting-positioned-{doc_id}.pdf")),
+                doc_id,
+                pages,
+                positioned_calls: Mutex::new(vec![0; page_count]),
+            }
+        }
+
+        fn positioned_calls(&self) -> Vec<usize> {
+            self.positioned_calls
+                .lock()
+                .expect("positioned calls lock should not be poisoned")
+                .clone()
+        }
+    }
+
+    impl PdfBackend for CountingPositionedStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            self.doc_id
+        }
+
+        fn page_count(&self) -> usize {
+            self.pages.len()
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+
+        fn extract_text(&self, page: usize) -> AppResult<String> {
+            Ok(self.pages[page].extracted_text())
+        }
+
+        fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage> {
+            let mut calls = self
+                .positioned_calls
+                .lock()
+                .expect("positioned calls lock should not be poisoned");
+            calls[page] += 1;
+            Ok(self.pages[page].clone())
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+    }
+
+    #[test]
+    fn search_page_cache_hits_after_insert() {
+        let mut cache = SearchPageCache::with_limits(4, usize::MAX);
+        let page = text_page("alpha");
+
+        cache.insert(1, 0, Arc::new(page.clone()));
+
+        assert_eq!(cache.get(1, 0).as_deref(), Some(&page));
+    }
+
+    #[test]
+    fn search_page_cache_evicts_least_recently_used_over_max_entries() {
+        let mut cache = SearchPageCache::with_limits(2, usize::MAX);
+        cache.insert(1, 0, Arc::new(text_page("alpha")));
+        cache.insert(1, 1, Arc::new(text_page("beta")));
+        assert!(cache.get(1, 0).is_some());
+
+        cache.insert(1, 2, Arc::new(text_page("gamma")));
+
+        assert!(cache.get(1, 0).is_some());
+        assert!(cache.get(1, 1).is_none());
+        assert!(cache.get(1, 2).is_some());
+    }
+
+    #[test]
+    fn search_page_cache_evicts_over_memory_budget() {
+        let small = text_page("a");
+        let large = text_page("abcdef");
+        let budget = estimate_text_page_bytes(&small) + estimate_text_page_bytes(&large) - 1;
+        let mut cache = SearchPageCache::with_limits(4, budget);
+        cache.insert(1, 0, Arc::new(small));
+
+        cache.insert(1, 1, Arc::new(large));
+
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(1, 0).is_none());
+        assert!(cache.get(1, 1).is_some());
+        assert!(cache.memory_bytes() <= budget);
+    }
+
+    #[test]
+    fn search_page_cache_separates_documents() {
+        let mut cache = SearchPageCache::with_limits(4, usize::MAX);
+        cache.insert(1, 0, Arc::new(text_page("alpha")));
+        cache.insert(2, 0, Arc::new(text_page("beta")));
+
+        assert_eq!(
+            cache
+                .get(1, 0)
+                .expect("doc 1 page should exist")
+                .extracted_text(),
+            "alpha"
+        );
+        assert_eq!(
+            cache
+                .get(2, 0)
+                .expect("doc 2 page should exist")
+                .extracted_text(),
+            "beta"
+        );
+    }
+
+    #[test]
+    fn search_page_cache_reinsertion_replaces_memory_accounting() {
+        let mut cache = SearchPageCache::with_limits(4, usize::MAX);
+        let replacement = text_page("abcde");
+        let expected_bytes = estimate_text_page_bytes(&replacement);
+
+        cache.insert(1, 0, Arc::new(text_page("a")));
+        cache.insert(1, 0, Arc::new(replacement));
+
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.memory_bytes(), expected_bytes);
     }
 
     impl PdfBackend for SearchPositionedStubPdf {
@@ -993,14 +1265,20 @@ mod tests {
     }
 
     #[test]
-    fn search_marks_highlight_unavailable_when_match_has_no_geometry() {
+    fn search_uses_positioned_text_even_when_extract_text_does_not_match() {
         let mut engine = SearchEngine::new();
         let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
-            "alpha beta",
+            "",
             TextPage {
                 width_pt: 100.0,
                 height_pt: 100.0,
-                glyphs: Vec::new(),
+                glyphs: vec![
+                    glyph('a', 0.0, 0.0, 10.0, 10.0),
+                    glyph('l', 10.0, 0.0, 20.0, 10.0),
+                    glyph('p', 20.0, 0.0, 30.0, 10.0),
+                    glyph('h', 30.0, 0.0, 40.0, 10.0),
+                    glyph('a', 40.0, 0.0, 50.0, 10.0),
+                ],
                 dropped_glyphs: 0,
             },
         ));
@@ -1016,19 +1294,136 @@ mod tests {
 
         let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hits.len(), 1);
-        assert!(hits[0].occurrences.is_empty());
-        assert!(highlight_unavailable);
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert!(!highlight_unavailable);
     }
 
     #[test]
-    fn search_treats_dropped_positioned_glyphs_as_highlight_failure() {
+    fn search_reuses_cached_positioned_text_for_same_document() {
+        let mut engine = SearchEngine::new();
+        let pdf = Arc::new(CountingPositionedStubPdf::new(
+            101,
+            vec![text_page("alpha"), text_page("beta alpha")],
+        ));
+
+        let generation = engine
+            .submit(
+                pdf.clone(),
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("first submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![0, 1]);
+
+        let generation = engine
+            .submit(
+                pdf.clone(),
+                "beta",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("second submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![1]);
+
+        assert_eq!(pdf.positioned_calls(), vec![1, 1]);
+    }
+
+    #[test]
+    fn search_does_not_reuse_positioned_text_across_document_ids() {
+        let mut engine = SearchEngine::new();
+        let first = Arc::new(CountingPositionedStubPdf::new(
+            201,
+            vec![text_page("alpha")],
+        ));
+        let second = Arc::new(CountingPositionedStubPdf::new(
+            202,
+            vec![text_page("alpha")],
+        ));
+
+        let generation = engine
+            .submit(
+                first.clone(),
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("first submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![0]);
+
+        let generation = engine
+            .submit(
+                second.clone(),
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("second submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hit_pages(&hits), vec![0]);
+
+        assert_eq!(first.positioned_calls(), vec![1]);
+        assert_eq!(second.positioned_calls(), vec![1]);
+    }
+
+    #[test]
+    fn search_keeps_occurrence_when_match_has_no_geometry() {
         let mut engine = SearchEngine::new();
         let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
             "alpha beta",
             TextPage {
                 width_pt: 100.0,
                 height_pt: 100.0,
-                glyphs: vec![glyph('a', 0.0, 0.0, 10.0, 10.0)],
+                glyphs: vec![
+                    glyph_without_bbox('a'),
+                    glyph_without_bbox('l'),
+                    glyph_without_bbox('p'),
+                    glyph_without_bbox('h'),
+                    glyph_without_bbox('a'),
+                ],
+                dropped_glyphs: 5,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert!(hits[0].occurrences[0].rects.is_empty());
+        assert_eq!(hits[0].occurrences[0].snippet, "alpha");
+        assert!(highlight_unavailable);
+    }
+
+    #[test]
+    fn search_marks_highlight_unavailable_when_matched_glyph_lacks_geometry() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "alpha beta",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: vec![
+                    glyph('a', 0.0, 0.0, 10.0, 10.0),
+                    glyph('l', 10.0, 0.0, 20.0, 10.0),
+                    glyph_without_bbox('p'),
+                    glyph('h', 30.0, 0.0, 40.0, 10.0),
+                    glyph('a', 40.0, 0.0, 50.0, 10.0),
+                ],
                 dropped_glyphs: 1,
             },
         ));
@@ -1044,12 +1439,13 @@ mod tests {
 
         let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hits.len(), 1);
-        assert!(hits[0].occurrences.is_empty());
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert_eq!(hits[0].occurrences[0].rects.len(), 1);
         assert!(highlight_unavailable);
     }
 
     #[test]
-    fn search_marks_highlight_unavailable_when_dropped_glyphs_and_occurrences_exist() {
+    fn search_ignores_dropped_glyphs_when_matched_glyphs_have_geometry() {
         let mut engine = SearchEngine::new();
         let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
             "alpha beta",
@@ -1079,7 +1475,39 @@ mod tests {
         let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].occurrences.len(), 1);
-        assert!(highlight_unavailable);
+        assert!(!highlight_unavailable);
+    }
+
+    #[test]
+    fn search_uses_glyph_order_without_coordinate_newline_inference() {
+        let mut engine = SearchEngine::new();
+        let pdf: Arc<dyn PdfBackend> = Arc::new(SearchPositionedStubPdf::new(
+            "",
+            TextPage {
+                width_pt: 100.0,
+                height_pt: 100.0,
+                glyphs: vec![
+                    glyph('縦', 80.0, 10.0, 92.0, 22.0),
+                    glyph('書', 80.0, 24.0, 92.0, 36.0),
+                    glyph('き', 80.0, 38.0, 92.0, 50.0),
+                ],
+                dropped_glyphs: 0,
+            },
+        ));
+        let generation = engine
+            .submit(
+                pdf,
+                "縦書き",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+
+        let (hits, highlight_unavailable) = wait_for_completed_hits(&mut engine, generation);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].occurrences.len(), 1);
+        assert!(!highlight_unavailable);
     }
 
     #[test]
@@ -1197,7 +1625,7 @@ mod tests {
     }
 
     #[test]
-    fn locate_occurrences_keeps_direct_and_whitespace_insensitive_matches() {
+    fn locate_occurrences_skips_whitespace_insensitive_fallback_after_direct_match() {
         let glyphs = vec![
             glyph('f', 10.0, 20.0, 18.0, 32.0),
             glyph('o', 20.0, 20.0, 28.0, 32.0),
@@ -1217,11 +1645,58 @@ mod tests {
 
         let occurrences = locate_occurrences(&glyphs, "foobar", false);
 
-        assert_eq!(occurrences.len(), 2);
+        assert_eq!(occurrences.len(), 1);
         assert_eq!(occurrences[0].glyph_start, 0);
         assert_eq!(occurrences[0].glyph_end, 5);
-        assert_eq!(occurrences[1].glyph_start, 7);
-        assert_eq!(occurrences[1].glyph_end, 13);
+    }
+
+    #[test]
+    fn locate_occurrences_uses_whitespace_insensitive_fallback_without_direct_match() {
+        let glyphs = vec![
+            glyph('f', 10.0, 20.0, 18.0, 32.0),
+            glyph('o', 20.0, 20.0, 28.0, 32.0),
+            glyph('o', 30.0, 20.0, 38.0, 32.0),
+            glyph('b', 40.0, 20.0, 48.0, 32.0),
+            glyph('a', 50.0, 20.0, 58.0, 32.0),
+            glyph('r', 60.0, 20.0, 68.0, 32.0),
+        ];
+
+        let occurrences = locate_occurrences(&glyphs, "foo bar", false);
+
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].glyph_start, 0);
+        assert_eq!(occurrences[0].glyph_end, 5);
+    }
+
+    #[test]
+    fn locate_occurrences_skips_overlapping_matches() {
+        let glyphs = vec![
+            glyph('a', 10.0, 20.0, 18.0, 32.0),
+            glyph('a', 20.0, 20.0, 28.0, 32.0),
+            glyph('a', 30.0, 20.0, 38.0, 32.0),
+        ];
+
+        let occurrences = locate_occurrences(&glyphs, "aa", true);
+
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].glyph_start, 0);
+        assert_eq!(occurrences[0].glyph_end, 1);
+    }
+
+    #[test]
+    fn locate_occurrences_maps_multibyte_byte_offsets_to_char_positions() {
+        let glyphs = vec![
+            glyph('a', 10.0, 20.0, 18.0, 32.0),
+            glyph('β', 20.0, 20.0, 28.0, 32.0),
+            glyph('a', 30.0, 20.0, 38.0, 32.0),
+            glyph('β', 40.0, 20.0, 48.0, 32.0),
+        ];
+
+        let occurrences = locate_occurrences(&glyphs, "βa", true);
+
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(occurrences[0].glyph_start, 1);
+        assert_eq!(occurrences[0].glyph_end, 2);
     }
 
     #[test]
@@ -1327,7 +1802,27 @@ mod tests {
     fn glyph(ch: char, x0: f32, y0: f32, x1: f32, y1: f32) -> TextGlyph {
         TextGlyph {
             ch,
-            bbox: PdfRect { x0, y0, x1, y1 },
+            bbox: Some(PdfRect { x0, y0, x1, y1 }),
+        }
+    }
+
+    fn glyph_without_bbox(ch: char) -> TextGlyph {
+        TextGlyph { ch, bbox: None }
+    }
+
+    fn text_page(text: &str) -> TextPage {
+        TextPage {
+            width_pt: 100.0,
+            height_pt: 100.0,
+            glyphs: text
+                .chars()
+                .enumerate()
+                .map(|(index, ch)| {
+                    let x0 = index as f32 * 10.0;
+                    glyph(ch, x0, 0.0, x0 + 10.0, 10.0)
+                })
+                .collect(),
+            dropped_glyphs: 0,
         }
     }
 

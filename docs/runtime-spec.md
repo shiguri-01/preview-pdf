@@ -53,6 +53,9 @@ Rules:
 - Search
   - full-text substring search supports case-insensitive and case-sensitive
     matchers
+  - each page is searched first with the query text as entered; when that finds
+    no hit on the page, search falls back to a whitespace-insensitive substring
+    match to tolerate PDF text extraction that omits or inserts whitespace
   - search runs asynchronously and reports progress while active
   - visible search hits are highlighted through the generic highlight overlay
     layer

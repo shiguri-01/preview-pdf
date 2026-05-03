@@ -112,7 +112,8 @@ struct CachedTextPage {
 }
 
 impl SearchPageCache {
-    const DEFAULT_MAX_ENTRIES: usize = 512;
+    // Search wants broad page reuse; memory budget is the real safety limit.
+    const DEFAULT_MAX_ENTRIES: usize = 16_384;
     const DEFAULT_MEMORY_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 
     fn new() -> Self {

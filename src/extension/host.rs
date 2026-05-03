@@ -90,6 +90,10 @@ impl ExtensionHost {
         self.search.submit(app, pdf, query, matcher)
     }
 
+    pub fn prewarm_search_text(&mut self, pdf: SharedPdfBackend) {
+        self.search.prewarm(pdf);
+    }
+
     pub fn open_search_results_palette(
         &mut self,
         app: &mut AppState,

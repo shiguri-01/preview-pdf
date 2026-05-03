@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::mem::size_of;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -84,8 +85,14 @@ struct SearchJob {
     matcher: Arc<dyn SearchMatcher>,
 }
 
+#[derive(Clone)]
+struct PrewarmJob {
+    pdf: SharedPdfBackend,
+}
+
 enum WorkerRequest {
     Query(SearchJob),
+    Prewarm(PrewarmJob),
     Shutdown,
 }
 
@@ -138,8 +145,12 @@ impl SearchPageCache {
 
     fn insert(&mut self, doc_id: u64, page: usize, text_page: Arc<TextPage>) {
         let estimated_bytes = estimate_text_page_bytes(&text_page);
+        let key = SearchPageCacheKey { doc_id, page };
+        if let Some(replaced) = self.pages.pop(&key) {
+            self.memory_bytes = self.memory_bytes.saturating_sub(replaced.estimated_bytes);
+        }
         if let Some((_key, removed)) = self.pages.push(
-            SearchPageCacheKey { doc_id, page },
+            key,
             CachedTextPage {
                 page: text_page,
                 estimated_bytes,
@@ -149,6 +160,21 @@ impl SearchPageCache {
         }
         self.memory_bytes = self.memory_bytes.saturating_add(estimated_bytes);
         self.enforce_memory_budget();
+    }
+
+    fn try_insert_without_eviction(
+        &mut self,
+        doc_id: u64,
+        page: usize,
+        text_page: Arc<TextPage>,
+    ) -> bool {
+        let estimated_bytes = estimate_text_page_bytes(&text_page);
+        if self.memory_bytes.saturating_add(estimated_bytes) > self.memory_budget_bytes {
+            return false;
+        }
+
+        self.insert(doc_id, page, text_page);
+        true
     }
 
     fn enforce_memory_budget(&mut self) {
@@ -267,6 +293,12 @@ impl SearchEngine {
         self.submit(pdf, String::new(), Arc::new(CancelMatcher))
     }
 
+    pub fn prewarm(&mut self, pdf: SharedPdfBackend) {
+        let _ = self
+            .request_tx
+            .send(WorkerRequest::Prewarm(PrewarmJob { pdf }));
+    }
+
     pub fn drain_events(&mut self) -> Vec<SearchEvent> {
         let mut drained = Vec::new();
 
@@ -314,12 +346,26 @@ fn worker_main(
 ) {
     let mut pending: Option<SearchJob> = None;
     let mut page_cache = SearchPageCache::new();
+    let mut prewarm_finished_doc_ids = HashSet::new();
 
     loop {
         let job = match pending.take() {
             Some(job) => job,
             None => match wait_for_job(&mut request_rx) {
-                Some(job) => job,
+                Some(WorkerWork::Query(job)) => job,
+                Some(WorkerWork::Prewarm(job)) => {
+                    match run_prewarm_job(
+                        job,
+                        &mut request_rx,
+                        &mut pending,
+                        &mut page_cache,
+                        &mut prewarm_finished_doc_ids,
+                    ) {
+                        WorkerControl::Continue => {}
+                        WorkerControl::Shutdown => break,
+                    }
+                    continue;
+                }
                 None => break,
             },
         };
@@ -337,11 +383,59 @@ fn worker_main(
     }
 }
 
-fn wait_for_job(request_rx: &mut UnboundedReceiver<WorkerRequest>) -> Option<SearchJob> {
+enum WorkerWork {
+    Query(SearchJob),
+    Prewarm(PrewarmJob),
+}
+
+fn wait_for_job(request_rx: &mut UnboundedReceiver<WorkerRequest>) -> Option<WorkerWork> {
     match request_rx.blocking_recv() {
-        Some(WorkerRequest::Query(job)) => Some(job),
+        Some(WorkerRequest::Query(job)) => Some(WorkerWork::Query(job)),
+        Some(WorkerRequest::Prewarm(job)) => Some(WorkerWork::Prewarm(job)),
         Some(WorkerRequest::Shutdown) | None => None,
     }
+}
+
+fn run_prewarm_job(
+    job: PrewarmJob,
+    request_rx: &mut UnboundedReceiver<WorkerRequest>,
+    pending: &mut Option<SearchJob>,
+    page_cache: &mut SearchPageCache,
+    prewarm_finished_doc_ids: &mut HashSet<u64>,
+) -> WorkerControl {
+    let doc = job.pdf;
+    let total_pages = doc.page_count();
+    if total_pages == 0 {
+        return WorkerControl::Continue;
+    }
+
+    let doc_id = doc.doc_id();
+    if prewarm_finished_doc_ids.contains(&doc_id) {
+        return WorkerControl::Continue;
+    }
+
+    for page in 0..total_pages {
+        match flush_requests(request_rx, pending) {
+            WorkerControl::Continue => {
+                if pending.is_some() {
+                    return WorkerControl::Continue;
+                }
+            }
+            WorkerControl::Shutdown => return WorkerControl::Shutdown,
+        }
+        if page_cache.get(doc_id, page).is_some() {
+            continue;
+        }
+        if let Ok(text_page) = doc.extract_positioned_text(page) {
+            if !page_cache.try_insert_without_eviction(doc_id, page, Arc::new(text_page)) {
+                prewarm_finished_doc_ids.insert(doc_id);
+                break;
+            }
+        }
+    }
+
+    prewarm_finished_doc_ids.insert(doc_id);
+    WorkerControl::Continue
 }
 
 fn run_job(
@@ -390,7 +484,7 @@ fn run_job(
             Some(text_page) => Ok(text_page),
             None => doc.extract_positioned_text(page).map(|text_page| {
                 let text_page = Arc::new(text_page);
-                page_cache.insert(doc_id, page, Arc::clone(&text_page));
+                page_cache.try_insert_without_eviction(doc_id, page, Arc::clone(&text_page));
                 text_page
             }),
         };
@@ -814,6 +908,7 @@ fn flush_requests(
     loop {
         match request_rx.try_recv() {
             Ok(WorkerRequest::Query(job)) => *pending = Some(job),
+            Ok(WorkerRequest::Prewarm(_)) => {}
             Ok(WorkerRequest::Shutdown) => return WorkerControl::Shutdown,
             Err(TryRecvError::Empty) => break,
             Err(TryRecvError::Disconnected) => return WorkerControl::Shutdown,
@@ -837,6 +932,7 @@ enum RectExtent {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
@@ -846,13 +942,14 @@ mod tests {
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::{
-        SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageCache, SearchPageHit,
-        estimate_text_page_bytes, locate_occurrences, merge_occurrence_rects,
-        page_matches_contains, prepare_contains_query,
+        PrewarmJob, SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageCache,
+        SearchPageHit, WorkerControl, estimate_text_page_bytes, locate_occurrences,
+        merge_occurrence_rects, page_matches_contains, prepare_contains_query, run_prewarm_job,
     };
     use crate::backend::open_default_backend;
     use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
     use crate::error::{AppError, AppResult};
+    use tokio::sync::mpsc::unbounded_channel;
 
     #[derive(Debug)]
     struct ContainsMatcher {
@@ -1043,6 +1140,22 @@ mod tests {
     }
 
     #[test]
+    fn search_page_cache_insert_without_eviction_stops_at_memory_budget() {
+        let first = Arc::new(text_page("alpha"));
+        let second = Arc::new(text_page("beta gamma"));
+        let budget = estimate_text_page_bytes(&first);
+        let mut cache = SearchPageCache::with_limits(4, budget);
+
+        assert!(cache.try_insert_without_eviction(1, 0, Arc::clone(&first)));
+        assert!(!cache.try_insert_without_eviction(1, 1, Arc::clone(&second)));
+
+        assert!(cache.get(1, 0).is_some());
+        assert!(cache.get(1, 1).is_none());
+        assert_eq!(cache.len(), 1);
+        assert!(cache.memory_bytes() <= budget);
+    }
+
+    #[test]
     fn search_page_cache_separates_documents() {
         let mut cache = SearchPageCache::with_limits(4, usize::MAX);
         cache.insert(1, 0, Arc::new(text_page("alpha")));
@@ -1074,6 +1187,20 @@ mod tests {
         cache.insert(1, 0, Arc::new(replacement));
 
         assert_eq!(cache.len(), 1);
+        assert_eq!(cache.memory_bytes(), expected_bytes);
+    }
+
+    #[test]
+    fn search_page_cache_reinsertion_does_not_trigger_budget_eviction() {
+        let page = Arc::new(text_page("a"));
+        let expected_bytes = estimate_text_page_bytes(&page);
+        let mut cache = SearchPageCache::with_limits(4, expected_bytes);
+
+        cache.insert(1, 0, Arc::clone(&page));
+        cache.insert(1, 0, Arc::clone(&page));
+
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(1, 0).is_some());
         assert_eq!(cache.memory_bytes(), expected_bytes);
     }
 
@@ -1296,6 +1423,77 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].occurrences.len(), 1);
         assert!(!highlight_unavailable);
+    }
+
+    #[test]
+    fn prewarm_populates_positioned_text_cache_for_later_search() {
+        let mut engine = SearchEngine::new();
+        let pdf = Arc::new(CountingPositionedStubPdf::new(
+            301,
+            vec![
+                text_page("alpha"),
+                text_page("beta"),
+                text_page("gamma alpha"),
+            ],
+        ));
+
+        engine.prewarm(pdf.clone());
+        wait_until(|| pdf.positioned_calls() == vec![1, 1, 1], "prewarm calls");
+
+        let generation = engine
+            .submit(
+                pdf.clone(),
+                "alpha",
+                Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            )
+            .expect("submit should succeed");
+        let (hits, _) = wait_for_completed_hits(&mut engine, generation);
+
+        assert_eq!(hit_pages(&hits), vec![0, 2]);
+        assert_eq!(pdf.positioned_calls(), vec![1, 1, 1]);
+    }
+
+    #[test]
+    fn prewarm_does_not_retry_after_memory_budget_is_reached() {
+        let first_page = text_page("alpha");
+        let second_page = text_page("beta gamma");
+        let budget = estimate_text_page_bytes(&first_page);
+        let pdf = Arc::new(CountingPositionedStubPdf::new(
+            302,
+            vec![first_page, second_page],
+        ));
+        let (_request_tx, request_rx) = unbounded_channel();
+        let (_event_tx, _event_rx) = unbounded_channel::<SearchEvent>();
+        let mut request_rx = request_rx;
+        let mut pending = None;
+        let mut page_cache = SearchPageCache::with_limits(4, budget);
+        let mut prewarm_finished_doc_ids = HashSet::new();
+
+        assert!(matches!(
+            run_prewarm_job(
+                PrewarmJob { pdf: pdf.clone() },
+                &mut request_rx,
+                &mut pending,
+                &mut page_cache,
+                &mut prewarm_finished_doc_ids,
+            ),
+            WorkerControl::Continue
+        ));
+        assert_eq!(pdf.positioned_calls(), vec![1, 1]);
+
+        assert!(matches!(
+            run_prewarm_job(
+                PrewarmJob { pdf: pdf.clone() },
+                &mut request_rx,
+                &mut pending,
+                &mut page_cache,
+                &mut prewarm_finished_doc_ids,
+            ),
+            WorkerControl::Continue
+        ));
+        assert_eq!(pdf.positioned_calls(), vec![1, 1]);
     }
 
     #[test]
@@ -1791,6 +1989,19 @@ mod tests {
                 start.elapsed() <= timeout,
                 "timed out waiting for search completion"
             );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn wait_until(mut condition: impl FnMut() -> bool, label: &str) {
+        let timeout = Duration::from_secs(3);
+        let start = Instant::now();
+
+        loop {
+            if condition() {
+                return;
+            }
+            assert!(start.elapsed() <= timeout, "timed out waiting for {label}");
             thread::sleep(Duration::from_millis(10));
         }
     }

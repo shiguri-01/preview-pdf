@@ -79,6 +79,10 @@ impl SearchRuntime {
         self.state.on_background(app, &mut self.engine)
     }
 
+    pub fn prewarm(&mut self, pdf: SharedPdfBackend) {
+        self.engine.prewarm(pdf);
+    }
+
     pub fn matcher(&self) -> SearchMatcherKind {
         self.state.matcher()
     }

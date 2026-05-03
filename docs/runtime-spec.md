@@ -57,6 +57,8 @@ Rules:
     no hit on the page, search falls back to a whitespace-insensitive substring
     match to tolerate PDF text extraction that omits or inserts whitespace
   - search runs asynchronously and reports progress while active
+  - positioned text extraction may be prewarmed in the background from the
+    start of the document so later searches can reuse cached page text
   - visible search hits are highlighted through the generic highlight overlay
     layer
   - if highlight extraction fails for matched pages, search results are kept and

@@ -125,6 +125,19 @@ enum WorkerControl {
     Shutdown,
 }
 
+enum PrewarmControl {
+    Finished,
+    Interrupted(PrewarmJob),
+    Shutdown,
+}
+
+#[derive(Default)]
+struct PendingWorkerWork {
+    query: Option<SearchJob>,
+    geometry: Option<GeometryJob>,
+    prewarm: Option<PrewarmJob>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct SearchPageCacheKey {
     doc_id: u64,
@@ -487,17 +500,17 @@ fn worker_main(
     mut request_rx: UnboundedReceiver<WorkerRequest>,
     event_tx: UnboundedSender<SearchEvent>,
 ) {
-    let mut pending: Option<SearchJob> = None;
-    let mut pending_geometry: Option<GeometryJob> = None;
+    let mut pending = PendingWorkerWork::default();
     let mut text_cache = SearchTextCache::new();
     let mut geometry_cache = SearchGeometryCache::new();
     let mut prewarm_finished_doc_ids = HashSet::new();
 
     loop {
-        let job = match pending.take() {
+        let job = match pending.query.take() {
             Some(job) => job,
-            None if pending_geometry.is_some() => {
-                let job = pending_geometry
+            None if pending.geometry.is_some() => {
+                let job = pending
+                    .geometry
                     .take()
                     .expect("pending geometry checked above");
                 match run_geometry_job(
@@ -505,12 +518,30 @@ fn worker_main(
                     &mut request_rx,
                     &event_tx,
                     &mut pending,
-                    &mut pending_geometry,
                     &mut text_cache,
                     &mut geometry_cache,
                 ) {
                     WorkerControl::Continue => {}
                     WorkerControl::Shutdown => break,
+                }
+                continue;
+            }
+            None if pending.prewarm.is_some() => {
+                let job = pending
+                    .prewarm
+                    .take()
+                    .expect("pending prewarm checked above");
+                match run_prewarm_job(
+                    job,
+                    &mut request_rx,
+                    &mut pending,
+                    &mut text_cache,
+                    &mut geometry_cache,
+                    &mut prewarm_finished_doc_ids,
+                ) {
+                    PrewarmControl::Finished => {}
+                    PrewarmControl::Interrupted(job) => pending.prewarm = Some(job),
+                    PrewarmControl::Shutdown => break,
                 }
                 continue;
             }
@@ -522,7 +553,6 @@ fn worker_main(
                         &mut request_rx,
                         &event_tx,
                         &mut pending,
-                        &mut pending_geometry,
                         &mut text_cache,
                         &mut geometry_cache,
                     ) {
@@ -536,13 +566,13 @@ fn worker_main(
                         job,
                         &mut request_rx,
                         &mut pending,
-                        &mut pending_geometry,
                         &mut text_cache,
                         &mut geometry_cache,
                         &mut prewarm_finished_doc_ids,
                     ) {
-                        WorkerControl::Continue => {}
-                        WorkerControl::Shutdown => break,
+                        PrewarmControl::Finished => {}
+                        PrewarmControl::Interrupted(job) => pending.prewarm = Some(job),
+                        PrewarmControl::Shutdown => break,
                     }
                     continue;
                 }
@@ -555,7 +585,6 @@ fn worker_main(
             &mut request_rx,
             &event_tx,
             &mut pending,
-            &mut pending_geometry,
             &mut text_cache,
             &mut geometry_cache,
         ) {
@@ -583,35 +612,35 @@ fn wait_for_job(request_rx: &mut UnboundedReceiver<WorkerRequest>) -> Option<Wor
 fn run_prewarm_job(
     job: PrewarmJob,
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
-    pending: &mut Option<SearchJob>,
-    pending_geometry: &mut Option<GeometryJob>,
+    pending: &mut PendingWorkerWork,
     text_cache: &mut SearchTextCache,
     geometry_cache: &mut SearchGeometryCache,
     prewarm_finished_doc_ids: &mut HashSet<u64>,
-) -> WorkerControl {
-    let doc = job.pdf;
+) -> PrewarmControl {
+    let doc = job.pdf.clone();
     let total_pages = doc.page_count();
     if total_pages == 0 {
-        return WorkerControl::Continue;
+        return PrewarmControl::Finished;
     }
 
     let doc_id = doc.doc_id();
     if prewarm_finished_doc_ids.contains(&doc_id) {
-        return WorkerControl::Continue;
+        return PrewarmControl::Finished;
     }
 
     for page in 0..total_pages {
-        match flush_requests(request_rx, pending, pending_geometry) {
+        match flush_requests(request_rx, pending) {
             WorkerControl::Continue => {
-                if pending.is_some()
-                    || pending_geometry
+                if pending.query.is_some()
+                    || pending
+                        .geometry
                         .as_ref()
                         .is_some_and(|job| job.priority == GeometryPriority::High)
                 {
-                    return WorkerControl::Continue;
+                    return PrewarmControl::Interrupted(job);
                 }
             }
-            WorkerControl::Shutdown => return WorkerControl::Shutdown,
+            WorkerControl::Shutdown => return PrewarmControl::Shutdown,
         }
         if text_cache.get(doc_id, page).is_some() {
             continue;
@@ -628,15 +657,14 @@ fn run_prewarm_job(
     }
 
     prewarm_finished_doc_ids.insert(doc_id);
-    WorkerControl::Continue
+    PrewarmControl::Finished
 }
 
 fn run_job(
     job: SearchJob,
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     event_tx: &UnboundedSender<SearchEvent>,
-    pending: &mut Option<SearchJob>,
-    pending_geometry: &mut Option<GeometryJob>,
+    pending: &mut PendingWorkerWork,
     text_cache: &mut SearchTextCache,
     geometry_cache: &mut SearchGeometryCache,
 ) -> WorkerControl {
@@ -666,9 +694,9 @@ fn run_job(
     let mut hits = Vec::new();
     let mut highlight_unavailable = false;
     for page in 0..total_pages {
-        match flush_requests(request_rx, pending, pending_geometry) {
+        match flush_requests(request_rx, pending) {
             WorkerControl::Continue => {
-                if pending.is_some() {
+                if pending.query.is_some() {
                     return WorkerControl::Continue;
                 }
             }
@@ -751,8 +779,7 @@ fn run_geometry_job(
     job: GeometryJob,
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     event_tx: &UnboundedSender<SearchEvent>,
-    pending: &mut Option<SearchJob>,
-    pending_geometry: &mut Option<GeometryJob>,
+    pending: &mut PendingWorkerWork,
     text_cache: &mut SearchTextCache,
     geometry_cache: &mut SearchGeometryCache,
 ) -> WorkerControl {
@@ -770,10 +797,11 @@ fn run_geometry_job(
         if !seen.insert(page) {
             continue;
         }
-        match flush_requests(request_rx, pending, pending_geometry) {
+        match flush_requests(request_rx, pending) {
             WorkerControl::Continue => {
-                if pending.is_some()
-                    || pending_geometry
+                if pending.query.is_some()
+                    || pending
+                        .geometry
                         .as_ref()
                         .is_some_and(|queued| queued.priority == GeometryPriority::High)
                 {
@@ -1320,22 +1348,22 @@ fn normalize_text_for_search(text: &str, case_sensitive: bool, ignore_whitespace
 
 fn flush_requests(
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
-    pending: &mut Option<SearchJob>,
-    pending_geometry: &mut Option<GeometryJob>,
+    pending: &mut PendingWorkerWork,
 ) -> WorkerControl {
     loop {
         match request_rx.try_recv() {
-            Ok(WorkerRequest::Query(job)) => *pending = Some(job),
-            Ok(WorkerRequest::Prewarm(_)) => {}
+            Ok(WorkerRequest::Query(job)) => pending.query = Some(job),
+            Ok(WorkerRequest::Prewarm(job)) => pending.prewarm = Some(job),
             Ok(WorkerRequest::ResolveGeometry(job)) => {
                 // Geometry work is opportunistic. Keep only the newest high-priority request
                 // so navigation can preempt broad background hit-page warming.
                 if job.priority == GeometryPriority::High
-                    || pending_geometry
+                    || pending
+                        .geometry
                         .as_ref()
                         .is_none_or(|queued| queued.priority == GeometryPriority::Background)
                 {
-                    *pending_geometry = Some(job);
+                    pending.geometry = Some(job);
                 }
             }
             Ok(WorkerRequest::Shutdown) => return WorkerControl::Shutdown,
@@ -1371,10 +1399,11 @@ mod tests {
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use super::{
-        PrewarmJob, SearchEngine, SearchEvent, SearchGeometryCache, SearchMatcher,
-        SearchOccurrence, SearchPageCache, SearchPageHit, SearchTextCache, WorkerControl,
-        estimate_search_text_bytes, estimate_text_page_bytes, locate_occurrences,
-        merge_occurrence_rects, page_matches_contains, prepare_contains_query, run_prewarm_job,
+        PendingWorkerWork, PrewarmControl, PrewarmJob, SearchEngine, SearchEvent,
+        SearchGeometryCache, SearchJob, SearchMatcher, SearchOccurrence, SearchPageCache,
+        SearchPageHit, SearchTextCache, WorkerRequest, estimate_search_text_bytes,
+        estimate_text_page_bytes, locate_occurrences, merge_occurrence_rects,
+        page_matches_contains, prepare_contains_query, run_prewarm_job,
     };
     use crate::backend::open_default_backend;
     use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
@@ -1905,8 +1934,7 @@ mod tests {
         let (_request_tx, request_rx) = unbounded_channel();
         let (_event_tx, _event_rx) = unbounded_channel::<SearchEvent>();
         let mut request_rx = request_rx;
-        let mut pending = None;
-        let mut pending_geometry = None;
+        let mut pending = PendingWorkerWork::default();
         let mut text_cache = SearchTextCache::with_limits(4, budget);
         let mut geometry_cache = SearchGeometryCache::with_limits(4, usize::MAX);
         let mut prewarm_finished_doc_ids = HashSet::new();
@@ -1916,12 +1944,11 @@ mod tests {
                 PrewarmJob { pdf: pdf.clone() },
                 &mut request_rx,
                 &mut pending,
-                &mut pending_geometry,
                 &mut text_cache,
                 &mut geometry_cache,
                 &mut prewarm_finished_doc_ids,
             ),
-            WorkerControl::Continue
+            PrewarmControl::Finished
         ));
         assert_eq!(pdf.positioned_calls(), vec![1, 1]);
 
@@ -1930,12 +1957,67 @@ mod tests {
                 PrewarmJob { pdf: pdf.clone() },
                 &mut request_rx,
                 &mut pending,
-                &mut pending_geometry,
                 &mut text_cache,
                 &mut geometry_cache,
                 &mut prewarm_finished_doc_ids,
             ),
-            WorkerControl::Continue
+            PrewarmControl::Finished
+        ));
+        assert_eq!(pdf.positioned_calls(), vec![1, 1]);
+    }
+
+    #[test]
+    fn interrupted_prewarm_can_resume_after_priority_work() {
+        let pdf = Arc::new(CountingPositionedStubPdf::new(
+            303,
+            vec![text_page("alpha"), text_page("beta")],
+        ));
+        let (request_tx, request_rx) = unbounded_channel();
+        let (_event_tx, _event_rx) = unbounded_channel::<SearchEvent>();
+        let mut request_rx = request_rx;
+        let mut pending = PendingWorkerWork::default();
+        let mut text_cache = SearchTextCache::with_limits(4, usize::MAX);
+        let mut geometry_cache = SearchGeometryCache::with_limits(4, usize::MAX);
+        let mut prewarm_finished_doc_ids = HashSet::new();
+
+        request_tx
+            .send(WorkerRequest::Query(SearchJob {
+                generation: 1,
+                pdf: pdf.clone(),
+                query: "alpha".to_string(),
+                matcher: Arc::new(ContainsMatcher {
+                    case_sensitive: false,
+                }),
+            }))
+            .expect("query request should be queued");
+
+        let interrupted = match run_prewarm_job(
+            PrewarmJob { pdf: pdf.clone() },
+            &mut request_rx,
+            &mut pending,
+            &mut text_cache,
+            &mut geometry_cache,
+            &mut prewarm_finished_doc_ids,
+        ) {
+            PrewarmControl::Interrupted(job) => job,
+            PrewarmControl::Finished => panic!("prewarm should be interrupted"),
+            PrewarmControl::Shutdown => panic!("worker should not shut down"),
+        };
+
+        assert!(pending.query.is_some());
+        assert_eq!(pdf.positioned_calls(), vec![0, 0]);
+
+        pending.query = None;
+        assert!(matches!(
+            run_prewarm_job(
+                interrupted,
+                &mut request_rx,
+                &mut pending,
+                &mut text_cache,
+                &mut geometry_cache,
+                &mut prewarm_finished_doc_ids,
+            ),
+            PrewarmControl::Finished
         ));
         assert_eq!(pdf.positioned_calls(), vec![1, 1]);
     }

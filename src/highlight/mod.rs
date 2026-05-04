@@ -3,6 +3,8 @@ use std::hash::{Hash, Hasher};
 
 use crate::backend::PdfRect;
 
+pub mod geometry;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HighlightSource {
     Search,

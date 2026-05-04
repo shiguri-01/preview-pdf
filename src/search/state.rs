@@ -8,10 +8,8 @@ use crate::error::AppResult;
 use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
-use super::engine::{
-    SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit, locate_occurrences,
-    locate_text_occurrences, page_matches_contains, prepare_contains_query,
-};
+use super::engine::{SearchEngine, SearchEvent, SearchPageHit};
+use super::matcher::matcher_for_kind;
 
 #[derive(Default)]
 pub struct SearchRuntime {
@@ -582,39 +580,6 @@ fn build_palette_entries(hits: &[SearchPageHit]) -> Arc<[SearchPaletteEntry]> {
             })
             .collect::<Vec<_>>(),
     )
-}
-
-fn matcher_for_kind(kind: SearchMatcherKind) -> Arc<dyn SearchMatcher> {
-    Arc::new(ContainsMatcher {
-        case_sensitive: kind == SearchMatcherKind::ContainsSensitive,
-    })
-}
-
-#[derive(Debug)]
-struct ContainsMatcher {
-    case_sensitive: bool,
-}
-
-impl SearchMatcher for ContainsMatcher {
-    fn prepare_query(&self, raw_query: &str) -> String {
-        prepare_contains_query(raw_query, self.case_sensitive)
-    }
-
-    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
-        page_matches_contains(page_text, prepared_query, self.case_sensitive)
-    }
-
-    fn locate_text_matches(&self, page_text: &str, prepared_query: &str) -> Vec<SearchOccurrence> {
-        locate_text_occurrences(page_text, prepared_query, self.case_sensitive)
-    }
-
-    fn locate_matches(
-        &self,
-        page: &crate::backend::TextPage,
-        prepared_query: &str,
-    ) -> Vec<SearchOccurrence> {
-        locate_occurrences(&page.glyphs, prepared_query, self.case_sensitive)
-    }
 }
 
 #[cfg(test)]

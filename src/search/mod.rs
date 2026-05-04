@@ -1,6 +1,8 @@
 pub mod engine;
+pub mod matcher;
 pub mod palette;
 pub mod state;
+pub(crate) mod worker;
 
 use crate::app::AppState;
 use crate::event::AppEvent;

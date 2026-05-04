@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 use bytemuck::allocation::cast_vec;
 use hayro::hayro_interpret::font::Glyph;
-use hayro::hayro_interpret::util::{PageExt, RectExt};
+use hayro::hayro_interpret::hayro_cmap::BfString;
+use hayro::hayro_interpret::util::{RectExt, TransformExt};
 use hayro::hayro_interpret::{
-    BlendMode, ClipPath, Context, Device, GlyphDrawMode, Image, InterpreterSettings, Paint,
-    PathDrawMode, SoftMask, interpret_page,
+    BlendMode, ClipPath, Context, Device, GlyphDrawMode, Image, InterpreterCache,
+    InterpreterSettings, Paint, PathDrawMode, SoftMask, interpret_page,
 };
 use hayro::hayro_syntax::Pdf;
 use hayro::hayro_syntax::object::dict::keys::{
@@ -18,7 +19,7 @@ use hayro::hayro_syntax::object::{Array, Dict, MaybeRef, Name, ObjRef, Object, O
 use hayro::hayro_syntax::page::Page;
 use hayro::vello_cpu::color::palette::css::WHITE;
 use hayro::vello_cpu::{Pixmap, color::PremulRgba8};
-use hayro::{RenderSettings, render};
+use hayro::{RenderCache, RenderSettings, render};
 use kurbo::{Affine, BezPath, Point, Shape};
 
 use crate::error::{AppError, AppResult};
@@ -167,8 +168,14 @@ impl PdfDoc {
             bg_color: WHITE,
             ..Default::default()
         };
+        let render_cache = RenderCache::new();
         let interpreter_settings = InterpreterSettings::default();
-        let pixmap = render(page_ref, &interpreter_settings, &render_settings);
+        let pixmap = render(
+            page_ref,
+            &render_cache,
+            &interpreter_settings,
+            &render_settings,
+        );
 
         Ok(RgbaFrame {
             width: pixmap.width() as u32,
@@ -359,7 +366,7 @@ fn resolve_destination<'a>(
             visited_names,
         ),
         Object::String(string) => resolve_named_destination(
-            string.get().as_ref(),
+            string.as_bytes(),
             xref,
             page_index,
             named_destinations,
@@ -388,9 +395,7 @@ fn outline_title(item: &Dict<'_>) -> String {
         return "(untitled)".to_string();
     };
 
-    let decoded = decode_pdf_text_string(title.get().as_ref())
-        .trim()
-        .to_string();
+    let decoded = decode_pdf_text_string(title.as_bytes()).trim().to_string();
     if decoded.is_empty() {
         "(untitled)".to_string()
     } else {
@@ -510,7 +515,7 @@ fn destination_name_key(value: MaybeRef<Object<'_>>) -> Option<Vec<u8>> {
     match value {
         MaybeRef::Ref(_) => None,
         MaybeRef::NotRef(Object::Name(name)) => Some(name.as_ref().to_vec()),
-        MaybeRef::NotRef(Object::String(string)) => Some(string.get().into_owned()),
+        MaybeRef::NotRef(Object::String(string)) => Some(string.as_bytes().to_vec()),
         MaybeRef::NotRef(_) => None,
     }
 }
@@ -607,9 +612,11 @@ impl<'a> NamedDestination<'a> {
 }
 
 fn extract_text_with_device(page: &Page<'_>) -> String {
+    let cache = InterpreterCache::new();
     let mut context = Context::new(
-        page.initial_transform(true),
+        page.initial_transform(true).to_kurbo(),
         page.intersected_crop_box().to_kurbo(),
+        &cache,
         page.xref(),
         InterpreterSettings::default(),
     );
@@ -698,12 +705,14 @@ impl<'a> Device<'a> for PlainTextExtractDevice {
         };
 
         let position = (transform * glyph_transform) * Point::ORIGIN;
-        if self.is_duplicate_glyph(ch, position.x, position.y) {
-            return;
-        }
+        for ch in bf_string_chars(ch) {
+            if self.is_duplicate_glyph(ch, position.x, position.y) {
+                continue;
+            }
 
-        self.set_last_glyph(ch, position.x, position.y);
-        self.push_char(ch, position.x, position.y);
+            self.set_last_glyph(ch, position.x, position.y);
+            self.push_char(ch, position.x, position.y);
+        }
     }
 
     fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
@@ -714,9 +723,11 @@ impl<'a> Device<'a> for PlainTextExtractDevice {
 }
 
 fn extract_positioned_text_with_device(page: &Page<'_>) -> TextPage {
+    let cache = InterpreterCache::new();
     let mut context = Context::new(
-        page.initial_transform(true),
+        page.initial_transform(true).to_kurbo(),
         page.intersected_crop_box().to_kurbo(),
+        &cache,
         page.xref(),
         InterpreterSettings::default(),
     );
@@ -789,16 +800,18 @@ impl<'a> Device<'a> for PositionedTextExtractDevice {
         };
 
         let position = (transform * glyph_transform) * Point::ORIGIN;
-        if self.is_duplicate_glyph(ch, position.x, position.y) {
-            return;
-        }
-
-        self.set_last_glyph(ch, position.x, position.y);
         let bbox = glyph_bbox(glyph, transform, glyph_transform);
         if bbox.is_none() {
             self.dropped_glyphs += 1;
         }
-        self.glyphs.push(TextGlyph { ch, bbox });
+        for ch in bf_string_chars(ch) {
+            if self.is_duplicate_glyph(ch, position.x, position.y) {
+                continue;
+            }
+
+            self.set_last_glyph(ch, position.x, position.y);
+            self.glyphs.push(TextGlyph { ch, bbox });
+        }
     }
 
     fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
@@ -842,6 +855,14 @@ fn glyph_bbox(glyph: &Glyph<'_>, transform: Affine, glyph_transform: Affine) -> 
         x1: bbox.x1 as f32,
         y1: bbox.y1 as f32,
     })
+}
+
+fn bf_string_chars(value: BfString) -> impl Iterator<Item = char> {
+    match value {
+        BfString::Char(ch) => vec![ch],
+        BfString::String(text) => text.chars().collect(),
+    }
+    .into_iter()
 }
 
 fn calculate_doc_id(path: &Path, byte_len: usize) -> u64 {

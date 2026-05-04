@@ -10,7 +10,7 @@ use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::engine::{
     SearchEngine, SearchEvent, SearchMatcher, SearchOccurrence, SearchPageHit, locate_occurrences,
-    page_matches_contains, prepare_contains_query,
+    locate_text_occurrences, page_matches_contains, prepare_contains_query,
 };
 
 #[derive(Default)]
@@ -79,6 +79,30 @@ impl SearchRuntime {
         self.state.on_background(app, &mut self.engine)
     }
 
+    pub fn prewarm(&mut self, pdf: SharedPdfBackend) {
+        self.engine.prewarm(pdf);
+    }
+
+    pub fn resolve_priority_geometry(
+        &mut self,
+        pdf: SharedPdfBackend,
+        visible_pages: [Option<usize>; 2],
+    ) {
+        if self.state.query.is_empty() {
+            return;
+        }
+        let pages = self.state.geometry_priority_pages(visible_pages, false);
+        let matcher = matcher_for_kind(self.state.matcher);
+        self.engine.resolve_geometry(
+            pdf,
+            self.state.generation,
+            self.state.query.clone(),
+            matcher,
+            pages,
+            true,
+        );
+    }
+
     pub fn matcher(&self) -> SearchMatcherKind {
         self.state.matcher()
     }
@@ -117,7 +141,7 @@ pub struct SearchPaletteEntry {
     pub snippet_match_end: Option<usize>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SearchState {
     query: String,
     matcher: SearchMatcherKind,
@@ -130,12 +154,13 @@ pub struct SearchState {
     /// Number of matched pages observed so far while scanning.
     /// This is progress-oriented and may change before completion.
     hit_pages_progress: usize,
-    /// Final matched page list with occurrence rects, available on completion.
+    /// Final matched page list. Occurrence rects may be filled after completion by geometry events.
     hits: Vec<SearchPageHit>,
     /// Final matched occurrences for the results palette, ordered by page/match order.
     palette_entries: Arc<[SearchPaletteEntry]>,
     current_hit: Option<usize>,
     last_error: Option<String>,
+    active_pdf: Option<SharedPdfBackend>,
 }
 
 impl Default for SearchState {
@@ -152,6 +177,7 @@ impl Default for SearchState {
             palette_entries: Arc::from([]),
             current_hit: None,
             last_error: None,
+            active_pdf: None,
         }
     }
 }
@@ -226,6 +252,7 @@ impl SearchState {
         self.palette_entries = Arc::from([]);
         self.current_hit = None;
         self.last_error = None;
+        self.active_pdf = Some(Arc::clone(&pdf));
         Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }
 
@@ -315,12 +342,46 @@ impl SearchState {
                     self.current_hit = None;
                     self.palette_entries = build_palette_entries(&hits);
                     self.hits = hits;
+                    let pages = self.geometry_priority_pages([Some(app.current_page), None], true);
+                    if !pages.is_empty()
+                        && let Some(pdf) = &self.active_pdf
+                    {
+                        let matcher = matcher_for_kind(self.matcher);
+                        search_engine.resolve_geometry(
+                            Arc::clone(pdf),
+                            self.generation,
+                            self.query.clone(),
+                            matcher,
+                            pages,
+                            false,
+                        );
+                    }
                     if highlight_unavailable {
                         app.apply_notice_action(NoticeAction::warning(
                             Self::HIGHLIGHT_UNAVAILABLE_NOTICE,
                         ));
                     }
                     changed = true;
+                }
+                SearchEvent::GeometryResolved {
+                    generation,
+                    page,
+                    occurrences,
+                    highlight_unavailable,
+                } => {
+                    if generation != self.generation {
+                        continue;
+                    }
+                    if let Some(hit) = self.hits.iter_mut().find(|hit| hit.page == page) {
+                        hit.occurrences = occurrences;
+                        self.palette_entries = build_palette_entries(&self.hits);
+                        if highlight_unavailable {
+                            app.apply_notice_action(NoticeAction::warning(
+                                Self::HIGHLIGHT_UNAVAILABLE_NOTICE,
+                            ));
+                        }
+                        changed = true;
+                    }
                 }
                 SearchEvent::Failed {
                     generation,
@@ -379,6 +440,42 @@ impl SearchState {
 
     pub fn palette_entries(&self) -> Arc<[SearchPaletteEntry]> {
         Arc::clone(&self.palette_entries)
+    }
+
+    fn geometry_priority_pages(
+        &self,
+        visible_pages: [Option<usize>; 2],
+        include_all_hits: bool,
+    ) -> Vec<usize> {
+        let mut pages = Vec::new();
+        for page in visible_pages.into_iter().flatten() {
+            push_unique_page(&mut pages, page);
+        }
+
+        if let Some(current_hit) = self.current_hit {
+            if let Some(hit) = self.hits.get(current_hit) {
+                push_unique_page(&mut pages, hit.page);
+            }
+            if let Some(hit) = self.hits.get((current_hit + 1) % self.hits.len().max(1)) {
+                push_unique_page(&mut pages, hit.page);
+            }
+            if !self.hits.is_empty() {
+                let prev = if current_hit == 0 {
+                    self.hits.len() - 1
+                } else {
+                    current_hit - 1
+                };
+                if let Some(hit) = self.hits.get(prev) {
+                    push_unique_page(&mut pages, hit.page);
+                }
+            }
+        }
+        if include_all_hits {
+            for hit in &self.hits {
+                push_unique_page(&mut pages, hit.page);
+            }
+        }
+        pages
     }
 
     fn move_hit(&mut self, app: &mut AppState, forward: bool) -> (CommandOutcome, NoticeAction) {
@@ -454,6 +551,13 @@ impl SearchState {
         self.palette_entries = Arc::from([]);
         self.current_hit = None;
         self.last_error = None;
+        self.active_pdf = None;
+    }
+}
+
+fn push_unique_page(pages: &mut Vec<usize>, page: usize) {
+    if !pages.contains(&page) {
+        pages.push(page);
     }
 }
 
@@ -498,6 +602,10 @@ impl SearchMatcher for ContainsMatcher {
 
     fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
         page_matches_contains(page_text, prepared_query, self.case_sensitive)
+    }
+
+    fn locate_text_matches(&self, page_text: &str, prepared_query: &str) -> Vec<SearchOccurrence> {
+        locate_text_occurrences(page_text, prepared_query, self.case_sensitive)
     }
 
     fn locate_matches(

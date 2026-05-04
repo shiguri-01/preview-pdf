@@ -266,6 +266,10 @@ impl App {
             render_actor.nav_mut().intent(),
             tracked_scale,
         );
+        self.interaction
+            .extensions
+            .host
+            .prewarm_search_text(Arc::clone(&pdf));
 
         Ok(LoopRuntime {
             page_count,
@@ -687,6 +691,7 @@ impl App {
             }
             WaitEvent::Event(DomainEvent::Command(request)) => {
                 let request = self.resolve_command_request(&runtime.session, request);
+                let previous_page = self.state.current_page;
                 let dispatch = match self.interaction.dispatch_command(
                     &mut self.state,
                     request,
@@ -704,6 +709,19 @@ impl App {
                 }
                 if self.interaction.apply_palette_requests(&mut self.state) {
                     self.request_redraw(runtime, RedrawReason::StateChanged);
+                }
+                if self.state.current_page != previous_page {
+                    self.interaction
+                        .extensions
+                        .host
+                        .prewarm_search_text(Arc::clone(&pdf));
+                    self.interaction
+                        .extensions
+                        .host
+                        .resolve_search_priority_geometry(
+                            Arc::clone(&pdf),
+                            [Some(self.state.current_page), None],
+                        );
                 }
                 match dispatch.outcome {
                     CommandOutcome::QuitRequested => {

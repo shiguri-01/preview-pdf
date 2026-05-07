@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -33,6 +34,65 @@ pub struct PdfDoc {
 }
 
 pub type HayroPdfBackend = PdfDoc;
+
+const MAX_DOC_RENDER_CACHES_PER_THREAD: usize = 8;
+
+thread_local! {
+    static THREAD_RENDER_CACHES: RefCell<ThreadRenderCaches> = RefCell::new(ThreadRenderCaches::default());
+}
+
+struct ThreadRenderCaches {
+    order: Vec<u64>,
+    by_doc: HashMap<u64, RenderCache>,
+    max_entries: usize,
+}
+
+impl Default for ThreadRenderCaches {
+    fn default() -> Self {
+        Self::with_capacity(MAX_DOC_RENDER_CACHES_PER_THREAD)
+    }
+}
+
+impl ThreadRenderCaches {
+    fn with_capacity(max_entries: usize) -> Self {
+        Self {
+            order: Vec::new(),
+            by_doc: HashMap::new(),
+            max_entries: max_entries.max(1),
+        }
+    }
+
+    fn get(&mut self, doc_id: u64) -> &RenderCache {
+        if self.by_doc.contains_key(&doc_id) {
+            self.touch(doc_id);
+        } else {
+            self.evict_if_full();
+            self.order.push(doc_id);
+            self.by_doc.insert(doc_id, RenderCache::new());
+        }
+
+        self.by_doc
+            .get(&doc_id)
+            .expect("render cache entry should exist")
+    }
+
+    fn touch(&mut self, doc_id: u64) {
+        if let Some(index) = self.order.iter().position(|id| *id == doc_id) {
+            self.order.remove(index);
+        }
+        self.order.push(doc_id);
+    }
+
+    fn evict_if_full(&mut self) {
+        if self.by_doc.len() < self.max_entries {
+            return;
+        }
+        if let Some(evicted_doc_id) = self.order.first().copied() {
+            self.order.remove(0);
+            self.by_doc.remove(&evicted_doc_id);
+        }
+    }
+}
 
 impl PdfBackend for PdfDoc {
     fn path(&self) -> &Path {
@@ -168,11 +228,10 @@ impl PdfDoc {
             bg_color: WHITE,
             ..Default::default()
         };
-        let render_cache = RenderCache::new();
         let interpreter_settings = InterpreterSettings::default();
-        let pixmap = render(
+        let pixmap = render_with_thread_local_cache(
+            self.doc_id,
             page_ref,
-            &render_cache,
             &interpreter_settings,
             &render_settings,
         );
@@ -215,6 +274,19 @@ impl PdfDoc {
     pub fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
         extract_outline_nodes(&self.pdf)
     }
+}
+
+fn render_with_thread_local_cache(
+    doc_id: u64,
+    page: &Page<'_>,
+    interpreter_settings: &InterpreterSettings,
+    render_settings: &RenderSettings,
+) -> Pixmap {
+    THREAD_RENDER_CACHES.with(|thread_caches| {
+        let mut thread_caches = thread_caches.borrow_mut();
+        let render_cache = thread_caches.get(doc_id);
+        render(page, render_cache, interpreter_settings, render_settings)
+    })
 }
 
 fn extract_outline_nodes(pdf: &Pdf) -> AppResult<Vec<OutlineNode>> {
@@ -892,7 +964,38 @@ mod tests {
 
     use crate::error::AppError;
 
-    use super::{PdfDoc, decode_pdf_text_string, pixel_buffer_from_pixmap};
+    use super::{
+        PdfDoc, ThreadRenderCaches, decode_pdf_text_string, pixel_buffer_from_pixmap,
+    };
+
+    #[test]
+    fn thread_render_caches_evict_oldest_document_when_capacity_is_reached() {
+        let mut caches = ThreadRenderCaches::with_capacity(2);
+
+        let _ = caches.get(10);
+        let _ = caches.get(20);
+        let _ = caches.get(30);
+
+        assert_eq!(caches.by_doc.len(), 2);
+        assert!(!caches.by_doc.contains_key(&10));
+        assert!(caches.by_doc.contains_key(&20));
+        assert!(caches.by_doc.contains_key(&30));
+    }
+
+    #[test]
+    fn thread_render_caches_refresh_recency_on_access() {
+        let mut caches = ThreadRenderCaches::with_capacity(2);
+
+        let _ = caches.get(10);
+        let _ = caches.get(20);
+        let _ = caches.get(10);
+        let _ = caches.get(30);
+
+        assert_eq!(caches.by_doc.len(), 2);
+        assert!(caches.by_doc.contains_key(&10));
+        assert!(!caches.by_doc.contains_key(&20));
+        assert!(caches.by_doc.contains_key(&30));
+    }
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()

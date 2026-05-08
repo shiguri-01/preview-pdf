@@ -8,7 +8,8 @@ mod traits;
 
 pub use hayro::{HayroPdfBackend, PdfDoc};
 pub use traits::{
-    OutlineNode, PdfBackend, PdfRect, PixelBuffer, PixelBufferPool, RgbaFrame, TextGlyph, TextPage,
+    OutlineNode, PdfBackend, PdfRect, PdfRenderContext, PixelBuffer, PixelBufferPool, RgbaFrame,
+    TextGlyph, TextPage,
 };
 
 pub type SharedPdfBackend = Arc<dyn PdfBackend>;

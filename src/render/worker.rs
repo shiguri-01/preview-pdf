@@ -296,6 +296,8 @@ fn render_worker_main(
     request_rx: Receiver<RenderWorkerRequest>,
     result_tx: UnboundedSender<RenderResultEvent>,
 ) {
+    let mut render_context = doc.render_context();
+
     loop {
         let request = request_rx.recv();
         let request = match request {
@@ -316,7 +318,8 @@ fn render_worker_main(
                         "render task does not match active document",
                     ))
                 } else {
-                    doc.render_page(task.page, task.scale)
+                    render_context
+                        .render_page(task.page, task.scale)
                         .map_err(|err| AppError::pdf_render(task.page, err))
                 };
 

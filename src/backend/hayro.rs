@@ -659,7 +659,7 @@ fn extract_text_with_device(page: &Page<'_>) -> String {
 struct PlainTextExtractDevice {
     text: String,
     last_point: Option<Point>,
-    last_glyph: Option<(char, i32, i32)>,
+    last_glyph: Option<(String, i32, i32)>,
 }
 
 impl PlainTextExtractDevice {
@@ -689,12 +689,27 @@ impl PlainTextExtractDevice {
         self.last_point = Some(Point::new(x, y));
     }
 
-    fn is_duplicate_glyph(&self, ch: char, x: f64, y: f64) -> bool {
-        self.last_glyph == Some((ch, quantize_coord(x), quantize_coord(y)))
+    fn push_glyph_text(&mut self, text: &str, x: f64, y: f64) {
+        if self.is_duplicate_glyph(text, x, y) {
+            return;
+        }
+
+        self.set_last_glyph(text, x, y);
+        for ch in text.chars() {
+            self.push_char(ch, x, y);
+        }
     }
 
-    fn set_last_glyph(&mut self, ch: char, x: f64, y: f64) {
-        self.last_glyph = Some((ch, quantize_coord(x), quantize_coord(y)));
+    fn is_duplicate_glyph(&self, text: &str, x: f64, y: f64) -> bool {
+        self.last_glyph
+            .as_ref()
+            .is_some_and(|(last, last_x, last_y)| {
+                last == text && *last_x == quantize_coord(x) && *last_y == quantize_coord(y)
+            })
+    }
+
+    fn set_last_glyph(&mut self, text: &str, x: f64, y: f64) {
+        self.last_glyph = Some((text.to_owned(), quantize_coord(x), quantize_coord(y)));
     }
 }
 
@@ -735,14 +750,7 @@ impl<'a> Device<'a> for PlainTextExtractDevice {
         };
 
         let position = (transform * glyph_transform) * Point::ORIGIN;
-        for ch in bf_string_chars(ch) {
-            if self.is_duplicate_glyph(ch, position.x, position.y) {
-                continue;
-            }
-
-            self.set_last_glyph(ch, position.x, position.y);
-            self.push_char(ch, position.x, position.y);
-        }
+        self.push_glyph_text(&bf_string_text(ch), position.x, position.y);
     }
 
     fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
@@ -769,7 +777,7 @@ fn extract_positioned_text_with_device(page: &Page<'_>) -> TextPage {
 
 #[derive(Default)]
 struct PositionedTextExtractDevice {
-    last_glyph: Option<(char, i32, i32)>,
+    last_glyph: Option<(String, i32, i32)>,
     glyphs: Vec<TextGlyph>,
     dropped_glyphs: usize,
 }
@@ -784,12 +792,26 @@ impl PositionedTextExtractDevice {
         }
     }
 
-    fn is_duplicate_glyph(&self, ch: char, x: f64, y: f64) -> bool {
-        self.last_glyph == Some((ch, quantize_coord(x), quantize_coord(y)))
+    fn push_glyph_text(&mut self, text: &str, bbox: Option<PdfRect>, x: f64, y: f64) {
+        if self.is_duplicate_glyph(text, x, y) {
+            return;
+        }
+
+        self.set_last_glyph(text, x, y);
+        self.glyphs
+            .extend(text.chars().map(|ch| TextGlyph { ch, bbox }));
     }
 
-    fn set_last_glyph(&mut self, ch: char, x: f64, y: f64) {
-        self.last_glyph = Some((ch, quantize_coord(x), quantize_coord(y)));
+    fn is_duplicate_glyph(&self, text: &str, x: f64, y: f64) -> bool {
+        self.last_glyph
+            .as_ref()
+            .is_some_and(|(last, last_x, last_y)| {
+                last == text && *last_x == quantize_coord(x) && *last_y == quantize_coord(y)
+            })
+    }
+
+    fn set_last_glyph(&mut self, text: &str, x: f64, y: f64) {
+        self.last_glyph = Some((text.to_owned(), quantize_coord(x), quantize_coord(y)));
     }
 }
 
@@ -834,14 +856,7 @@ impl<'a> Device<'a> for PositionedTextExtractDevice {
         if bbox.is_none() {
             self.dropped_glyphs += 1;
         }
-        for ch in bf_string_chars(ch) {
-            if self.is_duplicate_glyph(ch, position.x, position.y) {
-                continue;
-            }
-
-            self.set_last_glyph(ch, position.x, position.y);
-            self.glyphs.push(TextGlyph { ch, bbox });
-        }
+        self.push_glyph_text(&bf_string_text(ch), bbox, position.x, position.y);
     }
 
     fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
@@ -887,12 +902,11 @@ fn glyph_bbox(glyph: &Glyph<'_>, transform: Affine, glyph_transform: Affine) -> 
     })
 }
 
-fn bf_string_chars(value: BfString) -> impl Iterator<Item = char> {
+fn bf_string_text(value: BfString) -> String {
     match value {
-        BfString::Char(ch) => vec![ch],
-        BfString::String(text) => text.chars().collect(),
+        BfString::Char(ch) => ch.to_string(),
+        BfString::String(text) => text,
     }
-    .into_iter()
 }
 
 fn calculate_doc_id(path: &Path, byte_len: usize) -> u64 {
@@ -922,9 +936,12 @@ mod tests {
 
     use crate::error::AppError;
 
-    use crate::backend::PdfBackend;
+    use crate::backend::{PdfBackend, PdfRect};
 
-    use super::{PdfDoc, decode_pdf_text_string, pixel_buffer_from_pixmap};
+    use super::{
+        PdfDoc, PlainTextExtractDevice, PositionedTextExtractDevice, decode_pdf_text_string,
+        pixel_buffer_from_pixmap,
+    };
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -1071,6 +1088,34 @@ mod tests {
         );
 
         fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn plain_text_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
+        let mut device = PlainTextExtractDevice::default();
+
+        device.push_glyph_text("ll", 10.0, 20.0);
+        device.push_glyph_text("ll", 10.0, 20.0);
+
+        assert_eq!(device.finish(), "ll");
+    }
+
+    #[test]
+    fn positioned_text_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
+        let mut device = PositionedTextExtractDevice::default();
+        let bbox = Some(PdfRect {
+            x0: 1.0,
+            y0: 2.0,
+            x1: 3.0,
+            y1: 4.0,
+        });
+
+        device.push_glyph_text("ff", bbox, 10.0, 20.0);
+        device.push_glyph_text("ff", bbox, 10.0, 20.0);
+
+        let text: String = device.glyphs.iter().map(|glyph| glyph.ch).collect();
+        assert_eq!(text, "ff");
+        assert_eq!(device.glyphs.len(), 2);
     }
 
     #[test]

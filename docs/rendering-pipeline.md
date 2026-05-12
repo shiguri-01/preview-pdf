@@ -37,6 +37,11 @@ Primary backend API:
 fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>
 ```
 
+Render workers may create a backend-specific render context before processing
+tasks. The hayro backend uses this context to keep hayro's document-scoped
+`RenderCache` local to each worker thread while preserving the shared
+`PdfBackend` contract.
+
 Search and overlay extraction use a separate text-page path that exposes glyph
 rectangles in page coordinates.
 

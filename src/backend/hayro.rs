@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 use bytemuck::allocation::cast_vec;
 use hayro::hayro_interpret::font::Glyph;
-use hayro::hayro_interpret::util::{PageExt, RectExt};
+use hayro::hayro_interpret::hayro_cmap::BfString;
+use hayro::hayro_interpret::util::{RectExt, TransformExt};
 use hayro::hayro_interpret::{
-    BlendMode, ClipPath, Context, Device, GlyphDrawMode, Image, InterpreterSettings, Paint,
-    PathDrawMode, SoftMask, interpret_page,
+    BlendMode, ClipPath, Context, Device, GlyphDrawMode, Image, InterpreterCache,
+    InterpreterSettings, Paint, PathDrawMode, SoftMask, interpret_page,
 };
 use hayro::hayro_syntax::Pdf;
 use hayro::hayro_syntax::object::dict::keys::{
@@ -18,12 +19,14 @@ use hayro::hayro_syntax::object::{Array, Dict, MaybeRef, Name, ObjRef, Object, O
 use hayro::hayro_syntax::page::Page;
 use hayro::vello_cpu::color::palette::css::WHITE;
 use hayro::vello_cpu::{Pixmap, color::PremulRgba8};
-use hayro::{RenderSettings, render};
+use hayro::{RenderCache, RenderSettings, render};
 use kurbo::{Affine, BezPath, Point, Shape};
 
 use crate::error::{AppError, AppResult};
 
-use super::traits::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
+use super::traits::{
+    OutlineNode, PdfBackend, PdfRect, PdfRenderContext, RgbaFrame, TextGlyph, TextPage,
+};
 
 pub struct PdfDoc {
     path: PathBuf,
@@ -32,6 +35,11 @@ pub struct PdfDoc {
 }
 
 pub type HayroPdfBackend = PdfDoc;
+
+pub struct HayroRenderContext<'a> {
+    doc: &'a PdfDoc,
+    render_cache: RenderCache<'a>,
+}
 
 impl PdfBackend for PdfDoc {
     fn path(&self) -> &Path {
@@ -52,6 +60,13 @@ impl PdfBackend for PdfDoc {
 
     fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
         PdfDoc::render_page(self, page, scale)
+    }
+
+    fn render_context(&self) -> Box<dyn PdfRenderContext + '_> {
+        Box::new(HayroRenderContext {
+            doc: self,
+            render_cache: RenderCache::new(),
+        })
     }
 
     fn extract_text(&self, page: usize) -> AppResult<String> {
@@ -146,6 +161,16 @@ impl PdfDoc {
     }
 
     pub fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
+        let render_cache = RenderCache::new();
+        self.render_page_with_cache(page, scale, &render_cache)
+    }
+
+    fn render_page_with_cache<'a>(
+        &'a self,
+        page: usize,
+        scale: f32,
+        render_cache: &RenderCache<'a>,
+    ) -> AppResult<RgbaFrame> {
         if page >= self.page_count() {
             return Err(AppError::invalid_argument("page index is out of range"));
         }
@@ -168,7 +193,12 @@ impl PdfDoc {
             ..Default::default()
         };
         let interpreter_settings = InterpreterSettings::default();
-        let pixmap = render(page_ref, &interpreter_settings, &render_settings);
+        let pixmap = render(
+            page_ref,
+            render_cache,
+            &interpreter_settings,
+            &render_settings,
+        );
 
         Ok(RgbaFrame {
             width: pixmap.width() as u32,
@@ -207,6 +237,13 @@ impl PdfDoc {
 
     pub fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
         extract_outline_nodes(&self.pdf)
+    }
+}
+
+impl PdfRenderContext for HayroRenderContext<'_> {
+    fn render_page(&mut self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
+        self.doc
+            .render_page_with_cache(page, scale, &self.render_cache)
     }
 }
 
@@ -359,7 +396,7 @@ fn resolve_destination<'a>(
             visited_names,
         ),
         Object::String(string) => resolve_named_destination(
-            string.get().as_ref(),
+            string.as_bytes(),
             xref,
             page_index,
             named_destinations,
@@ -388,9 +425,7 @@ fn outline_title(item: &Dict<'_>) -> String {
         return "(untitled)".to_string();
     };
 
-    let decoded = decode_pdf_text_string(title.get().as_ref())
-        .trim()
-        .to_string();
+    let decoded = decode_pdf_text_string(title.as_bytes()).trim().to_string();
     if decoded.is_empty() {
         "(untitled)".to_string()
     } else {
@@ -510,7 +545,7 @@ fn destination_name_key(value: MaybeRef<Object<'_>>) -> Option<Vec<u8>> {
     match value {
         MaybeRef::Ref(_) => None,
         MaybeRef::NotRef(Object::Name(name)) => Some(name.as_ref().to_vec()),
-        MaybeRef::NotRef(Object::String(string)) => Some(string.get().into_owned()),
+        MaybeRef::NotRef(Object::String(string)) => Some(string.as_bytes().to_vec()),
         MaybeRef::NotRef(_) => None,
     }
 }
@@ -607,9 +642,11 @@ impl<'a> NamedDestination<'a> {
 }
 
 fn extract_text_with_device(page: &Page<'_>) -> String {
+    let cache = InterpreterCache::new();
     let mut context = Context::new(
-        page.initial_transform(true),
+        page.initial_transform(true).to_kurbo(),
         page.intersected_crop_box().to_kurbo(),
+        &cache,
         page.xref(),
         InterpreterSettings::default(),
     );
@@ -622,7 +659,7 @@ fn extract_text_with_device(page: &Page<'_>) -> String {
 struct PlainTextExtractDevice {
     text: String,
     last_point: Option<Point>,
-    last_glyph: Option<(char, i32, i32)>,
+    last_glyph: Option<(String, i32, i32)>,
 }
 
 impl PlainTextExtractDevice {
@@ -652,12 +689,27 @@ impl PlainTextExtractDevice {
         self.last_point = Some(Point::new(x, y));
     }
 
-    fn is_duplicate_glyph(&self, ch: char, x: f64, y: f64) -> bool {
-        self.last_glyph == Some((ch, quantize_coord(x), quantize_coord(y)))
+    fn push_glyph_text(&mut self, text: String, x: f64, y: f64) {
+        if self.is_duplicate_glyph(&text, x, y) {
+            return;
+        }
+
+        for ch in text.chars() {
+            self.push_char(ch, x, y);
+        }
+        self.set_last_glyph(text, x, y);
     }
 
-    fn set_last_glyph(&mut self, ch: char, x: f64, y: f64) {
-        self.last_glyph = Some((ch, quantize_coord(x), quantize_coord(y)));
+    fn is_duplicate_glyph(&self, text: &str, x: f64, y: f64) -> bool {
+        self.last_glyph
+            .as_ref()
+            .is_some_and(|(last, last_x, last_y)| {
+                last == text && *last_x == quantize_coord(x) && *last_y == quantize_coord(y)
+            })
+    }
+
+    fn set_last_glyph(&mut self, text: String, x: f64, y: f64) {
+        self.last_glyph = Some((text, quantize_coord(x), quantize_coord(y)));
     }
 }
 
@@ -698,12 +750,7 @@ impl<'a> Device<'a> for PlainTextExtractDevice {
         };
 
         let position = (transform * glyph_transform) * Point::ORIGIN;
-        if self.is_duplicate_glyph(ch, position.x, position.y) {
-            return;
-        }
-
-        self.set_last_glyph(ch, position.x, position.y);
-        self.push_char(ch, position.x, position.y);
+        self.push_glyph_text(bf_string_text(ch), position.x, position.y);
     }
 
     fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
@@ -714,9 +761,11 @@ impl<'a> Device<'a> for PlainTextExtractDevice {
 }
 
 fn extract_positioned_text_with_device(page: &Page<'_>) -> TextPage {
+    let cache = InterpreterCache::new();
     let mut context = Context::new(
-        page.initial_transform(true),
+        page.initial_transform(true).to_kurbo(),
         page.intersected_crop_box().to_kurbo(),
+        &cache,
         page.xref(),
         InterpreterSettings::default(),
     );
@@ -728,7 +777,7 @@ fn extract_positioned_text_with_device(page: &Page<'_>) -> TextPage {
 
 #[derive(Default)]
 struct PositionedTextExtractDevice {
-    last_glyph: Option<(char, i32, i32)>,
+    last_glyph: Option<(String, i32, i32)>,
     glyphs: Vec<TextGlyph>,
     dropped_glyphs: usize,
 }
@@ -743,12 +792,26 @@ impl PositionedTextExtractDevice {
         }
     }
 
-    fn is_duplicate_glyph(&self, ch: char, x: f64, y: f64) -> bool {
-        self.last_glyph == Some((ch, quantize_coord(x), quantize_coord(y)))
+    fn push_glyph_text(&mut self, text: String, bbox: Option<PdfRect>, x: f64, y: f64) {
+        if self.is_duplicate_glyph(&text, x, y) {
+            return;
+        }
+
+        self.glyphs
+            .extend(text.chars().map(|ch| TextGlyph { ch, bbox }));
+        self.set_last_glyph(text, x, y);
     }
 
-    fn set_last_glyph(&mut self, ch: char, x: f64, y: f64) {
-        self.last_glyph = Some((ch, quantize_coord(x), quantize_coord(y)));
+    fn is_duplicate_glyph(&self, text: &str, x: f64, y: f64) -> bool {
+        self.last_glyph
+            .as_ref()
+            .is_some_and(|(last, last_x, last_y)| {
+                last == text && *last_x == quantize_coord(x) && *last_y == quantize_coord(y)
+            })
+    }
+
+    fn set_last_glyph(&mut self, text: String, x: f64, y: f64) {
+        self.last_glyph = Some((text, quantize_coord(x), quantize_coord(y)));
     }
 }
 
@@ -789,16 +852,11 @@ impl<'a> Device<'a> for PositionedTextExtractDevice {
         };
 
         let position = (transform * glyph_transform) * Point::ORIGIN;
-        if self.is_duplicate_glyph(ch, position.x, position.y) {
-            return;
-        }
-
-        self.set_last_glyph(ch, position.x, position.y);
         let bbox = glyph_bbox(glyph, transform, glyph_transform);
         if bbox.is_none() {
             self.dropped_glyphs += 1;
         }
-        self.glyphs.push(TextGlyph { ch, bbox });
+        self.push_glyph_text(bf_string_text(ch), bbox, position.x, position.y);
     }
 
     fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
@@ -844,6 +902,13 @@ fn glyph_bbox(glyph: &Glyph<'_>, transform: Affine, glyph_transform: Affine) -> 
     })
 }
 
+fn bf_string_text(value: BfString) -> String {
+    match value {
+        BfString::Char(ch) => ch.to_string(),
+        BfString::String(text) => text,
+    }
+}
+
 fn calculate_doc_id(path: &Path, byte_len: usize) -> u64 {
     let mut hasher = DefaultHasher::new();
     path.hash(&mut hasher);
@@ -871,7 +936,12 @@ mod tests {
 
     use crate::error::AppError;
 
-    use super::{PdfDoc, decode_pdf_text_string, pixel_buffer_from_pixmap};
+    use crate::backend::{PdfBackend, PdfRect};
+
+    use super::{
+        PdfDoc, PlainTextExtractDevice, PositionedTextExtractDevice, decode_pdf_text_string,
+        pixel_buffer_from_pixmap,
+    };
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -992,6 +1062,60 @@ mod tests {
         );
 
         fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn render_context_renders_multiple_pages_with_reused_cache() {
+        let file = unique_temp_path("render_context.pdf");
+        fs::write(&file, build_pdf(&["first", "second"])).expect("test file should be created");
+
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let mut render_context = doc.render_context();
+        let first = render_context
+            .render_page(0, 1.0)
+            .expect("first page should render");
+        let second = render_context
+            .render_page(1, 1.0)
+            .expect("second page should render");
+
+        assert_eq!(
+            first.pixels.len(),
+            first.width as usize * first.height as usize * 4
+        );
+        assert_eq!(
+            second.pixels.len(),
+            second.width as usize * second.height as usize * 4
+        );
+
+        fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn plain_text_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
+        let mut device = PlainTextExtractDevice::default();
+
+        device.push_glyph_text("ll".to_owned(), 10.0, 20.0);
+        device.push_glyph_text("ll".to_owned(), 10.0, 20.0);
+
+        assert_eq!(device.finish(), "ll");
+    }
+
+    #[test]
+    fn positioned_text_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
+        let mut device = PositionedTextExtractDevice::default();
+        let bbox = Some(PdfRect {
+            x0: 1.0,
+            y0: 2.0,
+            x1: 3.0,
+            y1: 4.0,
+        });
+
+        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
+        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
+
+        let text: String = device.glyphs.iter().map(|glyph| glyph.ch).collect();
+        assert_eq!(text, "ff");
+        assert_eq!(device.glyphs.len(), 2);
     }
 
     #[test]

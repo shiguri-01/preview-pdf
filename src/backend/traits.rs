@@ -241,9 +241,26 @@ pub trait PdfBackend: Send + Sync {
     fn page_count(&self) -> usize;
     fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)>;
     fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame>;
+    fn render_context(&self) -> Box<dyn PdfRenderContext + '_> {
+        Box::new(DefaultPdfRenderContext { backend: self })
+    }
     fn extract_text(&self, page: usize) -> AppResult<String>;
     fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage>;
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>>;
+}
+
+pub trait PdfRenderContext {
+    fn render_page(&mut self, page: usize, scale: f32) -> AppResult<RgbaFrame>;
+}
+
+struct DefaultPdfRenderContext<'a, T: PdfBackend + ?Sized> {
+    backend: &'a T,
+}
+
+impl<T: PdfBackend + ?Sized> PdfRenderContext for DefaultPdfRenderContext<'_, T> {
+    fn render_page(&mut self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
+        self.backend.render_page(page, scale)
+    }
 }
 
 #[cfg(test)]

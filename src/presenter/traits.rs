@@ -106,10 +106,78 @@ pub enum PresenterHorizontalAlign {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PresenterSlotOutcome {
+    pub area: Rect,
+    pub active: bool,
+    pub drew_image: bool,
+    pub feedback: PresenterFeedback,
+    pub used_stale_fallback: bool,
+}
+
+impl PresenterSlotOutcome {
+    pub const fn active(
+        area: Rect,
+        drew_image: bool,
+        feedback: PresenterFeedback,
+        used_stale_fallback: bool,
+    ) -> Self {
+        Self {
+            area,
+            active: true,
+            drew_image,
+            feedback,
+            used_stale_fallback,
+        }
+    }
+
+    pub const fn inactive(area: Rect) -> Self {
+        Self {
+            area,
+            active: false,
+            drew_image: false,
+            feedback: PresenterFeedback::None,
+            used_stale_fallback: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PresenterRenderOutcome {
     pub drew_image: bool,
     pub feedback: PresenterFeedback,
     pub used_stale_fallback: bool,
+    pub slots: Vec<PresenterSlotOutcome>,
+}
+
+impl PresenterRenderOutcome {
+    pub fn from_slot(slot: PresenterSlotOutcome) -> Self {
+        Self {
+            drew_image: slot.active && slot.drew_image,
+            feedback: if slot.active {
+                slot.feedback
+            } else {
+                PresenterFeedback::None
+            },
+            used_stale_fallback: slot.active && slot.used_stale_fallback,
+            slots: vec![slot],
+        }
+    }
+
+    pub fn aggregate_slots(slots: Vec<PresenterSlotOutcome>) -> Self {
+        let mut outcome = Self {
+            slots,
+            ..Self::default()
+        };
+        for slot in &outcome.slots {
+            if !slot.active {
+                continue;
+            }
+            outcome.drew_image |= slot.drew_image;
+            outcome.used_stale_fallback |= slot.used_stale_fallback;
+            outcome.feedback = combine_feedback(outcome.feedback, slot.feedback);
+        }
+        outcome
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -197,17 +265,25 @@ pub trait ImagePresenter {
         frame: &mut Frame<'_>,
         slots: &[PresenterRenderSlot],
     ) -> AppResult<PresenterRenderOutcome> {
-        let mut outcome = PresenterRenderOutcome::default();
+        let mut slot_outcomes = Vec::with_capacity(slots.len());
         for slot in slots {
             if !slot.active {
+                slot_outcomes.push(PresenterSlotOutcome::inactive(slot.area));
                 continue;
             }
             let slot_outcome = self.render(frame, slot.area, slot.options)?;
-            outcome.drew_image |= slot_outcome.drew_image;
-            outcome.used_stale_fallback |= slot_outcome.used_stale_fallback;
-            outcome.feedback = combine_feedback(outcome.feedback, slot_outcome.feedback);
+            if slot_outcome.slots.is_empty() {
+                slot_outcomes.push(PresenterSlotOutcome::active(
+                    slot.area,
+                    slot_outcome.drew_image,
+                    slot_outcome.feedback,
+                    slot_outcome.used_stale_fallback,
+                ));
+            } else {
+                slot_outcomes.extend(slot_outcome.slots);
+            }
         }
-        Ok(outcome)
+        Ok(PresenterRenderOutcome::aggregate_slots(slot_outcomes))
     }
     fn capabilities(&self) -> PresenterCaps;
 

@@ -29,7 +29,7 @@ use super::terminal_cell::{picker_with_resolved_cell_size, protocol_type_label};
 use super::traits::{
     ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
     PresenterHorizontalAlign, PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot,
-    PresenterRuntimeInfo, PresenterSlot, Viewport, combine_feedback,
+    PresenterRuntimeInfo, PresenterSlot, PresenterSlotOutcome, Viewport,
 };
 
 pub(crate) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
@@ -508,11 +508,9 @@ impl RatatuiImagePresenter {
         horizontal_align: PresenterHorizontalAlign,
     ) -> AppResult<PresenterRenderOutcome> {
         if area.width == 0 || area.height == 0 {
-            return Ok(PresenterRenderOutcome {
-                drew_image: false,
-                feedback: PresenterFeedback::Pending,
-                used_stale_fallback: false,
-            });
+            return Ok(PresenterRenderOutcome::from_slot(
+                PresenterSlotOutcome::active(area, false, PresenterFeedback::Pending, false),
+            ));
         }
 
         let current_key = self.state.current_keys.get(slot_index).copied().flatten();
@@ -522,11 +520,14 @@ impl RatatuiImagePresenter {
             } else {
                 false
             };
-            return Ok(PresenterRenderOutcome {
-                drew_image,
-                feedback: PresenterFeedback::Pending,
-                used_stale_fallback: drew_image,
-            });
+            return Ok(PresenterRenderOutcome::from_slot(
+                PresenterSlotOutcome::active(
+                    area,
+                    drew_image,
+                    PresenterFeedback::Pending,
+                    drew_image,
+                ),
+            ));
         };
         let request_tx = self.encode_request_tx(EncodeLaneKind::Current);
         if self.state.l2_cache.cached_mut(&key).is_none() {
@@ -538,11 +539,14 @@ impl RatatuiImagePresenter {
             } else {
                 false
             };
-            return Ok(PresenterRenderOutcome {
-                drew_image,
-                feedback: PresenterFeedback::Pending,
-                used_stale_fallback: drew_image,
-            });
+            return Ok(PresenterRenderOutcome::from_slot(
+                PresenterSlotOutcome::active(
+                    area,
+                    drew_image,
+                    PresenterFeedback::Pending,
+                    drew_image,
+                ),
+            ));
         }
 
         let feedback = {
@@ -583,11 +587,9 @@ impl RatatuiImagePresenter {
                     self.state
                         .perf_stats
                         .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                    return Ok(PresenterRenderOutcome {
-                        drew_image: true,
-                        feedback: PresenterFeedback::None,
-                        used_stale_fallback: false,
-                    });
+                    return Ok(PresenterRenderOutcome::from_slot(
+                        PresenterSlotOutcome::active(area, true, PresenterFeedback::None, false),
+                    ));
                 }
                 TerminalFrameState::PendingFrame(frame) => {
                     let picker = if options.is_initial_preview() {
@@ -652,11 +654,9 @@ impl RatatuiImagePresenter {
         } else {
             false
         };
-        Ok(PresenterRenderOutcome {
-            drew_image,
-            feedback,
-            used_stale_fallback: drew_image,
-        })
+        Ok(PresenterRenderOutcome::from_slot(
+            PresenterSlotOutcome::active(area, drew_image, feedback, drew_image),
+        ))
     }
 }
 
@@ -856,10 +856,11 @@ impl ImagePresenter for RatatuiImagePresenter {
         slots: &[PresenterRenderSlot],
     ) -> AppResult<PresenterRenderOutcome> {
         self.drain_encode_results();
-        let mut outcome = PresenterRenderOutcome::default();
+        let mut slot_outcomes = Vec::with_capacity(slots.len());
         for (slot_index, slot) in slots.iter().enumerate() {
             if !slot.active {
                 frame.render_widget(Clear, slot.area);
+                slot_outcomes.push(PresenterSlotOutcome::inactive(slot.area));
                 continue;
             }
             let slot_outcome = self.render_slot(
@@ -869,11 +870,18 @@ impl ImagePresenter for RatatuiImagePresenter {
                 slot_index,
                 slot.horizontal_align,
             )?;
-            outcome.drew_image |= slot_outcome.drew_image;
-            outcome.used_stale_fallback |= slot_outcome.used_stale_fallback;
-            outcome.feedback = combine_feedback(outcome.feedback, slot_outcome.feedback);
+            if slot_outcome.slots.is_empty() {
+                slot_outcomes.push(PresenterSlotOutcome::active(
+                    slot.area,
+                    slot_outcome.drew_image,
+                    slot_outcome.feedback,
+                    slot_outcome.used_stale_fallback,
+                ));
+            } else {
+                slot_outcomes.extend(slot_outcome.slots);
+            }
         }
-        Ok(outcome)
+        Ok(PresenterRenderOutcome::aggregate_slots(slot_outcomes))
     }
 
     fn capabilities(&self) -> PresenterCaps {

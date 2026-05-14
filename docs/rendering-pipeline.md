@@ -156,19 +156,27 @@ output depends on all three.
 
 `ImagePresenter::render(...) -> AppResult<PresenterRenderOutcome>` draws a
 single slot. `ImagePresenter::render_slots(...)` draws one or more slots and
-aggregates the same outcome fields. Both must follow these rules:
+returns both aggregate outcome fields and per-slot `PresenterSlotOutcome`
+entries. Both must follow these rules:
 
 - `drew_image = true` means a terminal image was drawn
 - `feedback` indicates whether the current image is ready, pending, or failed
 - `used_stale_fallback = true` means an older ready frame was drawn
+- `slots` contains the display area and the same state for each rendered slot;
+  inactive slots are returned with `active = false` and do not participate in
+  aggregate feedback
 
 Frame-level UI rules:
 
 - a frame must not end in a clear-only state
 - each frame must show either image content, a loading overlay, or an error
   overlay
-- if the current page is pending and an older image is visible, the loading
-  overlay is drawn over that image
+- in single-page mode, if the current page is pending and no image is drawn,
+  the loading overlay is drawn over the viewer
+- in spread mode, viewer-level loading is not used; each active pending page
+  slot draws loading inside its own image area from the first pending frame,
+  labeled with that slot's page using the same `p.N` notation as the rest of
+  the app
 
 ## Redraw timing
 

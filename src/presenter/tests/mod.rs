@@ -65,6 +65,25 @@ fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
     );
 }
 
+fn render_slots_until_ready(presenter: &mut RatatuiImagePresenter, slots: &[PresenterRenderSlot]) {
+    let backend = TestBackend::new(40, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while presenter.state.last_ready_keys.iter().any(Option::is_none) && Instant::now() < deadline {
+        terminal
+            .draw(|frame| {
+                let _ = presenter.render_slots(frame, slots);
+            })
+            .expect("draw should pass");
+        let _ = presenter.drain_background_events();
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        presenter.state.last_ready_keys.iter().all(Option::is_some),
+        "presenter should have ready frames for all slots"
+    );
+}
+
 #[test]
 fn select_ratatui_presenter() {
     let presenter = create_presenter(PresenterKind::RatatuiImage)
@@ -313,6 +332,9 @@ fn render_slots_ignores_inactive_slots_for_feedback() {
         .expect("render should pass");
     assert_eq!(outcome.feedback, PresenterFeedback::None);
     assert!(!outcome.drew_image);
+    assert_eq!(outcome.slots.len(), 1);
+    assert_eq!(outcome.slots[0].area, Rect::new(0, 0, 12, 7));
+    assert!(!outcome.slots[0].active);
 }
 
 #[test]
@@ -385,6 +407,110 @@ fn render_slots_aggregates_failed_and_pending_feedback() {
         .expect("render should pass");
     assert_eq!(outcome.feedback, PresenterFeedback::Failed);
     assert!(!outcome.drew_image);
+    assert_eq!(outcome.slots.len(), 2);
+    assert_eq!(outcome.slots[0].feedback, PresenterFeedback::Failed);
+    assert_eq!(outcome.slots[1].feedback, PresenterFeedback::Pending);
+}
+
+#[test]
+fn render_slots_reports_stale_fallback_per_slot() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let left_area = Rect::new(0, 0, 12, 7);
+    let right_area = Rect::new(15, 0, 12, 7);
+    let left_key = RenderedPageKey::new(1, 0, 1.0);
+    let right_key = RenderedPageKey::new(1, 1, 1.0);
+    let next_right_key = RenderedPageKey::new(1, 2, 1.0);
+    let left_frame = frame();
+    let right_frame = frame();
+    let next_right_frame = frame();
+    let render_slots = [
+        PresenterRenderSlot {
+            area: left_area,
+            options: PresenterRenderOptions::new(true, PresenterRenderMode::Full),
+            active: true,
+            horizontal_align: PresenterHorizontalAlign::End,
+        },
+        PresenterRenderSlot {
+            area: right_area,
+            options: PresenterRenderOptions::new(true, PresenterRenderMode::Full),
+            active: true,
+            horizontal_align: PresenterHorizontalAlign::Start,
+        },
+    ];
+
+    presenter
+        .prepare_slots(&[
+            PresenterSlot {
+                cache_key: Some(left_key),
+                frame: Some(&left_frame),
+                viewport,
+                pan: PanOffset::default(),
+                overlay_stamp: 0,
+                generation: 1,
+            },
+            PresenterSlot {
+                cache_key: Some(right_key),
+                frame: Some(&right_frame),
+                viewport,
+                pan: PanOffset::default(),
+                overlay_stamp: 0,
+                generation: 1,
+            },
+        ])
+        .expect("initial slot prepare should pass");
+    render_slots_until_ready(&mut presenter, &render_slots);
+
+    presenter
+        .prepare_slots(&[
+            PresenterSlot {
+                cache_key: Some(left_key),
+                frame: Some(&left_frame),
+                viewport,
+                pan: PanOffset::default(),
+                overlay_stamp: 0,
+                generation: 2,
+            },
+            PresenterSlot {
+                cache_key: Some(next_right_key),
+                frame: Some(&next_right_frame),
+                viewport,
+                pan: PanOffset::default(),
+                overlay_stamp: 0,
+                generation: 2,
+            },
+        ])
+        .expect("second slot prepare should pass");
+
+    let backend = TestBackend::new(40, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut result = None;
+    terminal
+        .draw(|frame| {
+            result = Some(presenter.render_slots(frame, &render_slots));
+        })
+        .expect("draw should pass");
+
+    let outcome = result
+        .expect("render result should be captured")
+        .expect("render should pass");
+    assert_eq!(outcome.feedback, PresenterFeedback::Pending);
+    assert!(outcome.drew_image);
+    assert!(outcome.used_stale_fallback);
+    assert_eq!(outcome.slots.len(), 2);
+    assert_eq!(outcome.slots[0].area, left_area);
+    assert_eq!(outcome.slots[0].feedback, PresenterFeedback::None);
+    assert!(outcome.slots[0].drew_image);
+    assert!(!outcome.slots[0].used_stale_fallback);
+    assert_eq!(outcome.slots[1].area, right_area);
+    assert_eq!(outcome.slots[1].feedback, PresenterFeedback::Pending);
+    assert!(outcome.slots[1].drew_image);
+    assert!(outcome.slots[1].used_stale_fallback);
 }
 
 #[test]
@@ -648,6 +774,9 @@ fn render_pending_uses_stale_fallback_when_allowed() {
     assert_eq!(outcome.feedback, PresenterFeedback::Pending);
     assert!(outcome.drew_image);
     assert!(outcome.used_stale_fallback);
+    assert_eq!(outcome.slots.len(), 1);
+    assert_eq!(outcome.slots[0].area, area);
+    assert!(outcome.slots[0].used_stale_fallback);
 }
 
 #[test]

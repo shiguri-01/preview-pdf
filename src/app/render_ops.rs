@@ -366,6 +366,7 @@ mod tests {
                 drew_image: false,
                 feedback: PresenterFeedback::None,
                 used_stale_fallback: false,
+                slots: Vec::new(),
             })
         }
 

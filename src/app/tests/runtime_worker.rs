@@ -65,6 +65,7 @@ impl ImagePresenter for TestPresenter {
             drew_image: true,
             feedback: PresenterFeedback::None,
             used_stale_fallback: false,
+            slots: Vec::new(),
         })
     }
 

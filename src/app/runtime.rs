@@ -278,8 +278,8 @@ impl RenderRuntime {
         overlay: &HighlightOverlaySnapshot,
         generation: u64,
         gap_px: u32,
-    ) -> AppResult<Option<Vec<Rect>>> {
-        let Some((prepared, render_areas)) = self.build_spread_canvas_slots_from_cache(
+    ) -> AppResult<Option<[Option<Rect>; 2]>> {
+        let Some(prepared) = self.build_spread_canvas_slots_from_cache(
             doc, viewport, slots, scale, pan, cell_px, overlay, gap_px,
         )?
         else {
@@ -288,18 +288,24 @@ impl RenderRuntime {
         };
 
         let presenter_slots: Vec<_> = prepared
+            .presenter_slots
             .iter()
             .map(|slot| PresenterSlot {
-                cache_key: Some(slot.cache_key),
-                frame: Some(&slot.frame),
-                viewport: slot.viewport,
-                pan: slot.pan,
-                overlay_stamp: slot.overlay_stamp,
+                cache_key: slot.as_ref().map(|slot| slot.cache_key),
+                frame: slot.as_ref().map(|slot| &slot.frame),
+                viewport: slot.as_ref().map(|slot| slot.viewport).unwrap_or(Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                }),
+                pan: slot.as_ref().map(|slot| slot.pan).unwrap_or_default(),
+                overlay_stamp: slot.as_ref().map(|slot| slot.overlay_stamp).unwrap_or(0),
                 generation,
             })
             .collect();
         presenter.prepare_slots(&presenter_slots)?;
-        Ok(Some(render_areas))
+        Ok(Some(prepared.render_areas))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -455,7 +461,7 @@ impl RenderRuntime {
         cell_px: Option<(u16, u16)>,
         overlay: &HighlightOverlaySnapshot,
         gap_px: u32,
-    ) -> AppResult<Option<(Vec<PreparedPresenterSlot>, Vec<Rect>)>> {
+    ) -> AppResult<Option<PreparedSpreadCanvasSlots>> {
         let left = self.cached_decorated_page(doc, slots.left_page, scale, overlay)?;
         let right = self.cached_decorated_page(doc, slots.right_page, scale, overlay)?;
         if (slots.left_page.is_some() && left.is_none())
@@ -503,9 +509,7 @@ impl RenderRuntime {
         let view_x = pan.cells_x.saturating_mul(i32::from(cell_width_px)).max(0) as u32;
         let view_y = pan.cells_y.saturating_mul(i32::from(cell_height_px)).max(0) as u32;
 
-        let mut prepared = Vec::new();
-        let mut render_areas = Vec::new();
-        self.push_canvas_slot(
+        let left_slot = self.canvas_slot(
             left,
             view_x,
             view_y,
@@ -514,10 +518,8 @@ impl RenderRuntime {
             cell_height_px,
             0,
             *pan,
-            &mut prepared,
-            &mut render_areas,
         );
-        self.push_canvas_slot(
+        let right_slot = self.canvas_slot(
             right,
             view_x,
             view_y,
@@ -526,12 +528,13 @@ impl RenderRuntime {
             cell_height_px,
             left_width.saturating_add(gap_px),
             *pan,
-            &mut prepared,
-            &mut render_areas,
         );
 
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
-        Ok(Some((prepared, render_areas)))
+        Ok(Some(PreparedSpreadCanvasSlots {
+            presenter_slots: [left_slot.presenter_slot, right_slot.presenter_slot],
+            render_areas: [left_slot.render_area, right_slot.render_area],
+        }))
     }
 
     fn cached_decorated_page(
@@ -557,7 +560,7 @@ impl RenderRuntime {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn push_canvas_slot(
+    fn canvas_slot(
         &self,
         page: Option<CachedDecoratedPage>,
         view_x: u32,
@@ -567,11 +570,9 @@ impl RenderRuntime {
         cell_height_px: u16,
         page_origin_x: u32,
         pan: PanOffset,
-        prepared: &mut Vec<PreparedPresenterSlot>,
-        render_areas: &mut Vec<Rect>,
-    ) {
+    ) -> PreparedSpreadCanvasSlot {
         let Some(page) = page else {
-            return;
+            return PreparedSpreadCanvasSlot::inactive();
         };
         let viewport_width_px =
             u32::from(viewport.width.max(1)).saturating_mul(u32::from(cell_width_px));
@@ -586,7 +587,7 @@ impl RenderRuntime {
         let x1 = page_x1.min(view_x1);
         let y1 = page.frame.height.min(view_y1);
         if x1 <= x0 || y1 <= y0 {
-            return;
+            return PreparedSpreadCanvasSlot::inactive();
         }
 
         let crop_x = x0.saturating_sub(page_origin_x);
@@ -605,16 +606,18 @@ impl RenderRuntime {
             px_to_cells_ceil(crop_height, cell_height_px).min(viewport.height),
         );
         if area.width == 0 || area.height == 0 {
-            return;
+            return PreparedSpreadCanvasSlot::inactive();
         }
-        prepared.push(PreparedPresenterSlot {
-            cache_key: page.key,
-            frame,
-            viewport: viewport_from_rect(area),
-            pan,
-            overlay_stamp: page.overlay_stamp,
-        });
-        render_areas.push(area);
+        PreparedSpreadCanvasSlot {
+            presenter_slot: Some(PreparedPresenterSlot {
+                cache_key: page.key,
+                frame,
+                viewport: viewport_from_rect(area),
+                pan,
+                overlay_stamp: page.overlay_stamp,
+            }),
+            render_area: Some(area),
+        }
     }
 
     pub fn sync_presenter_metrics(&mut self, presenter: &dyn ImagePresenter) {
@@ -630,6 +633,25 @@ struct PreparedPresenterSlot {
     viewport: Viewport,
     pan: PanOffset,
     overlay_stamp: u64,
+}
+
+struct PreparedSpreadCanvasSlots {
+    presenter_slots: [Option<PreparedPresenterSlot>; 2],
+    render_areas: [Option<Rect>; 2],
+}
+
+struct PreparedSpreadCanvasSlot {
+    presenter_slot: Option<PreparedPresenterSlot>,
+    render_area: Option<Rect>,
+}
+
+impl PreparedSpreadCanvasSlot {
+    const fn inactive() -> Self {
+        Self {
+            presenter_slot: None,
+            render_area: None,
+        }
+    }
 }
 
 struct CachedDecoratedPage {

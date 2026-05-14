@@ -186,7 +186,7 @@ impl RenderSubsystem {
             )? {
                 return Ok(Some((
                     PresenterRenderMode::Full,
-                    render_areas_to_slots(&render_areas, PresenterRenderMode::Full),
+                    render_areas_to_slots(render_areas, PresenterRenderMode::Full),
                 )));
             }
 
@@ -208,7 +208,7 @@ impl RenderSubsystem {
             )? {
                 return Ok(Some((
                     PresenterRenderMode::InitialPreview,
-                    render_areas_to_slots(&render_areas, PresenterRenderMode::InitialPreview),
+                    render_areas_to_slots(render_areas, PresenterRenderMode::InitialPreview),
                 )));
             }
 
@@ -774,17 +774,16 @@ fn viewport_from_rect(area: Rect) -> Viewport {
 }
 
 fn render_areas_to_slots(
-    render_areas: &[Rect],
+    render_areas: [Option<Rect>; 2],
     render_mode: PresenterRenderMode,
 ) -> Vec<PresenterRenderSlot> {
     let options = PresenterRenderOptions::new(false, render_mode);
     render_areas
-        .iter()
-        .copied()
+        .into_iter()
         .map(|area| PresenterRenderSlot {
-            area,
+            area: area.unwrap_or_default(),
             options,
-            active: true,
+            active: area.is_some(),
             horizontal_align: PresenterHorizontalAlign::Start,
         })
         .collect()
@@ -816,13 +815,14 @@ mod tests {
         InitialPreviewPlan, SpreadSlotAreas, ViewerDisplayDecision, compute_initial_preview_plan,
         decide_viewer_display, format_loading_target, format_render_target,
         normalize_render_outcome, pending_spread_outcome, presenter_render_options,
-        render_failure_message, resolve_layout_dimensions, split_spread_slot_areas,
-        spread_loading_overlays, sync_render_notice,
+        render_areas_to_slots, render_failure_message, resolve_layout_dimensions,
+        split_spread_slot_areas, spread_loading_overlays, sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame, TextPage};
     use crate::presenter::{
-        PresenterFeedback, PresenterRenderMode, PresenterRenderOutcome, PresenterSlotOutcome,
+        PresenterFeedback, PresenterHorizontalAlign, PresenterRenderMode, PresenterRenderOutcome,
+        PresenterSlotOutcome,
     };
     use crate::render::cache::RenderedPageKey;
     use ratatui::layout::Rect;
@@ -1256,6 +1256,20 @@ mod tests {
         assert_eq!(slots.gap, Rect::new(29, 2, 3, 20));
         assert_eq!(slots.right, Rect::new(32, 2, 19, 20));
         assert_eq!(slots.right.x - (slots.left.x + slots.left.width), 3);
+    }
+
+    #[test]
+    fn render_areas_to_slots_preserves_offscreen_spread_slot_positions() {
+        let right_area = Rect::new(4, 2, 12, 8);
+
+        let slots = render_areas_to_slots([None, Some(right_area)], PresenterRenderMode::Full);
+
+        assert_eq!(slots.len(), 2);
+        assert!(!slots[0].active);
+        assert_eq!(slots[0].area, Rect::default());
+        assert!(slots[1].active);
+        assert_eq!(slots[1].area, right_area);
+        assert_eq!(slots[1].horizontal_align, PresenterHorizontalAlign::Start);
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan,
 use crate::perf::PerfStats;
 use crate::presenter::{
     ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
-    PresenterRenderOutcome, Viewport,
+    PresenterRenderOutcome, PresenterSlot, Viewport,
 };
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::{NavDirection, NavIntent, RenderTask};
@@ -31,6 +31,7 @@ struct TestPresenter {
     last_prepare_overlay_stamp: Option<u64>,
     prepared_viewports: Vec<Viewport>,
     prepared_frame_sizes: Vec<(u32, u32)>,
+    prepared_slot_pages: Vec<Option<usize>>,
     stats: PerfStats,
 }
 
@@ -50,6 +51,27 @@ impl ImagePresenter for TestPresenter {
         self.prepared_frame_sizes.push((frame.width, frame.height));
         self.stats.record_convert(Duration::from_millis(4));
         self.stats.set_l2_hit_rate(0.5);
+        Ok(())
+    }
+
+    fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
+        self.prepared_slot_pages = slots
+            .iter()
+            .map(|slot| slot.cache_key.map(|key| key.page))
+            .collect();
+        for slot in slots {
+            let (Some(cache_key), Some(frame)) = (slot.cache_key, slot.frame) else {
+                continue;
+            };
+            self.prepare(
+                cache_key,
+                frame,
+                slot.viewport,
+                slot.pan,
+                slot.overlay_stamp,
+                slot.generation,
+            )?;
+        }
         Ok(())
     }
 
@@ -367,9 +389,63 @@ fn spread_canvas_slots_crop_from_shared_pan_coordinate_space() {
         .expect("spread canvas prepare should pass")
         .expect("cached spread should prepare");
 
-    assert_eq!(areas, vec![Rect::new(0, 0, 2, 5), Rect::new(4, 0, 6, 5)]);
+    assert_eq!(
+        areas,
+        [Some(Rect::new(0, 0, 2, 5)), Some(Rect::new(4, 0, 6, 5))]
+    );
     assert_eq!(presenter.prepared_frame_sizes, vec![(20, 50), (60, 50)]);
     assert_eq!(presenter.prepared_viewports.len(), 2);
+}
+
+#[test]
+fn spread_canvas_slots_keep_slot_identity_when_left_page_is_offscreen() {
+    let doc = TwoPageRuntimePdf;
+    let mut runtime = RenderRuntime::default();
+    let mut presenter = TestPresenter::default();
+    for page in 0..2 {
+        runtime.l1_cache.insert(
+            RenderedPageKey::new(doc.doc_id(), page, 1.0),
+            RgbaFrame {
+                width: 100,
+                height: 50,
+                pixels: vec![page as u8; 100 * 50 * 4].into(),
+            },
+            false,
+        );
+    }
+    let mut pan = PanOffset {
+        cells_x: 12,
+        cells_y: 0,
+    };
+
+    let areas = runtime
+        .try_prepare_spread_canvas_slots_from_cache(
+            &doc,
+            &mut presenter,
+            Viewport {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 5,
+            },
+            crate::app::VisiblePageSlots {
+                anchor_page: 0,
+                trailing_page: Some(1),
+                left_page: Some(0),
+                right_page: Some(1),
+            },
+            1.0,
+            &mut pan,
+            Some((10, 10)),
+            &HighlightOverlaySnapshot::default(),
+            1,
+            20,
+        )
+        .expect("spread canvas prepare should pass")
+        .expect("cached spread should prepare");
+
+    assert_eq!(areas, [None, Some(Rect::new(0, 0, 10, 5))]);
+    assert_eq!(presenter.prepared_slot_pages, vec![None, Some(1)]);
 }
 
 #[test]

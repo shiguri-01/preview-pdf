@@ -78,6 +78,9 @@ Rules:
 - if zoomed content exceeds the viewport, only the visible region is forwarded
 - crop is cell-aligned
 - if the full frame already fits, the uncropped frame is forwarded
+- zoomed spread-canvas crops still preserve left/right slot identity; a page
+  outside the viewport is represented as an inactive slot rather than removing
+  that slot from the presenter input
 
 ## Render workers and scheduling
 

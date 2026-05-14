@@ -19,8 +19,9 @@ use super::l2_cache::{L2_MAX_ENTRIES, TerminalFrameCache, TerminalFrameKey, Term
 use super::ratatui::RatatuiImagePresenter;
 use super::terminal_cell::cell_size_from_window_metrics;
 use super::traits::{
-    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterFeedback, PresenterKind,
-    PresenterRenderMode, PresenterRenderOptions, PresenterRenderSlot, PresenterSlot, Viewport,
+    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterFeedback,
+    PresenterHorizontalAlign, PresenterKind, PresenterRenderMode, PresenterRenderOptions,
+    PresenterRenderSlot, PresenterSlot, Viewport,
 };
 
 fn frame() -> RgbaFrame {
@@ -301,6 +302,7 @@ fn render_slots_ignores_inactive_slots_for_feedback() {
                     area: Rect::new(0, 0, 12, 7),
                     options: PresenterRenderOptions::default(),
                     active: false,
+                    horizontal_align: PresenterHorizontalAlign::Center,
                 }],
             ));
         })
@@ -365,11 +367,13 @@ fn render_slots_aggregates_failed_and_pending_feedback() {
                         area: Rect::new(0, 0, 12, 7),
                         options: PresenterRenderOptions::default(),
                         active: true,
+                        horizontal_align: PresenterHorizontalAlign::End,
                     },
                     PresenterRenderSlot {
                         area: Rect::new(15, 0, 12, 7),
                         options: PresenterRenderOptions::default(),
                         active: true,
+                        horizontal_align: PresenterHorizontalAlign::Start,
                     },
                 ],
             ));

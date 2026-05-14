@@ -94,6 +94,15 @@ pub struct PresenterRenderSlot {
     pub area: Rect,
     pub options: PresenterRenderOptions,
     pub active: bool,
+    pub horizontal_align: PresenterHorizontalAlign,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PresenterHorizontalAlign {
+    Start,
+    #[default]
+    Center,
+    End,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

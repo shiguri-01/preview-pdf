@@ -9,8 +9,8 @@ use crate::highlight::HighlightOverlaySnapshot;
 use crate::input::sequence::SequenceRegistrySnapshot;
 use crate::palette::PaletteView;
 use crate::presenter::{
-    PanOffset, PresenterFeedback, PresenterRenderMode, PresenterRenderOptions,
-    PresenterRenderOutcome, PresenterRenderSlot, Viewport,
+    PanOffset, PresenterFeedback, PresenterHorizontalAlign, PresenterRenderMode,
+    PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot, Viewport,
 };
 use crate::render::cache::RenderedPageKey;
 use crate::ui;
@@ -645,11 +645,13 @@ impl SpreadSlotAreas {
                 area: self.left,
                 options,
                 active: visible_pages.left_page.is_some(),
+                horizontal_align: PresenterHorizontalAlign::End,
             },
             PresenterRenderSlot {
                 area: self.right,
                 options,
                 active: visible_pages.right_page.is_some(),
+                horizontal_align: PresenterHorizontalAlign::Start,
             },
         ]
     }
@@ -688,6 +690,7 @@ fn render_areas_to_slots(
             area,
             options,
             active: true,
+            horizontal_align: PresenterHorizontalAlign::Start,
         })
         .collect()
 }

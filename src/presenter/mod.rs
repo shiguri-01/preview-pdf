@@ -13,6 +13,6 @@ pub use factory::{create_presenter, create_presenter_with_cache_limits};
 pub use ratatui::RatatuiImagePresenter;
 pub use traits::{
     ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
-    PresenterKind, PresenterRenderMode, PresenterRenderOptions, PresenterRenderOutcome,
-    PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot, Viewport,
+    PresenterHorizontalAlign, PresenterKind, PresenterRenderMode, PresenterRenderOptions,
+    PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot, Viewport,
 };

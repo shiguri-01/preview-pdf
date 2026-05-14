@@ -20,7 +20,7 @@ use super::encode::{
     ENCODE_RESIZE_FILTER, EncodeLaneKind, EncodeWorkerEvent, EncodeWorkerRequest,
     EncodeWorkerResult, EncodeWorkerRuntime, send_encode_request, spawn_encode_worker,
 };
-use super::image_ops::fit_downscale_dimensions;
+use super::image_ops::{fit_downscale_dimensions, fit_resize_dimensions};
 use super::l2_cache::{
     L2_MAX_ENTRIES, L2_MEMORY_BUDGET_BYTES, TerminalFrameCache, TerminalFrameKey,
     TerminalFrameState,
@@ -28,8 +28,8 @@ use super::l2_cache::{
 use super::terminal_cell::{picker_with_resolved_cell_size, protocol_type_label};
 use super::traits::{
     ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
-    PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo,
-    PresenterSlot, Viewport, combine_feedback,
+    PresenterHorizontalAlign, PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot,
+    PresenterRuntimeInfo, PresenterSlot, Viewport, combine_feedback,
 };
 
 pub(crate) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
@@ -370,6 +370,7 @@ impl RatatuiImagePresenter {
         area: Rect,
         key: TerminalFrameKey,
         slot_index: usize,
+        horizontal_align: PresenterHorizontalAlign,
     ) -> AppResult<bool> {
         if self.state.l2_cache.cached_mut(&key).is_none() {
             if Some(key) == self.state.last_ready_key {
@@ -394,7 +395,12 @@ impl RatatuiImagePresenter {
             TerminalFrameState::Ready(mut protocol) => {
                 let blit_start = std::time::Instant::now();
                 let target_size = protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
-                let render_area = center_rect_within(area, target_size.width, target_size.height);
+                let render_area = align_rect_within(
+                    area,
+                    target_size.width,
+                    target_size.height,
+                    horizontal_align,
+                );
                 frame.render_widget(Clear, area);
                 if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
                     self.state
@@ -465,6 +471,7 @@ impl RatatuiImagePresenter {
         area: Rect,
         current_key: Option<TerminalFrameKey>,
         slot_index: usize,
+        horizontal_align: PresenterHorizontalAlign,
     ) -> AppResult<bool> {
         let Some(last_key) = self
             .state
@@ -478,7 +485,7 @@ impl RatatuiImagePresenter {
         if Some(last_key) == current_key {
             return Ok(false);
         }
-        self.try_draw_ready_key(frame, area, last_key, slot_index)
+        self.try_draw_ready_key(frame, area, last_key, slot_index, horizontal_align)
     }
 
     fn is_current_slot_key(&self, key: TerminalFrameKey) -> bool {
@@ -498,6 +505,7 @@ impl RatatuiImagePresenter {
         area: Rect,
         options: PresenterRenderOptions,
         slot_index: usize,
+        horizontal_align: PresenterHorizontalAlign,
     ) -> AppResult<PresenterRenderOutcome> {
         if area.width == 0 || area.height == 0 {
             return Ok(PresenterRenderOutcome {
@@ -510,7 +518,7 @@ impl RatatuiImagePresenter {
         let current_key = self.state.current_keys.get(slot_index).copied().flatten();
         let Some(key) = current_key else {
             let drew_image = if options.allow_stale_fallback {
-                self.try_draw_stale_fallback(frame, area, None, slot_index)?
+                self.try_draw_stale_fallback(frame, area, None, slot_index, horizontal_align)?
             } else {
                 false
             };
@@ -526,7 +534,7 @@ impl RatatuiImagePresenter {
                 .perf_stats
                 .set_l2_hit_rate(self.state.l2_cache.hit_rate());
             let drew_image = if options.allow_stale_fallback {
-                self.try_draw_stale_fallback(frame, area, Some(key), slot_index)?
+                self.try_draw_stale_fallback(frame, area, Some(key), slot_index, horizontal_align)?
             } else {
                 false
             };
@@ -549,8 +557,12 @@ impl RatatuiImagePresenter {
                     frame.render_widget(Clear, area);
                     let target_size =
                         protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
-                    let render_area =
-                        center_rect_within(area, target_size.width, target_size.height);
+                    let render_area = align_rect_within(
+                        area,
+                        target_size.width,
+                        target_size.height,
+                        horizontal_align,
+                    );
                     if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
                         self.state
                             .l2_cache
@@ -583,11 +595,14 @@ impl RatatuiImagePresenter {
                     } else {
                         self.config.picker.clone()
                     };
-                    let encode_area = if options.is_initial_preview() {
-                        area
-                    } else {
-                        centered_fit_area(frame.width, frame.height, picker.font_size(), area)
-                    };
+                    let encode_area = aligned_fit_area(
+                        frame.width,
+                        frame.height,
+                        picker.font_size(),
+                        area,
+                        horizontal_align,
+                        options.is_initial_preview(),
+                    );
                     let request = EncodeWorkerRequest::Encode {
                         key,
                         picker,
@@ -633,7 +648,7 @@ impl RatatuiImagePresenter {
             .perf_stats
             .set_l2_hit_rate(self.state.l2_cache.hit_rate());
         let drew_image = if options.allow_stale_fallback {
-            self.try_draw_stale_fallback(frame, area, Some(key), slot_index)?
+            self.try_draw_stale_fallback(frame, area, Some(key), slot_index, horizontal_align)?
         } else {
             false
         };
@@ -832,7 +847,7 @@ impl ImagePresenter for RatatuiImagePresenter {
             self.state.last_ready_keys = vec![self.state.last_ready_key];
             self.state.current_generations = vec![self.state.current_generation];
         }
-        self.render_slot(frame, area, options, 0)
+        self.render_slot(frame, area, options, 0, PresenterHorizontalAlign::Center)
     }
 
     fn render_slots(
@@ -847,7 +862,13 @@ impl ImagePresenter for RatatuiImagePresenter {
                 frame.render_widget(Clear, slot.area);
                 continue;
             }
-            let slot_outcome = self.render_slot(frame, slot.area, slot.options, slot_index)?;
+            let slot_outcome = self.render_slot(
+                frame,
+                slot.area,
+                slot.options,
+                slot_index,
+                slot.horizontal_align,
+            )?;
             outcome.drew_image |= slot_outcome.drew_image;
             outcome.used_stale_fallback |= slot_outcome.used_stale_fallback;
             outcome.feedback = combine_feedback(outcome.feedback, slot_outcome.feedback);
@@ -925,6 +946,24 @@ fn centered_fit_area(
     font_size: (u16, u16),
     area: Rect,
 ) -> Rect {
+    aligned_fit_area(
+        image_width_px,
+        image_height_px,
+        font_size,
+        area,
+        PresenterHorizontalAlign::Center,
+        false,
+    )
+}
+
+fn aligned_fit_area(
+    image_width_px: u32,
+    image_height_px: u32,
+    font_size: (u16, u16),
+    area: Rect,
+    horizontal_align: PresenterHorizontalAlign,
+    allow_upscale: bool,
+) -> Rect {
     if area.width == 0 || area.height == 0 {
         return area;
     }
@@ -934,13 +973,22 @@ fn centered_fit_area(
     let max_width_px = u32::from(area.width).saturating_mul(cell_width_px);
     let max_height_px = u32::from(area.height).saturating_mul(cell_height_px);
 
-    let (fit_width_px, fit_height_px) =
+    let fit_dimensions = if allow_upscale {
+        fit_resize_dimensions(
+            image_width_px,
+            image_height_px,
+            max_width_px,
+            max_height_px,
+            true,
+        )
+    } else {
         fit_downscale_dimensions(image_width_px, image_height_px, max_width_px, max_height_px)
-            .unwrap_or((image_width_px, image_height_px));
+    };
+    let (fit_width_px, fit_height_px) = fit_dimensions.unwrap_or((image_width_px, image_height_px));
 
     let width_cells = px_to_cells(fit_width_px, cell_width_px, area.width);
     let height_cells = px_to_cells(fit_height_px, cell_height_px, area.height);
-    center_rect_within(area, width_cells, height_cells)
+    align_rect_within(area, width_cells, height_cells, horizontal_align)
 }
 
 fn px_to_cells(px: u32, cell_px: u32, max_cells: u16) -> u16 {
@@ -948,10 +996,25 @@ fn px_to_cells(px: u32, cell_px: u32, max_cells: u16) -> u16 {
     cells.max(1).min(u32::from(max_cells)) as u16
 }
 
+#[cfg(test)]
 fn center_rect_within(area: Rect, width: u16, height: u16) -> Rect {
+    align_rect_within(area, width, height, PresenterHorizontalAlign::Center)
+}
+
+fn align_rect_within(
+    area: Rect,
+    width: u16,
+    height: u16,
+    horizontal_align: PresenterHorizontalAlign,
+) -> Rect {
     let width = width.max(1).min(area.width);
     let height = height.max(1).min(area.height);
-    let x = area.x + area.width.saturating_sub(width) / 2;
+    let spare_width = area.width.saturating_sub(width);
+    let x = match horizontal_align {
+        PresenterHorizontalAlign::Start => area.x,
+        PresenterHorizontalAlign::Center => area.x + spare_width / 2,
+        PresenterHorizontalAlign::End => area.x + spare_width,
+    };
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect::new(x, y, width, height)
 }
@@ -960,13 +1023,28 @@ fn center_rect_within(area: Rect, width: u16, height: u16) -> Rect {
 mod tests {
     use ratatui::layout::Rect;
 
-    use super::{center_rect_within, centered_fit_area};
+    use super::{align_rect_within, center_rect_within, centered_fit_area};
+    use crate::presenter::PresenterHorizontalAlign;
 
     #[test]
     fn center_rect_within_places_rect_in_the_middle() {
         let area = Rect::new(10, 5, 20, 10);
         let centered = center_rect_within(area, 8, 4);
         assert_eq!(centered, Rect::new(16, 8, 8, 4));
+    }
+
+    #[test]
+    fn align_rect_within_can_pin_to_horizontal_edges() {
+        let area = Rect::new(10, 5, 20, 10);
+
+        assert_eq!(
+            align_rect_within(area, 8, 4, PresenterHorizontalAlign::Start),
+            Rect::new(10, 8, 8, 4)
+        );
+        assert_eq!(
+            align_rect_within(area, 8, 4, PresenterHorizontalAlign::End),
+            Rect::new(22, 8, 8, 4)
+        );
     }
 
     #[test]

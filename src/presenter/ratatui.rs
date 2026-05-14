@@ -472,7 +472,6 @@ impl RatatuiImagePresenter {
             .get(slot_index)
             .copied()
             .flatten()
-            .or(self.state.last_ready_key)
         else {
             return Ok(false);
         };
@@ -705,11 +704,7 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.state.current_key = Some(key);
         self.state.current_generation = generation;
         self.state.current_keys = vec![Some(key)];
-        if self.state.last_ready_keys.is_empty() {
-            self.state.last_ready_keys = vec![self.state.last_ready_key];
-        } else {
-            self.state.last_ready_keys.truncate(1);
-        }
+        self.state.last_ready_keys = vec![self.state.last_ready_key];
         self.state.current_generations = vec![generation];
         Ok(())
     }
@@ -721,14 +716,18 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.state.last_ready_keys.resize(slots.len(), None);
 
         for slot in slots {
-            let key = self.ensure_frame_entry(
-                slot.cache_key,
-                slot.frame,
-                slot.viewport,
-                slot.pan,
-                slot.overlay_stamp,
-                true,
-            )?;
+            let key = if let (Some(cache_key), Some(frame)) = (slot.cache_key, slot.frame) {
+                self.ensure_frame_entry(
+                    cache_key,
+                    frame,
+                    slot.viewport,
+                    slot.pan,
+                    slot.overlay_stamp,
+                    true,
+                )?
+            } else {
+                None
+            };
             self.state.current_keys.push(key);
             self.state.current_generations.push(slot.generation);
         }
@@ -844,6 +843,10 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.drain_encode_results();
         let mut outcome = PresenterRenderOutcome::default();
         for (slot_index, slot) in slots.iter().enumerate() {
+            if !slot.active {
+                frame.render_widget(Clear, slot.area);
+                continue;
+            }
             let slot_outcome = self.render_slot(frame, slot.area, slot.options, slot_index)?;
             outcome.drew_image |= slot_outcome.drew_image;
             outcome.used_stale_fallback |= slot_outcome.used_stale_fallback;

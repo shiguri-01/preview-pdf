@@ -210,16 +210,16 @@ fn presenter_prepare_slots_tracks_independent_current_keys() {
     let right_frame = frame();
     let slots = [
         PresenterSlot {
-            cache_key: left_key,
-            frame: &left_frame,
+            cache_key: Some(left_key),
+            frame: Some(&left_frame),
             viewport: left_viewport,
             pan: PanOffset::default(),
             overlay_stamp: 0,
             generation: 1,
         },
         PresenterSlot {
-            cache_key: right_key,
-            frame: &right_frame,
+            cache_key: Some(right_key),
+            frame: Some(&right_frame),
             viewport: right_viewport,
             pan: PanOffset::default(),
             overlay_stamp: 0,
@@ -244,6 +244,76 @@ fn presenter_prepare_slots_tracks_independent_current_keys() {
 }
 
 #[test]
+fn presenter_prepare_slots_preserves_empty_slot_positions() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 42,
+        y: 0,
+        width: 40,
+        height: 24,
+    };
+    let right_key = RenderedPageKey::new(1, 2, 1.0);
+    let right_frame = frame();
+    let slots = [
+        PresenterSlot {
+            cache_key: None,
+            frame: None,
+            viewport,
+            pan: PanOffset::default(),
+            overlay_stamp: 0,
+            generation: 1,
+        },
+        PresenterSlot {
+            cache_key: Some(right_key),
+            frame: Some(&right_frame),
+            viewport,
+            pan: PanOffset::default(),
+            overlay_stamp: 0,
+            generation: 1,
+        },
+    ];
+
+    presenter
+        .prepare_slots(&slots)
+        .expect("slot prepare should pass");
+
+    assert_eq!(presenter.state.current_keys.len(), 2);
+    assert_eq!(presenter.state.current_keys[0], None);
+    assert_eq!(
+        presenter.state.current_keys[1].map(|key| key.rendered_page),
+        Some(right_key)
+    );
+    assert_eq!(presenter.l2_cache_len(), 1);
+}
+
+#[test]
+fn render_slots_ignores_inactive_slots_for_feedback() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let backend = TestBackend::new(30, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut result = None;
+
+    terminal
+        .draw(|frame| {
+            result = Some(presenter.render_slots(
+                frame,
+                &[PresenterRenderSlot {
+                    area: Rect::new(0, 0, 12, 7),
+                    options: PresenterRenderOptions::default(),
+                    active: false,
+                }],
+            ));
+        })
+        .expect("draw should pass");
+
+    let outcome = result
+        .expect("render result should be captured")
+        .expect("render should pass");
+    assert_eq!(outcome.feedback, PresenterFeedback::None);
+    assert!(!outcome.drew_image);
+}
+
+#[test]
 fn render_slots_aggregates_failed_and_pending_feedback() {
     let mut presenter = RatatuiImagePresenter::new();
     let viewport = Viewport {
@@ -258,16 +328,16 @@ fn render_slots_aggregates_failed_and_pending_feedback() {
     let right_frame = frame();
     let slots = [
         PresenterSlot {
-            cache_key: left_key,
-            frame: &left_frame,
+            cache_key: Some(left_key),
+            frame: Some(&left_frame),
             viewport,
             pan: PanOffset::default(),
             overlay_stamp: 0,
             generation: 1,
         },
         PresenterSlot {
-            cache_key: right_key,
-            frame: &right_frame,
+            cache_key: Some(right_key),
+            frame: Some(&right_frame),
             viewport,
             pan: PanOffset::default(),
             overlay_stamp: 0,
@@ -294,10 +364,12 @@ fn render_slots_aggregates_failed_and_pending_feedback() {
                     PresenterRenderSlot {
                         area: Rect::new(0, 0, 12, 7),
                         options: PresenterRenderOptions::default(),
+                        active: true,
                     },
                     PresenterRenderSlot {
                         area: Rect::new(15, 0, 12, 7),
                         options: PresenterRenderOptions::default(),
+                        active: true,
                     },
                 ],
             ));

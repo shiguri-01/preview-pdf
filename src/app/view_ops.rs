@@ -304,7 +304,8 @@ impl RenderSubsystem {
                         PageLayoutMode::Single => self.presenter.render(frame, image_area, options),
                         PageLayoutMode::Spread => {
                             frame.render_widget(Clear, image_area);
-                            let render_slots = spread_slot_areas.render_slots(options);
+                            let render_slots =
+                                spread_slot_areas.render_slots_for_pages(visible_pages, options);
                             self.presenter.render_slots(frame, &render_slots)
                         }
                     };
@@ -416,7 +417,7 @@ fn decide_viewer_display(
                 show_loading = true;
             }
         }
-        PresenterFeedback::Pending => show_loading = true,
+        PresenterFeedback::Pending => show_loading = !outcome.drew_image,
         PresenterFeedback::Failed => show_error = true,
     }
     ViewerDisplayDecision {
@@ -563,15 +564,21 @@ impl SpreadSlotAreas {
         ]
     }
 
-    fn render_slots(self, options: PresenterRenderOptions) -> [PresenterRenderSlot; 2] {
+    fn render_slots_for_pages(
+        self,
+        visible_pages: VisiblePageSlots,
+        options: PresenterRenderOptions,
+    ) -> [PresenterRenderSlot; 2] {
         [
             PresenterRenderSlot {
                 area: self.left,
                 options,
+                active: visible_pages.left_page.is_some(),
             },
             PresenterRenderSlot {
                 area: self.right,
                 options,
+                active: visible_pages.right_page.is_some(),
             },
         ]
     }
@@ -738,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn display_decision_overlays_loading_on_pending_image() {
+    fn display_decision_does_not_overlay_loading_on_pending_image() {
         let decision = decide_viewer_display(
             PresenterRenderOutcome {
                 drew_image: true,
@@ -751,7 +758,7 @@ mod tests {
             decision,
             ViewerDisplayDecision {
                 clear: false,
-                show_loading: true,
+                show_loading: false,
                 show_error: false,
             }
         );
@@ -818,7 +825,7 @@ mod tests {
     }
 
     #[test]
-    fn display_decision_overlays_loading_when_pending_and_viewer_has_image() {
+    fn display_decision_overlays_loading_when_pending_without_drawn_image() {
         let decision = decide_viewer_display(
             PresenterRenderOutcome {
                 drew_image: false,

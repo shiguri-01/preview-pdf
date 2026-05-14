@@ -81,8 +81,8 @@ impl PresenterRenderOptions {
 }
 
 pub struct PresenterSlot<'a> {
-    pub cache_key: RenderedPageKey,
-    pub frame: &'a RgbaFrame,
+    pub cache_key: Option<RenderedPageKey>,
+    pub frame: Option<&'a RgbaFrame>,
     pub viewport: Viewport,
     pub pan: PanOffset,
     pub overlay_stamp: u64,
@@ -93,6 +93,7 @@ pub struct PresenterSlot<'a> {
 pub struct PresenterRenderSlot {
     pub area: Rect,
     pub options: PresenterRenderOptions,
+    pub active: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -137,9 +138,12 @@ pub trait ImagePresenter {
 
     fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
         for slot in slots {
+            let (Some(cache_key), Some(frame)) = (slot.cache_key, slot.frame) else {
+                continue;
+            };
             self.prepare(
-                slot.cache_key,
-                slot.frame,
+                cache_key,
+                frame,
                 slot.viewport,
                 slot.pan,
                 slot.overlay_stamp,
@@ -186,6 +190,9 @@ pub trait ImagePresenter {
     ) -> AppResult<PresenterRenderOutcome> {
         let mut outcome = PresenterRenderOutcome::default();
         for slot in slots {
+            if !slot.active {
+                continue;
+            }
             let slot_outcome = self.render(frame, slot.area, slot.options)?;
             outcome.drew_image |= slot_outcome.drew_image;
             outcome.used_stale_fallback |= slot_outcome.used_stale_fallback;

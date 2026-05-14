@@ -242,11 +242,16 @@ impl RenderRuntime {
         let slots: Vec<_> = prepared
             .iter()
             .map(|slot| PresenterSlot {
-                cache_key: slot.cache_key,
-                frame: &slot.frame,
-                viewport: slot.viewport,
-                pan: slot.pan,
-                overlay_stamp: slot.overlay_stamp,
+                cache_key: slot.as_ref().map(|slot| slot.cache_key),
+                frame: slot.as_ref().map(|slot| &slot.frame),
+                viewport: slot.as_ref().map(|slot| slot.viewport).unwrap_or(Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                }),
+                pan: slot.as_ref().map(|slot| slot.pan).unwrap_or_default(),
+                overlay_stamp: slot.as_ref().map(|slot| slot.overlay_stamp).unwrap_or(0),
                 generation,
             })
             .collect();
@@ -362,13 +367,14 @@ impl RenderRuntime {
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
         overlay: &HighlightOverlaySnapshot,
-    ) -> AppResult<Option<(Vec<PreparedPresenterSlot>, PanOffset)>> {
+    ) -> AppResult<Option<(Vec<Option<PreparedPresenterSlot>>, PanOffset)>> {
         let mut prepared = Vec::new();
         let mut normalized_pan = requested_pan;
         let mut saw_page = false;
 
         for (page, viewport) in page_slots {
             let Some(page) = *page else {
+                prepared.push(None);
                 continue;
             };
             saw_page = true;
@@ -382,13 +388,13 @@ impl RenderRuntime {
                 prepare_presenter_frame(&frame, *viewport, &mut slot_pan, cell_px, enable_crop);
             normalized_pan.cells_x = normalized_pan.cells_x.min(slot_pan.cells_x);
             normalized_pan.cells_y = normalized_pan.cells_y.min(slot_pan.cells_y);
-            prepared.push(PreparedPresenterSlot {
+            prepared.push(Some(PreparedPresenterSlot {
                 cache_key: key,
                 frame,
                 viewport: *viewport,
                 pan: pan_for_presenter,
                 overlay_stamp,
-            });
+            }));
         }
 
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());

@@ -48,6 +48,8 @@ pub(crate) struct PresenterState {
     pub(crate) last_ready_key: Option<TerminalFrameKey>,
     pub(crate) current_keys: Vec<Option<TerminalFrameKey>>,
     pub(crate) last_ready_keys: Vec<Option<TerminalFrameKey>>,
+    pub(crate) last_drawn_keys: Vec<Option<TerminalFrameKey>>,
+    pub(crate) last_drawn_areas: Vec<Option<Rect>>,
     pub(crate) current_generations: Vec<u64>,
     pub(crate) current_generation: u64,
 }
@@ -104,6 +106,8 @@ impl RatatuiImagePresenter {
                 last_ready_key: None,
                 current_keys: Vec::new(),
                 last_ready_keys: Vec::new(),
+                last_drawn_keys: Vec::new(),
+                last_drawn_areas: Vec::new(),
                 current_generations: Vec::new(),
                 current_generation: 0,
             },
@@ -188,6 +192,8 @@ impl RatatuiImagePresenter {
         self.state.last_ready_key = None;
         self.state.current_keys.clear();
         self.state.last_ready_keys.clear();
+        self.state.last_drawn_keys.clear();
+        self.state.last_drawn_areas.clear();
         self.state.current_generations.clear();
         self.state.current_generation = 0;
         self.encode.current.state = EncodeLaneState::default();
@@ -364,6 +370,50 @@ impl RatatuiImagePresenter {
         Ok(())
     }
 
+    fn preserve_terminal_area(frame: &mut Frame<'_>, area: Rect) {
+        // Do not redraw a stable terminal image just to satisfy ratatui's
+        // immediate-mode buffer. Re-emitting the image protocol can race with
+        // later text overlays and make the right spread slot appear to clear or
+        // paint over the overlay; skipped cells keep the existing image intact.
+        for y in area.top()..area.bottom() {
+            for x in area.left()..area.right() {
+                if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
+                    cell.set_skip(true);
+                }
+            }
+        }
+    }
+
+    fn stable_slot_is_drawn(
+        &self,
+        slot_index: usize,
+        key: TerminalFrameKey,
+        render_area: Rect,
+    ) -> bool {
+        self.state
+            .last_drawn_keys
+            .get(slot_index)
+            .is_some_and(|last_key| *last_key == Some(key))
+            && self
+                .state
+                .last_drawn_areas
+                .get(slot_index)
+                .is_some_and(|last_area| *last_area == Some(render_area))
+    }
+
+    fn record_drawn_slot(&mut self, slot_index: usize, key: TerminalFrameKey, render_area: Rect) {
+        self.state.last_ready_key = Some(key);
+        if let Some(last_ready_key) = self.state.last_ready_keys.get_mut(slot_index) {
+            *last_ready_key = Some(key);
+        }
+        if let Some(last_drawn_key) = self.state.last_drawn_keys.get_mut(slot_index) {
+            *last_drawn_key = Some(key);
+        }
+        if let Some(last_drawn_area) = self.state.last_drawn_areas.get_mut(slot_index) {
+            *last_drawn_area = Some(render_area);
+        }
+    }
+
     fn try_draw_ready_key(
         &mut self,
         frame: &mut Frame<'_>,
@@ -371,6 +421,7 @@ impl RatatuiImagePresenter {
         key: TerminalFrameKey,
         slot_index: usize,
         horizontal_align: PresenterHorizontalAlign,
+        options: PresenterRenderOptions,
     ) -> AppResult<bool> {
         if self.state.l2_cache.cached_mut(&key).is_none() {
             if Some(key) == self.state.last_ready_key {
@@ -401,7 +452,28 @@ impl RatatuiImagePresenter {
                     target_size.height,
                     horizontal_align,
                 );
-                frame.render_widget(Clear, area);
+                if options.preserve_stable_image
+                    && !options.force_image_redraw
+                    && self.stable_slot_is_drawn(slot_index, key, render_area)
+                {
+                    Self::preserve_terminal_area(frame, render_area);
+                    self.state
+                        .l2_cache
+                        .set_state(&key, TerminalFrameState::Ready(protocol));
+                    self.record_drawn_slot(slot_index, key, render_area);
+                    self.state
+                        .perf_stats
+                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                    return Ok(true);
+                }
+                if self
+                    .state
+                    .last_drawn_areas
+                    .get(slot_index)
+                    .is_none_or(|last_area| *last_area != Some(render_area))
+                {
+                    frame.render_widget(Clear, area);
+                }
                 if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
                     self.state
                         .l2_cache
@@ -415,10 +487,7 @@ impl RatatuiImagePresenter {
                 self.state
                     .l2_cache
                     .set_state(&key, TerminalFrameState::Ready(protocol));
-                self.state.last_ready_key = Some(key);
-                if let Some(last_ready_key) = self.state.last_ready_keys.get_mut(slot_index) {
-                    *last_ready_key = Some(key);
-                }
+                self.record_drawn_slot(slot_index, key, render_area);
                 self.state
                     .perf_stats
                     .set_l2_hit_rate(self.state.l2_cache.hit_rate());
@@ -472,6 +541,7 @@ impl RatatuiImagePresenter {
         current_key: Option<TerminalFrameKey>,
         slot_index: usize,
         horizontal_align: PresenterHorizontalAlign,
+        options: PresenterRenderOptions,
     ) -> AppResult<bool> {
         let Some(last_key) = self
             .state
@@ -485,7 +555,7 @@ impl RatatuiImagePresenter {
         if Some(last_key) == current_key {
             return Ok(false);
         }
-        self.try_draw_ready_key(frame, area, last_key, slot_index, horizontal_align)
+        self.try_draw_ready_key(frame, area, last_key, slot_index, horizontal_align, options)
     }
 
     fn is_current_slot_key(&self, key: TerminalFrameKey) -> bool {
@@ -516,7 +586,14 @@ impl RatatuiImagePresenter {
         let current_key = self.state.current_keys.get(slot_index).copied().flatten();
         let Some(key) = current_key else {
             let drew_image = if options.allow_stale_fallback {
-                self.try_draw_stale_fallback(frame, area, None, slot_index, horizontal_align)?
+                self.try_draw_stale_fallback(
+                    frame,
+                    area,
+                    None,
+                    slot_index,
+                    horizontal_align,
+                    options,
+                )?
             } else {
                 false
             };
@@ -535,7 +612,14 @@ impl RatatuiImagePresenter {
                 .perf_stats
                 .set_l2_hit_rate(self.state.l2_cache.hit_rate());
             let drew_image = if options.allow_stale_fallback {
-                self.try_draw_stale_fallback(frame, area, Some(key), slot_index, horizontal_align)?
+                self.try_draw_stale_fallback(
+                    frame,
+                    area,
+                    Some(key),
+                    slot_index,
+                    horizontal_align,
+                    options,
+                )?
             } else {
                 false
             };
@@ -558,7 +642,6 @@ impl RatatuiImagePresenter {
             match state {
                 TerminalFrameState::Ready(mut protocol) => {
                     let blit_start = std::time::Instant::now();
-                    frame.render_widget(Clear, area);
                     let target_size =
                         protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
                     let render_area = align_rect_within(
@@ -567,6 +650,35 @@ impl RatatuiImagePresenter {
                         target_size.height,
                         horizontal_align,
                     );
+                    if options.preserve_stable_image
+                        && !options.force_image_redraw
+                        && self.stable_slot_is_drawn(slot_index, key, render_area)
+                    {
+                        Self::preserve_terminal_area(frame, render_area);
+                        self.state
+                            .l2_cache
+                            .set_state(&key, TerminalFrameState::Ready(protocol));
+                        self.record_drawn_slot(slot_index, key, render_area);
+                        self.state
+                            .perf_stats
+                            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                        return Ok(PresenterRenderOutcome::from_slot(
+                            PresenterSlotOutcome::active(
+                                area,
+                                true,
+                                PresenterFeedback::None,
+                                false,
+                            ),
+                        ));
+                    }
+                    if self
+                        .state
+                        .last_drawn_areas
+                        .get(slot_index)
+                        .is_none_or(|last_area| *last_area != Some(render_area))
+                    {
+                        frame.render_widget(Clear, area);
+                    }
                     if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
                         self.state
                             .l2_cache
@@ -580,10 +692,7 @@ impl RatatuiImagePresenter {
                     self.state
                         .l2_cache
                         .set_state(&key, TerminalFrameState::Ready(protocol));
-                    self.state.last_ready_key = Some(key);
-                    if let Some(last_ready_key) = self.state.last_ready_keys.get_mut(slot_index) {
-                        *last_ready_key = Some(key);
-                    }
+                    self.record_drawn_slot(slot_index, key, render_area);
                     self.state
                         .perf_stats
                         .set_l2_hit_rate(self.state.l2_cache.hit_rate());
@@ -650,7 +759,14 @@ impl RatatuiImagePresenter {
             .perf_stats
             .set_l2_hit_rate(self.state.l2_cache.hit_rate());
         let drew_image = if options.allow_stale_fallback {
-            self.try_draw_stale_fallback(frame, area, Some(key), slot_index, horizontal_align)?
+            self.try_draw_stale_fallback(
+                frame,
+                area,
+                Some(key),
+                slot_index,
+                horizontal_align,
+                options,
+            )?
         } else {
             false
         };
@@ -713,6 +829,9 @@ impl ImagePresenter for RatatuiImagePresenter {
         else {
             self.state.current_key = None;
             self.state.current_keys = vec![None];
+            self.state.last_ready_keys = vec![self.state.last_ready_key];
+            self.state.last_drawn_keys.resize(1, None);
+            self.state.last_drawn_areas.resize(1, None);
             self.state.current_generations = vec![generation];
             return Ok(());
         };
@@ -720,6 +839,8 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.state.current_generation = generation;
         self.state.current_keys = vec![Some(key)];
         self.state.last_ready_keys = vec![self.state.last_ready_key];
+        self.state.last_drawn_keys.resize(1, None);
+        self.state.last_drawn_areas.resize(1, None);
         self.state.current_generations = vec![generation];
         Ok(())
     }
@@ -729,6 +850,8 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.state.current_keys.clear();
         self.state.current_generations.clear();
         self.state.last_ready_keys.resize(slots.len(), None);
+        self.state.last_drawn_keys.resize(slots.len(), None);
+        self.state.last_drawn_areas.resize(slots.len(), None);
 
         for slot in slots {
             let key = if let (Some(cache_key), Some(frame)) = (slot.cache_key, slot.frame) {
@@ -845,6 +968,8 @@ impl ImagePresenter for RatatuiImagePresenter {
         if self.state.current_keys.is_empty() {
             self.state.current_keys = vec![self.state.current_key];
             self.state.last_ready_keys = vec![self.state.last_ready_key];
+            self.state.last_drawn_keys.resize(1, None);
+            self.state.last_drawn_areas.resize(1, None);
             self.state.current_generations = vec![self.state.current_generation];
         }
         self.render_slot(frame, area, options, 0, PresenterHorizontalAlign::Center)
@@ -860,6 +985,12 @@ impl ImagePresenter for RatatuiImagePresenter {
         for (slot_index, slot) in slots.iter().enumerate() {
             if !slot.active {
                 frame.render_widget(Clear, slot.area);
+                if let Some(last_drawn_key) = self.state.last_drawn_keys.get_mut(slot_index) {
+                    *last_drawn_key = None;
+                }
+                if let Some(last_drawn_area) = self.state.last_drawn_areas.get_mut(slot_index) {
+                    *last_drawn_area = None;
+                }
                 slot_outcomes.push(PresenterSlotOutcome::inactive(slot.area));
                 continue;
             }

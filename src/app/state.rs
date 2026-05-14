@@ -117,7 +117,7 @@ pub struct CacheRefs {
     pub l2_terminal_frames: Option<CacheHandle>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
     pub current_page: usize,
     pub page_layout_mode: PageLayoutMode,

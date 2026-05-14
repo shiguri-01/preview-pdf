@@ -85,6 +85,169 @@ fn render_slots_until_ready(presenter: &mut RatatuiImagePresenter, slots: &[Pres
 }
 
 #[test]
+fn presenter_tracks_last_drawn_area_for_stable_redraws() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let area = Rect::new(2, 1, 12, 7);
+    presenter
+        .prepare(
+            RenderedPageKey::new(1, 0, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            0,
+            1,
+        )
+        .expect("prepare should pass");
+
+    render_until_ready(&mut presenter, area);
+    let first_drawn_area =
+        presenter.state.last_drawn_areas[0].expect("ready render should record drawn area");
+
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    terminal
+        .draw(|frame| {
+            presenter
+                .render(frame, area, PresenterRenderOptions::default())
+                .expect("ready redraw should pass");
+        })
+        .expect("draw should pass");
+
+    assert_eq!(presenter.state.last_drawn_areas[0], Some(first_drawn_area));
+}
+
+#[test]
+fn presenter_preserves_stable_ready_image_without_reblitting() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let area = Rect::new(2, 1, 12, 7);
+    presenter
+        .prepare(
+            RenderedPageKey::new(1, 0, 1.0),
+            &frame(),
+            viewport,
+            PanOffset::default(),
+            0,
+            1,
+        )
+        .expect("prepare should pass");
+
+    render_until_ready(&mut presenter, area);
+    let first_drawn_key = presenter.state.last_drawn_keys[0];
+    let first_drawn_area = presenter.state.last_drawn_areas[0];
+    presenter.clear_perf_blit_metrics();
+
+    let options = PresenterRenderOptions {
+        preserve_stable_image: true,
+        ..PresenterRenderOptions::default()
+    };
+    let backend = TestBackend::new(20, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut outcome = None;
+    terminal
+        .draw(|frame| {
+            outcome = Some(
+                presenter
+                    .render(frame, area, options)
+                    .expect("stable redraw should pass"),
+            );
+        })
+        .expect("draw should pass");
+
+    assert!(
+        outcome.expect("outcome should be captured").drew_image,
+        "preserved image should still count as visible image content"
+    );
+    assert_eq!(presenter.state.last_drawn_keys[0], first_drawn_key);
+    assert_eq!(presenter.state.last_drawn_areas[0], first_drawn_area);
+    assert_eq!(presenter.perf_stats().blit_samples, 0);
+}
+
+#[test]
+fn inactive_spread_slot_forgets_last_drawn_area() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let left_area = Rect::new(0, 0, 12, 7);
+    let right_area = Rect::new(15, 0, 12, 7);
+    let slots = [
+        PresenterRenderSlot {
+            area: left_area,
+            options: PresenterRenderOptions::default(),
+            active: true,
+            horizontal_align: PresenterHorizontalAlign::End,
+        },
+        PresenterRenderSlot {
+            area: right_area,
+            options: PresenterRenderOptions::default(),
+            active: true,
+            horizontal_align: PresenterHorizontalAlign::Start,
+        },
+    ];
+    presenter
+        .prepare_slots(&[
+            PresenterSlot {
+                cache_key: Some(RenderedPageKey::new(1, 0, 1.0)),
+                frame: Some(&frame()),
+                viewport,
+                pan: PanOffset::default(),
+                overlay_stamp: 0,
+                generation: 1,
+            },
+            PresenterSlot {
+                cache_key: Some(RenderedPageKey::new(1, 1, 1.0)),
+                frame: Some(&frame()),
+                viewport,
+                pan: PanOffset::default(),
+                overlay_stamp: 0,
+                generation: 1,
+            },
+        ])
+        .expect("slot prepare should pass");
+
+    render_slots_until_ready(&mut presenter, &slots);
+    assert!(
+        presenter.state.last_drawn_areas[1].is_some(),
+        "ready right slot should record a drawn area"
+    );
+
+    let inactive_right = [
+        slots[0],
+        PresenterRenderSlot {
+            active: false,
+            ..slots[1]
+        },
+    ];
+    let backend = TestBackend::new(40, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    terminal
+        .draw(|frame| {
+            presenter
+                .render_slots(frame, &inactive_right)
+                .expect("inactive render should pass");
+        })
+        .expect("draw should pass");
+
+    assert_eq!(presenter.state.last_drawn_areas[1], None);
+    assert_eq!(presenter.state.last_drawn_keys[1], None);
+}
+
+#[test]
 fn select_ratatui_presenter() {
     let presenter = create_presenter(PresenterKind::RatatuiImage)
         .expect("ratatui presenter should be selectable");

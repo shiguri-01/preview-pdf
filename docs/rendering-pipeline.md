@@ -159,7 +159,7 @@ single slot. `ImagePresenter::render_slots(...)` draws one or more slots and
 returns both aggregate outcome fields and per-slot `PresenterSlotOutcome`
 entries. Both must follow these rules:
 
-- `drew_image = true` means a terminal image was drawn
+- `drew_image = true` means terminal image content is visible for the frame
 - `feedback` indicates whether the current image is ready, pending, or failed
 - `used_stale_fallback = true` means an older ready frame was drawn
 - `slots` contains the display area and the same state for each rendered slot;
@@ -177,6 +177,12 @@ Frame-level UI rules:
   slot draws loading inside its own image area from the first pending frame,
   labeled with that slot's page using the same `p.N` notation as the rest of
   the app
+- the presenter tracks the last terminal key and render area for each slot;
+  when a later draw targets the same key and area, it preserves the existing
+  terminal image with skipped buffer cells instead of re-emitting image
+  protocol data
+- when an app overlay has covered the image and then closes, the next frame
+  forces an image redraw so the covered image cells are restored
 
 ## Redraw timing
 

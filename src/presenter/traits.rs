@@ -65,6 +65,8 @@ pub enum PresenterRenderMode {
 pub struct PresenterRenderOptions {
     pub allow_stale_fallback: bool,
     pub render_mode: PresenterRenderMode,
+    pub preserve_stable_image: bool,
+    pub force_image_redraw: bool,
 }
 
 impl PresenterRenderOptions {
@@ -72,6 +74,8 @@ impl PresenterRenderOptions {
         Self {
             allow_stale_fallback,
             render_mode,
+            preserve_stable_image: false,
+            force_image_redraw: false,
         }
     }
 

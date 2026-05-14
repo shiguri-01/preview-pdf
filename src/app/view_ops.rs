@@ -284,10 +284,17 @@ impl RenderSubsystem {
             generation,
             nav_streak: _nav_streak,
         } = plan;
+        let image_occluded = palette_view.is_some() || state.mode == super::state::Mode::Help;
         // Keep the last ready frame visible while the next page is still preparing
         // so page flips do not briefly expose the terminal background.
-        let render_options =
-            presenter_render_options(self.viewer_has_image, PresenterRenderMode::Full);
+        // Stable image slots are preserved while overlays are open; once an
+        // overlay closes, force one redraw to restore cells it covered.
+        let render_options = presenter_render_options(
+            self.viewer_has_image,
+            PresenterRenderMode::Full,
+            image_occluded,
+            self.image_occluded_last_frame && !image_occluded,
+        );
         let file_name = pdf
             .path()
             .file_name()
@@ -485,6 +492,7 @@ impl RenderSubsystem {
         state.pan_y = pan.cells_y;
         self.runtime.sync_presenter_metrics(self.presenter.as_ref());
         self.viewer_has_image = viewer_has_image;
+        self.image_occluded_last_frame = image_occluded;
 
         sync_render_notice(state, render_failed, render_feedback, &render_target);
 
@@ -628,8 +636,13 @@ fn sync_render_notice(
 fn presenter_render_options(
     viewer_has_image: bool,
     render_mode: PresenterRenderMode,
+    image_occluded: bool,
+    force_image_redraw: bool,
 ) -> PresenterRenderOptions {
-    PresenterRenderOptions::new(viewer_has_image, render_mode)
+    let mut options = PresenterRenderOptions::new(viewer_has_image, render_mode);
+    options.preserve_stable_image = true;
+    options.force_image_redraw = force_image_redraw || image_occluded && !viewer_has_image;
+    options
 }
 
 fn resolve_layout_dimensions(
@@ -1183,16 +1196,25 @@ mod tests {
 
     #[test]
     fn presenter_render_options_derive_stale_fallback_from_viewer_image_state() {
-        let with_image = presenter_render_options(true, PresenterRenderMode::Full);
-        let without_image = presenter_render_options(false, PresenterRenderMode::InitialPreview);
+        let with_image = presenter_render_options(true, PresenterRenderMode::Full, false, false);
+        let without_image =
+            presenter_render_options(false, PresenterRenderMode::InitialPreview, false, false);
 
         assert!(with_image.allow_stale_fallback);
         assert!(!without_image.allow_stale_fallback);
+        assert!(with_image.preserve_stable_image);
+        assert!(!with_image.force_image_redraw);
         assert_eq!(with_image.render_mode, PresenterRenderMode::Full);
         assert_eq!(
             without_image.render_mode,
             PresenterRenderMode::InitialPreview
         );
+    }
+
+    #[test]
+    fn presenter_render_options_force_redraw_after_occlusion() {
+        let after_overlay = presenter_render_options(true, PresenterRenderMode::Full, false, true);
+        assert!(after_overlay.force_image_redraw);
     }
 
     #[test]

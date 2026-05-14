@@ -1,3 +1,4 @@
+use ratatui::layout::Rect;
 use ratatui::widgets::Clear;
 
 use crate::app::PageLayoutMode;
@@ -9,16 +10,14 @@ use crate::input::sequence::SequenceRegistrySnapshot;
 use crate::palette::PaletteView;
 use crate::presenter::{
     PanOffset, PresenterFeedback, PresenterRenderMode, PresenterRenderOptions,
-    PresenterRenderOutcome, Viewport,
+    PresenterRenderOutcome, PresenterRenderSlot, Viewport,
 };
 use crate::render::cache::RenderedPageKey;
 use crate::ui;
 
 use super::constants::DEFAULT_PAGE_SIZE_PT;
 use super::core::{App, RenderSubsystem};
-use super::scale::{
-    compute_render_scale, compute_scale, quantize_scale, resolved_cell_size_px, scale_eq,
-};
+use super::scale::{compute_render_scale, compute_scale, quantize_scale, scale_eq};
 use super::state::{AppState, VisiblePageSlots};
 use super::terminal_session::TerminalSurface;
 
@@ -157,9 +156,8 @@ impl RenderSubsystem {
     fn prepare_spread_or_preview_from_cache(
         &mut self,
         pdf: &dyn PdfBackend,
-        viewport: Viewport,
         visible_pages: VisiblePageSlots,
-        presenter_key: RenderedPageKey,
+        slot_areas: SpreadSlotAreas,
         full_scale: f32,
         initial_preview: Option<&InitialPreviewPlan>,
         pan: &mut PanOffset,
@@ -167,21 +165,18 @@ impl RenderSubsystem {
         enable_crop: bool,
         highlight_overlay: &HighlightOverlaySnapshot,
         generation: u64,
-        spread_gap_px: u32,
     ) -> AppResult<Option<PresenterRenderMode>> {
-        if self.runtime.try_prepare_spread_from_cache(
+        let page_slots = slot_areas.page_slots(visible_pages);
+        if self.runtime.try_prepare_page_slots_from_cache(
             pdf,
             self.presenter.as_mut(),
-            viewport,
-            visible_pages,
-            presenter_key,
+            &page_slots,
             full_scale,
             pan,
             cell_px,
             enable_crop,
             highlight_overlay,
             generation,
-            spread_gap_px,
         )? {
             return Ok(Some(PresenterRenderMode::Full));
         }
@@ -190,19 +185,16 @@ impl RenderSubsystem {
             return Ok(None);
         };
 
-        if self.runtime.try_prepare_spread_from_cache(
+        if self.runtime.try_prepare_page_slots_from_cache(
             pdf,
             self.presenter.as_mut(),
-            viewport,
-            visible_pages,
-            preview_plan.presenter_key,
+            &page_slots,
             preview_plan.scale,
             pan,
             cell_px,
             enable_crop,
             highlight_overlay,
             generation,
-            spread_gap_px,
         )? {
             return Ok(Some(PresenterRenderMode::InitialPreview));
         }
@@ -226,7 +218,7 @@ impl RenderSubsystem {
             visible_pages,
             current_scale,
             initial_preview,
-            presenter_key,
+            presenter_key: _presenter_key,
             highlight_overlay,
             generation,
             nav_streak: _nav_streak,
@@ -253,12 +245,6 @@ impl RenderSubsystem {
         let mut viewer_has_image = self.viewer_has_image;
         let loading_label = format_loading_target(visible_pages);
         let render_target = format_render_target(visible_pages);
-        let spread_gap_px = u32::from(
-            resolved_cell_size_px(presenter_caps.cell_px)
-                .0
-                .saturating_mul(SPREAD_GAP_CELLS),
-        );
-
         session.draw(|frame| {
             let layout = ui::split_layout(frame.area(), state.debug_status_visible);
             ui::draw_chrome(
@@ -279,6 +265,7 @@ impl RenderSubsystem {
                 height: layout.viewer_inner.height.max(1),
             };
             let image_area = layout.viewer_inner;
+            let spread_slot_areas = split_spread_slot_areas(image_area, SPREAD_GAP_CELLS);
 
             let prepare_result = match state.page_layout_mode {
                 PageLayoutMode::Single => self.prepare_single_page_or_preview_from_cache(
@@ -295,9 +282,8 @@ impl RenderSubsystem {
                 ),
                 PageLayoutMode::Spread => self.prepare_spread_or_preview_from_cache(
                     pdf,
-                    viewport,
                     visible_pages,
-                    presenter_key,
+                    spread_slot_areas,
                     current_scale,
                     initial_preview.as_ref(),
                     &mut pan,
@@ -305,52 +291,58 @@ impl RenderSubsystem {
                     enable_crop,
                     &highlight_overlay,
                     generation,
-                    spread_gap_px,
                 ),
             };
 
             match prepare_result {
-                Ok(Some(render_mode)) => match self.presenter.render(
-                    frame,
-                    image_area,
-                    PresenterRenderOptions {
+                Ok(Some(render_mode)) => {
+                    let options = PresenterRenderOptions {
                         render_mode,
                         ..render_options
-                    },
-                ) {
-                    Ok(outcome) => {
-                        let outcome = normalize_render_outcome(render_mode, outcome);
-                        render_feedback = outcome.feedback;
-                        if outcome.drew_image {
-                            viewer_has_image = true;
+                    };
+                    let render_result = match state.page_layout_mode {
+                        PageLayoutMode::Single => self.presenter.render(frame, image_area, options),
+                        PageLayoutMode::Spread => {
+                            frame.render_widget(Clear, image_area);
+                            let render_slots = spread_slot_areas.render_slots(options);
+                            self.presenter.render_slots(frame, &render_slots)
                         }
-                        draw_viewer_outcome(
-                            frame,
-                            image_area,
-                            outcome,
-                            loading_label.as_str(),
-                            None,
-                            viewer_has_image,
-                        );
+                    };
+                    match render_result {
+                        Ok(outcome) => {
+                            let outcome = normalize_render_outcome(render_mode, outcome);
+                            render_feedback = outcome.feedback;
+                            if outcome.drew_image {
+                                viewer_has_image = true;
+                            }
+                            draw_viewer_outcome(
+                                frame,
+                                image_area,
+                                outcome,
+                                loading_label.as_str(),
+                                None,
+                                viewer_has_image,
+                            );
+                        }
+                        Err(err) => {
+                            let _ = err;
+                            render_failed = true;
+                            let outcome = PresenterRenderOutcome {
+                                drew_image: false,
+                                feedback: PresenterFeedback::Failed,
+                                used_stale_fallback: false,
+                            };
+                            draw_viewer_outcome(
+                                frame,
+                                image_area,
+                                outcome,
+                                loading_label.as_str(),
+                                Some(render_target.as_str()),
+                                viewer_has_image,
+                            );
+                        }
                     }
-                    Err(err) => {
-                        let _ = err;
-                        render_failed = true;
-                        let outcome = PresenterRenderOutcome {
-                            drew_image: false,
-                            feedback: PresenterFeedback::Failed,
-                            used_stale_fallback: false,
-                        };
-                        draw_viewer_outcome(
-                            frame,
-                            image_area,
-                            outcome,
-                            loading_label.as_str(),
-                            Some(render_target.as_str()),
-                            viewer_has_image,
-                        );
-                    }
-                },
+                }
                 Ok(None) => {
                     render_feedback = PresenterFeedback::Pending;
                     let outcome = PresenterRenderOutcome {
@@ -506,18 +498,16 @@ fn resolve_layout_dimensions(
     match slots.trailing_page {
         None => match mode {
             PageLayoutMode::Single => (anchor_width, anchor_height),
-            // Tail spread still composes a blank partner slot, so width should
-            // stay consistent with regular spread composition.
+            // Tail spread still reserves a blank partner slot, so the scale
+            // stays consistent with regular spread slot layout.
             PageLayoutMode::Spread => (anchor_width + anchor_width, anchor_height),
         },
         Some(trailing_page) => {
             let (trailing_width, trailing_height) = pdf
                 .page_dimensions(trailing_page)
                 .unwrap_or((anchor_width, anchor_height));
-            (
-                anchor_width + trailing_width,
-                anchor_height.max(trailing_height),
-            )
+            let slot_width = anchor_width.max(trailing_width);
+            (slot_width + slot_width, anchor_height.max(trailing_height))
         }
     }
 }
@@ -527,7 +517,7 @@ pub(super) fn compute_initial_preview_plan(
     visible_pages: VisiblePageSlots,
     page_layout_mode: PageLayoutMode,
     current_scale: f32,
-    presenter_layout_tag: u16,
+    _presenter_layout_tag: u16,
 ) -> Option<InitialPreviewPlan> {
     let preview_scale = quantize_scale(current_scale * INITIAL_PREVIEW_SCALE_RATIO);
     if scale_eq(preview_scale, current_scale) {
@@ -549,12 +539,7 @@ pub(super) fn compute_initial_preview_plan(
     };
     let presenter_key = match page_layout_mode {
         PageLayoutMode::Single => page_keys[0],
-        PageLayoutMode::Spread => RenderedPageKey::with_layout(
-            doc_id,
-            visible_pages.anchor_page,
-            preview_scale,
-            presenter_layout_tag,
-        ),
+        PageLayoutMode::Spread => page_keys[0],
     };
 
     Some(InitialPreviewPlan {
@@ -562,6 +547,55 @@ pub(super) fn compute_initial_preview_plan(
         page_keys,
         presenter_key,
     })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SpreadSlotAreas {
+    left: Rect,
+    right: Rect,
+}
+
+impl SpreadSlotAreas {
+    fn page_slots(self, visible_pages: VisiblePageSlots) -> [(Option<usize>, Viewport); 2] {
+        [
+            (visible_pages.left_page, viewport_from_rect(self.left)),
+            (visible_pages.right_page, viewport_from_rect(self.right)),
+        ]
+    }
+
+    fn render_slots(self, options: PresenterRenderOptions) -> [PresenterRenderSlot; 2] {
+        [
+            PresenterRenderSlot {
+                area: self.left,
+                options,
+            },
+            PresenterRenderSlot {
+                area: self.right,
+                options,
+            },
+        ]
+    }
+}
+
+fn split_spread_slot_areas(area: Rect, gap_cells: u16) -> SpreadSlotAreas {
+    let gap = gap_cells.min(area.width);
+    let content_width = area.width.saturating_sub(gap);
+    let left_width = content_width / 2;
+    let right_width = content_width.saturating_sub(left_width);
+    let right_x = area.x.saturating_add(left_width).saturating_add(gap);
+    SpreadSlotAreas {
+        left: Rect::new(area.x, area.y, left_width, area.height),
+        right: Rect::new(right_x, area.y, right_width, area.height),
+    }
+}
+
+fn viewport_from_rect(area: Rect) -> Viewport {
+    Viewport {
+        x: area.x,
+        y: area.y,
+        width: area.width.max(1),
+        height: area.height.max(1),
+    }
 }
 
 fn format_loading_target(slots: VisiblePageSlots) -> String {
@@ -583,12 +617,13 @@ mod tests {
         InitialPreviewPlan, ViewerDisplayDecision, compute_initial_preview_plan,
         decide_viewer_display, format_loading_target, format_render_target,
         normalize_render_outcome, presenter_render_options, render_failure_message,
-        resolve_layout_dimensions, sync_render_notice,
+        resolve_layout_dimensions, split_spread_slot_areas, sync_render_notice,
     };
     use crate::app::{AppState, PageLayoutMode, VisiblePageSlots};
     use crate::backend::{PdfBackend, RgbaFrame, TextPage};
     use crate::presenter::{PresenterFeedback, PresenterRenderMode, PresenterRenderOutcome};
     use crate::render::cache::RenderedPageKey;
+    use ratatui::layout::Rect;
 
     struct DimPdf {
         path: PathBuf,
@@ -901,7 +936,16 @@ mod tests {
         };
 
         let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
-        assert_eq!(spread, (380.0, 300.0));
+        assert_eq!(spread, (400.0, 300.0));
+    }
+
+    #[test]
+    fn split_spread_slot_areas_preserves_gap_and_stable_widths() {
+        let slots = split_spread_slot_areas(Rect::new(10, 2, 41, 20), 3);
+
+        assert_eq!(slots.left, Rect::new(10, 2, 19, 20));
+        assert_eq!(slots.right, Rect::new(32, 2, 19, 20));
+        assert_eq!(slots.right.x - (slots.left.x + slots.left.width), 3);
     }
 
     #[test]
@@ -944,7 +988,7 @@ mod tests {
                     RenderedPageKey::new(7, 0, 0.25),
                     RenderedPageKey::new(7, 1, 0.25),
                 ],
-                presenter_key: RenderedPageKey::with_layout(7, 0, 0.25, 1),
+                presenter_key: RenderedPageKey::new(7, 0, 0.25),
             })
         );
     }
@@ -965,7 +1009,7 @@ mod tests {
             Some(InitialPreviewPlan {
                 scale: 0.25,
                 page_keys: vec![RenderedPageKey::new(7, 2, 0.25)],
-                presenter_key: RenderedPageKey::with_layout(7, 2, 0.25, 3),
+                presenter_key: RenderedPageKey::new(7, 2, 0.25),
             })
         );
     }

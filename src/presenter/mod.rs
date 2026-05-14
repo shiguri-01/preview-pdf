@@ -14,5 +14,5 @@ pub use ratatui::RatatuiImagePresenter;
 pub use traits::{
     ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
     PresenterKind, PresenterRenderMode, PresenterRenderOptions, PresenterRenderOutcome,
-    PresenterRuntimeInfo, Viewport,
+    PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot, Viewport,
 };

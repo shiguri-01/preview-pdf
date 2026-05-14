@@ -80,6 +80,21 @@ impl PresenterRenderOptions {
     }
 }
 
+pub struct PresenterSlot<'a> {
+    pub cache_key: RenderedPageKey,
+    pub frame: &'a RgbaFrame,
+    pub viewport: Viewport,
+    pub pan: PanOffset,
+    pub overlay_stamp: u64,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PresenterRenderSlot {
+    pub area: Rect,
+    pub options: PresenterRenderOptions,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PresenterRenderOutcome {
     pub drew_image: bool,
@@ -120,6 +135,20 @@ pub trait ImagePresenter {
         generation: u64,
     ) -> AppResult<()>;
 
+    fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
+        for slot in slots {
+            self.prepare(
+                slot.cache_key,
+                slot.frame,
+                slot.viewport,
+                slot.pan,
+                slot.overlay_stamp,
+                slot.generation,
+            )?;
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn prefetch_encode(
         &mut self,
@@ -149,6 +178,21 @@ pub trait ImagePresenter {
         area: Rect,
         options: PresenterRenderOptions,
     ) -> AppResult<PresenterRenderOutcome>;
+
+    fn render_slots(
+        &mut self,
+        frame: &mut Frame<'_>,
+        slots: &[PresenterRenderSlot],
+    ) -> AppResult<PresenterRenderOutcome> {
+        let mut outcome = PresenterRenderOutcome::default();
+        for slot in slots {
+            let slot_outcome = self.render(frame, slot.area, slot.options)?;
+            outcome.drew_image |= slot_outcome.drew_image;
+            outcome.used_stale_fallback |= slot_outcome.used_stale_fallback;
+            outcome.feedback = combine_feedback(outcome.feedback, slot_outcome.feedback);
+        }
+        Ok(outcome)
+    }
     fn capabilities(&self) -> PresenterCaps;
 
     fn has_pending_work(&self) -> bool {
@@ -174,4 +218,16 @@ pub trait ImagePresenter {
     fn enable_perf_sample_collection(&mut self) {}
 
     fn clear_perf_blit_metrics(&mut self) {}
+}
+
+pub fn combine_feedback(left: PresenterFeedback, right: PresenterFeedback) -> PresenterFeedback {
+    match (left, right) {
+        (PresenterFeedback::Failed, _) | (_, PresenterFeedback::Failed) => {
+            PresenterFeedback::Failed
+        }
+        (PresenterFeedback::Pending, _) | (_, PresenterFeedback::Pending) => {
+            PresenterFeedback::Pending
+        }
+        (PresenterFeedback::None, PresenterFeedback::None) => PresenterFeedback::None,
+    }
 }

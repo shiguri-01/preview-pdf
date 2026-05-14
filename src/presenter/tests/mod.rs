@@ -20,7 +20,7 @@ use super::ratatui::RatatuiImagePresenter;
 use super::terminal_cell::cell_size_from_window_metrics;
 use super::traits::{
     ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterFeedback, PresenterKind,
-    PresenterRenderMode, PresenterRenderOptions, Viewport,
+    PresenterRenderMode, PresenterRenderOptions, PresenterRenderSlot, PresenterSlot, Viewport,
 };
 
 fn frame() -> RgbaFrame {
@@ -187,6 +187,128 @@ fn presenter_cache_key_distinguishes_overlay_stamps() {
 
     assert_eq!(presenter.l2_cache_len(), 2);
     assert_eq!(presenter.perf_stats().cache_hit_rate_l2, 0.0);
+}
+
+#[test]
+fn presenter_prepare_slots_tracks_independent_current_keys() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let left_viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 24,
+    };
+    let right_viewport = Viewport {
+        x: 42,
+        y: 0,
+        width: 40,
+        height: 24,
+    };
+    let left_key = RenderedPageKey::new(1, 0, 1.0);
+    let right_key = RenderedPageKey::new(1, 1, 1.0);
+    let left_frame = frame();
+    let right_frame = frame();
+    let slots = [
+        PresenterSlot {
+            cache_key: left_key,
+            frame: &left_frame,
+            viewport: left_viewport,
+            pan: PanOffset::default(),
+            overlay_stamp: 0,
+            generation: 1,
+        },
+        PresenterSlot {
+            cache_key: right_key,
+            frame: &right_frame,
+            viewport: right_viewport,
+            pan: PanOffset::default(),
+            overlay_stamp: 0,
+            generation: 1,
+        },
+    ];
+
+    presenter
+        .prepare_slots(&slots)
+        .expect("slot prepare should pass");
+
+    assert_eq!(presenter.state.current_keys.len(), 2);
+    assert_eq!(
+        presenter.state.current_keys[0].map(|key| key.rendered_page),
+        Some(left_key)
+    );
+    assert_eq!(
+        presenter.state.current_keys[1].map(|key| key.rendered_page),
+        Some(right_key)
+    );
+    assert_eq!(presenter.l2_cache_len(), 2);
+}
+
+#[test]
+fn render_slots_aggregates_failed_and_pending_feedback() {
+    let mut presenter = RatatuiImagePresenter::new();
+    let viewport = Viewport {
+        x: 0,
+        y: 0,
+        width: 12,
+        height: 7,
+    };
+    let left_key = RenderedPageKey::new(1, 0, 1.0);
+    let right_key = RenderedPageKey::new(1, 1, 1.0);
+    let left_frame = frame();
+    let right_frame = frame();
+    let slots = [
+        PresenterSlot {
+            cache_key: left_key,
+            frame: &left_frame,
+            viewport,
+            pan: PanOffset::default(),
+            overlay_stamp: 0,
+            generation: 1,
+        },
+        PresenterSlot {
+            cache_key: right_key,
+            frame: &right_frame,
+            viewport,
+            pan: PanOffset::default(),
+            overlay_stamp: 0,
+            generation: 1,
+        },
+    ];
+    presenter
+        .prepare_slots(&slots)
+        .expect("slot prepare should pass");
+    let failed_key = presenter.state.current_keys[0].expect("left key should exist");
+    presenter
+        .state
+        .l2_cache
+        .set_state(&failed_key, TerminalFrameState::Failed);
+
+    let backend = TestBackend::new(30, 10);
+    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+    let mut result = None;
+    terminal
+        .draw(|frame| {
+            result = Some(presenter.render_slots(
+                frame,
+                &[
+                    PresenterRenderSlot {
+                        area: Rect::new(0, 0, 12, 7),
+                        options: PresenterRenderOptions::default(),
+                    },
+                    PresenterRenderSlot {
+                        area: Rect::new(15, 0, 12, 7),
+                        options: PresenterRenderOptions::default(),
+                    },
+                ],
+            ));
+        })
+        .expect("draw should pass");
+
+    let outcome = result
+        .expect("render result should be captured")
+        .expect("render should pass");
+    assert_eq!(outcome.feedback, PresenterFeedback::Failed);
+    assert!(!outcome.drew_image);
 }
 
 #[test]

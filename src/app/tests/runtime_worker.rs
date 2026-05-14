@@ -29,6 +29,8 @@ struct TestPresenter {
     prefetch_calls: usize,
     render_calls: usize,
     last_prepare_overlay_stamp: Option<u64>,
+    prepared_viewports: Vec<Viewport>,
+    prepared_frame_sizes: Vec<(u32, u32)>,
     stats: PerfStats,
 }
 
@@ -36,14 +38,16 @@ impl ImagePresenter for TestPresenter {
     fn prepare(
         &mut self,
         _cache_key: RenderedPageKey,
-        _frame: &RgbaFrame,
-        _viewport: Viewport,
+        frame: &RgbaFrame,
+        viewport: Viewport,
         _pan: PanOffset,
         overlay_stamp: u64,
         _generation: u64,
     ) -> AppResult<()> {
         self.prepare_calls += 1;
         self.last_prepare_overlay_stamp = Some(overlay_stamp);
+        self.prepared_viewports.push(viewport);
+        self.prepared_frame_sizes.push((frame.width, frame.height));
         self.stats.record_convert(Duration::from_millis(4));
         self.stats.set_l2_hit_rate(0.5);
         Ok(())
@@ -117,6 +121,42 @@ impl PdfBackend for PageDimensionFailingPdf {
             height: 4,
             pixels: vec![255; 64].into(),
         })
+    }
+
+    fn extract_text(&self, _page: usize) -> AppResult<String> {
+        Err(AppError::unsupported("not needed in runtime test"))
+    }
+
+    fn extract_positioned_text(&self, _page: usize) -> AppResult<crate::backend::TextPage> {
+        Err(AppError::unsupported("not needed in runtime test"))
+    }
+
+    fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+        Err(AppError::unsupported("not needed in runtime test"))
+    }
+}
+
+struct TwoPageRuntimePdf;
+
+impl PdfBackend for TwoPageRuntimePdf {
+    fn path(&self) -> &std::path::Path {
+        std::path::Path::new("two-page-runtime.pdf")
+    }
+
+    fn doc_id(&self) -> u64 {
+        11
+    }
+
+    fn page_count(&self) -> usize {
+        2
+    }
+
+    fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+        Ok((100.0, 100.0))
+    }
+
+    fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+        Err(AppError::unsupported("not needed in runtime test"))
     }
 
     fn extract_text(&self, _page: usize) -> AppResult<String> {
@@ -277,6 +317,58 @@ fn prepare_current_page_uses_zero_overlay_stamp_when_decoration_falls_back() {
         .expect("prepare should succeed");
 
     assert_eq!(presenter.last_prepare_overlay_stamp, Some(0));
+}
+
+#[test]
+fn spread_canvas_slots_crop_from_shared_pan_coordinate_space() {
+    let doc = TwoPageRuntimePdf;
+    let mut runtime = RenderRuntime::default();
+    let mut presenter = TestPresenter::default();
+    for page in 0..2 {
+        runtime.l1_cache.insert(
+            RenderedPageKey::new(doc.doc_id(), page, 1.0),
+            RgbaFrame {
+                width: 100,
+                height: 50,
+                pixels: vec![page as u8; 100 * 50 * 4].into(),
+            },
+            false,
+        );
+    }
+    let mut pan = PanOffset {
+        cells_x: 8,
+        cells_y: 0,
+    };
+
+    let areas = runtime
+        .try_prepare_spread_canvas_slots_from_cache(
+            &doc,
+            &mut presenter,
+            Viewport {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 5,
+            },
+            crate::app::VisiblePageSlots {
+                anchor_page: 0,
+                trailing_page: Some(1),
+                left_page: Some(0),
+                right_page: Some(1),
+            },
+            1.0,
+            &mut pan,
+            Some((10, 10)),
+            &HighlightOverlaySnapshot::default(),
+            1,
+            20,
+        )
+        .expect("spread canvas prepare should pass")
+        .expect("cached spread should prepare");
+
+    assert_eq!(areas, vec![Rect::new(0, 0, 2, 5), Rect::new(4, 0, 6, 5)]);
+    assert_eq!(presenter.prepared_frame_sizes, vec![(20, 50), (60, 50)]);
+    assert_eq!(presenter.prepared_viewports.len(), 2);
 }
 
 #[test]

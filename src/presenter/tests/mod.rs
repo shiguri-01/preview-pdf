@@ -225,10 +225,12 @@ fn inactive_spread_slot_forgets_last_drawn_area() {
         presenter.state.last_drawn_areas[1].is_some(),
         "ready right slot should record a drawn area"
     );
+    let right_drawn_area = presenter.state.last_drawn_areas[1].unwrap();
 
     let inactive_right = [
         slots[0],
         PresenterRenderSlot {
+            area: Rect::default(),
             active: false,
             ..slots[1]
         },
@@ -237,12 +239,25 @@ fn inactive_spread_slot_forgets_last_drawn_area() {
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
     terminal
         .draw(|frame| {
+            for y in right_drawn_area.top()..right_drawn_area.bottom() {
+                for x in right_drawn_area.left()..right_drawn_area.right() {
+                    if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
+                        cell.set_symbol("x");
+                    }
+                }
+            }
             presenter
                 .render_slots(frame, &inactive_right)
                 .expect("inactive render should pass");
         })
         .expect("draw should pass");
 
+    let buffer = terminal.backend().buffer();
+    for y in right_drawn_area.top()..right_drawn_area.bottom() {
+        for x in right_drawn_area.left()..right_drawn_area.right() {
+            assert_eq!(buffer[(x, y)].symbol(), " ");
+        }
+    }
     assert_eq!(presenter.state.last_drawn_areas[1], None);
     assert_eq!(presenter.state.last_drawn_keys[1], None);
 }

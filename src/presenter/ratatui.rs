@@ -985,6 +985,17 @@ impl ImagePresenter for RatatuiImagePresenter {
         for (slot_index, slot) in slots.iter().enumerate() {
             if !slot.active {
                 frame.render_widget(Clear, slot.area);
+                let last_drawn_area = self
+                    .state
+                    .last_drawn_areas
+                    .get(slot_index)
+                    .copied()
+                    .flatten();
+                if let Some(last_drawn_area) = last_drawn_area
+                    && last_drawn_area != slot.area
+                {
+                    frame.render_widget(Clear, last_drawn_area);
+                }
                 if let Some(last_drawn_key) = self.state.last_drawn_keys.get_mut(slot_index) {
                     *last_drawn_key = None;
                 }

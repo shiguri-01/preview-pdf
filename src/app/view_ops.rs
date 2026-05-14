@@ -372,7 +372,7 @@ impl RenderSubsystem {
                     let render_result = match state.page_layout_mode {
                         PageLayoutMode::Single => self.presenter.render(frame, image_area, options),
                         PageLayoutMode::Spread => {
-                            frame.render_widget(Clear, image_area);
+                            spread_slot_areas.clear_gap(frame);
                             let render_slots: Vec<_> = spread_render_slots
                                 .into_iter()
                                 .map(|slot| PresenterRenderSlot { options, ..slot })
@@ -624,6 +624,7 @@ pub(super) fn compute_initial_preview_plan(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SpreadSlotAreas {
     left: Rect,
+    gap: Rect,
     right: Rect,
 }
 
@@ -655,6 +656,12 @@ impl SpreadSlotAreas {
             },
         ]
     }
+
+    fn clear_gap(self, frame: &mut ratatui::Frame<'_>) {
+        if self.gap.width > 0 && self.gap.height > 0 {
+            frame.render_widget(Clear, self.gap);
+        }
+    }
 }
 
 fn split_spread_slot_areas(area: Rect, gap_cells: u16) -> SpreadSlotAreas {
@@ -663,8 +670,10 @@ fn split_spread_slot_areas(area: Rect, gap_cells: u16) -> SpreadSlotAreas {
     let left_width = content_width / 2;
     let right_width = content_width.saturating_sub(left_width);
     let right_x = area.x.saturating_add(left_width).saturating_add(gap);
+    let gap_x = area.x.saturating_add(left_width);
     SpreadSlotAreas {
         left: Rect::new(area.x, area.y, left_width, area.height),
+        gap: Rect::new(gap_x, area.y, gap, area.height),
         right: Rect::new(right_x, area.y, right_width, area.height),
     }
 }
@@ -1041,6 +1050,7 @@ mod tests {
         let slots = split_spread_slot_areas(Rect::new(10, 2, 41, 20), 3);
 
         assert_eq!(slots.left, Rect::new(10, 2, 19, 20));
+        assert_eq!(slots.gap, Rect::new(29, 2, 3, 20));
         assert_eq!(slots.right, Rect::new(32, 2, 19, 20));
         assert_eq!(slots.right.x - (slots.left.x + slots.left.width), 3);
     }

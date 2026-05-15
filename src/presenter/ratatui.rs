@@ -44,14 +44,11 @@ pub(crate) struct PresenterState {
     pub(crate) terminal_initialized: bool,
     pub(crate) l2_cache: TerminalFrameCache,
     pub(crate) perf_stats: PerfStats,
-    pub(crate) current_key: Option<TerminalFrameKey>,
-    pub(crate) last_ready_key: Option<TerminalFrameKey>,
     pub(crate) current_keys: Vec<Option<TerminalFrameKey>>,
     pub(crate) last_ready_keys: Vec<Option<TerminalFrameKey>>,
     pub(crate) last_drawn_keys: Vec<Option<TerminalFrameKey>>,
     pub(crate) last_drawn_areas: Vec<Option<Rect>>,
     pub(crate) current_generations: Vec<u64>,
-    pub(crate) current_generation: u64,
 }
 
 #[derive(Default)]
@@ -102,14 +99,11 @@ impl RatatuiImagePresenter {
                 terminal_initialized: false,
                 l2_cache: TerminalFrameCache::new(l2_max_entries, l2_memory_budget_bytes),
                 perf_stats: PerfStats::default(),
-                current_key: None,
-                last_ready_key: None,
                 current_keys: Vec::new(),
                 last_ready_keys: Vec::new(),
                 last_drawn_keys: Vec::new(),
                 last_drawn_areas: Vec::new(),
                 current_generations: Vec::new(),
-                current_generation: 0,
             },
             encode: EncodeChannels {
                 _runtime: runtime,
@@ -188,14 +182,11 @@ impl RatatuiImagePresenter {
 
     fn reset_terminal_state(&mut self) {
         self.state.l2_cache.clear();
-        self.state.current_key = None;
-        self.state.last_ready_key = None;
         self.state.current_keys.clear();
         self.state.last_ready_keys.clear();
         self.state.last_drawn_keys.clear();
         self.state.last_drawn_areas.clear();
         self.state.current_generations.clear();
-        self.state.current_generation = 0;
         self.encode.current.state = EncodeLaneState::default();
         self.encode.background.state = EncodeLaneState::default();
         self.sync_encode_perf_stats();
@@ -236,33 +227,21 @@ impl RatatuiImagePresenter {
             .get(slot_index)
             .copied()
             .flatten()
-            .or_else(|| {
-                (slot_index == 0 && self.state.last_ready_keys.is_empty())
-                    .then_some(self.state.last_ready_key)
-                    .flatten()
-            })
     }
 
     fn protected_ready_keys(&self) -> Vec<TerminalFrameKey> {
-        let keys = self
-            .state
+        self.state
             .last_ready_keys
             .iter()
             .copied()
             .flatten()
-            .collect::<Vec<_>>();
-        if keys.is_empty() {
-            self.state.last_ready_key.into_iter().collect()
-        } else {
-            keys
-        }
+            .collect()
     }
 
     fn handle_encode_result(
         &mut self,
         done: EncodeWorkerResult,
     ) -> Option<PresenterBackgroundEvent> {
-        let current_key = self.state.current_key;
         let lane = done.lane;
         let event = match done.event {
             EncodeWorkerEvent::Completed {
@@ -282,7 +261,7 @@ impl RatatuiImagePresenter {
                         .perf_stats
                         .set_l2_hit_rate(self.state.l2_cache.hit_rate());
                     return Some(PresenterBackgroundEvent::EncodeComplete {
-                        redraw_requested: Some(key) == current_key,
+                        redraw_requested: self.is_current_slot_key(key),
                     });
                 };
 
@@ -298,19 +277,22 @@ impl RatatuiImagePresenter {
                 self.state.l2_cache.set_state(&key, state);
 
                 Some(PresenterBackgroundEvent::EncodeComplete {
-                    redraw_requested: Some(key) == current_key || self.is_current_slot_key(key),
+                    redraw_requested: self.is_current_slot_key(key),
                 })
             }
             EncodeWorkerEvent::CanceledStale { key } => {
                 let removed = self.state.l2_cache.remove(&key);
                 self.state.perf_stats.add_encode_canceled_tasks(1);
-                if removed && Some(key) == self.state.last_ready_key {
-                    self.state.last_ready_key = None;
+                if removed {
+                    for last_ready_key in &mut self.state.last_ready_keys {
+                        if *last_ready_key == Some(key) {
+                            *last_ready_key = None;
+                        }
+                    }
                 }
 
                 Some(PresenterBackgroundEvent::EncodeComplete {
-                    redraw_requested: removed
-                        && (Some(key) == current_key || self.is_current_slot_key(key)),
+                    redraw_requested: removed && self.is_current_slot_key(key),
                 })
             }
             EncodeWorkerEvent::QueueState { depth, in_flight } => {
@@ -421,9 +403,6 @@ impl RatatuiImagePresenter {
     }
 
     fn record_drawn_slot(&mut self, slot_index: usize, key: TerminalFrameKey, render_area: Rect) {
-        if self.state.current_keys.len() <= 1 {
-            self.state.last_ready_key = Some(key);
-        }
         if let Some(last_ready_key) = self.state.last_ready_keys.get_mut(slot_index) {
             *last_ready_key = Some(key);
         }
@@ -445,9 +424,6 @@ impl RatatuiImagePresenter {
         options: PresenterRenderOptions,
     ) -> AppResult<bool> {
         if self.state.l2_cache.cached_mut(&key).is_none() {
-            if Some(key) == self.state.last_ready_key {
-                self.state.last_ready_key = None;
-            }
             if self
                 .state
                 .last_ready_keys
@@ -537,9 +513,6 @@ impl RatatuiImagePresenter {
                 self.state
                     .l2_cache
                     .set_state(&key, TerminalFrameState::Failed);
-                if Some(key) == self.state.last_ready_key {
-                    self.state.last_ready_key = None;
-                }
                 if self
                     .state
                     .last_ready_keys
@@ -582,13 +555,6 @@ impl RatatuiImagePresenter {
 
     fn is_current_slot_key(&self, key: TerminalFrameKey) -> bool {
         self.state.current_keys.contains(&Some(key))
-    }
-
-    fn sync_legacy_current_keys(&mut self) {
-        self.state.current_key = self.state.current_keys.first().copied().flatten();
-        self.state.last_ready_key = self.state.last_ready_keys.first().copied().flatten();
-        self.state.current_generation =
-            self.state.current_generations.first().copied().unwrap_or(0);
     }
 
     fn render_slot(
@@ -749,7 +715,7 @@ impl RatatuiImagePresenter {
                             .current_generations
                             .get(slot_index)
                             .copied()
-                            .unwrap_or(self.state.current_generation),
+                            .unwrap_or(0),
                         enqueued_at: Instant::now(),
                     };
 
@@ -857,19 +823,14 @@ impl ImagePresenter for RatatuiImagePresenter {
         };
         let Some(key) = self.ensure_frame_entry(frame_key, frame, true, &protected_ready_keys)?
         else {
-            self.state.current_key = None;
             self.state.current_keys = vec![None];
-            self.state.last_ready_key = previous_ready_key;
             self.state.last_ready_keys = vec![previous_ready_key];
             self.state.last_drawn_keys.resize(1, None);
             self.state.last_drawn_areas.resize(1, None);
             self.state.current_generations = vec![generation];
             return Ok(());
         };
-        self.state.current_key = Some(key);
-        self.state.current_generation = generation;
         self.state.current_keys = vec![Some(key)];
-        self.state.last_ready_key = previous_ready_key;
         self.state.last_ready_keys = vec![previous_ready_key];
         self.state.last_drawn_keys.resize(1, None);
         self.state.last_drawn_areas.resize(1, None);
@@ -901,7 +862,6 @@ impl ImagePresenter for RatatuiImagePresenter {
             self.state.current_keys.push(key);
             self.state.current_generations.push(slot.generation);
         }
-        self.sync_legacy_current_keys();
         Ok(())
     }
 
@@ -1004,11 +964,11 @@ impl ImagePresenter for RatatuiImagePresenter {
     ) -> AppResult<PresenterRenderOutcome> {
         self.drain_encode_results();
         if self.state.current_keys.is_empty() {
-            self.state.current_keys = vec![self.state.current_key];
-            self.state.last_ready_keys = vec![self.state.last_ready_key];
+            self.state.current_keys = vec![None];
+            self.state.last_ready_keys = vec![None];
             self.state.last_drawn_keys.resize(1, None);
             self.state.last_drawn_areas.resize(1, None);
-            self.state.current_generations = vec![self.state.current_generation];
+            self.state.current_generations = vec![0];
         }
         self.render_slot(frame, area, options, 0, PresenterHorizontalAlign::Center)
     }
@@ -1237,7 +1197,15 @@ mod tests {
         let backend = TestBackend::new(20, 10);
         let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
         let deadline = Instant::now() + Duration::from_secs(2);
-        while presenter.state.last_ready_key.is_none() && Instant::now() < deadline {
+        while presenter
+            .state
+            .last_ready_keys
+            .first()
+            .copied()
+            .flatten()
+            .is_none()
+            && Instant::now() < deadline
+        {
             terminal
                 .draw(|frame| {
                     let _ = presenter.render(frame, area, PresenterRenderOptions::default());
@@ -1247,7 +1215,13 @@ mod tests {
             thread::sleep(Duration::from_millis(5));
         }
         assert!(
-            presenter.state.last_ready_key.is_some(),
+            presenter
+                .state
+                .last_ready_keys
+                .first()
+                .copied()
+                .flatten()
+                .is_some(),
             "presenter should have a ready frame for fallback"
         );
     }

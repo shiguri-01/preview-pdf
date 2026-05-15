@@ -49,7 +49,15 @@ fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
     let backend = TestBackend::new(20, 10);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
     let deadline = Instant::now() + Duration::from_secs(2);
-    while presenter.state.last_ready_key.is_none() && Instant::now() < deadline {
+    while presenter
+        .state
+        .last_ready_keys
+        .first()
+        .copied()
+        .flatten()
+        .is_none()
+        && Instant::now() < deadline
+    {
         terminal
             .draw(|frame| {
                 let _ = presenter.render(frame, area, PresenterRenderOptions::default());
@@ -59,7 +67,13 @@ fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
         thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        presenter.state.last_ready_key.is_some(),
+        presenter
+            .state
+            .last_ready_keys
+            .first()
+            .copied()
+            .flatten()
+            .is_some(),
         "presenter should have a ready frame for fallback"
     );
 }
@@ -298,7 +312,7 @@ fn prefetch_encode_does_not_change_current_key() {
     presenter
         .prepare(current, &frame(), viewport, PanOffset::default(), 0, 0)
         .expect("prepare should pass");
-    let before = presenter.state.current_key;
+    let before = presenter.state.current_keys.first().copied().flatten();
 
     presenter
         .prefetch_encode(
@@ -312,7 +326,10 @@ fn prefetch_encode_does_not_change_current_key() {
         )
         .expect("prefetch should pass");
 
-    assert_eq!(presenter.state.current_key, before);
+    assert_eq!(
+        presenter.state.current_keys.first().copied().flatten(),
+        before
+    );
 }
 
 #[test]
@@ -541,7 +558,10 @@ fn render_returns_failed_feedback_for_failed_current_entry() {
         .expect("second prepare should pass");
     let key = presenter
         .state
-        .current_key
+        .current_keys
+        .first()
+        .copied()
+        .flatten()
         .expect("current key should exist");
     presenter
         .state
@@ -602,7 +622,10 @@ fn render_failed_does_not_use_stale_fallback_when_disallowed() {
         .expect("second prepare should pass");
     let key = presenter
         .state
-        .current_key
+        .current_keys
+        .first()
+        .copied()
+        .flatten()
         .expect("current key should exist");
     presenter
         .state
@@ -656,7 +679,7 @@ fn render_reports_failed_feedback_when_encode_worker_is_disconnected() {
         pan: PanOffset::default(),
         overlay_stamp: 0,
     };
-    presenter.state.current_key = Some(key);
+    presenter.state.current_keys = vec![Some(key)];
     presenter.shutdown_worker();
 
     let backend = TestBackend::new(20, 10);

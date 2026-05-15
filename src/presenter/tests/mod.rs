@@ -400,62 +400,6 @@ fn recv_background_event_requests_redraw_for_current_encode_completion() {
 }
 
 #[test]
-fn render_pending_uses_stale_fallback_when_allowed() {
-    let mut presenter = RatatuiImagePresenter::new();
-    let viewport = Viewport {
-        x: 0,
-        y: 0,
-        width: 12,
-        height: 7,
-    };
-    let area = Rect::new(1, 1, 12, 7);
-    presenter
-        .prepare(
-            RenderedPageKey::new(9, 1, 1.0),
-            &frame(),
-            viewport,
-            PanOffset::default(),
-            0,
-            1,
-        )
-        .expect("first prepare should pass");
-    render_until_ready(&mut presenter, area);
-    presenter
-        .prepare(
-            RenderedPageKey::new(9, 2, 1.0),
-            &frame(),
-            viewport,
-            PanOffset::default(),
-            0,
-            2,
-        )
-        .expect("second prepare should pass");
-
-    let backend = TestBackend::new(20, 10);
-    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-    let mut result = None;
-    terminal
-        .draw(|frame| {
-            result = Some(presenter.render(
-                frame,
-                area,
-                PresenterRenderOptions::new(true, PresenterRenderMode::Full),
-            ));
-        })
-        .expect("draw should pass");
-
-    let outcome = result
-        .expect("render result should be captured")
-        .expect("render should succeed");
-    assert_eq!(outcome.feedback, PresenterFeedback::Pending);
-    assert!(outcome.drew_image);
-    assert!(outcome.used_stale_fallback);
-    assert_eq!(outcome.slots.len(), 1);
-    assert_eq!(outcome.slots[0].area, area);
-    assert!(outcome.slots[0].used_stale_fallback);
-}
-
-#[test]
 fn render_pending_keeps_stale_fallback_when_new_oversize_entry_arrives() {
     let mut presenter = RatatuiImagePresenter::with_cache_limits(8, 32);
     let viewport = Viewport {
@@ -1022,6 +966,25 @@ fn l2_oversize_insert_with_protected_key_keeps_visible_entry() {
     assert!(cache.cached_mut(&visible).is_some());
     assert!(cache.cached_mut(&oversize).is_some());
     assert_eq!(cache.len(), 2);
+    assert!(cache.memory_bytes > cache.memory_budget_bytes());
+}
+
+#[test]
+fn l2_oversize_insert_with_protected_keys_keeps_visible_entries() {
+    let mut cache = TerminalFrameCache::new(8, 32);
+    let left_visible = l2_key(0);
+    let right_visible = l2_key(1);
+    let oversize = l2_key(2);
+    let _ = cache.insert(left_visible, frame(), 16, false, None);
+    let _ = cache.insert(right_visible, frame(), 16, false, None);
+
+    let inserted =
+        cache.insert_protected(oversize, frame(), 64, true, &[left_visible, right_visible]);
+    assert!(inserted);
+    assert!(cache.cached_mut(&left_visible).is_some());
+    assert!(cache.cached_mut(&right_visible).is_some());
+    assert!(cache.cached_mut(&oversize).is_some());
+    assert_eq!(cache.len(), 3);
     assert!(cache.memory_bytes > cache.memory_budget_bytes());
 }
 

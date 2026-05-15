@@ -203,27 +203,18 @@ impl RatatuiImagePresenter {
 
     fn ensure_frame_entry(
         &mut self,
-        cache_key: RenderedPageKey,
+        key: TerminalFrameKey,
         frame: &RgbaFrame,
-        viewport: Viewport,
-        pan: PanOffset,
-        overlay_stamp: u64,
         allow_single_oversize: bool,
+        protected_keys: &[TerminalFrameKey],
     ) -> AppResult<Option<TerminalFrameKey>> {
-        let key = TerminalFrameKey {
-            rendered_page: cache_key,
-            viewport,
-            pan,
-            overlay_stamp,
-        };
-
         if self.state.l2_cache.lookup_mut(&key).is_none() {
-            let inserted = self.state.l2_cache.insert(
+            let inserted = self.state.l2_cache.insert_protected(
                 key,
                 frame.clone(),
                 frame.byte_len(),
                 allow_single_oversize,
-                self.state.last_ready_key,
+                protected_keys,
             );
             if !inserted {
                 self.state
@@ -237,6 +228,34 @@ impl RatatuiImagePresenter {
             .perf_stats
             .set_l2_hit_rate(self.state.l2_cache.hit_rate());
         Ok(Some(key))
+    }
+
+    fn ready_key_for_slot(&self, slot_index: usize) -> Option<TerminalFrameKey> {
+        self.state
+            .last_ready_keys
+            .get(slot_index)
+            .copied()
+            .flatten()
+            .or_else(|| {
+                (slot_index == 0 && self.state.last_ready_keys.is_empty())
+                    .then_some(self.state.last_ready_key)
+                    .flatten()
+            })
+    }
+
+    fn protected_ready_keys(&self) -> Vec<TerminalFrameKey> {
+        let keys = self
+            .state
+            .last_ready_keys
+            .iter()
+            .copied()
+            .flatten()
+            .collect::<Vec<_>>();
+        if keys.is_empty() {
+            self.state.last_ready_key.into_iter().collect()
+        } else {
+            keys
+        }
     }
 
     fn handle_encode_result(
@@ -402,7 +421,9 @@ impl RatatuiImagePresenter {
     }
 
     fn record_drawn_slot(&mut self, slot_index: usize, key: TerminalFrameKey, render_area: Rect) {
-        self.state.last_ready_key = Some(key);
+        if self.state.current_keys.len() <= 1 {
+            self.state.last_ready_key = Some(key);
+        }
         if let Some(last_ready_key) = self.state.last_ready_keys.get_mut(slot_index) {
             *last_ready_key = Some(key);
         }
@@ -466,11 +487,12 @@ impl RatatuiImagePresenter {
                         .set_l2_hit_rate(self.state.l2_cache.hit_rate());
                     return Ok(true);
                 }
-                if self
-                    .state
-                    .last_drawn_areas
-                    .get(slot_index)
-                    .is_none_or(|last_area| *last_area != Some(render_area))
+                if options.force_image_redraw
+                    || self
+                        .state
+                        .last_drawn_areas
+                        .get(slot_index)
+                        .is_none_or(|last_area| *last_area != Some(render_area))
                 {
                     frame.render_widget(Clear, area);
                 }
@@ -671,11 +693,12 @@ impl RatatuiImagePresenter {
                             ),
                         ));
                     }
-                    if self
-                        .state
-                        .last_drawn_areas
-                        .get(slot_index)
-                        .is_none_or(|last_area| *last_area != Some(render_area))
+                    if options.force_image_redraw
+                        || self
+                            .state
+                            .last_drawn_areas
+                            .get(slot_index)
+                            .is_none_or(|last_area| *last_area != Some(render_area))
                     {
                         frame.render_widget(Clear, area);
                     }
@@ -824,12 +847,20 @@ impl ImagePresenter for RatatuiImagePresenter {
         generation: u64,
     ) -> AppResult<()> {
         self.drain_encode_results();
-        let Some(key) =
-            self.ensure_frame_entry(cache_key, frame, viewport, pan, overlay_stamp, true)?
+        let previous_ready_key = self.ready_key_for_slot(0);
+        let protected_ready_keys = self.protected_ready_keys();
+        let frame_key = TerminalFrameKey {
+            rendered_page: cache_key,
+            viewport,
+            pan,
+            overlay_stamp,
+        };
+        let Some(key) = self.ensure_frame_entry(frame_key, frame, true, &protected_ready_keys)?
         else {
             self.state.current_key = None;
             self.state.current_keys = vec![None];
-            self.state.last_ready_keys = vec![self.state.last_ready_key];
+            self.state.last_ready_key = previous_ready_key;
+            self.state.last_ready_keys = vec![previous_ready_key];
             self.state.last_drawn_keys.resize(1, None);
             self.state.last_drawn_areas.resize(1, None);
             self.state.current_generations = vec![generation];
@@ -838,7 +869,8 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.state.current_key = Some(key);
         self.state.current_generation = generation;
         self.state.current_keys = vec![Some(key)];
-        self.state.last_ready_keys = vec![self.state.last_ready_key];
+        self.state.last_ready_key = previous_ready_key;
+        self.state.last_ready_keys = vec![previous_ready_key];
         self.state.last_drawn_keys.resize(1, None);
         self.state.last_drawn_areas.resize(1, None);
         self.state.current_generations = vec![generation];
@@ -847,6 +879,7 @@ impl ImagePresenter for RatatuiImagePresenter {
 
     fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
         self.drain_encode_results();
+        let protected_ready_keys = self.protected_ready_keys();
         self.state.current_keys.clear();
         self.state.current_generations.clear();
         self.state.last_ready_keys.resize(slots.len(), None);
@@ -855,14 +888,13 @@ impl ImagePresenter for RatatuiImagePresenter {
 
         for slot in slots {
             let key = if let (Some(cache_key), Some(frame)) = (slot.cache_key, slot.frame) {
-                self.ensure_frame_entry(
-                    cache_key,
-                    frame,
-                    slot.viewport,
-                    slot.pan,
-                    slot.overlay_stamp,
-                    true,
-                )?
+                let frame_key = TerminalFrameKey {
+                    rendered_page: cache_key,
+                    viewport: slot.viewport,
+                    pan: slot.pan,
+                    overlay_stamp: slot.overlay_stamp,
+                };
+                self.ensure_frame_entry(frame_key, frame, true, &protected_ready_keys)?
             } else {
                 None
             };
@@ -885,8 +917,14 @@ impl ImagePresenter for RatatuiImagePresenter {
     ) -> AppResult<()> {
         self.drain_encode_results();
         debug_assert_ne!(class, WorkClass::CriticalCurrent);
-        let Some(key) =
-            self.ensure_frame_entry(cache_key, frame, viewport, pan, overlay_stamp, false)?
+        let protected_ready_keys = self.protected_ready_keys();
+        let frame_key = TerminalFrameKey {
+            rendered_page: cache_key,
+            viewport,
+            pan,
+            overlay_stamp,
+        };
+        let Some(key) = self.ensure_frame_entry(frame_key, frame, false, &protected_ready_keys)?
         else {
             return Ok(());
         };
@@ -1212,6 +1250,62 @@ mod tests {
             presenter.state.last_ready_key.is_some(),
             "presenter should have a ready frame for fallback"
         );
+    }
+
+    #[test]
+    fn render_pending_uses_stale_fallback_when_allowed() {
+        let mut presenter = super::RatatuiImagePresenter::new();
+        let viewport = Viewport {
+            x: 0,
+            y: 0,
+            width: 12,
+            height: 7,
+        };
+        let area = Rect::new(1, 1, 12, 7);
+        presenter
+            .prepare(
+                RenderedPageKey::new(9, 1, 1.0),
+                &frame(),
+                viewport,
+                PanOffset::default(),
+                0,
+                1,
+            )
+            .expect("first prepare should pass");
+        render_until_ready(&mut presenter, area);
+        presenter
+            .prepare(
+                RenderedPageKey::new(9, 2, 1.0),
+                &frame(),
+                viewport,
+                PanOffset::default(),
+                0,
+                2,
+            )
+            .expect("second prepare should pass");
+
+        let backend = TestBackend::new(20, 10);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let mut result = None;
+        terminal
+            .draw(|frame| {
+                result = Some(presenter.render(
+                    frame,
+                    area,
+                    PresenterRenderOptions::new(true, PresenterRenderMode::Full),
+                ));
+            })
+            .expect("draw should pass");
+
+        let outcome = result
+            .expect("render result should be captured")
+            .expect("render should succeed");
+        assert_eq!(outcome.feedback, PresenterFeedback::Pending);
+        assert!(outcome.drew_image);
+        assert!(outcome.used_stale_fallback);
+        assert_eq!(outcome.slots.len(), 1);
+        assert_eq!(outcome.slots[0].area, area);
+        assert!(outcome.slots[0].used_stale_fallback);
     }
 
     fn render_slots_until_ready(

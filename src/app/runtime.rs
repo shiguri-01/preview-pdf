@@ -496,6 +496,9 @@ impl RenderRuntime {
         );
 
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
+        if left_slot.render_area.is_none() && right_slot.render_area.is_none() {
+            return Ok(None);
+        }
         Ok(Some(PreparedSpreadCanvasSlots {
             presenter_slots: [left_slot.presenter_slot, right_slot.presenter_slot],
             render_areas: [left_slot.render_area, right_slot.render_area],
@@ -967,6 +970,42 @@ mod tests {
 
         assert_eq!(areas, [None, Some(Rect::new(4, 0, 6, 5))]);
         assert_eq!(presenter.prepared_slot_pages, vec![None, Some(1)]);
+    }
+
+    #[test]
+    fn spread_canvas_slots_miss_when_no_visible_cached_slots_exist() {
+        let doc = TwoPageRuntimePdf;
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        let mut pan = PanOffset::default();
+
+        let areas = runtime
+            .try_prepare_spread_canvas_slots_from_cache(
+                &doc,
+                &mut presenter,
+                Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 10,
+                    height: 5,
+                },
+                VisiblePageSlots {
+                    anchor_page: 0,
+                    trailing_page: Some(1),
+                    left_page: Some(0),
+                    right_page: Some(1),
+                },
+                1.0,
+                &mut pan,
+                Some((10, 10)),
+                &HighlightOverlaySnapshot::default(),
+                1,
+                20,
+            )
+            .expect("spread canvas prepare should pass");
+
+        assert_eq!(areas, None);
+        assert!(presenter.prepared_slot_pages.is_empty());
     }
 
     #[test]

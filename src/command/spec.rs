@@ -495,14 +495,25 @@ fn app_error_message(err: AppError) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use crate::app::AppState;
     use crate::extension::ExtensionUiSnapshot;
 
     use super::{
-        CommandConditionContext, find_command_spec, is_command_visible_in_palette,
-        validate_command_for_source, validate_command_id_for_source,
+        CommandConditionContext, command_registry, find_command_spec,
+        is_command_visible_in_palette, validate_command_for_source, validate_command_id_for_source,
     };
     use crate::command::{Command, CommandInvocationPolicy, CommandInvocationSource};
+
+    #[test]
+    fn command_specs_have_unique_ids() {
+        let mut seen = HashSet::new();
+
+        for spec in command_registry() {
+            assert!(seen.insert(spec.id), "duplicate command id: {}", spec.id);
+        }
+    }
 
     #[test]
     fn find_command_spec_returns_metadata_for_internal_command() {

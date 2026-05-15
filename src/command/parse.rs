@@ -429,7 +429,8 @@ fn split_last_token(input: &str) -> Option<(&str, &str)> {
 mod tests {
     use super::{first_token, parse_command_text};
     use crate::command::{
-        Command, PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind, SpreadDirectionArg,
+        ArgHint, ArgKind, ArgSpec, Command, CommandExposure, PageLayoutModeArg, PanAmount,
+        PanDirection, SearchMatcherKind, SpreadDirectionArg, all_command_specs,
     };
     use crate::palette::{PaletteKind, PaletteOpenPayload};
 
@@ -687,8 +688,93 @@ mod tests {
     }
 
     #[test]
+    fn no_arg_public_command_specs_parse_by_id() {
+        for spec in all_command_specs()
+            .into_iter()
+            .filter(|spec| spec.exposure == CommandExposure::Public && spec.args.is_empty())
+        {
+            let command = parse_command_text(spec.id).unwrap_or_else(|err| {
+                panic!("{} should parse without arguments: {}", spec.id, err)
+            });
+            assert_eq!(command.id(), spec.id);
+        }
+    }
+
+    #[test]
+    fn specs_with_required_args_reject_missing_args() {
+        for spec in all_command_specs()
+            .into_iter()
+            .filter(|spec| spec.args.iter().any(|arg| arg.required))
+        {
+            assert!(
+                parse_command_text(spec.id).is_err(),
+                "{} should reject missing required arguments",
+                spec.id
+            );
+        }
+    }
+
+    #[test]
+    fn enum_argument_hints_are_accepted_by_parser() {
+        for spec in all_command_specs() {
+            for (arg_index, arg) in spec.args.iter().enumerate() {
+                let ArgHint::Enum(values) = arg.hint else {
+                    continue;
+                };
+
+                for value in values() {
+                    let command_text = command_text_with_arg_value(&spec, arg_index, value);
+                    let command = parse_command_text(&command_text).unwrap_or_else(|err| {
+                        panic!("{command_text:?} should parse enum value {value:?}: {err}")
+                    });
+                    assert_eq!(command.id(), spec.id);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn first_token_ignores_leading_whitespace() {
         assert_eq!(first_token("  next-page"), "next-page");
         assert_eq!(first_token("\tzoom 1.5"), "zoom");
+    }
+
+    fn command_text_with_arg_value(
+        spec: &crate::command::CommandSpec,
+        arg_index: usize,
+        value: &str,
+    ) -> String {
+        let args = spec
+            .args
+            .iter()
+            .enumerate()
+            .filter_map(|(index, arg)| {
+                if index == arg_index {
+                    return Some(value);
+                }
+                required_arg_sample(arg)
+            })
+            .collect::<Vec<_>>();
+
+        if args.is_empty() {
+            spec.id.to_string()
+        } else {
+            format!("{} {}", spec.id, args.join(" "))
+        }
+    }
+
+    fn required_arg_sample(arg: &ArgSpec) -> Option<&'static str> {
+        if !arg.required {
+            return None;
+        }
+
+        Some(match arg.kind {
+            ArgKind::F32 => "1.25",
+            ArgKind::I32 => "1",
+            ArgKind::String => match arg.hint {
+                ArgHint::Enum(values) => values()[0],
+                ArgHint::None => "value",
+            },
+        })
     }
 }

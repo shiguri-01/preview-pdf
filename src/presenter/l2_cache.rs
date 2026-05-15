@@ -88,6 +88,7 @@ impl TerminalFrameCache {
         self.entries.peek_mut(key)
     }
 
+    #[cfg(test)]
     pub(crate) fn insert(
         &mut self,
         key: TerminalFrameKey,
@@ -96,6 +97,29 @@ impl TerminalFrameCache {
         allow_single_oversize: bool,
         protected_key: Option<TerminalFrameKey>,
     ) -> bool {
+        let protected_keys = protected_key.into_iter().collect::<Vec<_>>();
+        self.insert_protected(
+            key,
+            frame,
+            approx_bytes,
+            allow_single_oversize,
+            &protected_keys,
+        )
+    }
+
+    pub(crate) fn insert_protected(
+        &mut self,
+        key: TerminalFrameKey,
+        frame: RgbaFrame,
+        approx_bytes: usize,
+        allow_single_oversize: bool,
+        protected_keys: &[TerminalFrameKey],
+    ) -> bool {
+        let protected_keys = protected_keys
+            .iter()
+            .copied()
+            .filter(|protected| *protected != key)
+            .collect::<Vec<_>>();
         if approx_bytes > self.memory_budget_bytes {
             if !allow_single_oversize {
                 return false;
@@ -108,11 +132,12 @@ impl TerminalFrameCache {
             // from "image visible" back to blank while the replacement frame is pending.
             // If the cache is configured for a single entry, honor that cap and fall back
             // to the original replacement behavior.
-            let protected_key = (self.max_entries > 1)
-                .then_some(protected_key)
-                .flatten()
-                .filter(|protected| *protected != key);
-            self.retain_only(protected_key);
+            let protected_keys = if self.max_entries > 1 {
+                protected_keys.as_slice()
+            } else {
+                &[]
+            };
+            self.retain_only(protected_keys, key);
             self.memory_bytes = self.memory_bytes.saturating_add(approx_bytes);
             self.pending_work_count += 1;
             if let Some((_evicted_key, evicted)) = self.entries.push(
@@ -152,7 +177,7 @@ impl TerminalFrameCache {
             self.memory_bytes = self.memory_bytes.saturating_sub(evicted.approx_bytes);
             self.note_removed_state(&evicted.state);
         }
-        self.evict_while_needed(protected_key);
+        self.evict_while_needed(&protected_keys);
         true
     }
 
@@ -213,15 +238,17 @@ impl TerminalFrameCache {
         self.pop_entry(key).is_some()
     }
 
-    fn evict_while_needed(&mut self, protected_key: Option<TerminalFrameKey>) {
+    fn evict_while_needed(&mut self, protected_keys: &[TerminalFrameKey]) {
         while self.entries.len() > self.max_entries || self.memory_bytes > self.memory_budget_bytes
         {
             if self.entries.len() == 1
-                && protected_key.is_some_and(|key| self.entries.peek(&key).is_some())
+                && protected_keys
+                    .iter()
+                    .any(|key| self.entries.peek(key).is_some())
             {
                 break;
             }
-            let Some((_key, entry)) = self.pop_lru_unprotected(protected_key) else {
+            let Some((_key, entry)) = self.pop_lru_unprotected(protected_keys) else {
                 break;
             };
             self.memory_bytes = self.memory_bytes.saturating_sub(entry.approx_bytes);
@@ -229,12 +256,12 @@ impl TerminalFrameCache {
         }
     }
 
-    fn retain_only(&mut self, protected_key: Option<TerminalFrameKey>) {
+    fn retain_only(&mut self, protected_keys: &[TerminalFrameKey], inserted_key: TerminalFrameKey) {
         let doomed: Vec<_> = self
             .entries
             .iter()
             .map(|(key, _)| *key)
-            .filter(|key| Some(*key) != protected_key)
+            .filter(|key| *key != inserted_key && !protected_keys.contains(key))
             .collect();
 
         for key in doomed {
@@ -244,13 +271,13 @@ impl TerminalFrameCache {
 
     fn pop_lru_unprotected(
         &mut self,
-        protected_key: Option<TerminalFrameKey>,
+        protected_keys: &[TerminalFrameKey],
     ) -> Option<(TerminalFrameKey, TerminalFrameEntry)> {
         let mut protected_entry = Vec::new();
 
         loop {
             match self.entries.pop_lru() {
-                Some((key, entry)) if Some(key) == protected_key => {
+                Some((key, entry)) if protected_keys.contains(&key) => {
                     protected_entry.push((key, entry));
                     continue;
                 }

@@ -23,6 +23,17 @@ pub struct Viewport {
     pub height: u16,
 }
 
+impl From<Rect> for Viewport {
+    fn from(area: Rect) -> Self {
+        Self {
+            x: area.x,
+            y: area.y,
+            width: area.width.max(1),
+            height: area.height.max(1),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct PanOffset {
     pub cells_x: i32,
@@ -65,6 +76,8 @@ pub enum PresenterRenderMode {
 pub struct PresenterRenderOptions {
     pub allow_stale_fallback: bool,
     pub render_mode: PresenterRenderMode,
+    pub preserve_stable_image: bool,
+    pub force_image_redraw: bool,
 }
 
 impl PresenterRenderOptions {
@@ -72,6 +85,8 @@ impl PresenterRenderOptions {
         Self {
             allow_stale_fallback,
             render_mode,
+            preserve_stable_image: false,
+            force_image_redraw: false,
         }
     }
 
@@ -80,11 +95,118 @@ impl PresenterRenderOptions {
     }
 }
 
+pub struct PresenterSlot<'a> {
+    pub cache_key: Option<RenderedPageKey>,
+    pub frame: Option<&'a RgbaFrame>,
+    pub viewport: Viewport,
+    pub pan: PanOffset,
+    pub overlay_stamp: u64,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PresenterRenderSlot {
+    pub area: Rect,
+    pub options: PresenterRenderOptions,
+    pub active: bool,
+    pub horizontal_align: PresenterHorizontalAlign,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PresenterHorizontalAlign {
+    Start,
+    #[default]
+    Center,
+    End,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PresenterSlotOutcome {
+    pub area: Rect,
+    pub active: bool,
+    pub drew_image: bool,
+    pub feedback: PresenterFeedback,
+    pub used_stale_fallback: bool,
+}
+
+impl PresenterSlotOutcome {
+    pub const fn active(
+        area: Rect,
+        drew_image: bool,
+        feedback: PresenterFeedback,
+        used_stale_fallback: bool,
+    ) -> Self {
+        Self {
+            area,
+            active: true,
+            drew_image,
+            feedback,
+            used_stale_fallback,
+        }
+    }
+
+    pub const fn inactive(area: Rect) -> Self {
+        Self {
+            area,
+            active: false,
+            drew_image: false,
+            feedback: PresenterFeedback::None,
+            used_stale_fallback: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PresenterRenderOutcome {
     pub drew_image: bool,
     pub feedback: PresenterFeedback,
     pub used_stale_fallback: bool,
+    pub slots: Vec<PresenterSlotOutcome>,
+}
+
+impl PresenterRenderOutcome {
+    pub fn pending() -> Self {
+        Self {
+            feedback: PresenterFeedback::Pending,
+            ..Self::default()
+        }
+    }
+
+    pub fn failed() -> Self {
+        Self {
+            feedback: PresenterFeedback::Failed,
+            ..Self::default()
+        }
+    }
+
+    pub fn from_slot(slot: PresenterSlotOutcome) -> Self {
+        Self {
+            drew_image: slot.active && slot.drew_image,
+            feedback: if slot.active {
+                slot.feedback
+            } else {
+                PresenterFeedback::None
+            },
+            used_stale_fallback: slot.active && slot.used_stale_fallback,
+            slots: vec![slot],
+        }
+    }
+
+    pub fn aggregate_slots(slots: Vec<PresenterSlotOutcome>) -> Self {
+        let mut outcome = Self {
+            slots,
+            ..Self::default()
+        };
+        for slot in &outcome.slots {
+            if !slot.active {
+                continue;
+            }
+            outcome.drew_image |= slot.drew_image;
+            outcome.used_stale_fallback |= slot.used_stale_fallback;
+            outcome.feedback = combine_feedback(outcome.feedback, slot.feedback);
+        }
+        outcome
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +240,18 @@ pub trait ImagePresenter {
         pan: PanOffset,
         overlay_stamp: u64,
         generation: u64,
-    ) -> AppResult<()>;
+    ) -> AppResult<()> {
+        self.prepare_slots(&[PresenterSlot {
+            cache_key: Some(cache_key),
+            frame: Some(frame),
+            viewport,
+            pan,
+            overlay_stamp,
+            generation,
+        }])
+    }
+
+    fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()>;
 
     #[allow(clippy::too_many_arguments)]
     fn prefetch_encode(
@@ -148,6 +281,22 @@ pub trait ImagePresenter {
         frame: &mut Frame<'_>,
         area: Rect,
         options: PresenterRenderOptions,
+    ) -> AppResult<PresenterRenderOutcome> {
+        self.render_slots(
+            frame,
+            &[PresenterRenderSlot {
+                area,
+                options,
+                active: true,
+                horizontal_align: PresenterHorizontalAlign::Center,
+            }],
+        )
+    }
+
+    fn render_slots(
+        &mut self,
+        frame: &mut Frame<'_>,
+        slots: &[PresenterRenderSlot],
     ) -> AppResult<PresenterRenderOutcome>;
     fn capabilities(&self) -> PresenterCaps;
 
@@ -174,4 +323,16 @@ pub trait ImagePresenter {
     fn enable_perf_sample_collection(&mut self) {}
 
     fn clear_perf_blit_metrics(&mut self) {}
+}
+
+pub fn combine_feedback(left: PresenterFeedback, right: PresenterFeedback) -> PresenterFeedback {
+    match (left, right) {
+        (PresenterFeedback::Failed, _) | (_, PresenterFeedback::Failed) => {
+            PresenterFeedback::Failed
+        }
+        (PresenterFeedback::Pending, _) | (_, PresenterFeedback::Pending) => {
+            PresenterFeedback::Pending
+        }
+        (PresenterFeedback::None, PresenterFeedback::None) => PresenterFeedback::None,
+    }
 }

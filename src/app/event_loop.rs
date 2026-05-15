@@ -7,7 +7,7 @@ use tokio::time::{self, MissedTickBehavior};
 use crate::backend::{PdfBackend, SharedPdfBackend};
 use crate::command::{Command, CommandOutcome, CommandRequest, PanAmount};
 use crate::error::{AppError, AppResult};
-use crate::event::DomainEvent;
+use crate::event::{AppEvent, DomainEvent};
 use crate::perf::{PerfIterationSnapshot, PerfScenarioId, PerfScenarioParameters, RedrawReason};
 use crate::presenter::{ImagePresenter, PanOffset, PresenterBackgroundEvent, Viewport};
 use crate::render::cache::RenderedPageKey;
@@ -507,7 +507,6 @@ impl App {
             visible_pages,
             self.state.page_layout_mode,
             current_scale,
-            presenter_layout_tag,
         );
         let mut current_interest_keys = CurrentInterestKeys::from_required(&required);
         if let Some(preview_plan) = initial_preview.as_ref() {
@@ -691,6 +690,7 @@ impl App {
             }
             WaitEvent::Event(DomainEvent::Command(request)) => {
                 let request = self.resolve_command_request(&runtime.session, request);
+                let state_before_command = self.state.clone();
                 let previous_page = self.state.current_page;
                 let dispatch = match self.interaction.dispatch_command(
                     &mut self.state,
@@ -707,7 +707,8 @@ impl App {
                 for event in dispatch.emitted_events {
                     let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
                 }
-                if self.interaction.apply_palette_requests(&mut self.state) {
+                let palette_changed = self.interaction.apply_palette_requests(&mut self.state);
+                if palette_changed {
                     self.request_redraw(runtime, RedrawReason::StateChanged);
                 }
                 if self.state.current_page != previous_page {
@@ -727,14 +728,20 @@ impl App {
                     CommandOutcome::QuitRequested => {
                         Self::terminate_process_now(runtime);
                     }
-                    CommandOutcome::Applied | CommandOutcome::Noop => {
-                        self.request_redraw(runtime, RedrawReason::Command)
+                    CommandOutcome::Applied => self.request_redraw(runtime, RedrawReason::Command),
+                    CommandOutcome::Noop => {
+                        if !palette_changed && self.state != state_before_command {
+                            self.request_redraw(runtime, RedrawReason::Command);
+                        }
                     }
                 }
             }
             WaitEvent::Event(DomainEvent::App(event)) => {
+                let needs_redraw = !matches!(event, AppEvent::CommandExecuted { .. });
                 self.interaction.handle_app_event(&mut self.state, &event);
-                self.request_redraw(runtime, RedrawReason::AppEvent);
+                if needs_redraw {
+                    self.request_redraw(runtime, RedrawReason::AppEvent);
+                }
             }
             WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
                 let viewport =
@@ -759,8 +766,6 @@ impl App {
                     visible_pages,
                     self.state.page_layout_mode,
                     scale,
-                    self.state
-                        .presenter_layout_tag(visible_pages.trailing_page.is_some()),
                 ) {
                     current_keys.extend(preview_plan.page_keys);
                 }
@@ -821,19 +826,12 @@ fn cold_start_initial_preview_plan(
     visible_pages: super::state::VisiblePageSlots,
     page_layout_mode: super::state::PageLayoutMode,
     current_scale: f32,
-    presenter_layout_tag: u16,
 ) -> Option<InitialPreviewPlan> {
     if !is_cold_start || current_cached {
         return None;
     }
 
-    compute_initial_preview_plan(
-        doc_id,
-        visible_pages,
-        page_layout_mode,
-        current_scale,
-        presenter_layout_tag,
-    )
+    compute_initial_preview_plan(doc_id, visible_pages, page_layout_mode, current_scale)
 }
 
 async fn wait_next_event(
@@ -936,10 +934,9 @@ mod tests {
     use crate::input::shortcut::ShortcutKey;
     use crate::presenter::PresenterKind;
     use crate::presenter::{
-        ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
-        PresenterRenderOptions, PresenterRenderOutcome, PresenterRuntimeInfo, Viewport,
+        ImagePresenter, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
+        PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot,
     };
-    use crate::render::cache::RenderedPageKey;
     use crate::render::worker::RenderWorker;
 
     #[derive(Default)]
@@ -956,28 +953,20 @@ mod tests {
     }
 
     impl ImagePresenter for StubPresenter {
-        fn prepare(
-            &mut self,
-            _cache_key: RenderedPageKey,
-            _frame: &crate::backend::RgbaFrame,
-            _viewport: Viewport,
-            _pan: PanOffset,
-            _overlay_stamp: u64,
-            _generation: u64,
-        ) -> crate::error::AppResult<()> {
+        fn prepare_slots(&mut self, _slots: &[PresenterSlot<'_>]) -> crate::error::AppResult<()> {
             Ok(())
         }
 
-        fn render(
+        fn render_slots(
             &mut self,
             _frame: &mut ratatui::Frame<'_>,
-            _area: ratatui::layout::Rect,
-            _options: PresenterRenderOptions,
+            _slots: &[PresenterRenderSlot],
         ) -> crate::error::AppResult<PresenterRenderOutcome> {
             Ok(PresenterRenderOutcome {
                 drew_image: false,
                 feedback: PresenterFeedback::None,
                 used_stale_fallback: false,
+                slots: Vec::new(),
             })
         }
 
@@ -1216,7 +1205,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(true, true, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(true, true, 7, slots, PageLayoutMode::Single, 1.0);
 
         assert_eq!(preview, None);
     }
@@ -1231,7 +1220,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0);
 
         assert!(preview.is_some());
     }
@@ -1246,7 +1235,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0);
 
         assert!(preview.is_some());
     }
@@ -1261,7 +1250,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(false, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(false, false, 7, slots, PageLayoutMode::Single, 1.0);
 
         assert_eq!(preview, None);
     }
@@ -1490,5 +1479,132 @@ mod tests {
         assert_eq!(notice.level, crate::app::NoticeLevel::Warning);
         assert_eq!(notice.message, "page 999 is out of range (1-1)");
         assert!(runtime.loop_event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn noop_navigation_command_without_state_change_does_not_redraw() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.ui_actor.clear_redraw();
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
+                Command::PrevPage,
+                CommandInvocationSource::Keymap,
+            ))),
+            &mut runtime,
+            Arc::clone(&pdf),
+        )
+        .expect("command should be handled");
+
+        assert!(!runtime.ui_actor.needs_redraw());
+        let event = match runtime.loop_event_rx.try_recv() {
+            Ok(DomainEvent::App(event)) => event,
+            other => panic!("expected command event, got {other:?}"),
+        };
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::App(event)),
+            &mut runtime,
+            Arc::clone(&pdf),
+        )
+        .expect("app event should be handled");
+        assert!(!runtime.ui_actor.needs_redraw());
+    }
+
+    #[test]
+    fn unavailable_search_navigation_without_notice_change_does_not_redraw() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.ui_actor.clear_redraw();
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
+                Command::NextSearchHit,
+                CommandInvocationSource::Keymap,
+            ))),
+            &mut runtime,
+            Arc::clone(&pdf),
+        )
+        .expect("command should be handled");
+
+        assert!(!runtime.ui_actor.needs_redraw());
+    }
+
+    #[test]
+    fn noop_command_redraws_when_it_changes_visible_notice() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        app.state.set_warning_notice("old warning");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.ui_actor.clear_redraw();
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
+                Command::PrevPage,
+                CommandInvocationSource::Keymap,
+            ))),
+            &mut runtime,
+            Arc::clone(&pdf),
+        )
+        .expect("command should be handled");
+
+        assert!(app.state.notice.is_none());
+        assert!(runtime.ui_actor.needs_redraw());
     }
 }

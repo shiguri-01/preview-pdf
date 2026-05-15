@@ -9,7 +9,7 @@ This document owns:
 
 - rasterization contracts
 - L1 and L2 cache semantics
-- viewport crop and spread composition behavior
+- viewport crop and spread slot behavior
 - render scheduling and worker priority rules
 - presenter encode behavior
 - redraw timing rules
@@ -21,7 +21,7 @@ This document owns:
 2. Rasterize the visible page or pages into `RgbaFrame`.
 3. Store raster output in the L1 rendered-page cache.
 4. Apply current-view highlight overlays without mutating cached raster output.
-5. Compose spread output and crop to the current viewport when needed.
+5. Crop each visible page to its display slot when needed.
 6. Prepare terminal-frame entries in the L2 cache.
 7. Encode the image for the active terminal protocol.
 8. Draw a ready terminal frame through the presenter.
@@ -48,8 +48,8 @@ rectangles in page coordinates.
 Rules:
 
 - raster output uses RGBA pixel storage
-- cache identity includes document identity, page identity, scale, and layout
-  identity
+- cache identity includes document identity, page identity, scale, and an
+  optional layout identity
 - render-worker page tasks use layout tag `0` for source-page identity
 - text extraction is a separate backend path used by search
 - raw render cache entries do not include highlight overlays
@@ -63,17 +63,24 @@ Rules:
 - counters track hit, miss, and eviction behavior
 
 `scale_milli` stores scale in integer milli-units for exact key equality.
-`layout_tag` keeps single-page and spread presenter identities distinct.
+`layout_tag` is reserved for layout-sensitive identities. Presenter drawing uses
+source-page identities for both single-page and spread slots.
 
-## Viewport and spread composition
+## Viewport and spread slots
 
 Rules:
 
-- spread mode horizontally composes the left and right page with a fixed gap
-- a missing partner page is represented as a blank slot
+- spread mode splits the viewer into left and right page slots with a fixed gap
+- each slot draws the same source-page frame path used by single-page mode
+- a missing partner page is represented by clearing that slot
+- each page is independently fit within its slot, so differently sized pages do
+  not force each other to the same displayed size
 - if zoomed content exceeds the viewport, only the visible region is forwarded
 - crop is cell-aligned
 - if the full frame already fits, the uncropped frame is forwarded
+- zoomed spread-canvas crops still preserve left/right slot identity; a page
+  outside the viewport is represented as an inactive slot rather than removing
+  that slot from the presenter input
 
 ## Render workers and scheduling
 
@@ -102,7 +109,7 @@ Scheduling rules:
 - while no page image has been displayed yet, the runtime may enqueue both
   preview-scale work and full-resolution current-page work
 - in spread layout, preview rendering rasterizes each visible source page and
-  then composes a temporary spread image
+  prepares each page in its own presenter slot
 - the preview remains visible until the full-resolution current view is ready
 
 ## Presenter encode and L2 cache
@@ -150,20 +157,36 @@ output depends on all three.
 
 ## Presenter draw contract
 
-`ImagePresenter::render(...) -> AppResult<PresenterRenderOutcome>` must follow
-these rules:
+`ImagePresenter::render(...) -> AppResult<PresenterRenderOutcome>` draws a
+single slot. `ImagePresenter::render_slots(...)` draws one or more slots and
+returns both aggregate outcome fields and per-slot `PresenterSlotOutcome`
+entries. Both must follow these rules:
 
-- `drew_image = true` means a terminal image was drawn
+- `drew_image = true` means terminal image content is visible for the frame
 - `feedback` indicates whether the current image is ready, pending, or failed
 - `used_stale_fallback = true` means an older ready frame was drawn
+- `slots` contains the display area and the same state for each rendered slot;
+  inactive slots are returned with `active = false` and do not participate in
+  aggregate feedback
 
 Frame-level UI rules:
 
 - a frame must not end in a clear-only state
 - each frame must show either image content, a loading overlay, or an error
   overlay
-- if the current page is pending and an older image is visible, the loading
-  overlay is drawn over that image
+- in single-page mode, if the current page is pending, the loading overlay is
+  drawn over the viewer, including when a stale fallback or preview image is
+  visible
+- in spread mode, viewer-level loading is not used; each active pending page
+  slot draws loading inside its own image area from the first pending frame,
+  labeled with that slot's page using the same `p.N` notation as the rest of
+  the app
+- the presenter tracks the last terminal key and render area for each slot;
+  when a later draw targets the same key and area, it preserves the existing
+  terminal image with skipped buffer cells instead of re-emitting image
+  protocol data
+- when an app overlay has covered the image and then closes, the next frame
+  forces an image redraw so the covered image cells are restored
 
 ## Redraw timing
 

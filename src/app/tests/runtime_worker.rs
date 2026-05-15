@@ -16,7 +16,7 @@ use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan,
 use crate::perf::PerfStats;
 use crate::presenter::{
     ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
-    PresenterRenderOutcome, Viewport,
+    PresenterRenderOutcome, PresenterRenderSlot, PresenterSlot, Viewport,
 };
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::{NavDirection, NavIntent, RenderTask};
@@ -29,31 +29,36 @@ struct TestPresenter {
     prefetch_calls: usize,
     render_calls: usize,
     last_prepare_overlay_stamp: Option<u64>,
+    prepared_viewports: Vec<Viewport>,
+    prepared_frame_sizes: Vec<(u32, u32)>,
+    prepared_slot_pages: Vec<Option<usize>>,
     stats: PerfStats,
 }
 
 impl ImagePresenter for TestPresenter {
-    fn prepare(
-        &mut self,
-        _cache_key: RenderedPageKey,
-        _frame: &RgbaFrame,
-        _viewport: Viewport,
-        _pan: PanOffset,
-        overlay_stamp: u64,
-        _generation: u64,
-    ) -> AppResult<()> {
-        self.prepare_calls += 1;
-        self.last_prepare_overlay_stamp = Some(overlay_stamp);
-        self.stats.record_convert(Duration::from_millis(4));
-        self.stats.set_l2_hit_rate(0.5);
+    fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
+        self.prepared_slot_pages = slots
+            .iter()
+            .map(|slot| slot.cache_key.map(|key| key.page))
+            .collect();
+        for slot in slots {
+            let Some(frame) = slot.frame else {
+                continue;
+            };
+            self.prepare_calls += 1;
+            self.last_prepare_overlay_stamp = Some(slot.overlay_stamp);
+            self.prepared_viewports.push(slot.viewport);
+            self.prepared_frame_sizes.push((frame.width, frame.height));
+            self.stats.record_convert(Duration::from_millis(4));
+            self.stats.set_l2_hit_rate(0.5);
+        }
         Ok(())
     }
 
-    fn render(
+    fn render_slots(
         &mut self,
         _frame: &mut ratatui::Frame<'_>,
-        _area: Rect,
-        _options: PresenterRenderOptions,
+        _slots: &[PresenterRenderSlot],
     ) -> AppResult<PresenterRenderOutcome> {
         self.render_calls += 1;
         self.stats.record_blit(Duration::from_millis(2));
@@ -61,6 +66,7 @@ impl ImagePresenter for TestPresenter {
             drew_image: true,
             feedback: PresenterFeedback::None,
             used_stale_fallback: false,
+            slots: Vec::new(),
         })
     }
 

@@ -132,50 +132,38 @@ pub(crate) fn crop_frame_for_viewport(
     }
 }
 
-pub(crate) fn encode_work_class_for_completed_render(class: WorkClass) -> WorkClass {
-    match class {
-        WorkClass::CriticalCurrent => WorkClass::DirectionalLead,
-        _ => class,
-    }
-}
-
-pub(crate) fn compose_spread_frame(
-    left: Option<&RgbaFrame>,
-    right: Option<&RgbaFrame>,
-    gap_px: u32,
+pub(crate) fn crop_frame_region(
+    frame: &RgbaFrame,
+    origin_x: u32,
+    origin_y: u32,
+    width: u32,
+    height: u32,
 ) -> RgbaFrame {
-    let left_width = left
-        .map(|frame| frame.width)
-        .or_else(|| right.map(|frame| frame.width))
-        .unwrap_or(1);
-    let right_width = right
-        .map(|frame| frame.width)
-        .or_else(|| left.map(|frame| frame.width))
-        .unwrap_or(1);
-    let left_height = left
-        .map(|frame| frame.height)
-        .or_else(|| right.map(|frame| frame.height))
-        .unwrap_or(1);
-    let right_height = right
-        .map(|frame| frame.height)
-        .or_else(|| left.map(|frame| frame.height))
-        .unwrap_or(1);
+    let origin_x = origin_x.min(frame.width);
+    let origin_y = origin_y.min(frame.height);
+    let copy_width = width.min(frame.width.saturating_sub(origin_x));
+    let copy_height = height.min(frame.height.saturating_sub(origin_y));
+    let out_width = copy_width.max(1);
+    let out_height = copy_height.max(1);
 
-    let out_width = left_width
-        .saturating_add(gap_px)
-        .saturating_add(right_width)
-        .max(1);
-    let out_height = left_height.max(right_height).max(1);
+    if origin_x == 0 && origin_y == 0 && out_width == frame.width && out_height == frame.height {
+        return frame.clone();
+    }
+
     let mut pixels = frame_ops_pixel_pool().take(out_width as usize * out_height as usize * 4);
-
-    blit_side(&mut pixels, out_width, out_height, left, 0);
-    blit_side(
-        &mut pixels,
-        out_width,
-        out_height,
-        right,
-        left_width.saturating_add(gap_px),
-    );
+    if copy_width > 0 && copy_height > 0 {
+        let src_stride = frame.width as usize * 4;
+        let dst_stride = out_width as usize * 4;
+        let copy_row_bytes = copy_width as usize * 4;
+        for row in 0..copy_height as usize {
+            let src_row = origin_y as usize + row;
+            let src_start = src_row * src_stride + origin_x as usize * 4;
+            let src_end = src_start + copy_row_bytes;
+            let dst_start = row * dst_stride;
+            let dst_end = dst_start + copy_row_bytes;
+            pixels[dst_start..dst_end].copy_from_slice(&frame.pixels[src_start..src_end]);
+        }
+    }
 
     RgbaFrame {
         width: out_width,
@@ -184,32 +172,10 @@ pub(crate) fn compose_spread_frame(
     }
 }
 
-fn blit_side(
-    out_pixels: &mut [u8],
-    out_width: u32,
-    out_height: u32,
-    src: Option<&RgbaFrame>,
-    offset_x: u32,
-) {
-    let Some(src) = src else {
-        return;
-    };
-
-    let copy_width = src.width.min(out_width.saturating_sub(offset_x));
-    let copy_height = src.height.min(out_height);
-    if copy_width == 0 || copy_height == 0 {
-        return;
-    }
-
-    let out_stride = out_width as usize * 4;
-    let src_stride = src.width as usize * 4;
-    let row_bytes = copy_width as usize * 4;
-    for row in 0..copy_height as usize {
-        let out_start = row * out_stride + offset_x as usize * 4;
-        let out_end = out_start + row_bytes;
-        let src_start = row * src_stride;
-        let src_end = src_start + row_bytes;
-        out_pixels[out_start..out_end].copy_from_slice(&src.pixels[src_start..src_end]);
+pub(crate) fn encode_work_class_for_completed_render(class: WorkClass) -> WorkClass {
+    match class {
+        WorkClass::CriticalCurrent => WorkClass::DirectionalLead,
+        _ => class,
     }
 }
 
@@ -285,7 +251,7 @@ fn fill_rect(
 #[cfg(test)]
 mod tests {
     use super::{
-        PageRenderSpace, apply_highlight_overlay, compose_spread_frame, crop_frame_for_viewport,
+        PageRenderSpace, apply_highlight_overlay, crop_frame_for_viewport, crop_frame_region,
         prepare_presenter_frame,
     };
     use crate::backend::{PdfRect, RgbaFrame};
@@ -359,6 +325,27 @@ mod tests {
     }
 
     #[test]
+    fn crop_frame_region_extracts_requested_pixels() {
+        let frame = RgbaFrame {
+            width: 3,
+            height: 2,
+            pixels: vec![
+                1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255, 4, 0, 0, 255, 5, 0, 0, 255, 6, 0, 0, 255,
+            ]
+            .into(),
+        };
+
+        let cropped = crop_frame_region(&frame, 1, 0, 2, 2);
+
+        assert_eq!(cropped.width, 2);
+        assert_eq!(cropped.height, 2);
+        assert_eq!(cropped.pixels[0], 2);
+        assert_eq!(cropped.pixels[4], 3);
+        assert_eq!(cropped.pixels[8], 5);
+        assert_eq!(cropped.pixels[12], 6);
+    }
+
+    #[test]
     fn crop_frame_for_viewport_clamps_when_target_exceeds_source() {
         let frame = RgbaFrame {
             width: 2,
@@ -428,42 +415,5 @@ mod tests {
         assert!(frame.pixels.ptr_eq(&prepared.pixels));
         assert_eq!(pan, PanOffset::default());
         assert_eq!(pan_for_presenter, PanOffset::default());
-    }
-
-    #[test]
-    fn compose_spread_frame_places_left_and_right_with_gap() {
-        let left = RgbaFrame {
-            width: 2,
-            height: 1,
-            pixels: vec![1, 0, 0, 255, 2, 0, 0, 255].into(),
-        };
-        let right = RgbaFrame {
-            width: 2,
-            height: 1,
-            pixels: vec![3, 0, 0, 255, 4, 0, 0, 255].into(),
-        };
-
-        let composed = compose_spread_frame(Some(&left), Some(&right), 1);
-        assert_eq!(composed.width, 5);
-        assert_eq!(composed.height, 1);
-        assert_eq!(composed.pixels[0], 1);
-        assert_eq!(composed.pixels[4], 2);
-        assert_eq!(composed.pixels[8], 0);
-        assert_eq!(composed.pixels[12], 3);
-    }
-
-    #[test]
-    fn compose_spread_frame_keeps_blank_slot_for_missing_side() {
-        let page = RgbaFrame {
-            width: 2,
-            height: 1,
-            pixels: vec![9, 0, 0, 255, 8, 0, 0, 255].into(),
-        };
-
-        let composed = compose_spread_frame(None, Some(&page), 1);
-        assert_eq!(composed.width, 5);
-        assert_eq!(composed.height, 1);
-        assert_eq!(composed.pixels[0], 0);
-        assert_eq!(composed.pixels[12], 9);
     }
 }

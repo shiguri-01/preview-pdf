@@ -16,6 +16,7 @@ pub struct RenderSubsystem {
     pub presenter: Box<dyn ImagePresenter>,
     pub runtime: RenderRuntime,
     pub viewer_has_image: bool,
+    pub image_occluded_last_frame: bool,
 }
 
 impl RenderSubsystem {
@@ -24,6 +25,7 @@ impl RenderSubsystem {
             presenter,
             runtime,
             viewer_has_image: false,
+            image_occluded_last_frame: false,
         }
     }
 }

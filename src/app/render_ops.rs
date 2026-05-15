@@ -328,44 +328,34 @@ impl RenderSubsystem {
 mod tests {
     use std::time::Duration;
 
-    use ratatui::layout::Rect;
-
     use super::*;
     use crate::app::{NoticeLevel, RenderRuntime};
     use crate::backend::RgbaFrame;
     use crate::error::{AppError, AppResult};
     use crate::perf::PerfStats;
     use crate::presenter::{
-        ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
-        PresenterRenderOutcome,
+        ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOutcome,
+        PresenterRenderSlot, PresenterSlot,
     };
 
     #[derive(Default)]
     struct StubPresenter;
 
     impl ImagePresenter for StubPresenter {
-        fn prepare(
-            &mut self,
-            _cache_key: RenderedPageKey,
-            _frame: &RgbaFrame,
-            _viewport: Viewport,
-            _pan: PanOffset,
-            _overlay_stamp: u64,
-            _generation: u64,
-        ) -> AppResult<()> {
+        fn prepare_slots(&mut self, _slots: &[PresenterSlot<'_>]) -> AppResult<()> {
             Ok(())
         }
 
-        fn render(
+        fn render_slots(
             &mut self,
             _frame: &mut ratatui::Frame<'_>,
-            _area: Rect,
-            _options: PresenterRenderOptions,
+            _slots: &[PresenterRenderSlot],
         ) -> AppResult<PresenterRenderOutcome> {
             Ok(PresenterRenderOutcome {
                 drew_image: false,
                 feedback: PresenterFeedback::None,
                 used_stale_fallback: false,
+                slots: Vec::new(),
             })
         }
 

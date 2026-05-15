@@ -45,11 +45,19 @@ fn l2_key(page: usize) -> TerminalFrameKey {
     }
 }
 
+fn first_ready_key(presenter: &RatatuiImagePresenter) -> Option<TerminalFrameKey> {
+    presenter.state.last_ready_keys.first().copied().flatten()
+}
+
+fn first_current_key(presenter: &RatatuiImagePresenter) -> Option<TerminalFrameKey> {
+    presenter.state.current_keys.first().copied().flatten()
+}
+
 fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
     let backend = TestBackend::new(20, 10);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
     let deadline = Instant::now() + Duration::from_secs(2);
-    while presenter.state.last_ready_key.is_none() && Instant::now() < deadline {
+    while first_ready_key(presenter).is_none() && Instant::now() < deadline {
         terminal
             .draw(|frame| {
                 let _ = presenter.render(frame, area, PresenterRenderOptions::default());
@@ -59,7 +67,7 @@ fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
         thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        presenter.state.last_ready_key.is_some(),
+        first_ready_key(presenter).is_some(),
         "presenter should have a ready frame for fallback"
     );
 }
@@ -298,7 +306,7 @@ fn prefetch_encode_does_not_change_current_key() {
     presenter
         .prepare(current, &frame(), viewport, PanOffset::default(), 0, 0)
         .expect("prepare should pass");
-    let before = presenter.state.current_key;
+    let before = first_current_key(&presenter);
 
     presenter
         .prefetch_encode(
@@ -312,7 +320,7 @@ fn prefetch_encode_does_not_change_current_key() {
         )
         .expect("prefetch should pass");
 
-    assert_eq!(presenter.state.current_key, before);
+    assert_eq!(first_current_key(&presenter), before);
 }
 
 #[test]
@@ -397,59 +405,6 @@ fn recv_background_event_requests_redraw_for_current_encode_completion() {
             redraw_requested: true,
         }
     );
-}
-
-#[test]
-fn render_pending_uses_stale_fallback_when_allowed() {
-    let mut presenter = RatatuiImagePresenter::new();
-    let viewport = Viewport {
-        x: 0,
-        y: 0,
-        width: 12,
-        height: 7,
-    };
-    let area = Rect::new(1, 1, 12, 7);
-    presenter
-        .prepare(
-            RenderedPageKey::new(9, 1, 1.0),
-            &frame(),
-            viewport,
-            PanOffset::default(),
-            0,
-            1,
-        )
-        .expect("first prepare should pass");
-    render_until_ready(&mut presenter, area);
-    presenter
-        .prepare(
-            RenderedPageKey::new(9, 2, 1.0),
-            &frame(),
-            viewport,
-            PanOffset::default(),
-            0,
-            2,
-        )
-        .expect("second prepare should pass");
-
-    let backend = TestBackend::new(20, 10);
-    let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-    let mut result = None;
-    terminal
-        .draw(|frame| {
-            result = Some(presenter.render(
-                frame,
-                area,
-                PresenterRenderOptions::new(true, PresenterRenderMode::Full),
-            ));
-        })
-        .expect("draw should pass");
-
-    let outcome = result
-        .expect("render result should be captured")
-        .expect("render should succeed");
-    assert_eq!(outcome.feedback, PresenterFeedback::Pending);
-    assert!(outcome.drew_image);
-    assert!(outcome.used_stale_fallback);
 }
 
 #[test]
@@ -594,7 +549,10 @@ fn render_returns_failed_feedback_for_failed_current_entry() {
         .expect("second prepare should pass");
     let key = presenter
         .state
-        .current_key
+        .current_keys
+        .first()
+        .copied()
+        .flatten()
         .expect("current key should exist");
     presenter
         .state
@@ -655,7 +613,10 @@ fn render_failed_does_not_use_stale_fallback_when_disallowed() {
         .expect("second prepare should pass");
     let key = presenter
         .state
-        .current_key
+        .current_keys
+        .first()
+        .copied()
+        .flatten()
         .expect("current key should exist");
     presenter
         .state
@@ -709,7 +670,7 @@ fn render_reports_failed_feedback_when_encode_worker_is_disconnected() {
         pan: PanOffset::default(),
         overlay_stamp: 0,
     };
-    presenter.state.current_key = Some(key);
+    presenter.state.current_keys = vec![Some(key)];
     presenter.shutdown_worker();
 
     let backend = TestBackend::new(20, 10);
@@ -1019,6 +980,25 @@ fn l2_oversize_insert_with_protected_key_keeps_visible_entry() {
     assert!(cache.cached_mut(&visible).is_some());
     assert!(cache.cached_mut(&oversize).is_some());
     assert_eq!(cache.len(), 2);
+    assert!(cache.memory_bytes > cache.memory_budget_bytes());
+}
+
+#[test]
+fn l2_oversize_insert_with_protected_keys_keeps_visible_entries() {
+    let mut cache = TerminalFrameCache::new(8, 32);
+    let left_visible = l2_key(0);
+    let right_visible = l2_key(1);
+    let oversize = l2_key(2);
+    let _ = cache.insert(left_visible, frame(), 16, false, None);
+    let _ = cache.insert(right_visible, frame(), 16, false, None);
+
+    let inserted =
+        cache.insert_protected(oversize, frame(), 64, true, &[left_visible, right_visible]);
+    assert!(inserted);
+    assert!(cache.cached_mut(&left_visible).is_some());
+    assert!(cache.cached_mut(&right_visible).is_some());
+    assert!(cache.cached_mut(&oversize).is_some());
+    assert_eq!(cache.len(), 3);
     assert!(cache.memory_bytes > cache.memory_budget_bytes());
 }
 

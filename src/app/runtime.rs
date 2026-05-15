@@ -432,7 +432,8 @@ impl RenderRuntime {
             saw_page = true;
             let key = RenderedPageKey::new(doc.doc_id(), page, scale);
             let Some(frame) = self.l1_cache.get(&key) else {
-                return Ok(None);
+                prepared.push(None);
+                continue;
             };
             let (frame, overlay_stamp) = decorate_single_page_frame(doc, page, frame, overlay);
             let mut slot_pan = requested_pan;
@@ -467,12 +468,6 @@ impl RenderRuntime {
     ) -> AppResult<Option<PreparedSpreadCanvasSlots>> {
         let left = self.cached_decorated_page(doc, slots.left_page, scale, overlay)?;
         let right = self.cached_decorated_page(doc, slots.right_page, scale, overlay)?;
-        if (slots.left_page.is_some() && left.is_none())
-            || (slots.right_page.is_some() && right.is_none())
-        {
-            self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
-            return Ok(None);
-        }
 
         let left_width = left
             .as_ref()
@@ -726,4 +721,388 @@ fn page_render_space(
         width_pt,
         height_pt,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+
+    use super::*;
+    use crate::backend::OutlineNode;
+    use crate::error::AppResult;
+    use crate::presenter::{
+        PresenterCaps, PresenterFeedback, PresenterRenderOptions, PresenterRenderOutcome,
+    };
+
+    #[derive(Default)]
+    struct TestPresenter {
+        prepared_viewports: Vec<Viewport>,
+        prepared_frame_sizes: Vec<(u32, u32)>,
+        prepared_slot_pages: Vec<Option<usize>>,
+    }
+
+    impl ImagePresenter for TestPresenter {
+        fn prepare(
+            &mut self,
+            _cache_key: RenderedPageKey,
+            frame: &RgbaFrame,
+            viewport: Viewport,
+            _pan: PanOffset,
+            _overlay_stamp: u64,
+            _generation: u64,
+        ) -> AppResult<()> {
+            self.prepared_viewports.push(viewport);
+            self.prepared_frame_sizes.push((frame.width, frame.height));
+            Ok(())
+        }
+
+        fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
+            self.prepared_slot_pages = slots
+                .iter()
+                .map(|slot| slot.cache_key.map(|key| key.page))
+                .collect();
+            for slot in slots {
+                let (Some(cache_key), Some(frame)) = (slot.cache_key, slot.frame) else {
+                    continue;
+                };
+                self.prepare(
+                    cache_key,
+                    frame,
+                    slot.viewport,
+                    slot.pan,
+                    slot.overlay_stamp,
+                    slot.generation,
+                )?;
+            }
+            Ok(())
+        }
+
+        fn render(
+            &mut self,
+            _frame: &mut ratatui::Frame<'_>,
+            _area: Rect,
+            _options: PresenterRenderOptions,
+        ) -> AppResult<PresenterRenderOutcome> {
+            Ok(PresenterRenderOutcome {
+                drew_image: true,
+                feedback: PresenterFeedback::None,
+                used_stale_fallback: false,
+                slots: Vec::new(),
+            })
+        }
+
+        fn capabilities(&self) -> PresenterCaps {
+            PresenterCaps {
+                backend_name: "test-presenter",
+                supports_l2_cache: false,
+                cell_px: None,
+                preferred_max_render_scale: 2.5,
+            }
+        }
+    }
+
+    struct TwoPageRuntimePdf;
+
+    impl PdfBackend for TwoPageRuntimePdf {
+        fn path(&self) -> &std::path::Path {
+            std::path::Path::new("two-page-runtime.pdf")
+        }
+
+        fn doc_id(&self) -> u64 {
+            11
+        }
+
+        fn page_count(&self) -> usize {
+            2
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_text(&self, _page: usize) -> AppResult<String> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> AppResult<crate::backend::TextPage> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+    }
+
+    #[test]
+    fn spread_canvas_slots_crop_from_shared_pan_coordinate_space() {
+        let doc = TwoPageRuntimePdf;
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        for page in 0..2 {
+            runtime.l1_cache.insert(
+                RenderedPageKey::new(doc.doc_id(), page, 1.0),
+                RgbaFrame {
+                    width: 100,
+                    height: 50,
+                    pixels: vec![page as u8; 100 * 50 * 4].into(),
+                },
+                false,
+            );
+        }
+        let mut pan = PanOffset {
+            cells_x: 8,
+            cells_y: 0,
+        };
+
+        let areas = runtime
+            .try_prepare_spread_canvas_slots_from_cache(
+                &doc,
+                &mut presenter,
+                Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 10,
+                    height: 5,
+                },
+                VisiblePageSlots {
+                    anchor_page: 0,
+                    trailing_page: Some(1),
+                    left_page: Some(0),
+                    right_page: Some(1),
+                },
+                1.0,
+                &mut pan,
+                Some((10, 10)),
+                &HighlightOverlaySnapshot::default(),
+                1,
+                20,
+            )
+            .expect("spread canvas prepare should pass")
+            .expect("cached spread should prepare");
+
+        assert_eq!(
+            areas,
+            [Some(Rect::new(0, 0, 2, 5)), Some(Rect::new(4, 0, 6, 5))]
+        );
+        assert_eq!(presenter.prepared_frame_sizes, vec![(20, 50), (60, 50)]);
+        assert_eq!(presenter.prepared_viewports.len(), 2);
+    }
+
+    #[test]
+    fn spread_canvas_slots_keep_slot_identity_when_left_page_is_offscreen() {
+        let doc = TwoPageRuntimePdf;
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        for page in 0..2 {
+            runtime.l1_cache.insert(
+                RenderedPageKey::new(doc.doc_id(), page, 1.0),
+                RgbaFrame {
+                    width: 100,
+                    height: 50,
+                    pixels: vec![page as u8; 100 * 50 * 4].into(),
+                },
+                false,
+            );
+        }
+        let mut pan = PanOffset {
+            cells_x: 12,
+            cells_y: 0,
+        };
+
+        let areas = runtime
+            .try_prepare_spread_canvas_slots_from_cache(
+                &doc,
+                &mut presenter,
+                Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 10,
+                    height: 5,
+                },
+                VisiblePageSlots {
+                    anchor_page: 0,
+                    trailing_page: Some(1),
+                    left_page: Some(0),
+                    right_page: Some(1),
+                },
+                1.0,
+                &mut pan,
+                Some((10, 10)),
+                &HighlightOverlaySnapshot::default(),
+                1,
+                20,
+            )
+            .expect("spread canvas prepare should pass")
+            .expect("cached spread should prepare");
+
+        assert_eq!(areas, [None, Some(Rect::new(0, 0, 10, 5))]);
+        assert_eq!(presenter.prepared_slot_pages, vec![None, Some(1)]);
+    }
+
+    #[test]
+    fn spread_canvas_slots_keep_cached_slot_when_partner_page_misses() {
+        let doc = TwoPageRuntimePdf;
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        runtime.l1_cache.insert(
+            RenderedPageKey::new(doc.doc_id(), 1, 1.0),
+            RgbaFrame {
+                width: 100,
+                height: 50,
+                pixels: vec![1; 100 * 50 * 4].into(),
+            },
+            false,
+        );
+        let mut pan = PanOffset {
+            cells_x: 8,
+            cells_y: 0,
+        };
+
+        let areas = runtime
+            .try_prepare_spread_canvas_slots_from_cache(
+                &doc,
+                &mut presenter,
+                Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 10,
+                    height: 5,
+                },
+                VisiblePageSlots {
+                    anchor_page: 0,
+                    trailing_page: Some(1),
+                    left_page: Some(0),
+                    right_page: Some(1),
+                },
+                1.0,
+                &mut pan,
+                Some((10, 10)),
+                &HighlightOverlaySnapshot::default(),
+                1,
+                20,
+            )
+            .expect("spread canvas prepare should pass")
+            .expect("right cached slot should prepare");
+
+        assert_eq!(areas, [None, Some(Rect::new(4, 0, 6, 5))]);
+        assert_eq!(presenter.prepared_slot_pages, vec![None, Some(1)]);
+    }
+
+    #[test]
+    fn page_slots_clamp_negative_pan_before_saving_state() {
+        let doc = TwoPageRuntimePdf;
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        for page in 0..2 {
+            runtime.l1_cache.insert(
+                RenderedPageKey::new(doc.doc_id(), page, 1.0),
+                RgbaFrame {
+                    width: 100,
+                    height: 100,
+                    pixels: vec![page as u8; 100 * 100 * 4].into(),
+                },
+                false,
+            );
+        }
+        let mut pan = PanOffset {
+            cells_x: -3,
+            cells_y: -7,
+        };
+        let page_slots = [
+            (
+                Some(0),
+                Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 5,
+                    height: 5,
+                },
+            ),
+            (
+                Some(1),
+                Viewport {
+                    x: 5,
+                    y: 0,
+                    width: 5,
+                    height: 5,
+                },
+            ),
+        ];
+
+        let prepared = runtime
+            .try_prepare_page_slots_from_cache(
+                &doc,
+                &mut presenter,
+                &page_slots,
+                1.0,
+                &mut pan,
+                Some((10, 10)),
+                true,
+                &HighlightOverlaySnapshot::default(),
+                1,
+            )
+            .expect("page slot prepare should pass");
+
+        assert!(prepared);
+        assert_eq!(pan, PanOffset::default());
+        assert_eq!(presenter.prepared_slot_pages, vec![Some(0), Some(1)]);
+    }
+
+    #[test]
+    fn page_slots_keep_cached_slot_when_partner_page_misses() {
+        let doc = TwoPageRuntimePdf;
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        runtime.l1_cache.insert(
+            RenderedPageKey::new(doc.doc_id(), 1, 1.0),
+            RgbaFrame {
+                width: 100,
+                height: 100,
+                pixels: vec![1; 100 * 100 * 4].into(),
+            },
+            false,
+        );
+        let mut pan = PanOffset::default();
+        let page_slots = [
+            (
+                Some(0),
+                Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 5,
+                    height: 5,
+                },
+            ),
+            (
+                Some(1),
+                Viewport {
+                    x: 5,
+                    y: 0,
+                    width: 5,
+                    height: 5,
+                },
+            ),
+        ];
+
+        let prepared = runtime
+            .try_prepare_page_slots_from_cache(
+                &doc,
+                &mut presenter,
+                &page_slots,
+                1.0,
+                &mut pan,
+                Some((10, 10)),
+                true,
+                &HighlightOverlaySnapshot::default(),
+                1,
+            )
+            .expect("page slot prepare should pass");
+
+        assert!(prepared);
+        assert_eq!(presenter.prepared_slot_pages, vec![None, Some(1)]);
+    }
 }

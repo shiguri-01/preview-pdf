@@ -118,38 +118,45 @@ impl RenderSubsystem {
         enable_crop: bool,
         highlight_overlay: &HighlightOverlaySnapshot,
         generation: u64,
-    ) -> AppResult<Option<PresenterRenderMode>> {
-        if self.runtime.try_prepare_current_page_from_cache(
-            pdf,
-            self.presenter.as_mut(),
-            viewport,
-            page,
-            full_scale,
-            pan,
-            cell_px,
-            enable_crop,
-            highlight_overlay,
-            generation,
-        )? {
-            return Ok(Some(PresenterRenderMode::Full));
-        }
-
-        let Some(preview_plan) = initial_preview else {
-            return Ok(None);
-        };
-
-        if self.runtime.try_prepare_cached_page_from_cache(
-            pdf,
-            self.presenter.as_mut(),
-            viewport,
-            preview_plan.page_keys[0],
-            pan,
-            cell_px,
-            enable_crop,
-            highlight_overlay,
-            generation,
-        )? {
-            return Ok(Some(PresenterRenderMode::InitialPreview));
+    ) -> AppResult<Option<(PresenterRenderMode, Vec<PresenterRenderSlot>)>> {
+        let attempts = initial_preview.map_or_else(
+            || {
+                vec![(
+                    PresenterRenderMode::Full,
+                    RenderedPageKey::new(pdf.doc_id(), page, full_scale),
+                )]
+            },
+            |preview| {
+                vec![
+                    (
+                        PresenterRenderMode::Full,
+                        RenderedPageKey::new(pdf.doc_id(), page, full_scale),
+                    ),
+                    (PresenterRenderMode::InitialPreview, preview.page_keys[0]),
+                ]
+            },
+        );
+        for (render_mode, key) in attempts {
+            if self.runtime.try_prepare_page_slots_from_cache(
+                pdf,
+                self.presenter.as_mut(),
+                &[(Some(key), viewport)],
+                pan,
+                cell_px,
+                enable_crop,
+                highlight_overlay,
+                generation,
+            )? {
+                return Ok(Some((
+                    render_mode,
+                    vec![PresenterRenderSlot {
+                        area: Rect::new(viewport.x, viewport.y, viewport.width, viewport.height),
+                        options: PresenterRenderOptions::new(false, render_mode),
+                        active: true,
+                        horizontal_align: PresenterHorizontalAlign::Center,
+                    }],
+                )));
+            }
         }
 
         Ok(None)
@@ -171,7 +178,6 @@ impl RenderSubsystem {
         generation: u64,
         spread_gap_px: u32,
     ) -> AppResult<Option<(PresenterRenderMode, Vec<PresenterRenderSlot>)>> {
-        let page_slots = slot_areas.page_slots(visible_pages);
         let attempts = initial_preview.map_or_else(
             || vec![(PresenterRenderMode::Full, full_scale)],
             |preview| {
@@ -187,7 +193,6 @@ impl RenderSubsystem {
                 viewport,
                 visible_pages,
                 slot_areas,
-                &page_slots,
                 scale,
                 pan,
                 cell_px,
@@ -211,7 +216,6 @@ impl RenderSubsystem {
         viewport: Viewport,
         visible_pages: VisiblePageSlots,
         slot_areas: SpreadSlotAreas,
-        page_slots: &[(Option<usize>, Viewport); 2],
         scale: f32,
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
@@ -242,8 +246,7 @@ impl RenderSubsystem {
         if self.runtime.try_prepare_page_slots_from_cache(
             pdf,
             self.presenter.as_mut(),
-            page_slots,
-            scale,
+            &slot_areas.page_slots(pdf.doc_id(), visible_pages, scale),
             pan,
             cell_px,
             false,
@@ -337,20 +340,18 @@ impl RenderSubsystem {
             let spread_slot_areas = split_spread_slot_areas(image_area, SPREAD_GAP_CELLS);
 
             let prepare_result = match state.page_layout_mode {
-                PageLayoutMode::Single => self
-                    .prepare_single_page_or_preview_from_cache(
-                        pdf,
-                        viewport,
-                        visible_pages.anchor_page,
-                        current_scale,
-                        initial_preview.as_ref(),
-                        &mut pan,
-                        presenter_caps.cell_px,
-                        enable_crop,
-                        &highlight_overlay,
-                        generation,
-                    )
-                    .map(|mode| mode.map(|mode| (mode, Vec::new()))),
+                PageLayoutMode::Single => self.prepare_single_page_or_preview_from_cache(
+                    pdf,
+                    viewport,
+                    visible_pages.anchor_page,
+                    current_scale,
+                    initial_preview.as_ref(),
+                    &mut pan,
+                    presenter_caps.cell_px,
+                    enable_crop,
+                    &highlight_overlay,
+                    generation,
+                ),
                 PageLayoutMode::Spread => self.prepare_spread_or_preview_from_cache(
                     pdf,
                     viewport,
@@ -374,7 +375,13 @@ impl RenderSubsystem {
                         ..render_options
                     };
                     let render_result = match state.page_layout_mode {
-                        PageLayoutMode::Single => self.presenter.render(frame, image_area, options),
+                        PageLayoutMode::Single => {
+                            let render_slots: Vec<_> = spread_render_slots
+                                .into_iter()
+                                .map(|slot| PresenterRenderSlot { options, ..slot })
+                                .collect();
+                            self.presenter.render_slots(frame, &render_slots)
+                        }
                         PageLayoutMode::Spread => {
                             spread_slot_areas.clear_gap(frame);
                             let render_slots: Vec<_> = spread_render_slots
@@ -409,12 +416,7 @@ impl RenderSubsystem {
                         Err(err) => {
                             let _ = err;
                             render_failed = true;
-                            let outcome = PresenterRenderOutcome {
-                                drew_image: false,
-                                feedback: PresenterFeedback::Failed,
-                                used_stale_fallback: false,
-                                slots: Vec::new(),
-                            };
+                            let outcome = PresenterRenderOutcome::failed();
                             draw_viewer_outcome(
                                 frame,
                                 image_area,
@@ -431,10 +433,13 @@ impl RenderSubsystem {
                     render_feedback = PresenterFeedback::Pending;
                     let outcome = match state.page_layout_mode {
                         PageLayoutMode::Single => PresenterRenderOutcome {
-                            drew_image: false,
-                            feedback: PresenterFeedback::Pending,
-                            used_stale_fallback: false,
-                            slots: Vec::new(),
+                            slots: vec![PresenterSlotOutcome::active(
+                                image_area,
+                                false,
+                                PresenterFeedback::Pending,
+                                false,
+                            )],
+                            ..PresenterRenderOutcome::pending()
                         },
                         PageLayoutMode::Spread => pending_spread_outcome(
                             spread_slot_areas,
@@ -462,12 +467,7 @@ impl RenderSubsystem {
                 Err(err) => {
                     let _ = err;
                     render_failed = true;
-                    let outcome = PresenterRenderOutcome {
-                        drew_image: false,
-                        feedback: PresenterFeedback::Failed,
-                        used_stale_fallback: false,
-                        slots: Vec::new(),
-                    };
+                    let outcome = PresenterRenderOutcome::failed();
                     draw_viewer_outcome(
                         frame,
                         image_area,
@@ -710,10 +710,25 @@ struct SpreadSlotAreas {
 }
 
 impl SpreadSlotAreas {
-    fn page_slots(self, visible_pages: VisiblePageSlots) -> [(Option<usize>, Viewport); 2] {
+    fn page_slots(
+        self,
+        doc_id: u64,
+        visible_pages: VisiblePageSlots,
+        scale: f32,
+    ) -> [(Option<RenderedPageKey>, Viewport); 2] {
         [
-            (visible_pages.left_page, viewport_from_rect(self.left)),
-            (visible_pages.right_page, viewport_from_rect(self.right)),
+            (
+                visible_pages
+                    .left_page
+                    .map(|page| RenderedPageKey::new(doc_id, page, scale)),
+                self.left.into(),
+            ),
+            (
+                visible_pages
+                    .right_page
+                    .map(|page| RenderedPageKey::new(doc_id, page, scale)),
+                self.right.into(),
+            ),
         ]
     }
 
@@ -769,15 +784,6 @@ fn split_spread_slot_areas(area: Rect, gap_cells: u16) -> SpreadSlotAreas {
         left: Rect::new(area.x, area.y, left_width, area.height),
         gap: Rect::new(gap_x, area.y, gap, area.height),
         right: Rect::new(right_x, area.y, right_width, area.height),
-    }
-}
-
-fn viewport_from_rect(area: Rect) -> Viewport {
-    Viewport {
-        x: area.x,
-        y: area.y,
-        width: area.width.max(1),
-        height: area.height.max(1),
     }
 }
 

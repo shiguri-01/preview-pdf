@@ -51,6 +51,14 @@ pub(crate) struct PresenterState {
     pub(crate) current_generations: Vec<u64>,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ReadyDrawTarget {
+    area: Rect,
+    slot_index: usize,
+    horizontal_align: PresenterHorizontalAlign,
+    options: PresenterRenderOptions,
+}
+
 #[derive(Default)]
 struct EncodeLaneState {
     depth: usize,
@@ -406,6 +414,64 @@ impl RatatuiImagePresenter {
         }
     }
 
+    fn draw_ready_protocol(
+        &mut self,
+        frame: &mut Frame<'_>,
+        key: TerminalFrameKey,
+        mut protocol: Box<StatefulProtocol>,
+        target: ReadyDrawTarget,
+    ) -> AppResult<bool> {
+        let blit_start = std::time::Instant::now();
+        let target_size = protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), target.area);
+        let render_area = align_rect_within(
+            target.area,
+            target_size.width,
+            target_size.height,
+            target.horizontal_align,
+        );
+        if target.options.preserve_stable_image
+            && !target.options.force_image_redraw
+            && self.stable_slot_is_drawn(target.slot_index, key, render_area)
+        {
+            Self::preserve_terminal_area(frame, render_area);
+            self.state
+                .l2_cache
+                .set_state(&key, TerminalFrameState::Ready(protocol));
+            self.record_drawn_slot(target.slot_index, key, render_area);
+            self.state
+                .perf_stats
+                .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+            return Ok(true);
+        }
+        if target.options.force_image_redraw
+            || self
+                .state
+                .last_drawn_areas
+                .get(target.slot_index)
+                .is_none_or(|last_area| *last_area != Some(render_area))
+        {
+            frame.render_widget(Clear, target.area);
+        }
+        if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
+            self.state
+                .l2_cache
+                .set_state(&key, TerminalFrameState::Failed);
+            self.state
+                .perf_stats
+                .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+            return Err(err);
+        }
+        self.state.perf_stats.record_blit(blit_start.elapsed());
+        self.state
+            .l2_cache
+            .set_state(&key, TerminalFrameState::Ready(protocol));
+        self.record_drawn_slot(target.slot_index, key, render_area);
+        self.state
+            .perf_stats
+            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+        Ok(true)
+    }
+
     fn try_draw_ready_key(
         &mut self,
         frame: &mut Frame<'_>,
@@ -432,57 +498,17 @@ impl RatatuiImagePresenter {
             .replace_state(&key, TerminalFrameState::Encoding)
             .expect("entry existence checked above");
         match state {
-            TerminalFrameState::Ready(mut protocol) => {
-                let blit_start = std::time::Instant::now();
-                let target_size = protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
-                let render_area = align_rect_within(
+            TerminalFrameState::Ready(protocol) => self.draw_ready_protocol(
+                frame,
+                key,
+                protocol,
+                ReadyDrawTarget {
                     area,
-                    target_size.width,
-                    target_size.height,
+                    slot_index,
                     horizontal_align,
-                );
-                if options.preserve_stable_image
-                    && !options.force_image_redraw
-                    && self.stable_slot_is_drawn(slot_index, key, render_area)
-                {
-                    Self::preserve_terminal_area(frame, render_area);
-                    self.state
-                        .l2_cache
-                        .set_state(&key, TerminalFrameState::Ready(protocol));
-                    self.record_drawn_slot(slot_index, key, render_area);
-                    self.state
-                        .perf_stats
-                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                    return Ok(true);
-                }
-                if options.force_image_redraw
-                    || self
-                        .state
-                        .last_drawn_areas
-                        .get(slot_index)
-                        .is_none_or(|last_area| *last_area != Some(render_area))
-                {
-                    frame.render_widget(Clear, area);
-                }
-                if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
-                    self.state
-                        .l2_cache
-                        .set_state(&key, TerminalFrameState::Failed);
-                    self.state
-                        .perf_stats
-                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                    return Err(err);
-                }
-                self.state.perf_stats.record_blit(blit_start.elapsed());
-                self.state
-                    .l2_cache
-                    .set_state(&key, TerminalFrameState::Ready(protocol));
-                self.record_drawn_slot(slot_index, key, render_area);
-                self.state
-                    .perf_stats
-                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                Ok(true)
-            }
+                    options,
+                },
+            ),
             TerminalFrameState::PendingFrame(frame) => {
                 self.state
                     .l2_cache
@@ -620,63 +646,18 @@ impl RatatuiImagePresenter {
                 .replace_state(&key, TerminalFrameState::Encoding)
                 .expect("current key existence checked above");
             match state {
-                TerminalFrameState::Ready(mut protocol) => {
-                    let blit_start = std::time::Instant::now();
-                    let target_size =
-                        protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), area);
-                    let render_area = align_rect_within(
-                        area,
-                        target_size.width,
-                        target_size.height,
-                        horizontal_align,
-                    );
-                    if options.preserve_stable_image
-                        && !options.force_image_redraw
-                        && self.stable_slot_is_drawn(slot_index, key, render_area)
-                    {
-                        Self::preserve_terminal_area(frame, render_area);
-                        self.state
-                            .l2_cache
-                            .set_state(&key, TerminalFrameState::Ready(protocol));
-                        self.record_drawn_slot(slot_index, key, render_area);
-                        self.state
-                            .perf_stats
-                            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                        return Ok(PresenterRenderOutcome::from_slot(
-                            PresenterSlotOutcome::active(
-                                area,
-                                true,
-                                PresenterFeedback::None,
-                                false,
-                            ),
-                        ));
-                    }
-                    if options.force_image_redraw
-                        || self
-                            .state
-                            .last_drawn_areas
-                            .get(slot_index)
-                            .is_none_or(|last_area| *last_area != Some(render_area))
-                    {
-                        frame.render_widget(Clear, area);
-                    }
-                    if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
-                        self.state
-                            .l2_cache
-                            .set_state(&key, TerminalFrameState::Failed);
-                        self.state
-                            .perf_stats
-                            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
-                        return Err(err);
-                    }
-                    self.state.perf_stats.record_blit(blit_start.elapsed());
-                    self.state
-                        .l2_cache
-                        .set_state(&key, TerminalFrameState::Ready(protocol));
-                    self.record_drawn_slot(slot_index, key, render_area);
-                    self.state
-                        .perf_stats
-                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                TerminalFrameState::Ready(protocol) => {
+                    self.draw_ready_protocol(
+                        frame,
+                        key,
+                        protocol,
+                        ReadyDrawTarget {
+                            area,
+                            slot_index,
+                            horizontal_align,
+                            options,
+                        },
+                    )?;
                     return Ok(PresenterRenderOutcome::from_slot(
                         PresenterSlotOutcome::active(area, true, PresenterFeedback::None, false),
                     ));

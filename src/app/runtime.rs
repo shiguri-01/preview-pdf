@@ -130,76 +130,18 @@ impl RenderRuntime {
         let (frame, overlay_stamp) = decorate_single_page_frame(doc, task.page, &frame, overlay);
         let (frame, pan_for_presenter) =
             prepare_presenter_frame(&frame, viewport, pan, cell_px, enable_crop);
-        presenter.prepare(
-            RenderedPageKey::new(task.doc_id, task.page, task.scale),
-            &frame,
-            viewport,
-            pan_for_presenter,
-            overlay_stamp,
+        prepare_presenter_slots(
+            presenter,
+            &[Some(PreparedPresenterSlot {
+                cache_key: RenderedPageKey::new(task.doc_id, task.page, task.scale),
+                frame,
+                viewport,
+                pan: pan_for_presenter,
+                overlay_stamp,
+            })],
             task.generation,
         )?;
         Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn try_prepare_current_page_from_cache(
-        &mut self,
-        doc: &dyn PdfBackend,
-        presenter: &mut dyn ImagePresenter,
-        viewport: Viewport,
-        page: usize,
-        scale: f32,
-        pan: &mut PanOffset,
-        cell_px: Option<(u16, u16)>,
-        enable_crop: bool,
-        overlay: &HighlightOverlaySnapshot,
-        generation: u64,
-    ) -> AppResult<bool> {
-        let key = RenderedPageKey::new(doc.doc_id(), page, scale);
-        self.try_prepare_cached_page_from_cache(
-            doc,
-            presenter,
-            viewport,
-            key,
-            pan,
-            cell_px,
-            enable_crop,
-            overlay,
-            generation,
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn try_prepare_cached_page_from_cache(
-        &mut self,
-        doc: &dyn PdfBackend,
-        presenter: &mut dyn ImagePresenter,
-        viewport: Viewport,
-        key: RenderedPageKey,
-        pan: &mut PanOffset,
-        cell_px: Option<(u16, u16)>,
-        enable_crop: bool,
-        overlay: &HighlightOverlaySnapshot,
-        generation: u64,
-    ) -> AppResult<bool> {
-        let prepared = if let Some(frame) = self.l1_cache.get(&key) {
-            let (frame, overlay_stamp) = decorate_single_page_frame(doc, key.page, frame, overlay);
-            let (frame, pan_for_presenter) =
-                prepare_presenter_frame(&frame, viewport, pan, cell_px, enable_crop);
-            presenter.prepare(
-                key,
-                &frame,
-                viewport,
-                pan_for_presenter,
-                overlay_stamp,
-                generation,
-            )?;
-            true
-        } else {
-            false
-        };
-        self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
-        Ok(prepared)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -207,8 +149,7 @@ impl RenderRuntime {
         &mut self,
         doc: &dyn PdfBackend,
         presenter: &mut dyn ImagePresenter,
-        page_slots: &[(Option<usize>, Viewport)],
-        scale: f32,
+        page_slots: &[(Option<RenderedPageKey>, Viewport)],
         pan: &mut PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
@@ -219,7 +160,6 @@ impl RenderRuntime {
         let Some((mut prepared, normalized_pan)) = self.build_page_slots_from_cache(
             doc,
             page_slots,
-            scale,
             requested_pan,
             cell_px,
             enable_crop,
@@ -234,7 +174,6 @@ impl RenderRuntime {
             && let Some((rebuilt, _)) = self.build_page_slots_from_cache(
                 doc,
                 page_slots,
-                scale,
                 normalized_pan,
                 cell_px,
                 enable_crop,
@@ -377,8 +316,7 @@ impl RenderRuntime {
     fn build_page_slots_from_cache(
         &mut self,
         doc: &dyn PdfBackend,
-        page_slots: &[(Option<usize>, Viewport)],
-        scale: f32,
+        page_slots: &[(Option<RenderedPageKey>, Viewport)],
         requested_pan: PanOffset,
         cell_px: Option<(u16, u16)>,
         enable_crop: bool,
@@ -391,18 +329,17 @@ impl RenderRuntime {
         };
         let mut saw_page = false;
 
-        for (page, viewport) in page_slots {
-            let Some(page) = *page else {
+        for (key, viewport) in page_slots {
+            let Some(key) = *key else {
                 prepared.push(None);
                 continue;
             };
             saw_page = true;
-            let key = RenderedPageKey::new(doc.doc_id(), page, scale);
             let Some(frame) = self.l1_cache.get(&key) else {
                 prepared.push(None);
                 continue;
             };
-            let (frame, overlay_stamp) = decorate_single_page_frame(doc, page, frame, overlay);
+            let (frame, overlay_stamp) = decorate_single_page_frame(doc, key.page, frame, overlay);
             let mut slot_pan = requested_pan;
             let (frame, pan_for_presenter) =
                 prepare_presenter_frame(&frame, *viewport, &mut slot_pan, cell_px, enable_crop);
@@ -580,7 +517,7 @@ impl RenderRuntime {
             presenter_slot: Some(PreparedPresenterSlot {
                 cache_key: page.key,
                 frame,
-                viewport: viewport_from_rect(area),
+                viewport: Viewport::from(area),
                 pan,
                 overlay_stamp: page.overlay_stamp,
             }),
@@ -668,15 +605,6 @@ fn px_to_cells_ceil(px: u32, cell_px: u16) -> u16 {
     px.saturating_add(cell_px.saturating_sub(1))
         .saturating_div(cell_px)
         .min(u32::from(u16::MAX)) as u16
-}
-
-fn viewport_from_rect(area: Rect) -> Viewport {
-    Viewport {
-        x: area.x,
-        y: area.y,
-        width: area.width.max(1),
-        height: area.height.max(1),
-    }
 }
 
 fn decorate_frame(
@@ -1030,7 +958,7 @@ mod tests {
         };
         let page_slots = [
             (
-                Some(0),
+                Some(RenderedPageKey::new(doc.doc_id(), 0, 1.0)),
                 Viewport {
                     x: 0,
                     y: 0,
@@ -1039,7 +967,7 @@ mod tests {
                 },
             ),
             (
-                Some(1),
+                Some(RenderedPageKey::new(doc.doc_id(), 1, 1.0)),
                 Viewport {
                     x: 5,
                     y: 0,
@@ -1054,7 +982,6 @@ mod tests {
                 &doc,
                 &mut presenter,
                 &page_slots,
-                1.0,
                 &mut pan,
                 Some((10, 10)),
                 true,
@@ -1085,7 +1012,7 @@ mod tests {
         let mut pan = PanOffset::default();
         let page_slots = [
             (
-                Some(0),
+                Some(RenderedPageKey::new(doc.doc_id(), 0, 1.0)),
                 Viewport {
                     x: 0,
                     y: 0,
@@ -1094,7 +1021,7 @@ mod tests {
                 },
             ),
             (
-                Some(1),
+                Some(RenderedPageKey::new(doc.doc_id(), 1, 1.0)),
                 Viewport {
                     x: 5,
                     y: 0,
@@ -1109,7 +1036,6 @@ mod tests {
                 &doc,
                 &mut presenter,
                 &page_slots,
-                1.0,
                 &mut pan,
                 Some((10, 10)),
                 true,

@@ -23,6 +23,17 @@ pub struct Viewport {
     pub height: u16,
 }
 
+impl From<Rect> for Viewport {
+    fn from(area: Rect) -> Self {
+        Self {
+            x: area.x,
+            y: area.y,
+            width: area.width.max(1),
+            height: area.height.max(1),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct PanOffset {
     pub cells_x: i32,
@@ -154,6 +165,20 @@ pub struct PresenterRenderOutcome {
 }
 
 impl PresenterRenderOutcome {
+    pub fn pending() -> Self {
+        Self {
+            feedback: PresenterFeedback::Pending,
+            ..Self::default()
+        }
+    }
+
+    pub fn failed() -> Self {
+        Self {
+            feedback: PresenterFeedback::Failed,
+            ..Self::default()
+        }
+    }
+
     pub fn from_slot(slot: PresenterSlotOutcome) -> Self {
         Self {
             drew_image: slot.active && slot.drew_image,

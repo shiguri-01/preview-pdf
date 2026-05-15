@@ -678,7 +678,6 @@ pub(super) fn compute_initial_preview_plan(
     visible_pages: VisiblePageSlots,
     page_layout_mode: PageLayoutMode,
     current_scale: f32,
-    _presenter_layout_tag: u16,
 ) -> Option<InitialPreviewPlan> {
     let preview_scale = quantize_scale(current_scale * INITIAL_PREVIEW_SCALE_RATIO);
     if scale_eq(preview_scale, current_scale) {
@@ -698,10 +697,7 @@ pub(super) fn compute_initial_preview_plan(
             .map(|page| RenderedPageKey::new(doc_id, page, preview_scale))
             .collect(),
     };
-    let presenter_key = match page_layout_mode {
-        PageLayoutMode::Single => page_keys[0],
-        PageLayoutMode::Spread => page_keys[0],
-    };
+    let presenter_key = page_keys[0];
 
     Some(InitialPreviewPlan {
         scale: preview_scale,
@@ -1297,7 +1293,7 @@ mod tests {
             right_page: None,
         };
 
-        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Single, 1.0, 0);
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Single, 1.0);
 
         assert_eq!(
             preview,
@@ -1318,7 +1314,7 @@ mod tests {
             right_page: Some(1),
         };
 
-        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Spread, 1.0, 1);
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Spread, 1.0);
 
         assert_eq!(
             preview,
@@ -1342,7 +1338,7 @@ mod tests {
             right_page: None,
         };
 
-        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Spread, 1.0, 3);
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Spread, 1.0);
 
         assert_eq!(
             preview,

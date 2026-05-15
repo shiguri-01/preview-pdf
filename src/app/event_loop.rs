@@ -507,7 +507,6 @@ impl App {
             visible_pages,
             self.state.page_layout_mode,
             current_scale,
-            presenter_layout_tag,
         );
         let mut current_interest_keys = CurrentInterestKeys::from_required(&required);
         if let Some(preview_plan) = initial_preview.as_ref() {
@@ -767,8 +766,6 @@ impl App {
                     visible_pages,
                     self.state.page_layout_mode,
                     scale,
-                    self.state
-                        .presenter_layout_tag(visible_pages.trailing_page.is_some()),
                 ) {
                     current_keys.extend(preview_plan.page_keys);
                 }
@@ -829,19 +826,12 @@ fn cold_start_initial_preview_plan(
     visible_pages: super::state::VisiblePageSlots,
     page_layout_mode: super::state::PageLayoutMode,
     current_scale: f32,
-    presenter_layout_tag: u16,
 ) -> Option<InitialPreviewPlan> {
     if !is_cold_start || current_cached {
         return None;
     }
 
-    compute_initial_preview_plan(
-        doc_id,
-        visible_pages,
-        page_layout_mode,
-        current_scale,
-        presenter_layout_tag,
-    )
+    compute_initial_preview_plan(doc_id, visible_pages, page_layout_mode, current_scale)
 }
 
 async fn wait_next_event(
@@ -1225,7 +1215,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(true, true, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(true, true, 7, slots, PageLayoutMode::Single, 1.0);
 
         assert_eq!(preview, None);
     }
@@ -1240,7 +1230,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0);
 
         assert!(preview.is_some());
     }
@@ -1255,7 +1245,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0);
 
         assert!(preview.is_some());
     }
@@ -1270,7 +1260,7 @@ mod tests {
         };
 
         let preview =
-            cold_start_initial_preview_plan(false, false, 7, slots, PageLayoutMode::Single, 1.0, 0);
+            cold_start_initial_preview_plan(false, false, 7, slots, PageLayoutMode::Single, 1.0);
 
         assert_eq!(preview, None);
     }

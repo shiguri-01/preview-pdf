@@ -45,19 +45,19 @@ fn l2_key(page: usize) -> TerminalFrameKey {
     }
 }
 
+fn first_ready_key(presenter: &RatatuiImagePresenter) -> Option<TerminalFrameKey> {
+    presenter.state.last_ready_keys.first().copied().flatten()
+}
+
+fn first_current_key(presenter: &RatatuiImagePresenter) -> Option<TerminalFrameKey> {
+    presenter.state.current_keys.first().copied().flatten()
+}
+
 fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
     let backend = TestBackend::new(20, 10);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
     let deadline = Instant::now() + Duration::from_secs(2);
-    while presenter
-        .state
-        .last_ready_keys
-        .first()
-        .copied()
-        .flatten()
-        .is_none()
-        && Instant::now() < deadline
-    {
+    while first_ready_key(presenter).is_none() && Instant::now() < deadline {
         terminal
             .draw(|frame| {
                 let _ = presenter.render(frame, area, PresenterRenderOptions::default());
@@ -67,13 +67,7 @@ fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
         thread::sleep(Duration::from_millis(5));
     }
     assert!(
-        presenter
-            .state
-            .last_ready_keys
-            .first()
-            .copied()
-            .flatten()
-            .is_some(),
+        first_ready_key(presenter).is_some(),
         "presenter should have a ready frame for fallback"
     );
 }
@@ -312,7 +306,7 @@ fn prefetch_encode_does_not_change_current_key() {
     presenter
         .prepare(current, &frame(), viewport, PanOffset::default(), 0, 0)
         .expect("prepare should pass");
-    let before = presenter.state.current_keys.first().copied().flatten();
+    let before = first_current_key(&presenter);
 
     presenter
         .prefetch_encode(
@@ -326,10 +320,7 @@ fn prefetch_encode_does_not_change_current_key() {
         )
         .expect("prefetch should pass");
 
-    assert_eq!(
-        presenter.state.current_keys.first().copied().flatten(),
-        before
-    );
+    assert_eq!(first_current_key(&presenter), before);
 }
 
 #[test]

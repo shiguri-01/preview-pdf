@@ -640,7 +640,7 @@ fn presenter_render_options(
 ) -> PresenterRenderOptions {
     let mut options = PresenterRenderOptions::new(viewer_has_image, render_mode);
     options.preserve_stable_image = true;
-    options.force_image_redraw = force_image_redraw || image_occluded && !viewer_has_image;
+    options.force_image_redraw = force_image_redraw || (image_occluded && !viewer_has_image);
     options
 }
 
@@ -794,11 +794,16 @@ fn render_areas_to_slots(
     let options = PresenterRenderOptions::new(false, render_mode);
     render_areas
         .into_iter()
-        .map(|area| PresenterRenderSlot {
+        .enumerate()
+        .map(|(index, area)| PresenterRenderSlot {
             area: area.unwrap_or_default(),
             options,
             active: area.is_some(),
-            horizontal_align: PresenterHorizontalAlign::Start,
+            horizontal_align: if index == 0 {
+                PresenterHorizontalAlign::End
+            } else {
+                PresenterHorizontalAlign::Start
+            },
         })
         .collect()
 }
@@ -1281,6 +1286,7 @@ mod tests {
         assert_eq!(slots.len(), 2);
         assert!(!slots[0].active);
         assert_eq!(slots[0].area, Rect::default());
+        assert_eq!(slots[0].horizontal_align, PresenterHorizontalAlign::End);
         assert!(slots[1].active);
         assert_eq!(slots[1].area, right_area);
         assert_eq!(slots[1].horizontal_align, PresenterHorizontalAlign::Start);

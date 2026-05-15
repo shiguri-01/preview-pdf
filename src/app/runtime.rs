@@ -410,6 +410,14 @@ impl RenderRuntime {
         pan.cells_y = pan.cells_y.clamp(0, max_cells_y);
         let view_x = pan.cells_x.saturating_mul(i32::from(cell_width_px)).max(0) as u32;
         let view_y = pan.cells_y.saturating_mul(i32::from(cell_height_px)).max(0) as u32;
+        let left_origin_y = left
+            .as_ref()
+            .map(|page| canvas_height.saturating_sub(page.frame.height) / 2)
+            .unwrap_or_default();
+        let right_origin_y = right
+            .as_ref()
+            .map(|page| canvas_height.saturating_sub(page.frame.height) / 2)
+            .unwrap_or_default();
 
         let left_slot = self.canvas_slot(
             left,
@@ -419,6 +427,7 @@ impl RenderRuntime {
             cell_width_px,
             cell_height_px,
             0,
+            left_origin_y,
             *pan,
         );
         let right_slot = self.canvas_slot(
@@ -429,6 +438,7 @@ impl RenderRuntime {
             cell_width_px,
             cell_height_px,
             left_width.saturating_add(gap_px),
+            right_origin_y,
             *pan,
         );
 
@@ -474,6 +484,7 @@ impl RenderRuntime {
         cell_width_px: u16,
         cell_height_px: u16,
         page_origin_x: u32,
+        page_origin_y: u32,
         pan: PanOffset,
     ) -> PreparedSpreadCanvasSlot {
         let Some(page) = page else {
@@ -485,18 +496,20 @@ impl RenderRuntime {
             u32::from(viewport.height.max(1)).saturating_mul(u32::from(cell_height_px));
         let page_x0 = page_origin_x;
         let page_x1 = page_origin_x.saturating_add(page.frame.width);
+        let page_y0 = page_origin_y;
+        let page_y1 = page_origin_y.saturating_add(page.frame.height);
         let view_x1 = view_x.saturating_add(viewport_width_px);
         let view_y1 = view_y.saturating_add(viewport_height_px);
         let x0 = page_x0.max(view_x);
-        let y0 = view_y;
+        let y0 = page_y0.max(view_y);
         let x1 = page_x1.min(view_x1);
-        let y1 = page.frame.height.min(view_y1);
+        let y1 = page_y1.min(view_y1);
         if x1 <= x0 || y1 <= y0 {
             return PreparedSpreadCanvasSlot::inactive();
         }
 
         let crop_x = x0.saturating_sub(page_origin_x);
-        let crop_y = y0;
+        let crop_y = y0.saturating_sub(page_origin_y);
         let crop_width = x1.saturating_sub(x0);
         let crop_height = y1.saturating_sub(y0);
         let frame = crop_frame_region(&page.frame, crop_x, crop_y, crop_width, crop_height);
@@ -798,6 +811,67 @@ mod tests {
         );
         assert_eq!(presenter.prepared_frame_sizes, vec![(20, 50), (60, 50)]);
         assert_eq!(presenter.prepared_viewports.len(), 2);
+    }
+
+    #[test]
+    fn spread_canvas_slots_crop_from_centered_page_y_origin() {
+        let doc = TwoPageRuntimePdf;
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        runtime.l1_cache.insert(
+            RenderedPageKey::new(doc.doc_id(), 0, 1.0),
+            RgbaFrame {
+                width: 100,
+                height: 100,
+                pixels: vec![0; 100 * 100 * 4].into(),
+            },
+            false,
+        );
+        runtime.l1_cache.insert(
+            RenderedPageKey::new(doc.doc_id(), 1, 1.0),
+            RgbaFrame {
+                width: 100,
+                height: 40,
+                pixels: vec![1; 100 * 40 * 4].into(),
+            },
+            false,
+        );
+        let mut pan = PanOffset {
+            cells_x: 0,
+            cells_y: 2,
+        };
+
+        let areas = runtime
+            .try_prepare_spread_canvas_slots_from_cache(
+                &doc,
+                &mut presenter,
+                Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 25,
+                    height: 5,
+                },
+                VisiblePageSlots {
+                    anchor_page: 0,
+                    trailing_page: Some(1),
+                    left_page: Some(0),
+                    right_page: Some(1),
+                },
+                1.0,
+                &mut pan,
+                Some((10, 10)),
+                &HighlightOverlaySnapshot::default(),
+                1,
+                20,
+            )
+            .expect("spread canvas prepare should pass")
+            .expect("cached spread should prepare");
+
+        assert_eq!(
+            areas,
+            [Some(Rect::new(0, 0, 10, 5)), Some(Rect::new(12, 1, 10, 4))]
+        );
+        assert_eq!(presenter.prepared_frame_sizes, vec![(100, 50), (100, 40)]);
     }
 
     #[test]

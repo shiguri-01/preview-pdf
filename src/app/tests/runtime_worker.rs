@@ -449,6 +449,66 @@ fn spread_canvas_slots_keep_slot_identity_when_left_page_is_offscreen() {
 }
 
 #[test]
+fn page_slots_clamp_negative_pan_before_saving_state() {
+    let doc = TwoPageRuntimePdf;
+    let mut runtime = RenderRuntime::default();
+    let mut presenter = TestPresenter::default();
+    for page in 0..2 {
+        runtime.l1_cache.insert(
+            RenderedPageKey::new(doc.doc_id(), page, 1.0),
+            RgbaFrame {
+                width: 100,
+                height: 100,
+                pixels: vec![page as u8; 100 * 100 * 4].into(),
+            },
+            false,
+        );
+    }
+    let mut pan = PanOffset {
+        cells_x: -3,
+        cells_y: -7,
+    };
+    let page_slots = [
+        (
+            Some(0),
+            Viewport {
+                x: 0,
+                y: 0,
+                width: 5,
+                height: 5,
+            },
+        ),
+        (
+            Some(1),
+            Viewport {
+                x: 5,
+                y: 0,
+                width: 5,
+                height: 5,
+            },
+        ),
+    ];
+
+    let prepared = runtime
+        .try_prepare_page_slots_from_cache(
+            &doc,
+            &mut presenter,
+            &page_slots,
+            1.0,
+            &mut pan,
+            Some((10, 10)),
+            true,
+            &HighlightOverlaySnapshot::default(),
+            1,
+        )
+        .expect("page slot prepare should pass");
+
+    assert!(prepared);
+    assert_eq!(pan, PanOffset::default());
+    assert_eq!(presenter.prepared_slot_pages, vec![Some(0), Some(1)]);
+}
+
+#[test]
 fn run_next_prefetch_reduces_queue_depth() {
     let file = unique_temp_path("runtime_prefetch.pdf");
     fs::write(&file, build_pdf(&["a", "b", "c"])).expect("test pdf should be created");

@@ -447,6 +447,9 @@ impl RenderSubsystem {
                         ),
                     };
                     let allow_viewer_loading = state.page_layout_mode == PageLayoutMode::Single;
+                    if state.page_layout_mode == PageLayoutMode::Spread {
+                        clear_pending_spread_regions(frame, spread_slot_areas, &outcome);
+                    }
                     draw_viewer_outcome(
                         frame,
                         image_area,
@@ -746,6 +749,19 @@ impl SpreadSlotAreas {
     fn clear_gap(self, frame: &mut ratatui::Frame<'_>) {
         if self.gap.width > 0 && self.gap.height > 0 {
             frame.render_widget(Clear, self.gap);
+        }
+    }
+}
+
+fn clear_pending_spread_regions(
+    frame: &mut ratatui::Frame<'_>,
+    slot_areas: SpreadSlotAreas,
+    outcome: &PresenterRenderOutcome,
+) {
+    slot_areas.clear_gap(frame);
+    for slot in &outcome.slots {
+        if !slot.active && slot.area.width > 0 && slot.area.height > 0 {
+            frame.render_widget(Clear, slot.area);
         }
     }
 }

@@ -418,7 +418,10 @@ impl RenderRuntime {
         overlay: &HighlightOverlaySnapshot,
     ) -> AppResult<Option<(Vec<Option<PreparedPresenterSlot>>, PanOffset)>> {
         let mut prepared = Vec::new();
-        let mut normalized_pan = requested_pan;
+        let mut normalized_pan = PanOffset {
+            cells_x: requested_pan.cells_x.max(0),
+            cells_y: requested_pan.cells_y.max(0),
+        };
         let mut saw_page = false;
 
         for (page, viewport) in page_slots {

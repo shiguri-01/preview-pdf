@@ -4,6 +4,8 @@ use std::sync::Arc;
 use crate::error::AppResult;
 
 mod hayro;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod traits;
 
 pub use hayro::{HayroPdfBackend, PdfDoc};

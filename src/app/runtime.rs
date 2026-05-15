@@ -731,7 +731,7 @@ mod tests {
     use crate::backend::OutlineNode;
     use crate::error::AppResult;
     use crate::presenter::{
-        PresenterCaps, PresenterFeedback, PresenterRenderOptions, PresenterRenderOutcome,
+        PresenterCaps, PresenterFeedback, PresenterRenderOutcome, PresenterRenderSlot,
     };
 
     #[derive(Default)]
@@ -742,46 +742,25 @@ mod tests {
     }
 
     impl ImagePresenter for TestPresenter {
-        fn prepare(
-            &mut self,
-            _cache_key: RenderedPageKey,
-            frame: &RgbaFrame,
-            viewport: Viewport,
-            _pan: PanOffset,
-            _overlay_stamp: u64,
-            _generation: u64,
-        ) -> AppResult<()> {
-            self.prepared_viewports.push(viewport);
-            self.prepared_frame_sizes.push((frame.width, frame.height));
-            Ok(())
-        }
-
         fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
             self.prepared_slot_pages = slots
                 .iter()
                 .map(|slot| slot.cache_key.map(|key| key.page))
                 .collect();
             for slot in slots {
-                let (Some(cache_key), Some(frame)) = (slot.cache_key, slot.frame) else {
+                let Some(frame) = slot.frame else {
                     continue;
                 };
-                self.prepare(
-                    cache_key,
-                    frame,
-                    slot.viewport,
-                    slot.pan,
-                    slot.overlay_stamp,
-                    slot.generation,
-                )?;
+                self.prepared_viewports.push(slot.viewport);
+                self.prepared_frame_sizes.push((frame.width, frame.height));
             }
             Ok(())
         }
 
-        fn render(
+        fn render_slots(
             &mut self,
             _frame: &mut ratatui::Frame<'_>,
-            _area: Rect,
-            _options: PresenterRenderOptions,
+            _slots: &[PresenterRenderSlot],
         ) -> AppResult<PresenterRenderOutcome> {
             Ok(PresenterRenderOutcome {
                 drew_image: true,

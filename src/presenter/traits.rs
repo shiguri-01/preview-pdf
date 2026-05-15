@@ -215,24 +215,18 @@ pub trait ImagePresenter {
         pan: PanOffset,
         overlay_stamp: u64,
         generation: u64,
-    ) -> AppResult<()>;
-
-    fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
-        for slot in slots {
-            let (Some(cache_key), Some(frame)) = (slot.cache_key, slot.frame) else {
-                continue;
-            };
-            self.prepare(
-                cache_key,
-                frame,
-                slot.viewport,
-                slot.pan,
-                slot.overlay_stamp,
-                slot.generation,
-            )?;
-        }
-        Ok(())
+    ) -> AppResult<()> {
+        self.prepare_slots(&[PresenterSlot {
+            cache_key: Some(cache_key),
+            frame: Some(frame),
+            viewport,
+            pan,
+            overlay_stamp,
+            generation,
+        }])
     }
+
+    fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()>;
 
     #[allow(clippy::too_many_arguments)]
     fn prefetch_encode(
@@ -262,33 +256,23 @@ pub trait ImagePresenter {
         frame: &mut Frame<'_>,
         area: Rect,
         options: PresenterRenderOptions,
-    ) -> AppResult<PresenterRenderOutcome>;
+    ) -> AppResult<PresenterRenderOutcome> {
+        self.render_slots(
+            frame,
+            &[PresenterRenderSlot {
+                area,
+                options,
+                active: true,
+                horizontal_align: PresenterHorizontalAlign::Center,
+            }],
+        )
+    }
 
     fn render_slots(
         &mut self,
         frame: &mut Frame<'_>,
         slots: &[PresenterRenderSlot],
-    ) -> AppResult<PresenterRenderOutcome> {
-        let mut slot_outcomes = Vec::with_capacity(slots.len());
-        for slot in slots {
-            if !slot.active {
-                slot_outcomes.push(PresenterSlotOutcome::inactive(slot.area));
-                continue;
-            }
-            let slot_outcome = self.render(frame, slot.area, slot.options)?;
-            if slot_outcome.slots.is_empty() {
-                slot_outcomes.push(PresenterSlotOutcome::active(
-                    slot.area,
-                    slot_outcome.drew_image,
-                    slot_outcome.feedback,
-                    slot_outcome.used_stale_fallback,
-                ));
-            } else {
-                slot_outcomes.extend(slot_outcome.slots);
-            }
-        }
-        Ok(PresenterRenderOutcome::aggregate_slots(slot_outcomes))
-    }
+    ) -> AppResult<PresenterRenderOutcome>;
     fn capabilities(&self) -> PresenterCaps;
 
     fn has_pending_work(&self) -> bool {

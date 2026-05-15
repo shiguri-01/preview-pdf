@@ -221,14 +221,6 @@ impl RatatuiImagePresenter {
         Ok(Some(key))
     }
 
-    fn ready_key_for_slot(&self, slot_index: usize) -> Option<TerminalFrameKey> {
-        self.state
-            .last_ready_keys
-            .get(slot_index)
-            .copied()
-            .flatten()
-    }
-
     fn protected_ready_keys(&self) -> Vec<TerminalFrameKey> {
         self.state
             .last_ready_keys
@@ -803,41 +795,6 @@ impl ImagePresenter for RatatuiImagePresenter {
         }
     }
 
-    fn prepare(
-        &mut self,
-        cache_key: RenderedPageKey,
-        frame: &RgbaFrame,
-        viewport: Viewport,
-        pan: PanOffset,
-        overlay_stamp: u64,
-        generation: u64,
-    ) -> AppResult<()> {
-        self.drain_encode_results();
-        let previous_ready_key = self.ready_key_for_slot(0);
-        let protected_ready_keys = self.protected_ready_keys();
-        let frame_key = TerminalFrameKey {
-            rendered_page: cache_key,
-            viewport,
-            pan,
-            overlay_stamp,
-        };
-        let Some(key) = self.ensure_frame_entry(frame_key, frame, true, &protected_ready_keys)?
-        else {
-            self.state.current_keys = vec![None];
-            self.state.last_ready_keys = vec![previous_ready_key];
-            self.state.last_drawn_keys.resize(1, None);
-            self.state.last_drawn_areas.resize(1, None);
-            self.state.current_generations = vec![generation];
-            return Ok(());
-        };
-        self.state.current_keys = vec![Some(key)];
-        self.state.last_ready_keys = vec![previous_ready_key];
-        self.state.last_drawn_keys.resize(1, None);
-        self.state.last_drawn_areas.resize(1, None);
-        self.state.current_generations = vec![generation];
-        Ok(())
-    }
-
     fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {
         self.drain_encode_results();
         let protected_ready_keys = self.protected_ready_keys();
@@ -954,23 +911,6 @@ impl ImagePresenter for RatatuiImagePresenter {
             .perf_stats
             .set_l2_hit_rate(self.state.l2_cache.hit_rate());
         Ok(())
-    }
-
-    fn render(
-        &mut self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        options: PresenterRenderOptions,
-    ) -> AppResult<PresenterRenderOutcome> {
-        self.drain_encode_results();
-        if self.state.current_keys.is_empty() {
-            self.state.current_keys = vec![None];
-            self.state.last_ready_keys = vec![None];
-            self.state.last_drawn_keys.resize(1, None);
-            self.state.last_drawn_areas.resize(1, None);
-            self.state.current_generations = vec![0];
-        }
-        self.render_slot(frame, area, options, 0, PresenterHorizontalAlign::Center)
     }
 
     fn render_slots(

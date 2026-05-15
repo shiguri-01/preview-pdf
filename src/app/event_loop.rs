@@ -934,10 +934,9 @@ mod tests {
     use crate::input::shortcut::ShortcutKey;
     use crate::presenter::PresenterKind;
     use crate::presenter::{
-        ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
-        PresenterRenderOptions, PresenterRenderOutcome, PresenterRuntimeInfo, Viewport,
+        ImagePresenter, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
+        PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot,
     };
-    use crate::render::cache::RenderedPageKey;
     use crate::render::worker::RenderWorker;
 
     #[derive(Default)]
@@ -954,23 +953,14 @@ mod tests {
     }
 
     impl ImagePresenter for StubPresenter {
-        fn prepare(
-            &mut self,
-            _cache_key: RenderedPageKey,
-            _frame: &crate::backend::RgbaFrame,
-            _viewport: Viewport,
-            _pan: PanOffset,
-            _overlay_stamp: u64,
-            _generation: u64,
-        ) -> crate::error::AppResult<()> {
+        fn prepare_slots(&mut self, _slots: &[PresenterSlot<'_>]) -> crate::error::AppResult<()> {
             Ok(())
         }
 
-        fn render(
+        fn render_slots(
             &mut self,
             _frame: &mut ratatui::Frame<'_>,
-            _area: ratatui::layout::Rect,
-            _options: PresenterRenderOptions,
+            _slots: &[PresenterRenderSlot],
         ) -> crate::error::AppResult<PresenterRenderOutcome> {
             Ok(PresenterRenderOutcome {
                 drew_image: false,

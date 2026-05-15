@@ -245,23 +245,7 @@ impl RenderRuntime {
         }
 
         *pan = normalized_pan;
-        let slots: Vec<_> = prepared
-            .iter()
-            .map(|slot| PresenterSlot {
-                cache_key: slot.as_ref().map(|slot| slot.cache_key),
-                frame: slot.as_ref().map(|slot| &slot.frame),
-                viewport: slot.as_ref().map(|slot| slot.viewport).unwrap_or(Viewport {
-                    x: 0,
-                    y: 0,
-                    width: 1,
-                    height: 1,
-                }),
-                pan: slot.as_ref().map(|slot| slot.pan).unwrap_or_default(),
-                overlay_stamp: slot.as_ref().map(|slot| slot.overlay_stamp).unwrap_or(0),
-                generation,
-            })
-            .collect();
-        presenter.prepare_slots(&slots)?;
+        prepare_presenter_slots(presenter, &prepared, generation)?;
         Ok(true)
     }
 
@@ -287,24 +271,7 @@ impl RenderRuntime {
             return Ok(None);
         };
 
-        let presenter_slots: Vec<_> = prepared
-            .presenter_slots
-            .iter()
-            .map(|slot| PresenterSlot {
-                cache_key: slot.as_ref().map(|slot| slot.cache_key),
-                frame: slot.as_ref().map(|slot| &slot.frame),
-                viewport: slot.as_ref().map(|slot| slot.viewport).unwrap_or(Viewport {
-                    x: 0,
-                    y: 0,
-                    width: 1,
-                    height: 1,
-                }),
-                pan: slot.as_ref().map(|slot| slot.pan).unwrap_or_default(),
-                overlay_stamp: slot.as_ref().map(|slot| slot.overlay_stamp).unwrap_or(0),
-                generation,
-            })
-            .collect();
-        presenter.prepare_slots(&presenter_slots)?;
+        prepare_presenter_slots(presenter, &prepared.presenter_slots, generation)?;
         Ok(Some(prepared.render_areas))
     }
 
@@ -656,6 +623,37 @@ struct CachedDecoratedPage {
     key: RenderedPageKey,
     frame: RgbaFrame,
     overlay_stamp: u64,
+}
+
+fn prepare_presenter_slots(
+    presenter: &mut dyn ImagePresenter,
+    prepared: &[Option<PreparedPresenterSlot>],
+    generation: u64,
+) -> AppResult<()> {
+    let slots: Vec<_> = prepared
+        .iter()
+        .map(|slot| presenter_slot_from_prepared(slot.as_ref(), generation))
+        .collect();
+    presenter.prepare_slots(&slots)
+}
+
+fn presenter_slot_from_prepared(
+    slot: Option<&PreparedPresenterSlot>,
+    generation: u64,
+) -> PresenterSlot<'_> {
+    PresenterSlot {
+        cache_key: slot.map(|slot| slot.cache_key),
+        frame: slot.map(|slot| &slot.frame),
+        viewport: slot.map(|slot| slot.viewport).unwrap_or(Viewport {
+            x: 0,
+            y: 0,
+            width: 1,
+            height: 1,
+        }),
+        pan: slot.map(|slot| slot.pan).unwrap_or_default(),
+        overlay_stamp: slot.map(|slot| slot.overlay_stamp).unwrap_or(0),
+        generation,
+    }
 }
 
 fn px_to_cells_floor(px: u32, cell_px: u16) -> u16 {

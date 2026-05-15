@@ -327,18 +327,18 @@ impl RenderRuntime {
             cells_x: requested_pan.cells_x.max(0),
             cells_y: requested_pan.cells_y.max(0),
         };
-        let mut saw_page = false;
+        let mut saw_cached_page = false;
 
         for (key, viewport) in page_slots {
             let Some(key) = *key else {
                 prepared.push(None);
                 continue;
             };
-            saw_page = true;
             let Some(frame) = self.l1_cache.get(&key) else {
                 prepared.push(None);
                 continue;
             };
+            saw_cached_page = true;
             let (frame, overlay_stamp) = decorate_single_page_frame(doc, key.page, frame, overlay);
             let mut slot_pan = requested_pan;
             let (frame, pan_for_presenter) =
@@ -355,7 +355,7 @@ impl RenderRuntime {
         }
 
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
-        Ok(saw_page.then_some((prepared, normalized_pan)))
+        Ok(saw_cached_page.then_some((prepared, normalized_pan)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1046,5 +1046,38 @@ mod tests {
 
         assert!(prepared);
         assert_eq!(presenter.prepared_slot_pages, vec![None, Some(1)]);
+    }
+
+    #[test]
+    fn page_slots_return_miss_when_all_requested_pages_miss_l1() {
+        let doc = TwoPageRuntimePdf;
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        let mut pan = PanOffset::default();
+        let page_slots = [(
+            Some(RenderedPageKey::new(doc.doc_id(), 0, 1.0)),
+            Viewport {
+                x: 0,
+                y: 0,
+                width: 5,
+                height: 5,
+            },
+        )];
+
+        let prepared = runtime
+            .try_prepare_page_slots_from_cache(
+                &doc,
+                &mut presenter,
+                &page_slots,
+                &mut pan,
+                Some((10, 10)),
+                true,
+                &HighlightOverlaySnapshot::default(),
+                1,
+            )
+            .expect("page slot prepare should pass");
+
+        assert!(!prepared);
+        assert!(presenter.prepared_slot_pages.is_empty());
     }
 }

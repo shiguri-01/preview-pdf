@@ -519,7 +519,7 @@ fn decide_viewer_display(
                 show_loading = true;
             }
         }
-        PresenterFeedback::Pending => show_loading = !outcome.drew_image,
+        PresenterFeedback::Pending => show_loading = true,
         PresenterFeedback::Failed => show_error = true,
     }
     ViewerDisplayDecision {
@@ -963,28 +963,28 @@ mod tests {
     }
 
     #[test]
-    fn display_decision_does_not_overlay_loading_on_pending_stale_fallback() {
+    fn display_decision_overlays_loading_on_pending_stale_fallback() {
         let outcome = render_outcome(true, PresenterFeedback::Pending, true);
         let decision = decide_viewer_display(&outcome, true);
         assert_eq!(
             decision,
             ViewerDisplayDecision {
                 clear: false,
-                show_loading: false,
+                show_loading: true,
                 show_error: false,
             }
         );
     }
 
     #[test]
-    fn display_decision_does_not_overlay_loading_on_pending_fresh_image() {
+    fn display_decision_overlays_loading_on_pending_fresh_image() {
         let outcome = render_outcome(true, PresenterFeedback::Pending, false);
         let decision = decide_viewer_display(&outcome, true);
         assert_eq!(
             decision,
             ViewerDisplayDecision {
                 clear: false,
-                show_loading: false,
+                show_loading: true,
                 show_error: false,
             }
         );

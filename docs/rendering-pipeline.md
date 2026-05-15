@@ -174,8 +174,9 @@ Frame-level UI rules:
 - a frame must not end in a clear-only state
 - each frame must show either image content, a loading overlay, or an error
   overlay
-- in single-page mode, if the current page is pending and no image is drawn,
-  the loading overlay is drawn over the viewer
+- in single-page mode, if the current page is pending, the loading overlay is
+  drawn over the viewer, including when a stale fallback or preview image is
+  visible
 - in spread mode, viewer-level loading is not used; each active pending page
   slot draws loading inside its own image area from the first pending frame,
   labeled with that slot's page using the same `p.N` notation as the rest of

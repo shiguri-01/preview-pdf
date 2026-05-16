@@ -23,6 +23,20 @@ pub(crate) struct KeyEventOutcome {
     pub commands: Vec<CommandRequest>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KeyEventRoute {
+    Escape,
+    Palette,
+    Help,
+    Normal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HelpKeyAction {
+    ScrollBy(isize),
+    Ignore,
+}
+
 impl InteractionSubsystem {
     pub(crate) fn handle_key_event(
         &mut self,
@@ -30,55 +44,77 @@ impl InteractionSubsystem {
         key: KeyEvent,
     ) -> AppResult<KeyEventOutcome> {
         self.sync_sequences_with_mode(state);
+        match Self::route_key_event(state, key) {
+            KeyEventRoute::Escape => return Ok(self.handle_escape_key_event(state, key)),
+            KeyEventRoute::Palette => return self.handle_palette_key_event(state, key),
+            KeyEventRoute::Help => return Ok(self.handle_help_key_event(state, key)),
+            KeyEventRoute::Normal => {}
+        }
+
+        Ok(self.handle_normal_key_event(state, key))
+    }
+
+    fn route_key_event(state: &AppState, key: KeyEvent) -> KeyEventRoute {
         if key.code == KeyCode::Esc {
-            if let Some(outcome) = self.close_active_overlay(state) {
-                return Ok(outcome);
-            }
-            if self.sequences.resolver.has_pending() {
-                let resolution = self.sequences.resolver.handle_key(key);
-                return Ok(Self::sequence_outcome(resolution, false));
-            }
-            let search_active = self.extensions.host.ui_snapshot().search_active;
-            return Ok(KeyEventOutcome {
-                redraw: search_active,
+            return KeyEventRoute::Escape;
+        }
+        match state.mode {
+            Mode::Palette => KeyEventRoute::Palette,
+            Mode::Help => KeyEventRoute::Help,
+            Mode::Normal => KeyEventRoute::Normal,
+        }
+    }
+
+    fn handle_escape_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
+        if let Some(outcome) = self.close_active_overlay(state) {
+            return outcome;
+        }
+        if self.sequences.resolver.has_pending() {
+            let resolution = self.sequences.resolver.handle_key(key);
+            return Self::sequence_outcome(resolution, false);
+        }
+        let search_active = self.extensions.host.ui_snapshot().search_active;
+        KeyEventOutcome {
+            redraw: search_active,
+            clear_terminal: false,
+            quit_requested: false,
+            commands: if search_active {
+                vec![CommandRequest::new(
+                    Command::Cancel,
+                    CommandInvocationSource::Keymap,
+                )]
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
+    fn handle_palette_key_event(
+        &mut self,
+        state: &mut AppState,
+        key: KeyEvent,
+    ) -> AppResult<KeyEventOutcome> {
+        match self.handle_palette_key(state, key)? {
+            PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
+                redraw,
                 clear_terminal: false,
                 quit_requested: false,
-                commands: if search_active {
-                    vec![CommandRequest::new(
-                        Command::Cancel,
-                        CommandInvocationSource::Keymap,
-                    )]
-                } else {
-                    Vec::new()
-                },
-            });
-        }
-
-        if state.mode == Mode::Palette {
-            return match self.handle_palette_key(state, key)? {
-                PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
-                    redraw,
-                    clear_terminal: false,
+                commands: Vec::new(),
+            }),
+            PaletteKeyResult::Submit(action) => {
+                let (changed_by_palette, command) =
+                    self.handle_palette_submit_effect(state, action.session_id, action.effect)?;
+                Ok(KeyEventOutcome {
+                    redraw: changed_by_palette,
+                    clear_terminal: changed_by_palette,
                     quit_requested: false,
-                    commands: Vec::new(),
-                }),
-                PaletteKeyResult::Submit(action) => {
-                    let (changed_by_palette, command) =
-                        self.handle_palette_submit_effect(state, action.session_id, action.effect)?;
-                    Ok(KeyEventOutcome {
-                        redraw: changed_by_palette,
-                        clear_terminal: changed_by_palette,
-                        quit_requested: false,
-                        commands: command.into_iter().collect(),
-                    })
-                }
-            };
+                    commands: command.into_iter().collect(),
+                })
+            }
         }
+    }
 
-        if state.mode == Mode::Help {
-            return Ok(self.handle_help_key_event(state, key));
-        }
-
+    fn handle_normal_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
         // Once a sequence has started, keep routing keys through the resolver until it
         // either dispatches, times out, or is canceled. That keeps multi-key handling
         // from being stolen by global shortcuts or extension-local hooks mid-sequence.
@@ -86,15 +122,15 @@ impl InteractionSubsystem {
             match self.handle_extension_input(state, AppInputEvent::Key(key)) {
                 InputHookResult::Ignored => {}
                 InputHookResult::Consumed => {
-                    return Ok(KeyEventOutcome {
+                    return KeyEventOutcome {
                         redraw: true,
                         clear_terminal: false,
                         quit_requested: false,
                         commands: Vec::new(),
-                    });
+                    };
                 }
                 InputHookResult::EmitCommand(ext_command) => {
-                    return Ok(KeyEventOutcome {
+                    return KeyEventOutcome {
                         redraw: false,
                         clear_terminal: false,
                         quit_requested: false,
@@ -102,36 +138,35 @@ impl InteractionSubsystem {
                             ext_command,
                             CommandInvocationSource::Keymap,
                         )],
-                    });
+                    };
                 }
             }
         }
 
         let resolution = self.sequences.resolver.handle_key(key);
-        Ok(Self::sequence_outcome(resolution, false))
+        Self::sequence_outcome(resolution, false)
     }
 
     fn handle_help_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
+        match Self::classify_help_key(key) {
+            HelpKeyAction::ScrollBy(delta) => {
+                state.scroll_help_by(delta);
+                KeyEventOutcome {
+                    redraw: true,
+                    clear_terminal: false,
+                    quit_requested: false,
+                    commands: Vec::new(),
+                }
+            }
+            HelpKeyAction::Ignore => KeyEventOutcome::default(),
+        }
+    }
+
+    fn classify_help_key(key: KeyEvent) -> HelpKeyAction {
         match key.code {
-            KeyCode::Char('j') => {
-                state.scroll_help_by(1);
-                KeyEventOutcome {
-                    redraw: true,
-                    clear_terminal: false,
-                    quit_requested: false,
-                    commands: Vec::new(),
-                }
-            }
-            KeyCode::Char('k') => {
-                state.scroll_help_by(-1);
-                KeyEventOutcome {
-                    redraw: true,
-                    clear_terminal: false,
-                    quit_requested: false,
-                    commands: Vec::new(),
-                }
-            }
-            _ => KeyEventOutcome::default(),
+            KeyCode::Char('j') => HelpKeyAction::ScrollBy(1),
+            KeyCode::Char('k') => HelpKeyAction::ScrollBy(-1),
+            _ => HelpKeyAction::Ignore,
         }
     }
 

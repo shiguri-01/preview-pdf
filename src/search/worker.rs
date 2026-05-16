@@ -71,42 +71,32 @@ struct SearchPageCacheKey {
     page: usize,
 }
 
-struct SearchTextPage {
-    text: Arc<str>,
+struct BudgetedPageCacheEntry<V> {
+    value: V,
     estimated_bytes: usize,
 }
 
-struct SearchTextCache {
-    pages: LruCache<SearchPageCacheKey, SearchTextPage>,
+struct BudgetedPageCache<V> {
+    pages: LruCache<SearchPageCacheKey, BudgetedPageCacheEntry<V>>,
     memory_budget_bytes: usize,
     memory_bytes: usize,
 }
 
+struct SearchTextCache {
+    pages: BudgetedPageCache<Arc<str>>,
+}
+
 struct SearchGeometryCache {
-    pages: LruCache<SearchPageCacheKey, CachedTextPage>,
-    memory_budget_bytes: usize,
-    memory_bytes: usize,
+    pages: BudgetedPageCache<Arc<TextPage>>,
 }
 
 #[cfg(test)]
 type SearchPageCache = SearchGeometryCache;
 
-struct CachedTextPage {
-    page: Arc<TextPage>,
-    estimated_bytes: usize,
-}
-
-impl SearchTextCache {
-    const DEFAULT_MAX_ENTRIES: usize = 16_384;
-    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 48 * 1024 * 1024;
-
-    fn new() -> Self {
-        Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
-    }
-
+impl<V> BudgetedPageCache<V> {
     fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
         let max_entries =
-            NonZeroUsize::new(max_entries).expect("search page cache entries must be non-zero");
+            NonZeroUsize::new(max_entries).expect("search cache entries must be non-zero");
         Self {
             pages: LruCache::new(max_entries),
             memory_budget_bytes,
@@ -114,86 +104,21 @@ impl SearchTextCache {
         }
     }
 
-    fn get(&mut self, doc_id: u64, page: usize) -> Option<Arc<str>> {
+    fn get(&mut self, doc_id: u64, page: usize) -> Option<&V> {
         self.pages
             .get(&SearchPageCacheKey { doc_id, page })
-            .map(|cached| Arc::clone(&cached.text))
+            .map(|cached| &cached.value)
     }
 
-    fn insert(&mut self, doc_id: u64, page: usize, text: Arc<str>) {
-        let estimated_bytes = estimate_search_text_bytes(&text);
+    fn insert(&mut self, doc_id: u64, page: usize, value: V, estimated_bytes: usize) {
         let key = SearchPageCacheKey { doc_id, page };
         if let Some(replaced) = self.pages.pop(&key) {
             self.memory_bytes = self.memory_bytes.saturating_sub(replaced.estimated_bytes);
         }
         if let Some((_key, removed)) = self.pages.push(
             key,
-            SearchTextPage {
-                text,
-                estimated_bytes,
-            },
-        ) {
-            self.memory_bytes = self.memory_bytes.saturating_sub(removed.estimated_bytes);
-        }
-        self.memory_bytes = self.memory_bytes.saturating_add(estimated_bytes);
-        self.enforce_memory_budget();
-    }
-
-    fn try_insert_without_eviction(&mut self, doc_id: u64, page: usize, text: Arc<str>) -> bool {
-        let estimated_bytes = estimate_search_text_bytes(&text);
-        if self.memory_bytes.saturating_add(estimated_bytes) > self.memory_budget_bytes {
-            return false;
-        }
-
-        self.insert(doc_id, page, text);
-        true
-    }
-
-    fn enforce_memory_budget(&mut self) {
-        while self.memory_bytes > self.memory_budget_bytes {
-            let Some((_key, evicted)) = self.pages.pop_lru() else {
-                self.memory_bytes = 0;
-                break;
-            };
-            self.memory_bytes = self.memory_bytes.saturating_sub(evicted.estimated_bytes);
-        }
-    }
-}
-
-impl SearchGeometryCache {
-    const DEFAULT_MAX_ENTRIES: usize = 16_384;
-    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 16 * 1024 * 1024;
-
-    fn new() -> Self {
-        Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
-    }
-
-    fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
-        let max_entries =
-            NonZeroUsize::new(max_entries).expect("search geometry cache entries must be non-zero");
-        Self {
-            pages: LruCache::new(max_entries),
-            memory_budget_bytes,
-            memory_bytes: 0,
-        }
-    }
-
-    fn get(&mut self, doc_id: u64, page: usize) -> Option<Arc<TextPage>> {
-        self.pages
-            .get(&SearchPageCacheKey { doc_id, page })
-            .map(|cached| Arc::clone(&cached.page))
-    }
-
-    fn insert(&mut self, doc_id: u64, page: usize, text_page: Arc<TextPage>) {
-        let estimated_bytes = estimate_text_page_bytes(&text_page);
-        let key = SearchPageCacheKey { doc_id, page };
-        if let Some(replaced) = self.pages.pop(&key) {
-            self.memory_bytes = self.memory_bytes.saturating_sub(replaced.estimated_bytes);
-        }
-        if let Some((_key, removed)) = self.pages.push(
-            key,
-            CachedTextPage {
-                page: text_page,
+            BudgetedPageCacheEntry {
+                value,
                 estimated_bytes,
             },
         ) {
@@ -207,14 +132,23 @@ impl SearchGeometryCache {
         &mut self,
         doc_id: u64,
         page: usize,
-        text_page: Arc<TextPage>,
+        value: V,
+        estimated_bytes: usize,
     ) -> bool {
-        let estimated_bytes = estimate_text_page_bytes(&text_page);
-        if self.memory_bytes.saturating_add(estimated_bytes) > self.memory_budget_bytes {
+        let key = SearchPageCacheKey { doc_id, page };
+        let replaced_bytes = self
+            .pages
+            .peek(&key)
+            .map_or(0, |cached| cached.estimated_bytes);
+        let projected_memory_bytes = self
+            .memory_bytes
+            .saturating_sub(replaced_bytes)
+            .saturating_add(estimated_bytes);
+        if projected_memory_bytes > self.memory_budget_bytes {
             return false;
         }
 
-        self.insert(doc_id, page, text_page);
+        self.insert(doc_id, page, value, estimated_bytes);
         true
     }
 
@@ -236,6 +170,76 @@ impl SearchGeometryCache {
     #[cfg(test)]
     fn memory_bytes(&self) -> usize {
         self.memory_bytes
+    }
+}
+
+impl SearchTextCache {
+    const DEFAULT_MAX_ENTRIES: usize = 16_384;
+    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 48 * 1024 * 1024;
+
+    fn new() -> Self {
+        Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
+    }
+
+    fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
+        Self {
+            pages: BudgetedPageCache::with_limits(max_entries, memory_budget_bytes),
+        }
+    }
+
+    fn get(&mut self, doc_id: u64, page: usize) -> Option<Arc<str>> {
+        self.pages.get(doc_id, page).map(Arc::clone)
+    }
+
+    fn try_insert_without_eviction(&mut self, doc_id: u64, page: usize, text: Arc<str>) -> bool {
+        let estimated_bytes = estimate_search_text_bytes(&text);
+        self.pages
+            .try_insert_without_eviction(doc_id, page, text, estimated_bytes)
+    }
+}
+
+impl SearchGeometryCache {
+    const DEFAULT_MAX_ENTRIES: usize = 16_384;
+    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 16 * 1024 * 1024;
+
+    fn new() -> Self {
+        Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
+    }
+
+    fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
+        Self {
+            pages: BudgetedPageCache::with_limits(max_entries, memory_budget_bytes),
+        }
+    }
+
+    fn get(&mut self, doc_id: u64, page: usize) -> Option<Arc<TextPage>> {
+        self.pages.get(doc_id, page).map(Arc::clone)
+    }
+
+    fn insert(&mut self, doc_id: u64, page: usize, text_page: Arc<TextPage>) {
+        let estimated_bytes = estimate_text_page_bytes(&text_page);
+        self.pages.insert(doc_id, page, text_page, estimated_bytes);
+    }
+
+    fn try_insert_without_eviction(
+        &mut self,
+        doc_id: u64,
+        page: usize,
+        text_page: Arc<TextPage>,
+    ) -> bool {
+        let estimated_bytes = estimate_text_page_bytes(&text_page);
+        self.pages
+            .try_insert_without_eviction(doc_id, page, text_page, estimated_bytes)
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.pages.len()
+    }
+
+    #[cfg(test)]
+    fn memory_bytes(&self) -> usize {
+        self.pages.memory_bytes()
     }
 }
 
@@ -767,6 +771,28 @@ mod tests {
         assert!(cache.get(1, 1).is_none());
         assert_eq!(cache.len(), 1);
         assert!(cache.memory_bytes() <= budget);
+    }
+
+    #[test]
+    fn search_page_cache_insert_without_eviction_allows_replacing_existing_entry_within_budget() {
+        let first = Arc::new(text_page("alpha beta gamma"));
+        let replacement = Arc::new(text_page("alpha"));
+        let budget = estimate_text_page_bytes(&first);
+        let expected_bytes = estimate_text_page_bytes(&replacement);
+        let mut cache = SearchPageCache::with_limits(4, budget);
+
+        assert!(cache.try_insert_without_eviction(1, 0, Arc::clone(&first)));
+        assert!(cache.try_insert_without_eviction(1, 0, Arc::clone(&replacement)));
+
+        assert_eq!(cache.len(), 1);
+        assert_eq!(
+            cache
+                .get(1, 0)
+                .expect("replacement page should exist")
+                .extracted_text(),
+            "alpha"
+        );
+        assert_eq!(cache.memory_bytes(), expected_bytes);
     }
 
     #[test]

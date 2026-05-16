@@ -14,7 +14,6 @@ use crate::presenter::{ImagePresenter, PanOffset, PresenterBackgroundEvent, View
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::RenderTask;
 use crate::render::worker::{RenderWorker, RenderWorkerResult};
-use crate::work::WorkClass;
 
 use super::actors::{InputActor, RenderActor, UiActor};
 use super::core::App;
@@ -28,7 +27,7 @@ use super::render_ops::{
 use super::scale::select_input_poll_timeout;
 use super::state::notice_action_for_error;
 use super::terminal_session::{InteractiveTerminalSession, TerminalSurface};
-use super::view_ops::{InitialPreviewPlan, RenderFramePlan, compute_initial_preview_plan};
+use super::view_ops::{InitialPreviewPlan, RenderFramePlan};
 
 struct LoopRuntime<S> {
     page_count: usize,
@@ -58,16 +57,7 @@ struct LoopStep {
     required: RequiredRenderPages,
     current_interest_keys: CurrentInterestKeys,
     initial_preview: Option<InitialPreviewPlan>,
-    presenter_key: RenderedPageKey,
-    current_cached: bool,
-}
-
-struct CurrentRenderView {
-    visible_pages: super::state::VisiblePageSlots,
-    current_scale: f32,
-    required: RequiredRenderPages,
-    current_interest_keys: CurrentInterestKeys,
-    initial_preview: Option<InitialPreviewPlan>,
+    initial_preview_tasks: Vec<RenderTask>,
     presenter_key: RenderedPageKey,
     current_cached: bool,
 }
@@ -277,10 +267,7 @@ impl App {
             render_actor.nav_mut().intent(),
             tracked_scale,
         );
-        self.interaction
-            .extensions
-            .host
-            .prewarm_search_text(Arc::clone(&pdf));
+        self.interaction.prewarm_search_text(Arc::clone(&pdf));
 
         Ok(LoopRuntime {
             page_count,
@@ -375,7 +362,7 @@ impl App {
             &runtime.session,
             pdf,
             &runtime.input_actor,
-            runtime.render_actor.generation() == 0,
+            runtime.render_actor.generation(),
             runtime.prefetch_pause_after_input,
         );
         let changed = self.drain_background_and_sync_navigation(
@@ -393,28 +380,7 @@ impl App {
                 required: step.required,
                 current_interest_keys: step.current_interest_keys,
                 current_cached: step.current_cached,
-                preview_tasks: step
-                    .initial_preview
-                    .as_ref()
-                    .map(|plan| {
-                        plan.page_keys
-                            .iter()
-                            .enumerate()
-                            .map(|(idx, key)| RenderTask {
-                                doc_id: key.doc_id,
-                                page: key.page,
-                                scale: key.scale_milli as f32 / 1000.0,
-                                class: WorkClass::CriticalCurrent,
-                                generation: runtime.render_actor.generation(),
-                                reason: if idx == 0 {
-                                    "initial-preview"
-                                } else {
-                                    "initial-preview-spread"
-                                },
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                preview_tasks: step.initial_preview_tasks.clone(),
             },
         );
         self.render.dispatch_prefetch_if_due(
@@ -478,11 +444,19 @@ impl App {
         session: &impl TerminalSurface,
         pdf: &dyn PdfBackend,
         input_actor: &InputActor,
-        is_cold_start: bool,
+        render_generation: u64,
         prefetch_pause_after_input: Duration,
     ) -> LoopStep {
         let prefetch_viewport = Self::current_viewport(session, self.state.debug_status_visible);
-        let current_view = self.build_current_render_view(pdf, prefetch_viewport, is_cold_start);
+        let visible_pages = self.state.visible_page_slots(pdf.page_count());
+        let current_scale =
+            self.compute_current_scale(pdf, visible_pages.anchor_page, prefetch_viewport);
+        let current_view = self.render.build_current_render_view(
+            &self.state,
+            pdf,
+            current_scale,
+            render_generation == 0,
+        );
         let overlay_stamp = self
             .interaction
             .extensions
@@ -503,64 +477,10 @@ impl App {
             visible_pages: current_view.visible_pages,
             required: current_view.required,
             current_interest_keys: current_view.current_interest_keys,
+            initial_preview_tasks: current_view.preview_tasks(render_generation),
             initial_preview: current_view.initial_preview,
             presenter_key: current_view.presenter_key,
             current_cached: current_view.current_cached,
-        }
-    }
-
-    fn build_current_render_view(
-        &self,
-        pdf: &dyn PdfBackend,
-        viewport: Option<Viewport>,
-        is_cold_start: bool,
-    ) -> CurrentRenderView {
-        let visible_pages = self.state.visible_page_slots(pdf.page_count());
-        let current_scale = self.compute_current_scale(pdf, visible_pages.anchor_page, viewport);
-        let mut required = RequiredRenderPages::new(
-            visible_pages.anchor_page,
-            RenderedPageKey::new(pdf.doc_id(), visible_pages.anchor_page, current_scale),
-        );
-        if let Some(trailing_page) = visible_pages.trailing_page {
-            required.push_trailing(
-                trailing_page,
-                RenderedPageKey::new(pdf.doc_id(), trailing_page, current_scale),
-            );
-        }
-        let current_cached = required
-            .keys()
-            .iter()
-            .all(|key| self.render.runtime.has_cached_frame(key));
-        let presenter_layout_tag = self
-            .state
-            .presenter_layout_tag(visible_pages.trailing_page.is_some());
-        let initial_preview = cold_start_initial_preview_plan(
-            is_cold_start,
-            current_cached,
-            pdf.doc_id(),
-            visible_pages,
-            self.state.page_layout_mode,
-            current_scale,
-        );
-        let mut current_interest_keys = CurrentInterestKeys::from_required(&required);
-        if let Some(preview_plan) = initial_preview.as_ref() {
-            current_interest_keys.extend(preview_plan.page_keys.iter().copied());
-        }
-        let presenter_key = RenderedPageKey::with_layout(
-            pdf.doc_id(),
-            visible_pages.anchor_page,
-            current_scale,
-            presenter_layout_tag,
-        );
-
-        CurrentRenderView {
-            visible_pages,
-            current_scale,
-            required,
-            current_interest_keys,
-            initial_preview,
-            presenter_key,
-            current_cached,
         }
     }
 
@@ -800,16 +720,7 @@ impl App {
         }
         if self.state.current_page != previous_page {
             self.interaction
-                .extensions
-                .host
-                .prewarm_search_text(Arc::clone(&pdf));
-            self.interaction
-                .extensions
-                .host
-                .resolve_search_priority_geometry(
-                    Arc::clone(&pdf),
-                    [Some(self.state.current_page), None],
-                );
+                .sync_search_after_page_change(Arc::clone(&pdf), self.state.current_page);
         }
         match dispatch.outcome {
             CommandOutcome::QuitRequested => {
@@ -834,8 +745,14 @@ impl App {
         S: TerminalSurface,
     {
         let viewport = Self::current_viewport(&runtime.session, self.state.debug_status_visible);
-        let current_view =
-            self.build_current_render_view(pdf, viewport, runtime.render_actor.generation() == 0);
+        let visible_pages = self.state.visible_page_slots(pdf.page_count());
+        let current_scale = self.compute_current_scale(pdf, visible_pages.anchor_page, viewport);
+        let current_view = self.render.build_current_render_view(
+            &self.state,
+            pdf,
+            current_scale,
+            runtime.render_actor.generation() == 0,
+        );
         let pan = self.current_pan();
         let enable_crop = self.state.zoom > 1.0;
         if self.render.process_render_result(
@@ -863,21 +780,6 @@ impl App {
         runtime.ui_actor.mark_redraw();
         self.render.runtime.perf_stats.record_redraw(reason);
     }
-}
-
-fn cold_start_initial_preview_plan(
-    is_cold_start: bool,
-    current_cached: bool,
-    doc_id: u64,
-    visible_pages: super::state::VisiblePageSlots,
-    page_layout_mode: super::state::PageLayoutMode,
-    current_scale: f32,
-) -> Option<InitialPreviewPlan> {
-    if !is_cold_start || current_cached {
-        return None;
-    }
-
-    compute_initial_preview_plan(doc_id, visible_pages, page_layout_mode, current_scale)
 }
 
 async fn wait_next_event(
@@ -963,9 +865,10 @@ mod tests {
     use tokio::runtime::Builder;
     use tokio::sync::mpsc::unbounded_channel;
 
-    use super::{WaitEvent, cold_start_initial_preview_plan, wait_next_event};
+    use super::{WaitEvent, wait_next_event};
     use crate::app::App;
     use crate::app::core::InteractionSubsystem;
+    use crate::app::render_ops::cold_start_initial_preview_plan;
     use crate::app::state::{PageLayoutMode, VisiblePageSlots};
     use crate::app::terminal_session::TerminalSurface;
     use crate::backend::test_support::{build_pdf, unique_temp_path};

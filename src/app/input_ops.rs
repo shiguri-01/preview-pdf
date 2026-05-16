@@ -139,6 +139,21 @@ impl InteractionSubsystem {
         drain_background_events(state, &mut self.extensions.host)
     }
 
+    pub(crate) fn prewarm_search_text(&mut self, pdf: SharedPdfBackend) {
+        self.extensions.host.prewarm_search_text(pdf);
+    }
+
+    pub(crate) fn sync_search_after_page_change(
+        &mut self,
+        pdf: SharedPdfBackend,
+        current_page: usize,
+    ) {
+        self.extensions.host.prewarm_search_text(pdf.clone());
+        self.extensions
+            .host
+            .resolve_search_priority_geometry(pdf, [Some(current_page), None]);
+    }
+
     pub(crate) fn palette_view(&self) -> Option<PaletteView> {
         self.palette.manager.view()
     }

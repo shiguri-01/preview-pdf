@@ -61,6 +61,16 @@ struct LoopStep {
     current_cached: bool,
 }
 
+struct CurrentRenderView {
+    visible_pages: super::state::VisiblePageSlots,
+    current_scale: f32,
+    required: RequiredRenderPages,
+    current_interest_keys: CurrentInterestKeys,
+    initial_preview: Option<InitialPreviewPlan>,
+    presenter_key: RenderedPageKey,
+    current_cached: bool,
+}
+
 enum WaitEvent {
     Event(DomainEvent),
     Closed,
@@ -471,18 +481,41 @@ impl App {
         prefetch_pause_after_input: Duration,
     ) -> LoopStep {
         let prefetch_viewport = Self::current_viewport(session, self.state.debug_status_visible);
-        let visible_pages = self.state.visible_page_slots(pdf.page_count());
-        let current_scale =
-            self.compute_current_scale(pdf, visible_pages.anchor_page, prefetch_viewport);
+        let current_view = self.build_current_render_view(pdf, prefetch_viewport, is_cold_start);
         let overlay_stamp = self
             .interaction
             .extensions
             .host
-            .highlight_overlay_for(visible_pages.existing_pages())
+            .highlight_overlay_for(current_view.visible_pages.existing_pages())
             .stamp;
         let base_pan = self.current_pan();
         let enable_crop = self.state.zoom > 1.0;
         let interactive = input_actor.is_interactive(prefetch_pause_after_input);
+
+        LoopStep {
+            current_scale: current_view.current_scale,
+            overlay_stamp,
+            prefetch_viewport,
+            base_pan,
+            enable_crop,
+            interactive,
+            visible_pages: current_view.visible_pages,
+            required: current_view.required,
+            current_interest_keys: current_view.current_interest_keys,
+            initial_preview: current_view.initial_preview,
+            presenter_key: current_view.presenter_key,
+            current_cached: current_view.current_cached,
+        }
+    }
+
+    fn build_current_render_view(
+        &self,
+        pdf: &dyn PdfBackend,
+        viewport: Option<Viewport>,
+        is_cold_start: bool,
+    ) -> CurrentRenderView {
+        let visible_pages = self.state.visible_page_slots(pdf.page_count());
+        let current_scale = self.compute_current_scale(pdf, visible_pages.anchor_page, viewport);
         let mut required = RequiredRenderPages::new(
             visible_pages.anchor_page,
             RenderedPageKey::new(pdf.doc_id(), visible_pages.anchor_page, current_scale),
@@ -519,14 +552,9 @@ impl App {
             presenter_layout_tag,
         );
 
-        LoopStep {
-            current_scale,
-            overlay_stamp,
-            prefetch_viewport,
-            base_pan,
-            enable_crop,
-            interactive,
+        CurrentRenderView {
             visible_pages,
+            current_scale,
             required,
             current_interest_keys,
             initial_preview,
@@ -746,35 +774,17 @@ impl App {
             WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
                 let viewport =
                     Self::current_viewport(&runtime.session, self.state.debug_status_visible);
-                let visible_pages = self.state.visible_page_slots(pdf.page_count());
-                let scale =
-                    self.compute_current_scale(pdf.as_ref(), visible_pages.anchor_page, viewport);
-                let mut current_keys = vec![RenderedPageKey::new(
-                    pdf.doc_id(),
-                    visible_pages.anchor_page,
-                    scale,
-                )];
-                if let Some(trailing_page) = visible_pages.trailing_page {
-                    current_keys.push(RenderedPageKey::new(pdf.doc_id(), trailing_page, scale));
-                }
-                if let Some(preview_plan) = cold_start_initial_preview_plan(
+                let current_view = self.build_current_render_view(
+                    pdf.as_ref(),
+                    viewport,
                     runtime.render_actor.generation() == 0,
-                    current_keys
-                        .iter()
-                        .all(|key| self.render.runtime.has_cached_frame(key)),
-                    pdf.doc_id(),
-                    visible_pages,
-                    self.state.page_layout_mode,
-                    scale,
-                ) {
-                    current_keys.extend(preview_plan.page_keys);
-                }
+                );
                 let pan = self.current_pan();
                 let enable_crop = self.state.zoom > 1.0;
                 if self.render.process_render_result(
                     &mut self.state,
                     completed,
-                    &current_keys,
+                    current_view.current_interest_keys.as_slice(),
                     viewport,
                     pan,
                     enable_crop,

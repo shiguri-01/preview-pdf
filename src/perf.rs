@@ -868,15 +868,15 @@ fn percentile(sorted: &[f64], percentile: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::process;
     use std::str::FromStr;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::Duration;
 
     use super::{
         PerfIterationSnapshot, PerfScenarioId, PerfStats, PerfSuiteConfig, RedrawReason,
         build_aggregate_report, merge_stats, run_suite, summarize_metric, summarize_scalar,
         validate_suite_config,
     };
+    use crate::backend::test_support::{build_pdf, unique_temp_path};
 
     #[test]
     fn records_milliseconds_and_clamped_rates() {
@@ -1212,76 +1212,5 @@ mod tests {
             .find(|scenario| scenario.id == PerfScenarioId::IdleSettledRedraw)
             .expect("idle scenario should be reported");
         assert_eq!(idle.parameters.idle_duration_ms, 1);
-    }
-
-    fn unique_temp_path(suffix: &str) -> std::path::PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after unix epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("pvf-perf-{}-{nanos}{suffix}", process::id()))
-    }
-
-    fn build_pdf(page_texts: &[&str]) -> Vec<u8> {
-        let page_texts = if page_texts.is_empty() {
-            vec!["".to_string()]
-        } else {
-            page_texts
-                .iter()
-                .map(|text| format!("BT /F1 14 Tf 36 260 Td ({text}) Tj ET"))
-                .collect()
-        };
-
-        let page_count = page_texts.len();
-        let page_ids: Vec<usize> = (0..page_count).map(|i| 4 + i * 2).collect();
-
-        let mut objects = Vec::new();
-        objects.push("<< /Type /Catalog /Pages 2 0 R >>".to_string());
-        let kids = page_ids
-            .iter()
-            .map(|id| format!("{id} 0 R"))
-            .collect::<Vec<_>>()
-            .join(" ");
-        objects.push(format!(
-            "<< /Type /Pages /Kids [{kids}] /Count {page_count} >>"
-        ));
-        objects.push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string());
-
-        for (index, stream) in page_texts.iter().enumerate() {
-            let content_id = 5 + index * 2;
-            objects.push(format!(
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 3 0 R >> >> /Contents {content_id} 0 R >>"
-            ));
-            objects.push(format!(
-                "<< /Length {} >>\nstream\n{}\nendstream",
-                stream.len(),
-                stream
-            ));
-        }
-
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
-        let mut offsets = vec![0_usize];
-        for (index, object) in objects.iter().enumerate() {
-            let object_id = index + 1;
-            offsets.push(bytes.len());
-            bytes.extend_from_slice(format!("{object_id} 0 obj\n{object}\nendobj\n").as_bytes());
-        }
-
-        let xref_start = bytes.len();
-        bytes.extend_from_slice(format!("xref\n0 {}\n", objects.len() + 1).as_bytes());
-        bytes.extend_from_slice(b"0000000000 65535 f \n");
-        for offset in offsets.iter().skip(1) {
-            bytes.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
-        }
-        bytes.extend_from_slice(
-            format!(
-                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n",
-                objects.len() + 1,
-                xref_start
-            )
-            .as_bytes(),
-        );
-        bytes
     }
 }

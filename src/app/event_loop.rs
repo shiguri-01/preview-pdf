@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crossterm::event::Event;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::{self, MissedTickBehavior};
 
@@ -12,7 +13,7 @@ use crate::perf::{PerfIterationSnapshot, PerfScenarioId, PerfScenarioParameters,
 use crate::presenter::{ImagePresenter, PanOffset, PresenterBackgroundEvent, Viewport};
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::RenderTask;
-use crate::render::worker::RenderWorker;
+use crate::render::worker::{RenderWorker, RenderWorkerResult};
 use crate::work::WorkClass;
 
 use super::actors::{InputActor, RenderActor, UiActor};
@@ -671,41 +672,14 @@ impl App {
     {
         // Wake events are not guaranteed to arrive before the next input event, so the
         // loop checks for timed-out sequences at the start of every iteration as well.
-        let timeout_outcome = self.interaction.flush_sequence_timeout(self.state.mode);
-        if timeout_outcome.clear_terminal {
-            runtime.session.clear()?;
-        }
-        if timeout_outcome.redraw {
-            self.request_redraw(runtime, RedrawReason::Input);
-        }
-        if matches!(
-            Self::enqueue_commands_and_optional_quit(
-                runtime,
-                timeout_outcome.commands,
-                timeout_outcome.quit_requested,
-            ),
-            LoopControl::Break
-        ) {
+        if matches!(self.handle_timeout_outcome(runtime)?, LoopControl::Break) {
             return Ok(LoopControl::Break);
         }
 
         match waited {
             WaitEvent::Event(DomainEvent::Input(event)) => {
-                let input_outcome = self.handle_input_event(
-                    event,
-                    &mut runtime.session,
-                    runtime.ui_actor.needs_redraw_mut(),
-                    runtime.input_actor.last_input_at_mut(),
-                )?;
-                if input_outcome.redraw_requested {
-                    self.request_redraw(runtime, RedrawReason::Input);
-                }
                 if matches!(
-                    Self::enqueue_commands_and_optional_quit(
-                        runtime,
-                        input_outcome.commands,
-                        input_outcome.quit_requested,
-                    ),
+                    self.handle_input_domain_event(event, runtime)?,
                     LoopControl::Break
                 ) {
                     return Ok(LoopControl::Break);
@@ -717,52 +691,7 @@ impl App {
                 self.request_redraw(runtime, RedrawReason::InputError);
             }
             WaitEvent::Event(DomainEvent::Command(request)) => {
-                let request = self.resolve_command_request(&runtime.session, request);
-                let state_before_command = self.state.clone();
-                let previous_page = self.state.current_page;
-                let dispatch = match self.interaction.dispatch_command(
-                    &mut self.state,
-                    request,
-                    Arc::clone(&pdf),
-                ) {
-                    Ok(dispatch) => dispatch,
-                    Err(err) => {
-                        self.state.apply_notice_action(notice_action_for_error(err));
-                        self.request_redraw(runtime, RedrawReason::Command);
-                        return Ok(LoopControl::Continue);
-                    }
-                };
-                for event in dispatch.emitted_events {
-                    let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
-                }
-                let palette_changed = self.interaction.apply_palette_requests(&mut self.state);
-                if palette_changed {
-                    self.request_redraw(runtime, RedrawReason::StateChanged);
-                }
-                if self.state.current_page != previous_page {
-                    self.interaction
-                        .extensions
-                        .host
-                        .prewarm_search_text(Arc::clone(&pdf));
-                    self.interaction
-                        .extensions
-                        .host
-                        .resolve_search_priority_geometry(
-                            Arc::clone(&pdf),
-                            [Some(self.state.current_page), None],
-                        );
-                }
-                match dispatch.outcome {
-                    CommandOutcome::QuitRequested => {
-                        Self::terminate_process_now(runtime);
-                    }
-                    CommandOutcome::Applied => self.request_redraw(runtime, RedrawReason::Command),
-                    CommandOutcome::Noop => {
-                        if !palette_changed && self.state != state_before_command {
-                            self.request_redraw(runtime, RedrawReason::Command);
-                        }
-                    }
-                }
+                self.handle_command_event(request, runtime, pdf)?;
             }
             WaitEvent::Event(DomainEvent::App(event)) => {
                 let needs_redraw = !matches!(event, AppEvent::CommandExecuted { .. });
@@ -772,31 +701,7 @@ impl App {
                 }
             }
             WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
-                let viewport =
-                    Self::current_viewport(&runtime.session, self.state.debug_status_visible);
-                let current_view = self.build_current_render_view(
-                    pdf.as_ref(),
-                    viewport,
-                    runtime.render_actor.generation() == 0,
-                );
-                let pan = self.current_pan();
-                let enable_crop = self.state.zoom > 1.0;
-                if self.render.process_render_result(
-                    &mut self.state,
-                    completed,
-                    current_view.current_interest_keys.as_slice(),
-                    viewport,
-                    pan,
-                    enable_crop,
-                    runtime
-                        .input_actor
-                        .is_interactive(runtime.prefetch_pause_after_input),
-                ) {
-                    self.request_redraw(runtime, RedrawReason::RenderComplete);
-                }
-                self.render
-                    .runtime
-                    .set_queue_depth_with_inflight(runtime.render_worker.in_flight_len());
+                self.handle_render_complete_event(completed, runtime, pdf.as_ref());
             }
             WaitEvent::Event(DomainEvent::EncodeComplete(
                 PresenterBackgroundEvent::EncodeComplete { redraw_requested },
@@ -818,6 +723,137 @@ impl App {
             WaitEvent::Closed => return Ok(LoopControl::Break),
         }
         Ok(LoopControl::Continue)
+    }
+
+    fn handle_timeout_outcome<S>(&mut self, runtime: &mut LoopRuntime<S>) -> AppResult<LoopControl>
+    where
+        S: TerminalSurface,
+    {
+        let timeout_outcome = self.interaction.flush_sequence_timeout(self.state.mode);
+        if timeout_outcome.clear_terminal {
+            runtime.session.clear()?;
+        }
+        if timeout_outcome.redraw {
+            self.request_redraw(runtime, RedrawReason::Input);
+        }
+        Ok(Self::enqueue_commands_and_optional_quit(
+            runtime,
+            timeout_outcome.commands,
+            timeout_outcome.quit_requested,
+        ))
+    }
+
+    fn handle_input_domain_event<S>(
+        &mut self,
+        event: Event,
+        runtime: &mut LoopRuntime<S>,
+    ) -> AppResult<LoopControl>
+    where
+        S: TerminalSurface,
+    {
+        let input_outcome = self.handle_input_event(
+            event,
+            &mut runtime.session,
+            runtime.ui_actor.needs_redraw_mut(),
+            runtime.input_actor.last_input_at_mut(),
+        )?;
+        if input_outcome.redraw_requested {
+            self.request_redraw(runtime, RedrawReason::Input);
+        }
+        Ok(Self::enqueue_commands_and_optional_quit(
+            runtime,
+            input_outcome.commands,
+            input_outcome.quit_requested,
+        ))
+    }
+
+    fn handle_command_event<S>(
+        &mut self,
+        request: CommandRequest,
+        runtime: &mut LoopRuntime<S>,
+        pdf: SharedPdfBackend,
+    ) -> AppResult<()>
+    where
+        S: TerminalSurface + SessionRestore,
+    {
+        let request = self.resolve_command_request(&runtime.session, request);
+        let state_before_command = self.state.clone();
+        let previous_page = self.state.current_page;
+        let dispatch =
+            match self
+                .interaction
+                .dispatch_command(&mut self.state, request, Arc::clone(&pdf))
+            {
+                Ok(dispatch) => dispatch,
+                Err(err) => {
+                    self.state.apply_notice_action(notice_action_for_error(err));
+                    self.request_redraw(runtime, RedrawReason::Command);
+                    return Ok(());
+                }
+            };
+        for event in dispatch.emitted_events {
+            let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
+        }
+        let palette_changed = self.interaction.apply_palette_requests(&mut self.state);
+        if palette_changed {
+            self.request_redraw(runtime, RedrawReason::StateChanged);
+        }
+        if self.state.current_page != previous_page {
+            self.interaction
+                .extensions
+                .host
+                .prewarm_search_text(Arc::clone(&pdf));
+            self.interaction
+                .extensions
+                .host
+                .resolve_search_priority_geometry(
+                    Arc::clone(&pdf),
+                    [Some(self.state.current_page), None],
+                );
+        }
+        match dispatch.outcome {
+            CommandOutcome::QuitRequested => {
+                Self::terminate_process_now(runtime);
+            }
+            CommandOutcome::Applied => self.request_redraw(runtime, RedrawReason::Command),
+            CommandOutcome::Noop => {
+                if !palette_changed && self.state != state_before_command {
+                    self.request_redraw(runtime, RedrawReason::Command);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn handle_render_complete_event<S>(
+        &mut self,
+        completed: RenderWorkerResult,
+        runtime: &mut LoopRuntime<S>,
+        pdf: &dyn PdfBackend,
+    ) where
+        S: TerminalSurface,
+    {
+        let viewport = Self::current_viewport(&runtime.session, self.state.debug_status_visible);
+        let current_view =
+            self.build_current_render_view(pdf, viewport, runtime.render_actor.generation() == 0);
+        let pan = self.current_pan();
+        let enable_crop = self.state.zoom > 1.0;
+        if self.render.process_render_result(
+            &mut self.state,
+            completed,
+            current_view.current_interest_keys.as_slice(),
+            viewport,
+            pan,
+            enable_crop,
+            runtime
+                .input_actor
+                .is_interactive(runtime.prefetch_pause_after_input),
+        ) {
+            self.request_redraw(runtime, RedrawReason::RenderComplete);
+        }
+        self.render
+            .runtime
+            .set_queue_depth_with_inflight(runtime.render_worker.in_flight_len());
     }
 
     fn request_redraw<S>(&mut self, runtime: &mut LoopRuntime<S>, reason: RedrawReason)

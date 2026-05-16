@@ -161,6 +161,28 @@ impl RatatuiImagePresenter {
         self.state.perf_stats.set_encode_in_flight(in_flight);
     }
 
+    fn sync_l2_hit_rate(&mut self) {
+        self.state
+            .perf_stats
+            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+    }
+
+    fn set_l2_state(&mut self, key: TerminalFrameKey, state: TerminalFrameState) {
+        self.state.l2_cache.set_state(&key, state);
+        self.sync_l2_hit_rate();
+    }
+
+    fn forget_last_ready_key_if_matches(&mut self, slot_index: usize, key: TerminalFrameKey) {
+        if self
+            .state
+            .last_ready_keys
+            .get(slot_index)
+            .is_some_and(|last_key| *last_key == Some(key))
+        {
+            self.state.last_ready_keys[slot_index] = None;
+        }
+    }
+
     fn set_encode_lane_state(&mut self, lane: EncodeLaneKind, depth: usize, in_flight: usize) {
         let state = match lane {
             EncodeLaneKind::Current => &mut self.encode.current.state,
@@ -216,16 +238,12 @@ impl RatatuiImagePresenter {
                 protected_keys,
             );
             if !inserted {
-                self.state
-                    .perf_stats
-                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                self.sync_l2_hit_rate();
                 return Ok(None);
             }
         }
 
-        self.state
-            .perf_stats
-            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+        self.sync_l2_hit_rate();
         Ok(Some(key))
     }
 
@@ -257,9 +275,7 @@ impl RatatuiImagePresenter {
                 }
 
                 if self.state.l2_cache.cached_mut(&key).is_none() {
-                    self.state
-                        .perf_stats
-                        .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                    self.sync_l2_hit_rate();
                     return Some(PresenterBackgroundEvent::EncodeComplete {
                         redraw_requested: self.is_current_slot_key(key),
                     });
@@ -300,9 +316,7 @@ impl RatatuiImagePresenter {
                 None
             }
         };
-        self.state
-            .perf_stats
-            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+        self.sync_l2_hit_rate();
         event
     }
 
@@ -434,13 +448,8 @@ impl RatatuiImagePresenter {
             && self.stable_slot_is_drawn(target.slot_index, key, render_area)
         {
             Self::preserve_terminal_area(frame, render_area);
-            self.state
-                .l2_cache
-                .set_state(&key, TerminalFrameState::Ready(protocol));
+            self.set_l2_state(key, TerminalFrameState::Ready(protocol));
             self.record_drawn_slot(target.slot_index, key, render_area);
-            self.state
-                .perf_stats
-                .set_l2_hit_rate(self.state.l2_cache.hit_rate());
             return Ok(true);
         }
         if target.options.force_image_redraw
@@ -453,22 +462,12 @@ impl RatatuiImagePresenter {
             frame.render_widget(Clear, target.area);
         }
         if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
-            self.state
-                .l2_cache
-                .set_state(&key, TerminalFrameState::Failed);
-            self.state
-                .perf_stats
-                .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+            self.set_l2_state(key, TerminalFrameState::Failed);
             return Err(err);
         }
         self.state.perf_stats.record_blit(blit_start.elapsed());
-        self.state
-            .l2_cache
-            .set_state(&key, TerminalFrameState::Ready(protocol));
+        self.set_l2_state(key, TerminalFrameState::Ready(protocol));
         self.record_drawn_slot(target.slot_index, key, render_area);
-        self.state
-            .perf_stats
-            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
         Ok(true)
     }
 
@@ -482,14 +481,7 @@ impl RatatuiImagePresenter {
         options: PresenterRenderOptions,
     ) -> AppResult<bool> {
         if self.state.l2_cache.cached_mut(&key).is_none() {
-            if self
-                .state
-                .last_ready_keys
-                .get(slot_index)
-                .is_some_and(|last_key| *last_key == Some(key))
-            {
-                self.state.last_ready_keys[slot_index] = None;
-            }
+            self.forget_last_ready_key_if_matches(slot_index, key);
             return Ok(false);
         };
         let state = self
@@ -510,38 +502,16 @@ impl RatatuiImagePresenter {
                 },
             ),
             TerminalFrameState::PendingFrame(frame) => {
-                self.state
-                    .l2_cache
-                    .set_state(&key, TerminalFrameState::PendingFrame(frame));
-                self.state
-                    .perf_stats
-                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                self.set_l2_state(key, TerminalFrameState::PendingFrame(frame));
                 Ok(false)
             }
             TerminalFrameState::Encoding => {
-                self.state
-                    .l2_cache
-                    .set_state(&key, TerminalFrameState::Encoding);
-                self.state
-                    .perf_stats
-                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                self.set_l2_state(key, TerminalFrameState::Encoding);
                 Ok(false)
             }
             TerminalFrameState::Failed => {
-                self.state
-                    .l2_cache
-                    .set_state(&key, TerminalFrameState::Failed);
-                if self
-                    .state
-                    .last_ready_keys
-                    .get(slot_index)
-                    .is_some_and(|last_key| *last_key == Some(key))
-                {
-                    self.state.last_ready_keys[slot_index] = None;
-                }
-                self.state
-                    .perf_stats
-                    .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+                self.set_l2_state(key, TerminalFrameState::Failed);
+                self.forget_last_ready_key_if_matches(slot_index, key);
                 Ok(false)
             }
         }
@@ -573,6 +543,100 @@ impl RatatuiImagePresenter {
 
     fn is_current_slot_key(&self, key: TerminalFrameKey) -> bool {
         self.state.current_keys.contains(&Some(key))
+    }
+
+    fn current_encode_request(
+        &self,
+        key: TerminalFrameKey,
+        frame: RgbaFrame,
+        area: Rect,
+        slot_index: usize,
+        horizontal_align: PresenterHorizontalAlign,
+        options: PresenterRenderOptions,
+    ) -> EncodeWorkerRequest {
+        let picker = if options.is_initial_preview() {
+            Picker::halfblocks()
+        } else {
+            self.config.picker.clone()
+        };
+        let encode_area = aligned_fit_area(
+            frame.width,
+            frame.height,
+            picker.font_size(),
+            area,
+            horizontal_align,
+            options.is_initial_preview(),
+        );
+        EncodeWorkerRequest::Encode {
+            key,
+            picker,
+            frame,
+            area: encode_area,
+            allow_upscale: options.is_initial_preview(),
+            class: WorkClass::CriticalCurrent,
+            generation: self
+                .state
+                .current_generations
+                .get(slot_index)
+                .copied()
+                .unwrap_or(0),
+            enqueued_at: Instant::now(),
+        }
+    }
+
+    fn background_encode_request(
+        &self,
+        key: TerminalFrameKey,
+        frame: RgbaFrame,
+        viewport_area: Rect,
+        class: WorkClass,
+        generation: u64,
+    ) -> EncodeWorkerRequest {
+        let area = centered_fit_area(
+            frame.width,
+            frame.height,
+            self.config.picker.font_size(),
+            viewport_area,
+        );
+        EncodeWorkerRequest::Encode {
+            key,
+            picker: self.config.picker.clone(),
+            frame,
+            area,
+            allow_upscale: false,
+            class,
+            generation,
+            enqueued_at: Instant::now(),
+        }
+    }
+
+    fn enqueue_current_encode(
+        request_tx: &Option<UnboundedSender<EncodeWorkerRequest>>,
+        request: EncodeWorkerRequest,
+    ) -> (TerminalFrameState, PresenterFeedback) {
+        match send_encode_request(request_tx, request) {
+            Ok(()) => (TerminalFrameState::Encoding, PresenterFeedback::Pending),
+            Err(err) => match *err {
+                EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown => {
+                    (TerminalFrameState::Failed, PresenterFeedback::Failed)
+                }
+            },
+        }
+    }
+
+    fn enqueue_background_encode(
+        request_tx: &Option<UnboundedSender<EncodeWorkerRequest>>,
+        request: EncodeWorkerRequest,
+    ) -> TerminalFrameState {
+        match send_encode_request(request_tx, request) {
+            Ok(()) => TerminalFrameState::Encoding,
+            Err(err) => match *err {
+                EncodeWorkerRequest::Encode { frame, .. } => {
+                    TerminalFrameState::PendingFrame(frame)
+                }
+                EncodeWorkerRequest::Shutdown => TerminalFrameState::Failed,
+            },
+        }
     }
 
     fn render_slot(
@@ -614,9 +678,7 @@ impl RatatuiImagePresenter {
         };
         let request_tx = self.encode_request_tx(EncodeLaneKind::Current);
         if self.state.l2_cache.cached_mut(&key).is_none() {
-            self.state
-                .perf_stats
-                .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+            self.sync_l2_hit_rate();
             let drew_image = if options.allow_stale_fallback {
                 self.try_draw_stale_fallback(
                     frame,
@@ -663,63 +725,28 @@ impl RatatuiImagePresenter {
                     ));
                 }
                 TerminalFrameState::PendingFrame(frame) => {
-                    let picker = if options.is_initial_preview() {
-                        Picker::halfblocks()
-                    } else {
-                        self.config.picker.clone()
-                    };
-                    let encode_area = aligned_fit_area(
-                        frame.width,
-                        frame.height,
-                        picker.font_size(),
-                        area,
-                        horizontal_align,
-                        options.is_initial_preview(),
-                    );
-                    let request = EncodeWorkerRequest::Encode {
+                    let request = self.current_encode_request(
                         key,
-                        picker,
                         frame,
-                        area: encode_area,
-                        allow_upscale: options.is_initial_preview(),
-                        class: WorkClass::CriticalCurrent,
-                        generation: self
-                            .state
-                            .current_generations
-                            .get(slot_index)
-                            .copied()
-                            .unwrap_or(0),
-                        enqueued_at: Instant::now(),
-                    };
-
-                    let (new_state, feedback) = match send_encode_request(&request_tx, request) {
-                        Ok(()) => (TerminalFrameState::Encoding, PresenterFeedback::Pending),
-                        Err(err) => match *err {
-                            EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown => {
-                                (TerminalFrameState::Failed, PresenterFeedback::Failed)
-                            }
-                        },
-                    };
-                    self.state.l2_cache.set_state(&key, new_state);
+                        area,
+                        slot_index,
+                        horizontal_align,
+                        options,
+                    );
+                    let (new_state, feedback) = Self::enqueue_current_encode(&request_tx, request);
+                    self.set_l2_state(key, new_state);
                     feedback
                 }
                 TerminalFrameState::Encoding => {
-                    self.state
-                        .l2_cache
-                        .set_state(&key, TerminalFrameState::Encoding);
+                    self.set_l2_state(key, TerminalFrameState::Encoding);
                     PresenterFeedback::Pending
                 }
                 TerminalFrameState::Failed => {
-                    self.state
-                        .l2_cache
-                        .set_state(&key, TerminalFrameState::Failed);
+                    self.set_l2_state(key, TerminalFrameState::Failed);
                     PresenterFeedback::Failed
                 }
             }
         };
-        self.state
-            .perf_stats
-            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
         let drew_image = if options.allow_stale_fallback {
             self.try_draw_stale_fallback(
                 frame,
@@ -833,12 +860,9 @@ impl ImagePresenter for RatatuiImagePresenter {
             viewport.width.max(1),
             viewport.height.max(1),
         );
-        let font_size = self.config.picker.font_size();
         let request_tx = self.encode_request_tx(EncodeLaneKind::Background);
         if self.state.l2_cache.cached_mut(&key).is_none() {
-            self.state
-                .perf_stats
-                .set_l2_hit_rate(self.state.l2_cache.hit_rate());
+            self.sync_l2_hit_rate();
             return Ok(());
         };
 
@@ -849,48 +873,22 @@ impl ImagePresenter for RatatuiImagePresenter {
             .expect("entry existence checked above");
         match state {
             TerminalFrameState::PendingFrame(frame) => {
-                let area = centered_fit_area(frame.width, frame.height, font_size, viewport_area);
-                let request = EncodeWorkerRequest::Encode {
-                    key,
-                    picker: self.config.picker.clone(),
-                    frame,
-                    area,
-                    allow_upscale: false,
-                    class,
-                    generation,
-                    enqueued_at: Instant::now(),
-                };
-                let new_state = match send_encode_request(&request_tx, request) {
-                    Ok(()) => TerminalFrameState::Encoding,
-                    Err(err) => match *err {
-                        EncodeWorkerRequest::Encode { frame, .. } => {
-                            TerminalFrameState::PendingFrame(frame)
-                        }
-                        EncodeWorkerRequest::Shutdown => TerminalFrameState::Failed,
-                    },
-                };
-                self.state.l2_cache.set_state(&key, new_state);
+                let request =
+                    self.background_encode_request(key, frame, viewport_area, class, generation);
+                let new_state = Self::enqueue_background_encode(&request_tx, request);
+                self.set_l2_state(key, new_state);
             }
             TerminalFrameState::Encoding => {
-                self.state
-                    .l2_cache
-                    .set_state(&key, TerminalFrameState::Encoding);
+                self.set_l2_state(key, TerminalFrameState::Encoding);
             }
             TerminalFrameState::Ready(protocol) => {
-                self.state
-                    .l2_cache
-                    .set_state(&key, TerminalFrameState::Ready(protocol));
+                self.set_l2_state(key, TerminalFrameState::Ready(protocol));
             }
             TerminalFrameState::Failed => {
-                self.state
-                    .l2_cache
-                    .set_state(&key, TerminalFrameState::Failed);
+                self.set_l2_state(key, TerminalFrameState::Failed);
             }
         }
 
-        self.state
-            .perf_stats
-            .set_l2_hit_rate(self.state.l2_cache.hit_rate());
         Ok(())
     }
 

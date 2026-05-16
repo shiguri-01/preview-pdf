@@ -10,7 +10,7 @@ use crate::command::{Command, CommandOutcome, CommandRequest, PanAmount};
 use crate::error::{AppError, AppResult};
 use crate::event::{AppEvent, DomainEvent};
 use crate::perf::{PerfIterationSnapshot, PerfScenarioId, PerfScenarioParameters, RedrawReason};
-use crate::presenter::{ImagePresenter, PanOffset, PresenterBackgroundEvent, Viewport};
+use crate::presenter::{ImagePresenter, PresenterBackgroundEvent};
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::RenderTask;
 use crate::render::worker::{RenderWorker, RenderWorkerResult};
@@ -22,7 +22,8 @@ use super::perf_runner::{
     HeadlessTerminalSession, PERF_HEADLESS_HEIGHT, PERF_HEADLESS_WIDTH, PerfLoopDriver,
 };
 use super::render_ops::{
-    CurrentInterestKeys, CurrentTaskContext, PrefetchDispatchContext, RequiredRenderPages,
+    CurrentInterestKeys, CurrentTaskContext, PrefetchDispatchContext, PrefetchDispatchPlan,
+    RequiredRenderPages,
 };
 use super::scale::select_input_poll_timeout;
 use super::state::notice_action_for_error;
@@ -48,16 +49,12 @@ struct LoopRuntime<S> {
 
 struct LoopStep {
     current_scale: f32,
-    overlay_stamp: u64,
-    prefetch_viewport: Option<Viewport>,
-    base_pan: PanOffset,
-    enable_crop: bool,
-    interactive: bool,
     visible_pages: super::state::VisiblePageSlots,
     required: RequiredRenderPages,
     current_interest_keys: CurrentInterestKeys,
     initial_preview: Option<InitialPreviewPlan>,
     initial_preview_tasks: Vec<RenderTask>,
+    prefetch_dispatch: PrefetchDispatchContext,
     presenter_key: RenderedPageKey,
     current_cached: bool,
 }
@@ -364,6 +361,7 @@ impl App {
             &runtime.input_actor,
             runtime.render_actor.generation(),
             runtime.prefetch_pause_after_input,
+            self.config.render.prefetch_dispatch_budget_per_tick,
         );
         let changed = self.drain_background_and_sync_navigation(
             pdf,
@@ -387,16 +385,7 @@ impl App {
             &mut self.state,
             &mut runtime.render_actor,
             &mut runtime.render_worker,
-            PrefetchDispatchContext {
-                required: step.required,
-                current_cached: step.current_cached,
-                overlay_stamp: step.overlay_stamp,
-                prefetch_viewport: step.prefetch_viewport,
-                base_pan: step.base_pan,
-                enable_crop: step.enable_crop,
-                interactive: step.interactive,
-                dispatch_budget: self.config.render.prefetch_dispatch_budget_per_tick,
-            },
+            step.prefetch_dispatch,
         );
         self.update_ui_and_render_frame(runtime, pdf, changed, &step)?;
         Ok(step)
@@ -446,6 +435,7 @@ impl App {
         input_actor: &InputActor,
         render_generation: u64,
         prefetch_pause_after_input: Duration,
+        prefetch_dispatch_budget: usize,
     ) -> LoopStep {
         let prefetch_viewport = Self::current_viewport(session, self.state.debug_status_visible);
         let visible_pages = self.state.visible_page_slots(pdf.page_count());
@@ -464,20 +454,25 @@ impl App {
             .highlight_overlay_for(current_view.visible_pages.existing_pages())
             .stamp;
         let base_pan = self.current_pan();
-        let enable_crop = self.state.zoom > 1.0;
         let interactive = input_actor.is_interactive(prefetch_pause_after_input);
+        let prefetch_dispatch = current_view.prefetch_dispatch_context(
+            &self.state,
+            PrefetchDispatchPlan {
+                overlay_stamp,
+                prefetch_viewport,
+                base_pan,
+                interactive,
+                dispatch_budget: prefetch_dispatch_budget,
+            },
+        );
 
         LoopStep {
             current_scale: current_view.current_scale,
-            overlay_stamp,
-            prefetch_viewport,
-            base_pan,
-            enable_crop,
-            interactive,
             visible_pages: current_view.visible_pages,
             required: current_view.required,
             current_interest_keys: current_view.current_interest_keys,
             initial_preview_tasks: current_view.preview_tasks(render_generation),
+            prefetch_dispatch,
             initial_preview: current_view.initial_preview,
             presenter_key: current_view.presenter_key,
             current_cached: current_view.current_cached,

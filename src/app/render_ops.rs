@@ -81,6 +81,7 @@ pub(crate) struct CurrentTaskContext {
     pub(crate) preview_tasks: Vec<RenderTask>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct PrefetchDispatchContext {
     pub(crate) required: RequiredRenderPages,
     pub(crate) current_cached: bool,
@@ -88,6 +89,14 @@ pub(crate) struct PrefetchDispatchContext {
     pub(crate) prefetch_viewport: Option<Viewport>,
     pub(crate) base_pan: PanOffset,
     pub(crate) enable_crop: bool,
+    pub(crate) interactive: bool,
+    pub(crate) dispatch_budget: usize,
+}
+
+pub(crate) struct PrefetchDispatchPlan {
+    pub(crate) overlay_stamp: u64,
+    pub(crate) prefetch_viewport: Option<Viewport>,
+    pub(crate) base_pan: PanOffset,
     pub(crate) interactive: bool,
     pub(crate) dispatch_budget: usize,
 }
@@ -125,6 +134,23 @@ impl CurrentRenderView {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    pub(crate) fn prefetch_dispatch_context(
+        &self,
+        state: &AppState,
+        plan: PrefetchDispatchPlan,
+    ) -> PrefetchDispatchContext {
+        PrefetchDispatchContext {
+            required: self.required,
+            current_cached: self.current_cached,
+            overlay_stamp: plan.overlay_stamp,
+            prefetch_viewport: plan.prefetch_viewport,
+            base_pan: plan.base_pan,
+            enable_crop: state.zoom > 1.0,
+            interactive: plan.interactive,
+            dispatch_budget: plan.dispatch_budget,
+        }
     }
 }
 

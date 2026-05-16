@@ -12,7 +12,7 @@ This document owns:
 - module navigation guidance
 
 Feature behavior lives in `runtime-spec.md` and the subsystem specs rather than
-here.
+here. Worker ownership and cancellation details live in `async-workers.md`.
 
 ## Top-level runtime model
 
@@ -92,3 +92,4 @@ here.
 - `src/command/`
 - `src/extension/host.rs`
 - `src/palette/registry.rs`
+- `docs/async-workers.md`

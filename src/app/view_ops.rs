@@ -10,8 +10,8 @@ use crate::input::sequence::SequenceRegistrySnapshot;
 use crate::palette::PaletteView;
 use crate::presenter::{
     PanOffset, PresenterFeedback, PresenterHorizontalAlign, PresenterRenderMode,
-    PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot, PresenterSlotOutcome,
-    Viewport,
+    PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo,
+    PresenterSlotOutcome, Viewport,
 };
 use crate::render::cache::RenderedPageKey;
 use crate::ui;
@@ -21,7 +21,7 @@ use super::core::{App, RenderSubsystem};
 use super::scale::{
     compute_render_scale, compute_scale, quantize_scale, resolved_cell_size_px, scale_eq,
 };
-use super::state::{AppState, VisiblePageSlots};
+use super::state::{AppState, Mode, VisiblePageSlots};
 use super::terminal_session::TerminalSurface;
 
 const SPREAD_GAP_CELLS: u16 = 2;
@@ -46,6 +46,121 @@ pub(super) struct RenderFramePlan {
     pub(super) highlight_overlay: HighlightOverlaySnapshot,
     pub(super) generation: u64,
     pub(super) nav_streak: usize,
+}
+
+struct RenderFrameDrawPlan {
+    palette_view: Option<PaletteView>,
+    help_keymap: SequenceRegistrySnapshot,
+    status_bar_segments: Vec<String>,
+    page_count: usize,
+    visible_pages: VisiblePageSlots,
+    current_scale: f32,
+    initial_preview: Option<InitialPreviewPlan>,
+    highlight_overlay: HighlightOverlaySnapshot,
+    generation: u64,
+    mode: Mode,
+    help_scroll: usize,
+    debug_status_visible: bool,
+    chrome_state: AppState,
+    page_layout_mode: PageLayoutMode,
+    enable_crop: bool,
+    file_name: String,
+    presenter_backend_name: &'static str,
+    presenter_runtime: PresenterRuntimeInfo,
+    presenter_cell_px: Option<(u16, u16)>,
+    render_options: PresenterRenderOptions,
+    pan: PanOffset,
+    image_occluded: bool,
+    loading_label: String,
+    render_target: String,
+    spread_gap_px: u32,
+}
+
+struct RenderFrameFeedback {
+    pan: PanOffset,
+    render_failed: bool,
+    render_feedback: PresenterFeedback,
+    viewer_has_image: bool,
+    image_occluded: bool,
+    render_target: String,
+}
+
+impl RenderFrameDrawPlan {
+    fn new(
+        state: &AppState,
+        pdf: &dyn PdfBackend,
+        plan: RenderFramePlan,
+        viewer_has_image: bool,
+        image_occluded_last_frame: bool,
+        presenter_backend_name: &'static str,
+        presenter_runtime: PresenterRuntimeInfo,
+        presenter_cell_px: Option<(u16, u16)>,
+    ) -> Self {
+        let RenderFramePlan {
+            palette_view,
+            help_keymap,
+            status_bar_segments,
+            page_count,
+            visible_pages,
+            current_scale,
+            initial_preview,
+            presenter_key: _presenter_key,
+            highlight_overlay,
+            generation,
+            nav_streak: _nav_streak,
+        } = plan;
+        let image_occluded = palette_view.is_some() || state.mode == Mode::Help;
+        let render_options = presenter_render_options(
+            viewer_has_image,
+            PresenterRenderMode::Full,
+            image_occluded,
+            image_occluded_last_frame && !image_occluded,
+        );
+        let file_name = pdf
+            .path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+            .unwrap_or_else(|| pdf.path().display().to_string());
+        let loading_label = format_loading_target(visible_pages);
+        let render_target = format_render_target(visible_pages);
+        let spread_gap_px = u32::from(
+            resolved_cell_size_px(presenter_cell_px)
+                .0
+                .saturating_mul(SPREAD_GAP_CELLS),
+        );
+
+        Self {
+            palette_view,
+            help_keymap,
+            status_bar_segments,
+            page_count,
+            visible_pages,
+            current_scale,
+            initial_preview,
+            highlight_overlay,
+            generation,
+            mode: state.mode,
+            help_scroll: state.help_scroll,
+            debug_status_visible: state.debug_status_visible,
+            chrome_state: state.clone(),
+            page_layout_mode: state.page_layout_mode,
+            enable_crop: state.zoom > 1.0,
+            file_name,
+            presenter_backend_name,
+            presenter_runtime,
+            presenter_cell_px,
+            render_options,
+            pan: PanOffset {
+                cells_x: state.pan_x,
+                cells_y: state.pan_y,
+            },
+            image_occluded,
+            loading_label,
+            render_target,
+            spread_gap_px,
+        }
+    }
 }
 
 impl App {
@@ -270,64 +385,44 @@ impl RenderSubsystem {
         pdf: &dyn PdfBackend,
         plan: RenderFramePlan,
     ) -> AppResult<()> {
-        let RenderFramePlan {
-            palette_view,
-            help_keymap,
-            status_bar_segments,
-            page_count,
-            visible_pages,
-            current_scale,
-            initial_preview,
-            presenter_key: _presenter_key,
-            highlight_overlay,
-            generation,
-            nav_streak: _nav_streak,
-        } = plan;
-        let image_occluded = palette_view.is_some() || state.mode == super::state::Mode::Help;
-        // Keep the last ready frame visible while the next page is still preparing
-        // so page flips do not briefly expose the terminal background.
-        // Stable image slots are preserved while overlays are open; once an
-        // overlay closes, force one redraw to restore cells it covered.
-        let render_options = presenter_render_options(
-            self.viewer_has_image,
-            PresenterRenderMode::Full,
-            image_occluded,
-            self.image_occluded_last_frame && !image_occluded,
-        );
-        let file_name = pdf
-            .path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_owned)
-            .unwrap_or_else(|| pdf.path().display().to_string());
         let presenter_caps = self.presenter.capabilities();
-        let presenter_runtime = self.presenter.runtime_info();
-        let enable_crop = state.zoom > 1.0;
-        let mut pan = PanOffset {
-            cells_x: state.pan_x,
-            cells_y: state.pan_y,
-        };
+        let draw_plan = RenderFrameDrawPlan::new(
+            state,
+            pdf,
+            plan,
+            self.viewer_has_image,
+            self.image_occluded_last_frame,
+            presenter_caps.backend_name,
+            self.presenter.runtime_info(),
+            presenter_caps.cell_px,
+        );
+        let feedback = self.draw_render_frame(session, pdf, draw_plan)?;
+        self.apply_render_frame_feedback(state, feedback);
+
+        Ok(())
+    }
+
+    fn draw_render_frame(
+        &mut self,
+        session: &mut impl TerminalSurface,
+        pdf: &dyn PdfBackend,
+        draw_plan: RenderFrameDrawPlan,
+    ) -> AppResult<RenderFrameFeedback> {
+        let mut pan = draw_plan.pan;
         let mut render_failed = false;
         let mut render_feedback = PresenterFeedback::None;
         let mut viewer_has_image = self.viewer_has_image;
-        let loading_label = format_loading_target(visible_pages);
-        let render_target = format_render_target(visible_pages);
-        let spread_gap_px = u32::from(
-            resolved_cell_size_px(presenter_caps.cell_px)
-                .0
-                .saturating_mul(SPREAD_GAP_CELLS),
-        );
         session.draw(|frame| {
-            let layout = ui::split_layout(frame.area(), state.debug_status_visible);
+            let layout = ui::split_layout(frame.area(), draw_plan.debug_status_visible);
             ui::draw_chrome(
                 frame,
                 layout,
-                state,
-                &file_name,
-                page_count,
-                presenter_caps.backend_name,
-                presenter_runtime.graphics_protocol,
-                &status_bar_segments,
+                &draw_plan.chrome_state,
+                &draw_plan.file_name,
+                draw_plan.page_count,
+                draw_plan.presenter_backend_name,
+                draw_plan.presenter_runtime.graphics_protocol,
+                &draw_plan.status_bar_segments,
             );
 
             let viewport = Viewport {
@@ -339,32 +434,32 @@ impl RenderSubsystem {
             let image_area = layout.viewer_inner;
             let spread_slot_areas = split_spread_slot_areas(image_area, SPREAD_GAP_CELLS);
 
-            let prepare_result = match state.page_layout_mode {
+            let prepare_result = match draw_plan.page_layout_mode {
                 PageLayoutMode::Single => self.prepare_single_page_or_preview_from_cache(
                     pdf,
                     viewport,
-                    visible_pages.anchor_page,
-                    current_scale,
-                    initial_preview.as_ref(),
+                    draw_plan.visible_pages.anchor_page,
+                    draw_plan.current_scale,
+                    draw_plan.initial_preview.as_ref(),
                     &mut pan,
-                    presenter_caps.cell_px,
-                    enable_crop,
-                    &highlight_overlay,
-                    generation,
+                    draw_plan.presenter_cell_px,
+                    draw_plan.enable_crop,
+                    &draw_plan.highlight_overlay,
+                    draw_plan.generation,
                 ),
                 PageLayoutMode::Spread => self.prepare_spread_or_preview_from_cache(
                     pdf,
                     viewport,
-                    visible_pages,
+                    draw_plan.visible_pages,
                     spread_slot_areas,
-                    current_scale,
-                    initial_preview.as_ref(),
+                    draw_plan.current_scale,
+                    draw_plan.initial_preview.as_ref(),
                     &mut pan,
-                    presenter_caps.cell_px,
-                    enable_crop,
-                    &highlight_overlay,
-                    generation,
-                    spread_gap_px,
+                    draw_plan.presenter_cell_px,
+                    draw_plan.enable_crop,
+                    &draw_plan.highlight_overlay,
+                    draw_plan.generation,
+                    draw_plan.spread_gap_px,
                 ),
             };
 
@@ -372,9 +467,9 @@ impl RenderSubsystem {
                 Ok(Some((render_mode, spread_render_slots))) => {
                     let options = PresenterRenderOptions {
                         render_mode,
-                        ..render_options
+                        ..draw_plan.render_options
                     };
-                    let render_result = match state.page_layout_mode {
+                    let render_result = match draw_plan.page_layout_mode {
                         PageLayoutMode::Single => {
                             let render_slots: Vec<_> = spread_render_slots
                                 .into_iter()
@@ -399,18 +494,22 @@ impl RenderSubsystem {
                                 viewer_has_image = true;
                             }
                             let allow_viewer_loading =
-                                state.page_layout_mode == PageLayoutMode::Single;
+                                draw_plan.page_layout_mode == PageLayoutMode::Single;
                             draw_viewer_outcome(
                                 frame,
                                 image_area,
                                 &outcome,
-                                loading_label.as_str(),
+                                draw_plan.loading_label.as_str(),
                                 None,
                                 viewer_has_image,
                                 allow_viewer_loading,
                             );
-                            if state.page_layout_mode == PageLayoutMode::Spread {
-                                draw_spread_loading_overlays(frame, &outcome, visible_pages);
+                            if draw_plan.page_layout_mode == PageLayoutMode::Spread {
+                                draw_spread_loading_overlays(
+                                    frame,
+                                    &outcome,
+                                    draw_plan.visible_pages,
+                                );
                             }
                         }
                         Err(err) => {
@@ -421,8 +520,8 @@ impl RenderSubsystem {
                                 frame,
                                 image_area,
                                 &outcome,
-                                loading_label.as_str(),
-                                Some(render_target.as_str()),
+                                draw_plan.loading_label.as_str(),
+                                Some(draw_plan.render_target.as_str()),
                                 viewer_has_image,
                                 true,
                             );
@@ -431,7 +530,7 @@ impl RenderSubsystem {
                 }
                 Ok(None) => {
                     render_feedback = PresenterFeedback::Pending;
-                    let outcome = match state.page_layout_mode {
+                    let outcome = match draw_plan.page_layout_mode {
                         PageLayoutMode::Single => PresenterRenderOutcome {
                             slots: vec![PresenterSlotOutcome::active(
                                 image_area,
@@ -443,25 +542,25 @@ impl RenderSubsystem {
                         },
                         PageLayoutMode::Spread => pending_spread_outcome(
                             spread_slot_areas,
-                            visible_pages,
+                            draw_plan.visible_pages,
                             PresenterFeedback::Pending,
                         ),
                     };
-                    let allow_viewer_loading = state.page_layout_mode == PageLayoutMode::Single;
-                    if state.page_layout_mode == PageLayoutMode::Spread {
+                    let allow_viewer_loading = draw_plan.page_layout_mode == PageLayoutMode::Single;
+                    if draw_plan.page_layout_mode == PageLayoutMode::Spread {
                         clear_pending_spread_regions(frame, spread_slot_areas, &outcome);
                     }
                     draw_viewer_outcome(
                         frame,
                         image_area,
                         &outcome,
-                        loading_label.as_str(),
+                        draw_plan.loading_label.as_str(),
                         None,
                         viewer_has_image,
                         allow_viewer_loading,
                     );
-                    if state.page_layout_mode == PageLayoutMode::Spread {
-                        draw_spread_loading_overlays(frame, &outcome, visible_pages);
+                    if draw_plan.page_layout_mode == PageLayoutMode::Spread {
+                        draw_spread_loading_overlays(frame, &outcome, draw_plan.visible_pages);
                     }
                 }
                 Err(err) => {
@@ -472,30 +571,50 @@ impl RenderSubsystem {
                         frame,
                         image_area,
                         &outcome,
-                        loading_label.as_str(),
-                        Some(render_target.as_str()),
+                        draw_plan.loading_label.as_str(),
+                        Some(draw_plan.render_target.as_str()),
                         viewer_has_image,
                         true,
                     );
                 }
             }
 
-            if let Some(view) = palette_view.as_ref() {
+            if let Some(view) = draw_plan.palette_view.as_ref() {
                 ui::draw_palette_overlay(frame, image_area, view);
             }
-            if state.mode == super::state::Mode::Help {
-                ui::draw_help_overlay(frame, image_area, state.help_scroll, &help_keymap);
+            if draw_plan.mode == Mode::Help {
+                ui::draw_help_overlay(
+                    frame,
+                    image_area,
+                    draw_plan.help_scroll,
+                    &draw_plan.help_keymap,
+                );
             }
         })?;
-        state.pan_x = pan.cells_x;
-        state.pan_y = pan.cells_y;
+
+        Ok(RenderFrameFeedback {
+            pan,
+            render_failed,
+            render_feedback,
+            viewer_has_image,
+            image_occluded: draw_plan.image_occluded,
+            render_target: draw_plan.render_target,
+        })
+    }
+
+    fn apply_render_frame_feedback(&mut self, state: &mut AppState, feedback: RenderFrameFeedback) {
+        state.pan_x = feedback.pan.cells_x;
+        state.pan_y = feedback.pan.cells_y;
         self.runtime.sync_presenter_metrics(self.presenter.as_ref());
-        self.viewer_has_image = viewer_has_image;
-        self.image_occluded_last_frame = image_occluded;
+        self.viewer_has_image = feedback.viewer_has_image;
+        self.image_occluded_last_frame = feedback.image_occluded;
 
-        sync_render_notice(state, render_failed, render_feedback, &render_target);
-
-        Ok(())
+        sync_render_notice(
+            state,
+            feedback.render_failed,
+            feedback.render_feedback,
+            &feedback.render_target,
+        );
     }
 }
 

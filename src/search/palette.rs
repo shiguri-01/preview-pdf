@@ -423,7 +423,6 @@ mod tests {
         let app = PaletteAppSnapshot {
             current_page: 4,
             page_layout_mode: PageLayoutMode::Spread,
-            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot {
             search_results_entries: vec![

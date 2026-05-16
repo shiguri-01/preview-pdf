@@ -76,6 +76,12 @@ struct RenderFrameDrawPlan {
     spread_gap_px: u32,
 }
 
+struct RenderFramePresenterInfo {
+    backend_name: &'static str,
+    runtime: PresenterRuntimeInfo,
+    cell_px: Option<(u16, u16)>,
+}
+
 struct RenderFrameFeedback {
     pan: PanOffset,
     render_failed: bool,
@@ -92,9 +98,7 @@ impl RenderFrameDrawPlan {
         plan: RenderFramePlan,
         viewer_has_image: bool,
         image_occluded_last_frame: bool,
-        presenter_backend_name: &'static str,
-        presenter_runtime: PresenterRuntimeInfo,
-        presenter_cell_px: Option<(u16, u16)>,
+        presenter: RenderFramePresenterInfo,
     ) -> Self {
         let RenderFramePlan {
             palette_view,
@@ -125,7 +129,7 @@ impl RenderFrameDrawPlan {
         let loading_label = format_loading_target(visible_pages);
         let render_target = format_render_target(visible_pages);
         let spread_gap_px = u32::from(
-            resolved_cell_size_px(presenter_cell_px)
+            resolved_cell_size_px(presenter.cell_px)
                 .0
                 .saturating_mul(SPREAD_GAP_CELLS),
         );
@@ -153,9 +157,9 @@ impl RenderFrameDrawPlan {
             page_layout_mode: state.page_layout_mode,
             enable_crop: state.zoom > 1.0,
             file_name,
-            presenter_backend_name,
-            presenter_runtime,
-            presenter_cell_px,
+            presenter_backend_name: presenter.backend_name,
+            presenter_runtime: presenter.runtime,
+            presenter_cell_px: presenter.cell_px,
             render_options,
             pan: PanOffset {
                 cells_x: state.pan_x,
@@ -398,9 +402,11 @@ impl RenderSubsystem {
             plan,
             self.viewer_has_image,
             self.image_occluded_last_frame,
-            presenter_caps.backend_name,
-            self.presenter.runtime_info(),
-            presenter_caps.cell_px,
+            RenderFramePresenterInfo {
+                backend_name: presenter_caps.backend_name,
+                runtime: self.presenter.runtime_info(),
+                cell_px: presenter_caps.cell_px,
+            },
         );
         let feedback = self.draw_render_frame(session, pdf, draw_plan)?;
         self.apply_render_frame_feedback(state, feedback);

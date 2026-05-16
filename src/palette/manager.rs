@@ -218,7 +218,7 @@ impl PaletteManager {
                 let provider = registry.get(session.kind);
                 let selected = selected_candidate(session);
                 let previous_input = session.input.value().to_string();
-                let app_snapshot = PaletteAppSnapshot::from(&*app);
+                let app_snapshot = PaletteAppSnapshot::from(app);
                 let ctx = PaletteContext {
                     app: app_snapshot,
                     extensions,
@@ -242,7 +242,7 @@ impl PaletteManager {
             KeyCode::Enter => {
                 let selected = selected_candidate(session);
                 let provider = registry.get(session.kind);
-                let app_snapshot = PaletteAppSnapshot::from(&*app);
+                let app_snapshot = PaletteAppSnapshot::from(app);
                 let ctx = PaletteContext {
                     app: app_snapshot,
                     extensions,
@@ -453,7 +453,7 @@ mod tests {
     fn command_palette_uses_ctrl_n_for_selection_when_input_history_is_enabled() {
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
-        let mut app = AppState::default();
+        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         manager
@@ -473,7 +473,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
             )
@@ -484,7 +484,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE),
             )
@@ -498,7 +498,7 @@ mod tests {
     fn command_palette_recalls_input_history_with_up_and_restores_draft_on_down() {
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
-        let mut app = AppState::default();
+        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         manager
@@ -515,7 +515,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
             )
@@ -524,7 +524,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
             )
@@ -533,7 +533,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
             )
@@ -553,7 +553,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
             )
@@ -573,7 +573,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
             )
@@ -584,7 +584,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
             )
@@ -597,7 +597,7 @@ mod tests {
     fn search_palette_keeps_selection_when_typing_after_ctrl_n() {
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
-        let mut app = AppState::default();
+        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         manager
@@ -614,7 +614,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
             )
@@ -625,7 +625,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
             )
@@ -639,7 +639,7 @@ mod tests {
     fn tab_completion_resets_history_navigation_state() {
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
-        let mut app = AppState::default();
+        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         manager
@@ -656,7 +656,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
             )
@@ -664,7 +664,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
             )
@@ -676,7 +676,7 @@ mod tests {
         manager
             .handle_key(
                 &registry,
-                &mut app,
+                &app,
                 &extensions,
                 KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
             )

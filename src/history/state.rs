@@ -280,7 +280,7 @@ mod tests {
     use crate::event::{AppEvent, GotoKind, NavReason};
     use crate::extension::ExtensionUiSnapshot;
     use crate::history::palette::HistoryPaletteProvider;
-    use crate::palette::{PaletteContext, PaletteKind, PaletteProvider};
+    use crate::palette::{PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteProvider};
 
     #[test]
     fn destination_reason_is_stored_on_the_destination_page() {
@@ -422,14 +422,14 @@ mod tests {
         assert!(seed.contains("%3B"));
 
         let provider = HistoryPaletteProvider;
-        let app = AppState {
+        let app = PaletteAppSnapshot {
             current_page: 6,
-            ..AppState::default()
+            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot::default();
         let payload = crate::palette::PaletteOpenPayload::HistorySeed(seed);
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::History,
             input: "",

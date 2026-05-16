@@ -80,6 +80,7 @@ here.
 - palette provider resolution is a static match on `PaletteKind`
 - current extension ownership is explicit in `ExtensionHost`
 - extension UI data is exposed to palettes through `ExtensionUiSnapshot`
+- app data exposed to palettes is limited to a read-only palette snapshot
 - render and presenter scheduling share `WorkClass` to classify priority and
   stale-generation handling
 

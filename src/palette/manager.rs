@@ -12,8 +12,8 @@ use super::matcher::{CandidateMatcher, ContainsMatcher};
 use super::registry::PaletteProviderRef;
 use super::registry::PaletteRegistry;
 use super::types::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView, PaletteKeyResult,
-    PaletteOpenPayload, PaletteSubmitAction, PaletteTabEffect, PaletteView,
+    PaletteAppSnapshot, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView,
+    PaletteKeyResult, PaletteOpenPayload, PaletteSubmitAction, PaletteTabEffect, PaletteView,
 };
 
 #[derive(Debug)]
@@ -113,6 +113,7 @@ impl PaletteManager {
         let provider = registry.get(kind);
 
         let input = Input::new(provider.initial_input(payload.as_ref()));
+        let app = PaletteAppSnapshot::from(app);
 
         let ctx = PaletteContext {
             app,
@@ -217,8 +218,9 @@ impl PaletteManager {
                 let provider = registry.get(session.kind);
                 let selected = selected_candidate(session);
                 let previous_input = session.input.value().to_string();
+                let app_snapshot = PaletteAppSnapshot::from(&*app);
                 let ctx = PaletteContext {
-                    app,
+                    app: app_snapshot,
                     extensions,
                     kind: session.kind,
                     input: session.input.value(),
@@ -240,8 +242,9 @@ impl PaletteManager {
             KeyCode::Enter => {
                 let selected = selected_candidate(session);
                 let provider = registry.get(session.kind);
+                let app_snapshot = PaletteAppSnapshot::from(&*app);
                 let ctx = PaletteContext {
-                    app,
+                    app: app_snapshot,
                     extensions,
                     kind: session.kind,
                     input: session.input.value(),
@@ -311,6 +314,7 @@ impl PaletteManager {
         let current_selected = existing.selected;
 
         let provider = registry.get(kind);
+        let app = PaletteAppSnapshot::from(app);
         let ctx = PaletteContext {
             app,
             extensions,

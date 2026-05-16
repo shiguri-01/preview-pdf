@@ -464,10 +464,10 @@ fn parse_entry(item: &str) -> Option<SeedEntry> {
 mod tests {
     use crate::palette::PaletteTextTone;
     use crate::{
-        app::AppState,
         extension::ExtensionUiSnapshot,
         palette::{
-            PaletteCandidate, PaletteContext, PaletteOpenPayload, PalettePayload, PaletteProvider,
+            PaletteAppSnapshot, PaletteCandidate, PaletteContext, PaletteOpenPayload,
+            PalettePayload, PaletteProvider,
         },
     };
 
@@ -547,10 +547,10 @@ mod tests {
     #[test]
     fn assistive_text_reflects_selected_candidate() {
         let provider = HistoryPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: crate::palette::PaletteKind::History,
             input: "",
@@ -604,15 +604,15 @@ mod tests {
     fn list_orders_matches_by_index_then_reason_then_page() {
         let provider = HistoryPaletteProvider;
         let seed = "b:11|c:0,Search: 1|f:9";
-        let app = AppState {
+        let app = PaletteAppSnapshot {
             current_page: 4,
-            ..AppState::default()
+            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot::default();
         let payload = PaletteOpenPayload::HistorySeed(seed.to_string());
 
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: crate::palette::PaletteKind::History,
             input: "",
@@ -630,15 +630,15 @@ mod tests {
     fn list_orders_forward_entries_before_current_in_reverse_stack_order() {
         let provider = HistoryPaletteProvider;
         let seed = "b:11|c:12|f:13,Search: one;14,Search: two;15,Search: three;16,Search: four";
-        let app = AppState {
+        let app = PaletteAppSnapshot {
             current_page: 12,
-            ..AppState::default()
+            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot::default();
         let payload = PaletteOpenPayload::HistorySeed(seed.to_string());
 
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: crate::palette::PaletteKind::History,
             input: "",

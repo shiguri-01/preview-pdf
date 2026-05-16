@@ -45,7 +45,6 @@ pub fn dispatch(
     let action_id = cmd.action_id();
     let extensions = extension_host.ui_snapshot();
     let ctx = CommandConditionContext {
-        app,
         extensions: &extensions,
         source,
     };

@@ -324,7 +324,9 @@ mod tests {
         app::PageLayoutMode,
         command::SearchMatcherKind,
         extension::ExtensionUiSnapshot,
-        palette::{PaletteContext, PaletteKind, PaletteOpenPayload, PaletteProvider},
+        palette::{
+            PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenPayload, PaletteProvider,
+        },
         search::SearchPaletteEntry,
     };
 
@@ -344,14 +346,14 @@ mod tests {
     #[test]
     fn search_payload_selects_current_matcher() {
         let provider = SearchPaletteProvider;
-        let app = crate::app::AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let open_payload = PaletteOpenPayload::Search {
             query: "needle".to_string(),
             matcher: SearchMatcherKind::ContainsSensitive,
         };
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Search,
             input: "needle",
@@ -368,11 +370,11 @@ mod tests {
     #[test]
     fn non_search_payload_keeps_default_selection() {
         let provider = SearchPaletteProvider;
-        let app = crate::app::AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let open_payload = PaletteOpenPayload::CommandInput("needle".to_string());
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Search,
             input: "needle",
@@ -386,7 +388,7 @@ mod tests {
     #[test]
     fn results_list_shows_index_snippet_and_page() {
         let provider = SearchResultsPaletteProvider;
-        let app = crate::app::AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot {
             search_results_entries: vec![SearchPaletteEntry {
                 index: 1,
@@ -399,7 +401,7 @@ mod tests {
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::SearchResults,
             input: "",
@@ -418,10 +420,10 @@ mod tests {
     #[test]
     fn results_initial_selection_accepts_right_page_of_visible_spread() {
         let provider = SearchResultsPaletteProvider;
-        let app = crate::app::AppState {
+        let app = PaletteAppSnapshot {
             current_page: 4,
             page_layout_mode: PageLayoutMode::Spread,
-            ..crate::app::AppState::default()
+            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot {
             search_results_entries: vec![
@@ -444,7 +446,7 @@ mod tests {
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::SearchResults,
             input: "",
@@ -461,10 +463,10 @@ mod tests {
     #[test]
     fn results_assistive_text_shows_zero_hits() {
         let provider = SearchResultsPaletteProvider;
-        let app = crate::app::AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::SearchResults,
             input: "",

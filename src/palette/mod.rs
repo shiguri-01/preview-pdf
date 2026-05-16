@@ -10,8 +10,8 @@ pub use manager::PaletteManager;
 pub use matcher::{CandidateMatcher, ContainsMatcher};
 pub use registry::PaletteRegistry;
 pub use types::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView, PaletteKeyResult,
-    PaletteOpenPayload, PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText,
-    PaletteSubmitAction, PaletteSubmitEffect, PaletteTabEffect, PaletteTextPart, PaletteTextTone,
-    PaletteView,
+    PaletteAppSnapshot, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView,
+    PaletteKeyResult, PaletteOpenPayload, PalettePayload, PalettePostAction, PaletteProvider,
+    PaletteSearchText, PaletteSubmitAction, PaletteSubmitEffect, PaletteTabEffect, PaletteTextPart,
+    PaletteTextTone, PaletteView,
 };

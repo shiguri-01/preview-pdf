@@ -1,6 +1,5 @@
 use std::num::IntErrorKind;
 
-use crate::app::AppState;
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
 use crate::palette::{PaletteKind, PaletteOpenPayload};
@@ -69,7 +68,6 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
 pub fn parse_invocable_command_text(
     input: &str,
     source: CommandInvocationSource,
-    app: &AppState,
     extensions: &ExtensionUiSnapshot,
 ) -> AppResult<Command> {
     let trimmed = input.trim();
@@ -78,11 +76,7 @@ pub fn parse_invocable_command_text(
     }
 
     let id = first_token(trimmed);
-    let ctx = CommandConditionContext {
-        app,
-        extensions,
-        source,
-    };
+    let ctx = CommandConditionContext { extensions, source };
     validate_command_id_for_source(id, &ctx)?;
     parse_command_text(trimmed)
 }

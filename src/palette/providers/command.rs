@@ -53,7 +53,6 @@ impl PaletteProvider for CommandPaletteProvider {
                     .into_iter()
                     .filter(|spec| {
                         let command_ctx = CommandConditionContext {
-                            app: ctx.app,
                             extensions: ctx.extensions,
                             source: CommandInvocationSource::CommandPaletteInput,
                         };
@@ -89,7 +88,6 @@ impl PaletteProvider for CommandPaletteProvider {
             match parse_invocable_command_text(
                 input,
                 CommandInvocationSource::CommandPaletteInput,
-                ctx.app,
                 ctx.extensions,
             ) {
                 Ok(command) => {
@@ -410,7 +408,6 @@ fn submit_selected_enum_candidate(
     match parse_invocable_command_text(
         synthesized_trimmed,
         CommandInvocationSource::CommandPaletteInput,
-        ctx.app,
         ctx.extensions,
     ) {
         Ok(command) => Ok(Some(PaletteSubmitEffect::Dispatch {
@@ -591,13 +588,12 @@ fn format_search_texts(
 
 #[cfg(test)]
 mod tests {
-    use crate::app::AppState;
     use crate::command::Command;
     use crate::extension::ExtensionUiSnapshot;
     use crate::input::InputHistoryRecord;
     use crate::palette::{
-        PaletteContext, PaletteKind, PaletteOpenPayload, PalettePostAction, PaletteProvider,
-        PaletteSubmitEffect, PaletteTabEffect,
+        PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenPayload, PalettePostAction,
+        PaletteProvider, PaletteSubmitEffect, PaletteTabEffect,
     };
 
     use super::CommandPaletteProvider;
@@ -611,10 +607,10 @@ mod tests {
         search_active: bool,
     ) -> Vec<crate::palette::PaletteCandidate> {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::with_search_active(search_active);
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
@@ -629,10 +625,10 @@ mod tests {
         search_active: bool,
     ) -> PaletteSubmitEffect {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::with_search_active(search_active);
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
@@ -650,10 +646,10 @@ mod tests {
 
     fn command_tab_effect(input: &str, selected_id: &str, search_active: bool) -> PaletteTabEffect {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::with_search_active(search_active);
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
@@ -671,10 +667,10 @@ mod tests {
 
     fn assistive_text_for_input(input: &str, search_active: bool) -> Option<String> {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::with_search_active(search_active);
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
@@ -686,10 +682,10 @@ mod tests {
     #[test]
     fn list_hides_search_hit_navigation_when_search_is_inactive() {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
@@ -721,10 +717,10 @@ mod tests {
     #[test]
     fn list_shows_search_hit_navigation_when_search_is_active() {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::with_search_active(true);
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
@@ -912,10 +908,10 @@ mod tests {
     #[test]
     fn submit_dispatches_typed_command_with_history_record() {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "quit",
@@ -939,10 +935,10 @@ mod tests {
     #[test]
     fn submit_dispatches_typed_optional_enum_command_without_argument() {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "page-layout-spread",
@@ -1065,10 +1061,10 @@ mod tests {
     #[test]
     fn submit_reopens_when_input_targets_internal_command() {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::with_search_active(true);
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "submit-search hello",
@@ -1087,10 +1083,10 @@ mod tests {
     #[test]
     fn submit_errors_when_explicit_input_has_invalid_arguments() {
         let provider = CommandPaletteProvider;
-        let app = AppState::default();
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
-            app: &app,
+            app,
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "first-page hoge",

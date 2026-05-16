@@ -13,7 +13,7 @@ use crate::palette::PaletteKeyResult;
 use crate::palette::{PalettePostAction, PaletteSubmitEffect, PaletteView};
 
 use super::core::InteractionSubsystem;
-use super::state::{AppState, Mode, PaletteRequest};
+use super::state::{AppState, Mode, PaletteRequest, notice_action_for_error};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct KeyEventOutcome {
@@ -109,6 +109,15 @@ impl InteractionSubsystem {
                     clear_terminal: changed_by_palette,
                     quit_requested: false,
                     commands: command.into_iter().collect(),
+                })
+            }
+            PaletteKeyResult::SubmitError(err) => {
+                state.apply_notice_action(notice_action_for_error(err));
+                Ok(KeyEventOutcome {
+                    redraw: true,
+                    clear_terminal: false,
+                    quit_requested: false,
+                    commands: Vec::new(),
                 })
             }
         }

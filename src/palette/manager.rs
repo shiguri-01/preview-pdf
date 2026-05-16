@@ -2,8 +2,8 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
 
-use crate::app::{AppState, notice_action_for_error};
-use crate::error::{AppError, AppResult};
+use crate::app::AppState;
+use crate::error::AppResult;
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::InputHistorySnapshot;
 
@@ -169,7 +169,7 @@ impl PaletteManager {
     pub fn handle_key(
         &mut self,
         registry: &PaletteRegistry,
-        app: &mut AppState,
+        app: &AppState,
         extensions: &ExtensionUiSnapshot,
         key: KeyEvent,
     ) -> AppResult<PaletteKeyResult> {
@@ -253,8 +253,7 @@ impl PaletteManager {
                 let effect = match provider.on_submit(&ctx, selected) {
                     Ok(effect) => effect,
                     Err(err) => {
-                        apply_palette_submit_error_notice(app, err);
-                        return Ok(PaletteKeyResult::Consumed { redraw: true });
+                        return Ok(PaletteKeyResult::SubmitError(err));
                     }
                 };
                 return Ok(PaletteKeyResult::Submit(PaletteSubmitAction {
@@ -403,10 +402,6 @@ impl PaletteManager {
         session.input = Input::new(next_value);
         true
     }
-}
-
-fn apply_palette_submit_error_notice(app: &mut AppState, err: AppError) {
-    app.apply_notice_action(notice_action_for_error(err));
 }
 
 fn selected_candidate(session: &PaletteSession) -> Option<&PaletteCandidate> {

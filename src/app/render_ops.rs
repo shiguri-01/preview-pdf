@@ -9,7 +9,8 @@ use super::actors::{RenderActor, RenderNavSyncParts};
 use super::core::RenderSubsystem;
 use super::frame_ops::{encode_work_class_for_completed_render, prepare_presenter_frame};
 use super::scale::{scale_eq, zoom_eq};
-use super::state::AppState;
+use super::state::{AppState, VisiblePageSlots};
+use super::view_ops::{InitialPreviewPlan, compute_initial_preview_plan};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RequiredRenderPages {
@@ -80,6 +81,7 @@ pub(crate) struct CurrentTaskContext {
     pub(crate) preview_tasks: Vec<RenderTask>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct PrefetchDispatchContext {
     pub(crate) required: RequiredRenderPages,
     pub(crate) current_cached: bool,
@@ -91,7 +93,137 @@ pub(crate) struct PrefetchDispatchContext {
     pub(crate) dispatch_budget: usize,
 }
 
+pub(crate) struct PrefetchDispatchPlan {
+    pub(crate) overlay_stamp: u64,
+    pub(crate) prefetch_viewport: Option<Viewport>,
+    pub(crate) base_pan: PanOffset,
+    pub(crate) interactive: bool,
+    pub(crate) dispatch_budget: usize,
+}
+
+pub(crate) struct CurrentRenderView {
+    pub(crate) visible_pages: VisiblePageSlots,
+    pub(crate) current_scale: f32,
+    pub(crate) required: RequiredRenderPages,
+    pub(crate) current_interest_keys: CurrentInterestKeys,
+    pub(crate) initial_preview: Option<InitialPreviewPlan>,
+    pub(crate) presenter_key: RenderedPageKey,
+    pub(crate) current_cached: bool,
+}
+
+impl CurrentRenderView {
+    pub(crate) fn preview_tasks(&self, generation: u64) -> Vec<RenderTask> {
+        self.initial_preview
+            .as_ref()
+            .map(|plan| {
+                plan.page_keys
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, key)| RenderTask {
+                        doc_id: key.doc_id,
+                        page: key.page,
+                        scale: key.scale_milli as f32 / 1000.0,
+                        class: WorkClass::CriticalCurrent,
+                        generation,
+                        reason: if idx == 0 {
+                            "initial-preview"
+                        } else {
+                            "initial-preview-spread"
+                        },
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn prefetch_dispatch_context(
+        &self,
+        state: &AppState,
+        plan: PrefetchDispatchPlan,
+    ) -> PrefetchDispatchContext {
+        PrefetchDispatchContext {
+            required: self.required,
+            current_cached: self.current_cached,
+            overlay_stamp: plan.overlay_stamp,
+            prefetch_viewport: plan.prefetch_viewport,
+            base_pan: plan.base_pan,
+            enable_crop: state.zoom > 1.0,
+            interactive: plan.interactive,
+            dispatch_budget: plan.dispatch_budget,
+        }
+    }
+}
+
+pub(crate) fn cold_start_initial_preview_plan(
+    is_cold_start: bool,
+    current_cached: bool,
+    doc_id: u64,
+    visible_pages: VisiblePageSlots,
+    page_layout_mode: super::state::PageLayoutMode,
+    current_scale: f32,
+) -> Option<InitialPreviewPlan> {
+    if !is_cold_start || current_cached {
+        return None;
+    }
+
+    compute_initial_preview_plan(doc_id, visible_pages, page_layout_mode, current_scale)
+}
+
 impl RenderSubsystem {
+    pub(crate) fn build_current_render_view(
+        &self,
+        state: &AppState,
+        pdf: &dyn PdfBackend,
+        visible_pages: VisiblePageSlots,
+        current_scale: f32,
+        is_cold_start: bool,
+    ) -> CurrentRenderView {
+        let mut required = RequiredRenderPages::new(
+            visible_pages.anchor_page,
+            RenderedPageKey::new(pdf.doc_id(), visible_pages.anchor_page, current_scale),
+        );
+        if let Some(trailing_page) = visible_pages.trailing_page {
+            required.push_trailing(
+                trailing_page,
+                RenderedPageKey::new(pdf.doc_id(), trailing_page, current_scale),
+            );
+        }
+        let current_cached = required
+            .keys()
+            .iter()
+            .all(|key| self.runtime.has_cached_frame(key));
+        let presenter_layout_tag =
+            state.presenter_layout_tag(visible_pages.trailing_page.is_some());
+        let initial_preview = cold_start_initial_preview_plan(
+            is_cold_start,
+            current_cached,
+            pdf.doc_id(),
+            visible_pages,
+            state.page_layout_mode,
+            current_scale,
+        );
+        let mut current_interest_keys = CurrentInterestKeys::from_required(&required);
+        if let Some(preview_plan) = initial_preview.as_ref() {
+            current_interest_keys.extend(preview_plan.page_keys.iter().copied());
+        }
+        let presenter_key = RenderedPageKey::with_layout(
+            pdf.doc_id(),
+            visible_pages.anchor_page,
+            current_scale,
+            presenter_layout_tag,
+        );
+
+        CurrentRenderView {
+            visible_pages,
+            current_scale,
+            required,
+            current_interest_keys,
+            initial_preview,
+            presenter_key,
+            current_cached,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn process_render_result(
         &mut self,
@@ -329,6 +461,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::app::state::{PageLayoutMode, VisiblePageSlots};
     use crate::app::{NoticeLevel, RenderRuntime};
     use crate::backend::RgbaFrame;
     use crate::error::{AppError, AppResult};
@@ -445,5 +578,68 @@ mod tests {
 
         assert!(!redraw);
         assert!(state.notice.is_none());
+    }
+
+    #[test]
+    fn cold_start_initial_preview_plan_is_disabled_after_first_image() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(true, true, 7, slots, PageLayoutMode::Single, 1.0);
+
+        assert_eq!(preview, None);
+    }
+
+    #[test]
+    fn cold_start_initial_preview_plan_is_available_before_first_image() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0);
+
+        assert!(preview.is_some());
+    }
+
+    #[test]
+    fn cold_start_initial_preview_plan_stays_available_until_current_frame_is_cached() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: Some(1),
+            left_page: Some(0),
+            right_page: Some(1),
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Spread, 1.0)
+                .expect("spread cold start should include preview pages");
+
+        assert_eq!(preview.page_keys.len(), 2);
+        assert_eq!(preview.page_keys[0], RenderedPageKey::new(7, 0, 0.25));
+        assert_eq!(preview.page_keys[1], RenderedPageKey::new(7, 1, 0.25));
+    }
+
+    #[test]
+    fn cold_start_initial_preview_plan_is_disabled_after_navigation_begins() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview =
+            cold_start_initial_preview_plan(false, false, 7, slots, PageLayoutMode::Single, 1.0);
+
+        assert_eq!(preview, None);
     }
 }

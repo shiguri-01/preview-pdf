@@ -3,18 +3,27 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
+use crate::app::{Notice, NoticeLevel, PageLayoutMode, VisiblePageSlots};
 
 use super::layout::UiLayout;
 use super::{border, error_text, primary_text, warning_text};
 
 const MIN_FILENAME_ELISION_WIDTH: usize = 7;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChromeViewState {
+    pub visible_pages: VisiblePageSlots,
+    pub page_layout_mode: PageLayoutMode,
+    pub zoom: f32,
+    pub debug_status_visible: bool,
+    pub notice: Option<Notice>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw_chrome(
     frame: &mut Frame<'_>,
     layout: UiLayout,
-    app: &AppState,
+    chrome: &ChromeViewState,
     file_name: &str,
     page_count: usize,
     presenter_label: &str,
@@ -22,13 +31,13 @@ pub fn draw_chrome(
     extension_status_segments: &[String],
 ) {
     let status_text = build_status_text(
-        app,
+        chrome,
         file_name,
         page_count,
         extension_status_segments,
         layout.status.width as usize,
     );
-    let primary = if let Some(notice) = app.notice.as_ref() {
+    let primary = if let Some(notice) = chrome.notice.as_ref() {
         Paragraph::new(stylize_notice_line(notice, layout.status.width as usize))
             .style(primary_text())
             .wrap(Wrap { trim: true })
@@ -37,7 +46,7 @@ pub fn draw_chrome(
             .style(primary_text())
             .wrap(Wrap { trim: true })
     };
-    if app.debug_status_visible && layout.status.height >= 2 {
+    if chrome.debug_status_visible && layout.status.height >= 2 {
         let top =
             ratatui::layout::Rect::new(layout.status.x, layout.status.y, layout.status.width, 1);
         frame.render_widget(primary, top);
@@ -64,7 +73,7 @@ pub fn draw_chrome(
 }
 
 fn build_status_text(
-    app: &AppState,
+    chrome: &ChromeViewState,
     file_name: &str,
     page_count: usize,
     extension_status_segments: &[String],
@@ -73,8 +82,8 @@ fn build_status_text(
     let page_total = page_count.max(1);
     let base = format!(
         "{} | zoom {:.2}x",
-        format_page_segment(app, page_total),
-        app.zoom
+        format_page_segment(chrome, page_total),
+        chrome.zoom
     );
     let sep = " | ";
 
@@ -120,10 +129,10 @@ fn build_status_text(
     trim_trailing_whitespace(truncate_right_by_width(&base, max_width))
 }
 
-fn format_page_segment(app: &AppState, page_total: usize) -> String {
-    let slots = app.visible_page_slots(page_total);
+fn format_page_segment(chrome: &ChromeViewState, page_total: usize) -> String {
+    let slots = chrome.visible_pages;
     let page_width = page_total.to_string().len();
-    match app.page_layout_mode {
+    match chrome.page_layout_mode {
         PageLayoutMode::Single => {
             let page_now = slots.anchor_page.saturating_add(1).min(page_total);
             format!("p.{:>page_width$}/{:>page_width$}", page_now, page_total)
@@ -272,9 +281,19 @@ mod tests {
     use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
 
     use super::{
-        build_presenter_path_text, build_status_text, display_width, format_filename_segment,
-        stylize_notice_line,
+        ChromeViewState, build_presenter_path_text, build_status_text, display_width,
+        format_filename_segment, stylize_notice_line,
     };
+
+    fn chrome_from_app(app: &AppState, page_count: usize) -> ChromeViewState {
+        ChromeViewState {
+            visible_pages: app.visible_page_slots(page_count),
+            page_layout_mode: app.page_layout_mode,
+            zoom: app.zoom,
+            debug_status_visible: app.debug_status_visible,
+            notice: app.notice.clone(),
+        }
+    }
 
     #[test]
     fn build_status_text_includes_page_zoom_and_file() {
@@ -284,7 +303,7 @@ mod tests {
             ..AppState::default()
         };
 
-        let text = build_status_text(&app, "sample.pdf", 10, &[], 80);
+        let text = build_status_text(&chrome_from_app(&app, 10), "sample.pdf", 10, &[], 80);
         assert_eq!(text, "p. 3/10 | zoom 1.50x | sample.pdf");
     }
 
@@ -319,7 +338,7 @@ mod tests {
     fn build_status_text_uses_last_non_empty_extension_segment() {
         let app = AppState::default();
         let text = build_status_text(
-            &app,
+            &chrome_from_app(&app, 5),
             "sample.pdf",
             5,
             &[
@@ -335,7 +354,13 @@ mod tests {
     #[test]
     fn build_status_text_elides_filename_in_middle_on_tight_width() {
         let app = AppState::default();
-        let text = build_status_text(&app, "very-long-document-name.pdf", 7, &[], 28);
+        let text = build_status_text(
+            &chrome_from_app(&app, 7),
+            "very-long-document-name.pdf",
+            7,
+            &[],
+            28,
+        );
         assert!(text.starts_with("p.1/7 | zoom 1.00x |"));
         assert!(display_width(&text) <= 28);
     }
@@ -344,7 +369,7 @@ mod tests {
     fn build_status_text_drops_filename_before_extension() {
         let app = AppState::default();
         let text = build_status_text(
-            &app,
+            &chrome_from_app(&app, 7),
             "very-long-document-name.pdf",
             7,
             &[String::from("SEARCH 10/100")],
@@ -356,7 +381,13 @@ mod tests {
     #[test]
     fn build_status_text_handles_very_narrow_width() {
         let app = AppState::default();
-        let text = build_status_text(&app, "sample.pdf", 10, &[String::from("SEARCH 1/1")], 8);
+        let text = build_status_text(
+            &chrome_from_app(&app, 10),
+            "sample.pdf",
+            10,
+            &[String::from("SEARCH 1/1")],
+            8,
+        );
         assert_eq!(text, "p. 1/10");
     }
 
@@ -370,8 +401,8 @@ mod tests {
             current_page: 9,
             ..AppState::default()
         };
-        let text9 = build_status_text(&app9, "sample.pdf", 120, &[], 120);
-        let text10 = build_status_text(&app10, "sample.pdf", 120, &[], 120);
+        let text9 = build_status_text(&chrome_from_app(&app9, 120), "sample.pdf", 120, &[], 120);
+        let text10 = build_status_text(&chrome_from_app(&app10, 120), "sample.pdf", 120, &[], 120);
         assert_eq!(display_width(&text9), display_width(&text10));
         assert!(text9.starts_with("p.  9/120 | zoom 1.00x"));
         assert!(text10.starts_with("p. 10/120 | zoom 1.00x"));
@@ -383,7 +414,7 @@ mod tests {
         let expected = "p.1/7 | zoom 1.00x | SEARCH 10/100";
         let target_width = display_width(expected) + display_width(" | ") + 1;
         let text = build_status_text(
-            &app,
+            &chrome_from_app(&app, 7),
             "漢字.pdf",
             7,
             &[String::from("SEARCH 10/100")],
@@ -424,7 +455,7 @@ mod tests {
             page_layout_mode: PageLayoutMode::Spread,
             ..AppState::default()
         };
-        let text = build_status_text(&app, "sample.pdf", 10, &[], 120);
+        let text = build_status_text(&chrome_from_app(&app, 10), "sample.pdf", 10, &[], 120);
         assert_eq!(text, "pp. 3- 4/10 | zoom 1.00x | sample.pdf");
     }
 }

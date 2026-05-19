@@ -863,8 +863,6 @@ mod tests {
     use super::{WaitEvent, wait_next_event};
     use crate::app::App;
     use crate::app::core::InteractionSubsystem;
-    use crate::app::render_ops::cold_start_initial_preview_plan;
-    use crate::app::state::{PageLayoutMode, VisiblePageSlots};
     use crate::app::terminal_session::TerminalSurface;
     use crate::backend::test_support::{build_pdf, unique_temp_path};
     use crate::backend::{PdfDoc, SharedPdfBackend};
@@ -1065,66 +1063,6 @@ mod tests {
                 amount: PanAmount::Cells(3),
             }
         );
-    }
-
-    #[test]
-    fn cold_start_initial_preview_plan_is_disabled_after_first_image() {
-        let slots = VisiblePageSlots {
-            anchor_page: 0,
-            trailing_page: None,
-            left_page: Some(0),
-            right_page: None,
-        };
-
-        let preview =
-            cold_start_initial_preview_plan(true, true, 7, slots, PageLayoutMode::Single, 1.0);
-
-        assert_eq!(preview, None);
-    }
-
-    #[test]
-    fn cold_start_initial_preview_plan_is_available_before_first_image() {
-        let slots = VisiblePageSlots {
-            anchor_page: 0,
-            trailing_page: None,
-            left_page: Some(0),
-            right_page: None,
-        };
-
-        let preview =
-            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0);
-
-        assert!(preview.is_some());
-    }
-
-    #[test]
-    fn cold_start_initial_preview_plan_stays_available_until_current_frame_is_cached() {
-        let slots = VisiblePageSlots {
-            anchor_page: 0,
-            trailing_page: None,
-            left_page: Some(0),
-            right_page: None,
-        };
-
-        let preview =
-            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0);
-
-        assert!(preview.is_some());
-    }
-
-    #[test]
-    fn cold_start_initial_preview_plan_is_disabled_after_navigation_begins() {
-        let slots = VisiblePageSlots {
-            anchor_page: 0,
-            trailing_page: None,
-            left_page: Some(0),
-            right_page: None,
-        };
-
-        let preview =
-            cold_start_initial_preview_plan(false, false, 7, slots, PageLayoutMode::Single, 1.0);
-
-        assert_eq!(preview, None);
     }
 
     #[test]

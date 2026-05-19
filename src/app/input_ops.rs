@@ -94,7 +94,16 @@ impl InteractionSubsystem {
         state: &mut AppState,
         key: KeyEvent,
     ) -> AppResult<KeyEventOutcome> {
-        match self.handle_palette_key(state, key)? {
+        let result = self.handle_palette_key(state, key)?;
+        self.handle_palette_key_result(state, result)
+    }
+
+    fn handle_palette_key_result(
+        &mut self,
+        state: &mut AppState,
+        result: PaletteKeyResult,
+    ) -> AppResult<KeyEventOutcome> {
+        match result {
             PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
                 redraw,
                 clear_terminal: false,
@@ -470,13 +479,15 @@ mod tests {
     use crate::backend::{PdfDoc, SharedPdfBackend};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
     use crate::config::Config;
+    use crate::error::AppError;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
-    use crate::palette::PaletteKind;
+    use crate::palette::{PaletteKeyResult, PaletteKind};
     use crate::presenter::PresenterKind;
 
     use super::super::App;
     use super::super::core::InteractionSubsystem;
+    use super::super::state::{NoticeLevel, notice_action_for_error};
 
     struct MockSession {
         clear_count: usize,
@@ -685,6 +696,38 @@ mod tests {
         assert_eq!(state.mode, Mode::Normal);
         assert!(outcome.redraw);
         assert!(outcome.clear_terminal);
+        assert!(outcome.commands.is_empty());
+    }
+
+    #[test]
+    fn palette_submit_error_applies_notice_without_dispatching_command() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState::default();
+        let expected = notice_action_for_error(AppError::invalid_argument("bad palette input"));
+
+        let outcome = interaction
+            .handle_palette_key_result(
+                &mut state,
+                PaletteKeyResult::SubmitError(AppError::invalid_argument("bad palette input")),
+            )
+            .expect("palette error should be converted to a notice");
+
+        assert_eq!(
+            state.notice,
+            match expected {
+                super::super::state::NoticeAction::Show { level, message } =>
+                    Some(super::super::state::Notice { level, message }),
+                super::super::state::NoticeAction::Keep
+                | super::super::state::NoticeAction::Clear => None,
+            }
+        );
+        assert_eq!(
+            state.notice.as_ref().map(|notice| notice.level),
+            Some(NoticeLevel::Warning)
+        );
+        assert!(outcome.redraw);
+        assert!(!outcome.clear_terminal);
+        assert!(!outcome.quit_requested);
         assert!(outcome.commands.is_empty());
     }
 

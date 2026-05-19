@@ -174,10 +174,10 @@ impl RenderSubsystem {
         &self,
         state: &AppState,
         pdf: &dyn PdfBackend,
+        visible_pages: VisiblePageSlots,
         current_scale: f32,
         is_cold_start: bool,
     ) -> CurrentRenderView {
-        let visible_pages = state.visible_page_slots(pdf.page_count());
         let mut required = RequiredRenderPages::new(
             visible_pages.anchor_page,
             RenderedPageKey::new(pdf.doc_id(), visible_pages.anchor_page, current_scale),
@@ -614,15 +614,18 @@ mod tests {
     fn cold_start_initial_preview_plan_stays_available_until_current_frame_is_cached() {
         let slots = VisiblePageSlots {
             anchor_page: 0,
-            trailing_page: None,
+            trailing_page: Some(1),
             left_page: Some(0),
-            right_page: None,
+            right_page: Some(1),
         };
 
         let preview =
-            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Single, 1.0);
+            cold_start_initial_preview_plan(true, false, 7, slots, PageLayoutMode::Spread, 1.0)
+                .expect("spread cold start should include preview pages");
 
-        assert!(preview.is_some());
+        assert_eq!(preview.page_keys.len(), 2);
+        assert_eq!(preview.page_keys[0], RenderedPageKey::new(7, 0, 0.25));
+        assert_eq!(preview.page_keys[1], RenderedPageKey::new(7, 1, 0.25));
     }
 
     #[test]

@@ -444,6 +444,7 @@ impl App {
         let current_view = self.render.build_current_render_view(
             &self.state,
             pdf,
+            visible_pages,
             current_scale,
             render_generation == 0,
         );
@@ -745,6 +746,7 @@ impl App {
         let current_view = self.render.build_current_render_view(
             &self.state,
             pdf,
+            visible_pages,
             current_scale,
             runtime.render_actor.generation() == 0,
         );

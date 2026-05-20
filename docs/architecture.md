@@ -12,7 +12,7 @@ This document owns:
 - module navigation guidance
 
 Feature behavior lives in `runtime-spec.md` and the subsystem specs rather than
-here.
+here. Worker ownership and cancellation details live in `async-workers.md`.
 
 ## Top-level runtime model
 
@@ -80,6 +80,7 @@ here.
 - palette provider resolution is a static match on `PaletteKind`
 - current extension ownership is explicit in `ExtensionHost`
 - extension UI data is exposed to palettes through `ExtensionUiSnapshot`
+- app data exposed to palettes is limited to a read-only palette snapshot
 - render and presenter scheduling share `WorkClass` to classify priority and
   stale-generation handling
 
@@ -91,3 +92,4 @@ here.
 - `src/command/`
 - `src/extension/host.rs`
 - `src/palette/registry.rs`
+- `docs/async-workers.md`

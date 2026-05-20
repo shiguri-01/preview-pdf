@@ -157,7 +157,9 @@ fn decode_payload(payload: &PalettePayload) -> Option<(usize, String)> {
 mod tests {
     use crate::{
         extension::ExtensionUiSnapshot,
-        palette::{PaletteContext, PaletteKind, PalettePayload, PaletteProvider},
+        palette::{
+            PaletteAppSnapshot, PaletteContext, PaletteKind, PalettePayload, PaletteProvider,
+        },
     };
 
     use super::{
@@ -199,7 +201,7 @@ mod tests {
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
-            app: &Default::default(),
+            app: PaletteAppSnapshot::default(),
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "",
@@ -237,7 +239,7 @@ mod tests {
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
-            app: &Default::default(),
+            app: PaletteAppSnapshot::default(),
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "3",
@@ -276,7 +278,7 @@ mod tests {
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
-            app: &Default::default(),
+            app: PaletteAppSnapshot::default(),
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "p.1",
@@ -308,7 +310,7 @@ mod tests {
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
-            app: &Default::default(),
+            app: PaletteAppSnapshot::default(),
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "ÜBER",

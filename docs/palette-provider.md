@@ -31,8 +31,10 @@ behavior.
 - `initial_selected_candidate(ctx, candidates) -> Option<usize>`
 - `initial_input(open_payload) -> String`
 
-`PaletteContext` includes current app state, palette kind, input text,
-optional `open_payload`, and extension UI snapshot data.
+`PaletteContext` includes a small app snapshot, palette kind, input text,
+optional `open_payload`, and extension UI snapshot data. Providers should add
+fields to the snapshot when they need new read-only app data instead of taking
+`AppState` directly.
 
 ## Candidate and rendering contract
 

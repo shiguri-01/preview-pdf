@@ -1,16 +1,25 @@
 use std::path::PathBuf;
 use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static TEMP_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn unique_temp_path(suffix: &str) -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("clock should be after unix epoch")
         .as_nanos();
+    let counter = TEMP_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
 
     let mut path = std::env::temp_dir();
     std::fs::create_dir_all(&path).expect("test temp directory should be created");
-    path.push(format!("pvf_{suffix}_{}_{}", process::id(), nanos));
+    path.push(format!(
+        "pvf_{suffix}_{}_{}_{}",
+        process::id(),
+        nanos,
+        counter
+    ));
     path
 }
 

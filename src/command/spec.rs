@@ -1,4 +1,3 @@
-use crate::app::AppState;
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
 
@@ -374,7 +373,6 @@ pub fn all_command_specs() -> Vec<CommandSpec> {
 }
 
 pub struct CommandConditionContext<'a> {
-    pub app: &'a AppState,
     pub extensions: &'a ExtensionUiSnapshot,
     pub source: CommandInvocationSource,
 }
@@ -497,7 +495,6 @@ fn app_error_message(err: AppError) -> String {
 mod tests {
     use std::collections::HashSet;
 
-    use crate::app::AppState;
     use crate::extension::ExtensionUiSnapshot;
 
     use super::{
@@ -523,10 +520,8 @@ mod tests {
 
     #[test]
     fn palette_visibility_hides_internal_commands() {
-        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = CommandConditionContext {
-            app: &app,
             extensions: &extensions,
             source: CommandInvocationSource::CommandPaletteInput,
         };
@@ -537,10 +532,8 @@ mod tests {
 
     #[test]
     fn command_validation_rejects_search_navigation_when_search_is_inactive() {
-        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = CommandConditionContext {
-            app: &app,
             extensions: &extensions,
             source: CommandInvocationSource::Keymap,
         };
@@ -556,10 +549,8 @@ mod tests {
 
     #[test]
     fn keymap_only_command_is_allowed_from_keymap_but_not_palette_input() {
-        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
         let keymap_ctx = CommandConditionContext {
-            app: &app,
             extensions: &extensions,
             source: CommandInvocationSource::Keymap,
         };
@@ -573,7 +564,6 @@ mod tests {
         .expect("keymap should be allowed");
 
         let palette_input_ctx = CommandConditionContext {
-            app: &app,
             extensions: &extensions,
             source: CommandInvocationSource::CommandPaletteInput,
         };
@@ -584,10 +574,8 @@ mod tests {
 
     #[test]
     fn keymap_only_close_help_is_hidden_from_palette() {
-        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = CommandConditionContext {
-            app: &app,
             extensions: &extensions,
             source: CommandInvocationSource::CommandPaletteInput,
         };

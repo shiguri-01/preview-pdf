@@ -171,7 +171,7 @@ impl<'a> PaletteProviderRef<'a> {
 #[cfg(test)]
 mod tests {
     use crate::extension::ExtensionUiSnapshot;
-    use crate::palette::{PaletteContext, PaletteKind};
+    use crate::palette::{PaletteAppSnapshot, PaletteContext, PaletteKind};
 
     use super::PaletteRegistry;
 
@@ -180,7 +180,7 @@ mod tests {
         let registry = PaletteRegistry::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
-            app: &crate::app::AppState::default(),
+            app: PaletteAppSnapshot::default(),
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",

@@ -33,6 +33,22 @@ impl SpreadDirection {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SpreadCoverPolicy {
+    #[default]
+    Paired,
+    Cover,
+}
+
+impl SpreadCoverPolicy {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Paired => "paired",
+            Self::Cover => "cover",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VisiblePageSlots {
     pub anchor_page: usize,
@@ -122,6 +138,7 @@ pub struct AppState {
     pub current_page: usize,
     pub page_layout_mode: PageLayoutMode,
     pub spread_direction: SpreadDirection,
+    pub spread_cover_policy: SpreadCoverPolicy,
     pub zoom: f32,
     pub pan_x: i32,
     pub pan_y: i32,
@@ -138,6 +155,7 @@ impl Default for AppState {
             current_page: 0,
             page_layout_mode: PageLayoutMode::Single,
             spread_direction: SpreadDirection::Ltr,
+            spread_cover_policy: SpreadCoverPolicy::Paired,
             zoom: 1.0,
             pan_x: 0,
             pan_y: 0,
@@ -208,6 +226,18 @@ impl AppState {
         }
     }
 
+    pub fn page_step_between(&self, from: usize, to: usize) -> usize {
+        if self.page_layout_mode == PageLayoutMode::Spread
+            && self.spread_cover_policy == SpreadCoverPolicy::Cover
+            && from.min(to) == 0
+            && from.max(to) == 1
+        {
+            return 1;
+        }
+
+        self.page_step()
+    }
+
     pub fn normalize_page_for_layout(&self, page: usize, page_count: usize) -> usize {
         if page_count == 0 {
             return 0;
@@ -216,12 +246,59 @@ impl AppState {
         let clamped = page.min(page_count - 1);
         match self.page_layout_mode {
             PageLayoutMode::Single => clamped,
-            PageLayoutMode::Spread => clamped.saturating_sub(clamped % 2),
+            PageLayoutMode::Spread => match self.spread_cover_policy {
+                SpreadCoverPolicy::Paired => clamped.saturating_sub(clamped % 2),
+                SpreadCoverPolicy::Cover => {
+                    if clamped == 0 {
+                        0
+                    } else {
+                        clamped.saturating_sub((clamped - 1) % 2)
+                    }
+                }
+            },
         }
     }
 
     pub fn normalize_current_page(&mut self, page_count: usize) {
         self.current_page = self.normalize_page_for_layout(self.current_page, page_count);
+    }
+
+    pub fn next_page_for_layout(&self, page: usize, page_count: usize) -> usize {
+        if page_count == 0 {
+            return 0;
+        }
+
+        let anchor_page = self.normalize_page_for_layout(page, page_count);
+        match self.page_layout_mode {
+            PageLayoutMode::Single => (anchor_page + 1).min(page_count - 1),
+            PageLayoutMode::Spread => {
+                let next =
+                    if self.spread_cover_policy == SpreadCoverPolicy::Cover && anchor_page == 0 {
+                        1
+                    } else {
+                        anchor_page.saturating_add(2)
+                    };
+                if next < page_count { next } else { anchor_page }
+            }
+        }
+    }
+
+    pub fn prev_page_for_layout(&self, page: usize, page_count: usize) -> usize {
+        if page_count == 0 {
+            return 0;
+        }
+
+        let anchor_page = self.normalize_page_for_layout(page, page_count);
+        match self.page_layout_mode {
+            PageLayoutMode::Single => anchor_page.saturating_sub(1),
+            PageLayoutMode::Spread => {
+                if self.spread_cover_policy == SpreadCoverPolicy::Cover && anchor_page == 1 {
+                    0
+                } else {
+                    anchor_page.saturating_sub(2)
+                }
+            }
+        }
     }
 
     pub fn visible_page_slots(&self, page_count: usize) -> VisiblePageSlots {
@@ -248,6 +325,15 @@ impl AppState {
             };
         }
 
+        if self.spread_cover_policy == SpreadCoverPolicy::Cover && anchor_page == 0 {
+            return VisiblePageSlots {
+                anchor_page,
+                trailing_page: None,
+                left_page: Some(anchor_page),
+                right_page: None,
+            };
+        }
+
         let trailing_page = (anchor_page + 1 < page_count).then_some(anchor_page + 1);
         let (left_page, right_page) = match self.spread_direction {
             SpreadDirection::Ltr => (Some(anchor_page), trailing_page),
@@ -261,12 +347,25 @@ impl AppState {
         }
     }
 
-    pub fn presenter_layout_tag(&self, has_trailing_page: bool) -> u16 {
-        match (
-            self.page_layout_mode,
-            self.spread_direction,
-            has_trailing_page,
-        ) {
+    pub fn page_presentation_for_slots(&self, slots: VisiblePageSlots) -> PageLayoutMode {
+        match self.page_layout_mode {
+            PageLayoutMode::Single => PageLayoutMode::Single,
+            PageLayoutMode::Spread
+                if self.spread_cover_policy == SpreadCoverPolicy::Cover
+                    && slots.anchor_page == 0 =>
+            {
+                PageLayoutMode::Single
+            }
+            PageLayoutMode::Spread => PageLayoutMode::Spread,
+        }
+    }
+
+    pub fn presenter_layout_tag(
+        &self,
+        page_presentation: PageLayoutMode,
+        has_trailing_page: bool,
+    ) -> u16 {
+        match (page_presentation, self.spread_direction, has_trailing_page) {
             (PageLayoutMode::Single, _, _) => 0,
             (PageLayoutMode::Spread, SpreadDirection::Ltr, true) => 1,
             (PageLayoutMode::Spread, SpreadDirection::Rtl, true) => 2,
@@ -289,7 +388,10 @@ pub fn notice_action_for_error(err: AppError) -> NoticeAction {
 mod tests {
     use std::io;
 
-    use super::{NoticeAction, NoticeLevel, notice_action_for_error};
+    use super::{
+        AppState, NoticeAction, NoticeLevel, PageLayoutMode, SpreadCoverPolicy, SpreadDirection,
+        notice_action_for_error,
+    };
     use crate::error::AppError;
 
     #[test]
@@ -312,6 +414,68 @@ mod tests {
                 level: NoticeLevel::Error,
                 message: "I/O error: disk failed".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn paired_spread_normalizes_to_even_anchor_pages() {
+        let app = AppState {
+            page_layout_mode: PageLayoutMode::Spread,
+            spread_cover_policy: SpreadCoverPolicy::Paired,
+            ..AppState::default()
+        };
+
+        assert_eq!(app.normalize_page_for_layout(0, 8), 0);
+        assert_eq!(app.normalize_page_for_layout(1, 8), 0);
+        assert_eq!(app.normalize_page_for_layout(2, 8), 2);
+        assert_eq!(app.normalize_page_for_layout(3, 8), 2);
+    }
+
+    #[test]
+    fn cover_spread_keeps_first_page_solo_and_pairs_from_second_page() {
+        let app = AppState {
+            page_layout_mode: PageLayoutMode::Spread,
+            spread_cover_policy: SpreadCoverPolicy::Cover,
+            ..AppState::default()
+        };
+
+        assert_eq!(app.normalize_page_for_layout(0, 8), 0);
+        assert_eq!(app.normalize_page_for_layout(1, 8), 1);
+        assert_eq!(app.normalize_page_for_layout(2, 8), 1);
+        assert_eq!(app.normalize_page_for_layout(3, 8), 3);
+
+        assert_eq!(app.next_page_for_layout(0, 8), 1);
+        assert_eq!(app.next_page_for_layout(1, 8), 3);
+        assert_eq!(app.prev_page_for_layout(3, 8), 1);
+        assert_eq!(app.prev_page_for_layout(1, 8), 0);
+    }
+
+    #[test]
+    fn cover_spread_presents_first_page_as_single_page() {
+        let app = AppState {
+            page_layout_mode: PageLayoutMode::Spread,
+            spread_direction: SpreadDirection::Rtl,
+            spread_cover_policy: SpreadCoverPolicy::Cover,
+            ..AppState::default()
+        };
+
+        let cover = app.visible_page_slots_for_page(0, 8);
+        assert_eq!(cover.trailing_page, None);
+        assert_eq!(cover.left_page, Some(0));
+        assert_eq!(cover.right_page, None);
+        assert_eq!(
+            app.page_presentation_for_slots(cover),
+            PageLayoutMode::Single
+        );
+
+        let first_spread = app.visible_page_slots_for_page(1, 8);
+        assert_eq!(first_spread.anchor_page, 1);
+        assert_eq!(first_spread.trailing_page, Some(2));
+        assert_eq!(first_spread.left_page, Some(2));
+        assert_eq!(first_spread.right_page, Some(1));
+        assert_eq!(
+            app.page_presentation_for_slots(first_spread),
+            PageLayoutMode::Spread
         );
     }
 }

@@ -1,8 +1,10 @@
 use crate::app::scale::{ZOOM_MAX, ZOOM_MIN};
-use crate::app::{AppState, Mode, NoticeAction, PageLayoutMode, SpreadDirection};
+use crate::app::{
+    AppState, Mode, NoticeAction, PageLayoutMode, SpreadCoverPolicy, SpreadDirection,
+};
 use crate::error::{AppError, AppResult};
 
-use super::types::{CommandOutcome, PageLayoutModeArg, SpreadDirectionArg};
+use super::types::{CommandOutcome, PageLayoutModeArg, SpreadCoverPolicyArg, SpreadDirectionArg};
 
 pub(crate) type CommandNoticeResult = (CommandOutcome, NoticeAction);
 
@@ -16,27 +18,23 @@ fn noop() -> CommandNoticeResult {
 
 pub(crate) fn next_page(app: &mut AppState, page_count: usize) -> AppResult<CommandNoticeResult> {
     let page_count = resolve_page_count(page_count)?;
-    let step = app.page_step();
-
-    if app.current_page.saturating_add(step) >= page_count {
+    let target = app.next_page_for_layout(app.current_page, page_count);
+    if app.current_page == target {
         return Ok(noop());
     }
 
-    let target = app.current_page.saturating_add(step);
-    app.current_page = app.normalize_page_for_layout(target, page_count);
+    app.current_page = target;
     Ok(applied())
 }
 
 pub(crate) fn prev_page(app: &mut AppState, page_count: usize) -> AppResult<CommandNoticeResult> {
     let page_count = resolve_page_count(page_count)?;
-    let step = app.page_step();
-
-    if app.current_page == 0 {
+    let target = app.prev_page_for_layout(app.current_page, page_count);
+    if app.current_page == target {
         return Ok(noop());
     }
 
-    let target = app.current_page.saturating_sub(step);
-    app.current_page = app.normalize_page_for_layout(target, page_count);
+    app.current_page = target;
     Ok(applied())
 }
 
@@ -91,6 +89,7 @@ pub(crate) fn set_page_layout(
     page_count: usize,
     mode: PageLayoutModeArg,
     direction: Option<SpreadDirectionArg>,
+    cover_policy: Option<SpreadCoverPolicyArg>,
 ) -> AppResult<CommandNoticeResult> {
     let page_count = resolve_page_count(page_count)?;
 
@@ -103,14 +102,20 @@ pub(crate) fn set_page_layout(
         Some(SpreadDirectionArg::Rtl) => SpreadDirection::Rtl,
         None => app.spread_direction,
     };
-    if next_mode == PageLayoutMode::Single && direction.is_some() {
+    let next_cover_policy = match cover_policy {
+        Some(SpreadCoverPolicyArg::Cover) => SpreadCoverPolicy::Cover,
+        Some(SpreadCoverPolicyArg::Paired) | None => SpreadCoverPolicy::Paired,
+    };
+    if next_mode == PageLayoutMode::Single && (direction.is_some() || cover_policy.is_some()) {
         return Err(AppError::invalid_argument(
-            "single layout does not accept a spread direction",
+            "single layout does not accept spread arguments",
         ));
     }
 
     let changed = app.page_layout_mode != next_mode
-        || (next_mode == PageLayoutMode::Spread && app.spread_direction != next_direction);
+        || (next_mode == PageLayoutMode::Spread
+            && (app.spread_direction != next_direction
+                || app.spread_cover_policy != next_cover_policy));
     if !changed {
         return Ok(noop());
     }
@@ -118,6 +123,7 @@ pub(crate) fn set_page_layout(
     app.page_layout_mode = next_mode;
     if next_mode == PageLayoutMode::Spread {
         app.spread_direction = next_direction;
+        app.spread_cover_policy = next_cover_policy;
     }
     app.normalize_current_page(page_count);
     app.pan_x = 0;

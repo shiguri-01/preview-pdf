@@ -39,7 +39,11 @@ Rules:
   - `single` is the default layout
   - `spread` shows two logical pages side by side
   - spread direction supports `ltr` and `rtl`
-  - runtime commands are `page-layout-single` and `page-layout-spread [ltr|rtl]`
+  - spread cover policy supports `paired` and `cover`
+    - `paired` is the default and groups pages as `1-2`, `3-4`, ...
+    - `cover` shows page 1 by itself, then groups pages as `2-3`, `4-5`, ...
+  - runtime commands are `page-layout-single` and
+    `page-layout-spread [ltr|rtl] [paired|cover]`
 
 - Zoom and viewport
   - zoom uses a bounded discrete ladder

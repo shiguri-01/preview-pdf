@@ -109,12 +109,16 @@ Command-specific parsing rules:
   - overflow in `amount` clamps to `i32` bounds
 - `page-layout-single`
   - takes no arguments
-- `page-layout-spread [ltr|rtl]`
-  - accepts at most one spread direction argument
+- `page-layout-spread [ltr|rtl] [paired|cover]`
+  - accepts an optional spread direction argument followed by an optional cover
+    policy argument
   - the argument is optional to keep the common case short to type; users can
-    stop at `page-layout-spread` and let the command use its default direction
-  - omission is therefore not a separate argument value or token; it is just
-    the shorter command form
+    stop at `page-layout-spread`
+  - omitted direction keeps the current spread direction
+  - omitted cover policy uses `paired`, which groups pages as `1-2`, `3-4`, ...
+  - `cover` shows page 1 by itself, then groups pages as `2-3`, `4-5`, ...
+  - the cover policy is positional; specifying it requires specifying a
+    direction first
 - `open-palette <kind> [seed]`
   - parses palette kind first and preserves remaining text as optional seed
 - `submit-search <query> [matcher]`
@@ -182,7 +186,7 @@ Public commands:
 
 - Layout
   - `page-layout-single`
-  - `page-layout-spread [ltr|rtl]`
+  - `page-layout-spread [ltr|rtl] [paired|cover]`
 
 - Debug status
   - `debug-status-show`

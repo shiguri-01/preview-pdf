@@ -752,6 +752,9 @@ mod tests {
     fn enum_argument_phase_lists_values() {
         let list = command_list_for_input("page-layout-spread ", false);
         assert_eq!(ids(&list), vec!["ltr".to_string(), "rtl".to_string()]);
+
+        let list = command_list_for_input("page-layout-spread ltr ", false);
+        assert_eq!(ids(&list), vec!["paired".to_string(), "cover".to_string()]);
     }
 
     #[test]
@@ -781,6 +784,9 @@ mod tests {
 
         let list = command_list_for_input("page-layout-spread rt", false);
         assert_eq!(ids(&list), vec!["rtl".to_string()]);
+
+        let list = command_list_for_input("page-layout-spread rtl p", false);
+        assert_eq!(ids(&list), vec!["paired".to_string()]);
     }
 
     #[test]
@@ -871,6 +877,7 @@ mod tests {
                 command: Command::SetPageLayout {
                     mode: crate::command::PageLayoutModeArg::Spread,
                     direction: None,
+                    cover_policy: None,
                 },
                 history_record: Some(InputHistoryRecord::Command(
                     "page-layout-spread".to_string(),
@@ -955,6 +962,7 @@ mod tests {
                 command: Command::SetPageLayout {
                     mode: crate::command::PageLayoutModeArg::Spread,
                     direction: None,
+                    cover_policy: None,
                 },
                 history_record: Some(InputHistoryRecord::Command(
                     "page-layout-spread".to_string(),
@@ -1009,6 +1017,7 @@ mod tests {
                 command: Command::SetPageLayout {
                     mode: crate::command::PageLayoutModeArg::Spread,
                     direction: Some(crate::command::SpreadDirectionArg::Rtl),
+                    cover_policy: None,
                 },
                 history_record: Some(InputHistoryRecord::Command(
                     "page-layout-spread rtl".to_string(),
@@ -1019,10 +1028,38 @@ mod tests {
     }
 
     #[test]
+    fn submit_dispatches_selected_spread_cover_policy_when_result_is_complete() {
+        let effect = command_submit_effect("page-layout-spread rtl ", "cover", false);
+        assert_eq!(
+            effect,
+            PaletteSubmitEffect::Dispatch {
+                command: Command::SetPageLayout {
+                    mode: crate::command::PageLayoutModeArg::Spread,
+                    direction: Some(crate::command::SpreadDirectionArg::Rtl),
+                    cover_policy: Some(crate::command::SpreadCoverPolicyArg::Cover),
+                },
+                history_record: Some(InputHistoryRecord::Command(
+                    "page-layout-spread rtl cover".to_string(),
+                )),
+                next: PalettePostAction::Close,
+            }
+        );
+    }
+
+    #[test]
     fn assistive_text_uses_enum_values_for_enum_arguments() {
         assert_eq!(
             assistive_text_for_input("page-layout-spread ", false),
-            Some("page-layout-spread [direction] | direction: ltr / rtl".to_string())
+            Some(
+                "page-layout-spread [direction] [cover-policy] | direction: ltr / rtl".to_string()
+            )
+        );
+        assert_eq!(
+            assistive_text_for_input("page-layout-spread rtl ", false),
+            Some(
+                "page-layout-spread [direction] [cover-policy] | cover-policy: paired / cover"
+                    .to_string()
+            )
         );
     }
 

@@ -4,7 +4,7 @@ use crate::extension::ExtensionUiSnapshot;
 use super::types::{
     ArgHint, ArgKind, ArgSpec, Command, CommandAvailability, CommandCondition, CommandExposure,
     CommandInvocationPolicy, CommandInvocationSource, CommandSpec, PanDirection,
-    SpreadDirectionArg,
+    SpreadCoverPolicyArg, SpreadDirectionArg,
 };
 
 const NO_ARGS: [ArgSpec; 0] = [];
@@ -36,12 +36,20 @@ const ARGS_PAN: [ArgSpec; 2] = [
         hint: ArgHint::None,
     },
 ];
-const ARGS_PAGE_LAYOUT_SPREAD: [ArgSpec; 1] = [ArgSpec {
-    name: "direction",
-    kind: ArgKind::String,
-    required: false,
-    hint: ArgHint::Enum(SpreadDirectionArg::values),
-}];
+const ARGS_PAGE_LAYOUT_SPREAD: [ArgSpec; 2] = [
+    ArgSpec {
+        name: "direction",
+        kind: ArgKind::String,
+        required: false,
+        hint: ArgHint::Enum(SpreadDirectionArg::values),
+    },
+    ArgSpec {
+        name: "cover-policy",
+        kind: ArgKind::String,
+        required: false,
+        hint: ArgHint::Enum(SpreadCoverPolicyArg::values),
+    },
+];
 const ARGS_OPEN_PALETTE: [ArgSpec; 2] = [
     ArgSpec {
         name: "kind",

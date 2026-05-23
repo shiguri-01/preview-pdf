@@ -62,7 +62,7 @@ struct RenderFrameDrawPlan {
     help_scroll: usize,
     debug_status_visible: bool,
     chrome: ui::ChromeViewState,
-    page_layout_mode: PageLayoutMode,
+    page_presentation: PageLayoutMode,
     enable_crop: bool,
     file_name: String,
     presenter_backend_name: &'static str,
@@ -128,6 +128,7 @@ impl RenderFrameDrawPlan {
             .unwrap_or_else(|| pdf.path().display().to_string());
         let loading_label = format_loading_target(visible_pages);
         let render_target = format_render_target(visible_pages);
+        let page_presentation = state.page_presentation_for_slots(visible_pages);
         let spread_gap_px = u32::from(
             resolved_cell_size_px(presenter.cell_px)
                 .0
@@ -149,12 +150,12 @@ impl RenderFrameDrawPlan {
             debug_status_visible: state.debug_status_visible,
             chrome: ui::ChromeViewState {
                 visible_pages,
-                page_layout_mode: state.page_layout_mode,
+                page_presentation,
                 zoom: state.zoom,
                 debug_status_visible: state.debug_status_visible,
                 notice: state.notice.clone(),
             },
-            page_layout_mode: state.page_layout_mode,
+            page_presentation,
             enable_crop: state.zoom > 1.0,
             file_name,
             presenter_backend_name: presenter.backend_name,
@@ -205,8 +206,9 @@ impl App {
         let slots = self
             .state
             .visible_page_slots_for_page(page, pdf.page_count());
+        let page_presentation = self.state.page_presentation_for_slots(slots);
         let (page_width_pt, page_height_pt) =
-            resolve_layout_dimensions(pdf, self.state.page_layout_mode, slots);
+            resolve_layout_dimensions(pdf, page_presentation, slots);
         let caps = self.render.presenter.capabilities();
         let max_scale = caps
             .preferred_max_render_scale
@@ -446,7 +448,7 @@ impl RenderSubsystem {
             let image_area = layout.viewer_inner;
             let spread_slot_areas = split_spread_slot_areas(image_area, SPREAD_GAP_CELLS);
 
-            let prepare_result = match draw_plan.page_layout_mode {
+            let prepare_result = match draw_plan.page_presentation {
                 PageLayoutMode::Single => self.prepare_single_page_or_preview_from_cache(
                     pdf,
                     viewport,
@@ -481,7 +483,7 @@ impl RenderSubsystem {
                         render_mode,
                         ..draw_plan.render_options
                     };
-                    let render_result = match draw_plan.page_layout_mode {
+                    let render_result = match draw_plan.page_presentation {
                         PageLayoutMode::Single => {
                             let render_slots: Vec<_> = spread_render_slots
                                 .into_iter()
@@ -506,7 +508,7 @@ impl RenderSubsystem {
                                 viewer_has_image = true;
                             }
                             let allow_viewer_loading =
-                                draw_plan.page_layout_mode == PageLayoutMode::Single;
+                                draw_plan.page_presentation == PageLayoutMode::Single;
                             draw_viewer_outcome(
                                 frame,
                                 image_area,
@@ -516,7 +518,7 @@ impl RenderSubsystem {
                                 viewer_has_image,
                                 allow_viewer_loading,
                             );
-                            if draw_plan.page_layout_mode == PageLayoutMode::Spread {
+                            if draw_plan.page_presentation == PageLayoutMode::Spread {
                                 draw_spread_loading_overlays(
                                     frame,
                                     &outcome,
@@ -542,7 +544,7 @@ impl RenderSubsystem {
                 }
                 Ok(None) => {
                     render_feedback = PresenterFeedback::Pending;
-                    let outcome = match draw_plan.page_layout_mode {
+                    let outcome = match draw_plan.page_presentation {
                         PageLayoutMode::Single => PresenterRenderOutcome {
                             slots: vec![PresenterSlotOutcome::active(
                                 image_area,
@@ -558,8 +560,9 @@ impl RenderSubsystem {
                             PresenterFeedback::Pending,
                         ),
                     };
-                    let allow_viewer_loading = draw_plan.page_layout_mode == PageLayoutMode::Single;
-                    if draw_plan.page_layout_mode == PageLayoutMode::Spread {
+                    let allow_viewer_loading =
+                        draw_plan.page_presentation == PageLayoutMode::Single;
+                    if draw_plan.page_presentation == PageLayoutMode::Spread {
                         clear_pending_spread_regions(frame, spread_slot_areas, &outcome);
                     }
                     draw_viewer_outcome(
@@ -571,7 +574,7 @@ impl RenderSubsystem {
                         viewer_has_image,
                         allow_viewer_loading,
                     );
-                    if draw_plan.page_layout_mode == PageLayoutMode::Spread {
+                    if draw_plan.page_presentation == PageLayoutMode::Spread {
                         draw_spread_loading_overlays(frame, &outcome, draw_plan.visible_pages);
                     }
                 }
@@ -777,14 +780,14 @@ fn presenter_render_options(
 
 fn resolve_layout_dimensions(
     pdf: &dyn PdfBackend,
-    mode: PageLayoutMode,
+    page_presentation: PageLayoutMode,
     slots: VisiblePageSlots,
 ) -> (f32, f32) {
     let (anchor_width, anchor_height) = pdf
         .page_dimensions(slots.anchor_page)
         .unwrap_or(DEFAULT_PAGE_SIZE_PT);
     match slots.trailing_page {
-        None => match mode {
+        None => match page_presentation {
             PageLayoutMode::Single => (anchor_width, anchor_height),
             // Tail spread still reserves a blank partner slot, so the scale
             // stays consistent with regular spread slot layout.
@@ -803,7 +806,7 @@ fn resolve_layout_dimensions(
 pub(super) fn compute_initial_preview_plan(
     doc_id: u64,
     visible_pages: VisiblePageSlots,
-    page_layout_mode: PageLayoutMode,
+    page_presentation: PageLayoutMode,
     current_scale: f32,
 ) -> Option<InitialPreviewPlan> {
     let preview_scale = quantize_scale(current_scale * INITIAL_PREVIEW_SCALE_RATIO);
@@ -811,7 +814,7 @@ pub(super) fn compute_initial_preview_plan(
         return None;
     }
 
-    let page_keys = match page_layout_mode {
+    let page_keys = match page_presentation {
         PageLayoutMode::Single => vec![RenderedPageKey::new(
             doc_id,
             visible_pages.anchor_page,

@@ -15,5 +15,5 @@ pub use types::{
     ActionId, ArgHint, ArgKind, ArgSpec, Command, CommandAvailability, CommandCondition,
     CommandExposure, CommandInvocationPolicy, CommandInvocationSource, CommandOutcome,
     CommandRequest, CommandSpec, PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind,
-    SpreadDirectionArg,
+    SpreadCoverPolicyArg, SpreadDirectionArg,
 };

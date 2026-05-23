@@ -1,4 +1,4 @@
-use crate::app::PageLayoutMode;
+use crate::app::{PageLayoutMode, SpreadCoverPolicy};
 use crate::command::{Command, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::input::InputHistoryRecord;
@@ -152,7 +152,10 @@ impl PaletteProvider for SearchResultsPaletteProvider {
         candidates: &[PaletteCandidate],
     ) -> Option<usize> {
         let primary_page = ctx.app.current_page + 1;
-        let trailing_page = if ctx.app.page_layout_mode == PageLayoutMode::Spread {
+        let cover_solo = ctx.app.page_layout_mode == PageLayoutMode::Spread
+            && ctx.app.spread_cover_policy == SpreadCoverPolicy::Cover
+            && ctx.app.current_page == 0;
+        let trailing_page = if ctx.app.page_layout_mode == PageLayoutMode::Spread && !cover_solo {
             Some(primary_page + 1)
         } else {
             None
@@ -321,7 +324,7 @@ fn result_candidate(entry: &SearchPaletteEntry) -> PaletteCandidate {
 #[cfg(test)]
 mod tests {
     use crate::{
-        app::PageLayoutMode,
+        app::{PageLayoutMode, SpreadCoverPolicy},
         command::SearchMatcherKind,
         extension::ExtensionUiSnapshot,
         palette::{
@@ -423,6 +426,7 @@ mod tests {
         let app = PaletteAppSnapshot {
             current_page: 4,
             page_layout_mode: PageLayoutMode::Spread,
+            spread_cover_policy: SpreadCoverPolicy::Paired,
         };
         let extensions = ExtensionUiSnapshot {
             search_results_entries: vec![
@@ -456,6 +460,49 @@ mod tests {
         assert_eq!(
             provider.initial_selected_candidate(&ctx, &candidates),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn results_initial_selection_does_not_treat_cover_solo_as_spread() {
+        let provider = SearchResultsPaletteProvider;
+        let app = PaletteAppSnapshot {
+            current_page: 0,
+            page_layout_mode: PageLayoutMode::Spread,
+            spread_cover_policy: SpreadCoverPolicy::Cover,
+        };
+        let extensions = ExtensionUiSnapshot {
+            search_results_entries: vec![
+                SearchPaletteEntry {
+                    index: 1,
+                    page: 0,
+                    snippet: "cover".to_string(),
+                    snippet_match_start: None,
+                    snippet_match_end: None,
+                },
+                SearchPaletteEntry {
+                    index: 2,
+                    page: 1,
+                    snippet: "next".to_string(),
+                    snippet_match_start: None,
+                    snippet_match_end: None,
+                },
+            ]
+            .into(),
+            ..ExtensionUiSnapshot::default()
+        };
+        let ctx = PaletteContext {
+            app,
+            extensions: &extensions,
+            kind: PaletteKind::SearchResults,
+            input: "",
+            open_payload: None,
+        };
+        let candidates = provider.list(&ctx).expect("results list should build");
+
+        assert_eq!(
+            provider.initial_selected_candidate(&ctx, &candidates),
+            Some(0)
         );
     }
 

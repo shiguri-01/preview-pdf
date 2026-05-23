@@ -126,6 +126,47 @@ impl SpreadDirectionArg {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpreadCoverPolicyArg {
+    Paired,
+    Cover,
+}
+
+impl SpreadCoverPolicyArg {
+    const VARIANTS: [Self; 2] = [Self::Paired, Self::Cover];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Paired => "paired",
+            Self::Cover => "cover",
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        self.as_str()
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::VARIANTS
+            .iter()
+            .copied()
+            .find(|candidate| candidate.as_str() == value)
+    }
+
+    pub fn values() -> &'static [&'static str] {
+        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
+
+        VALUES
+            .get_or_init(|| {
+                SpreadCoverPolicyArg::VARIANTS
+                    .iter()
+                    .map(|candidate| candidate.as_str())
+                    .collect()
+            })
+            .as_ref()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PanDirection {
     Left,
     Right,
@@ -194,6 +235,7 @@ pub enum Command {
     SetPageLayout {
         mode: PageLayoutModeArg,
         direction: Option<SpreadDirectionArg>,
+        cover_policy: Option<SpreadCoverPolicyArg>,
     },
     DebugStatusShow,
     DebugStatusHide,
@@ -456,7 +498,7 @@ mod tests {
 
     use super::{
         ActionId, Command, PageLayoutModeArg, PanAmount, PanDirection, SearchMatcherKind,
-        SpreadDirectionArg,
+        SpreadCoverPolicyArg, SpreadDirectionArg,
     };
 
     #[test]
@@ -487,6 +529,10 @@ mod tests {
         for mode in [PageLayoutModeArg::Single, PageLayoutModeArg::Spread] {
             assert_eq!(PageLayoutModeArg::parse(mode.as_str()), Some(mode));
         }
+
+        for policy in [SpreadCoverPolicyArg::Paired, SpreadCoverPolicyArg::Cover] {
+            assert_eq!(SpreadCoverPolicyArg::parse(policy.as_str()), Some(policy));
+        }
     }
 
     #[test]
@@ -505,6 +551,13 @@ mod tests {
             &[
                 SpreadDirectionArg::Ltr.as_str(),
                 SpreadDirectionArg::Rtl.as_str(),
+            ]
+        );
+        assert_eq!(
+            SpreadCoverPolicyArg::values(),
+            &[
+                SpreadCoverPolicyArg::Paired.as_str(),
+                SpreadCoverPolicyArg::Cover.as_str(),
             ]
         );
         assert_eq!(
@@ -568,6 +621,7 @@ mod tests {
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Spread,
                 direction: Some(SpreadDirectionArg::Rtl),
+                cover_policy: None,
             }
             .action_id(),
             ActionId::SetPageLayout

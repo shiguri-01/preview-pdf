@@ -101,9 +101,11 @@ pub fn dispatch(
             app.pan_y = app.pan_y.saturating_add(dy);
             Ok((CommandOutcome::Applied, NoticeAction::Clear))
         }
-        Command::SetPageLayout { mode, direction } => {
-            set_page_layout(app, page_count, mode, direction)
-        }
+        Command::SetPageLayout {
+            mode,
+            direction,
+            cover_policy,
+        } => set_page_layout(app, page_count, mode, direction, cover_policy),
         Command::DebugStatusShow => set_debug_status_visible(app, true),
         Command::DebugStatusHide => set_debug_status_visible(app, false),
         Command::DebugStatusToggle => {
@@ -262,11 +264,11 @@ mod tests {
     use std::sync::Arc;
 
     use crate::app::scale::zoom_eq;
-    use crate::app::{AppState, Notice, NoticeLevel, PaletteRequest};
+    use crate::app::{AppState, Notice, NoticeLevel, PaletteRequest, SpreadCoverPolicy};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{
         ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg, PanAmount,
-        PanDirection, SearchMatcherKind,
+        PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
     };
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
@@ -868,6 +870,7 @@ mod tests {
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Spread,
                 direction: None,
+                cover_policy: None,
             },
             CommandInvocationSource::Keymap,
             pdf,
@@ -886,6 +889,63 @@ mod tests {
                 reason: NavReason::LayoutNormalize
             }
         ));
+    }
+
+    #[test]
+    fn dispatch_page_layout_spread_without_cover_policy_resets_to_paired() {
+        let mut app = AppState {
+            current_page: 1,
+            page_layout_mode: crate::app::PageLayoutMode::Spread,
+            spread_cover_policy: SpreadCoverPolicy::Cover,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetPageLayout {
+                mode: PageLayoutModeArg::Spread,
+                direction: None,
+                cover_policy: None,
+            },
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(app.spread_cover_policy, SpreadCoverPolicy::Paired);
+        assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn dispatch_page_layout_spread_cover_keeps_cover_policy() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::SetPageLayout {
+                mode: PageLayoutModeArg::Spread,
+                direction: None,
+                cover_policy: Some(SpreadCoverPolicyArg::Cover),
+            },
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(app.spread_cover_policy, SpreadCoverPolicy::Cover);
+        assert_eq!(app.current_page, 0);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::palette::{PaletteKind, PaletteOpenPayload};
 use super::spec::{CommandConditionContext, find_command_spec, validate_command_id_for_source};
 use super::types::{
     Command, CommandInvocationSource, PageLayoutModeArg, PanAmount, PanDirection,
-    SearchMatcherKind, SpreadDirectionArg,
+    SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
 };
 
 pub fn parse_command_text(input: &str) -> AppResult<Command> {
@@ -266,6 +266,7 @@ fn parse_page_layout_single(args_text: &str) -> AppResult<Command> {
         Command::SetPageLayout {
             mode: PageLayoutModeArg::Single,
             direction: None,
+            cover_policy: None,
         },
     )
 }
@@ -276,6 +277,7 @@ fn parse_page_layout_spread(args_text: &str) -> AppResult<Command> {
         return Ok(Command::SetPageLayout {
             mode: PageLayoutModeArg::Spread,
             direction: None,
+            cover_policy: None,
         });
     }
 
@@ -285,15 +287,23 @@ fn parse_page_layout_spread(args_text: &str) -> AppResult<Command> {
     };
     let direction = SpreadDirectionArg::parse(direction_text)
         .ok_or(AppError::invalid_argument("unknown spread direction"))?;
+    let cover_policy = parts
+        .next()
+        .map(|policy_text| {
+            SpreadCoverPolicyArg::parse(policy_text)
+                .ok_or(AppError::invalid_argument("unknown spread cover policy"))
+        })
+        .transpose()?;
     if parts.next().is_some() {
         return Err(AppError::invalid_argument(
-            "page-layout-spread accepts at most 1 argument",
+            "page-layout-spread accepts at most 2 arguments",
         ));
     }
 
     Ok(Command::SetPageLayout {
         mode: PageLayoutModeArg::Spread,
         direction: Some(direction),
+        cover_policy,
     })
 }
 
@@ -424,7 +434,8 @@ mod tests {
     use super::{first_token, parse_command_text};
     use crate::command::{
         ArgHint, ArgKind, ArgSpec, Command, CommandExposure, PageLayoutModeArg, PanAmount,
-        PanDirection, SearchMatcherKind, SpreadDirectionArg, all_command_specs,
+        PanDirection, SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
+        all_command_specs,
     };
     use crate::palette::{PaletteKind, PaletteOpenPayload};
 
@@ -550,6 +561,7 @@ mod tests {
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Single,
                 direction: None,
+                cover_policy: None,
             }
         );
         assert_eq!(
@@ -557,6 +569,7 @@ mod tests {
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Spread,
                 direction: None,
+                cover_policy: None,
             }
         );
         assert_eq!(
@@ -564,6 +577,15 @@ mod tests {
             Command::SetPageLayout {
                 mode: PageLayoutModeArg::Spread,
                 direction: Some(SpreadDirectionArg::Rtl),
+                cover_policy: None,
+            }
+        );
+        assert_eq!(
+            parse_command_text("page-layout-spread rtl cover").expect("parse should succeed"),
+            Command::SetPageLayout {
+                mode: PageLayoutModeArg::Spread,
+                direction: Some(SpreadDirectionArg::Rtl),
+                cover_policy: Some(SpreadCoverPolicyArg::Cover),
             }
         );
     }
@@ -746,6 +768,9 @@ mod tests {
                 if index == arg_index {
                     return Some(value);
                 }
+                if index < arg_index {
+                    return sample_arg(arg);
+                }
                 required_arg_sample(arg)
             })
             .collect::<Vec<_>>();
@@ -762,6 +787,10 @@ mod tests {
             return None;
         }
 
+        sample_arg(arg)
+    }
+
+    fn sample_arg(arg: &ArgSpec) -> Option<&'static str> {
         Some(match arg.kind {
             ArgKind::F32 => "1.25",
             ArgKind::I32 => "1",

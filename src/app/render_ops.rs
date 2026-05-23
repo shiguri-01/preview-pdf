@@ -159,14 +159,14 @@ pub(crate) fn cold_start_initial_preview_plan(
     current_cached: bool,
     doc_id: u64,
     visible_pages: VisiblePageSlots,
-    page_layout_mode: super::state::PageLayoutMode,
+    page_presentation: super::state::PageLayoutMode,
     current_scale: f32,
 ) -> Option<InitialPreviewPlan> {
     if !is_cold_start || current_cached {
         return None;
     }
 
-    compute_initial_preview_plan(doc_id, visible_pages, page_layout_mode, current_scale)
+    compute_initial_preview_plan(doc_id, visible_pages, page_presentation, current_scale)
 }
 
 impl RenderSubsystem {
@@ -192,14 +192,15 @@ impl RenderSubsystem {
             .keys()
             .iter()
             .all(|key| self.runtime.has_cached_frame(key));
+        let page_presentation = state.page_presentation_for_slots(visible_pages);
         let presenter_layout_tag =
-            state.presenter_layout_tag(visible_pages.trailing_page.is_some());
+            state.presenter_layout_tag(page_presentation, visible_pages.trailing_page.is_some());
         let initial_preview = cold_start_initial_preview_plan(
             is_cold_start,
             current_cached,
             pdf.doc_id(),
             visible_pages,
-            state.page_layout_mode,
+            page_presentation,
             current_scale,
         );
         let mut current_interest_keys = CurrentInterestKeys::from_required(&required);
@@ -308,9 +309,11 @@ impl RenderSubsystem {
         }
 
         if state.current_page != *parts.tracked_page {
-            parts
-                .nav
-                .on_page_change(*parts.tracked_page, state.current_page, state.page_step());
+            parts.nav.on_page_change(
+                *parts.tracked_page,
+                state.current_page,
+                state.page_step_between(*parts.tracked_page, state.current_page),
+            );
             self.runtime.schedule_navigation(
                 pdf,
                 state.current_page,

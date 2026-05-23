@@ -13,7 +13,7 @@ const MIN_FILENAME_ELISION_WIDTH: usize = 7;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChromeViewState {
     pub visible_pages: VisiblePageSlots,
-    pub page_layout_mode: PageLayoutMode,
+    pub page_presentation: PageLayoutMode,
     pub zoom: f32,
     pub debug_status_visible: bool,
     pub notice: Option<Notice>,
@@ -132,7 +132,7 @@ fn build_status_text(
 fn format_page_segment(chrome: &ChromeViewState, page_total: usize) -> String {
     let slots = chrome.visible_pages;
     let page_width = page_total.to_string().len();
-    match chrome.page_layout_mode {
+    match chrome.page_presentation {
         PageLayoutMode::Single => {
             let page_now = slots.anchor_page.saturating_add(1).min(page_total);
             format!("p.{:>page_width$}/{:>page_width$}", page_now, page_total)
@@ -278,7 +278,7 @@ fn elide_middle_by_width(input: &str, max_width: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode};
+    use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode, SpreadCoverPolicy};
 
     use super::{
         ChromeViewState, build_presenter_path_text, build_status_text, display_width,
@@ -288,7 +288,7 @@ mod tests {
     fn chrome_from_app(app: &AppState, page_count: usize) -> ChromeViewState {
         ChromeViewState {
             visible_pages: app.visible_page_slots(page_count),
-            page_layout_mode: app.page_layout_mode,
+            page_presentation: app.page_presentation_for_slots(app.visible_page_slots(page_count)),
             zoom: app.zoom,
             debug_status_visible: app.debug_status_visible,
             notice: app.notice.clone(),
@@ -457,5 +457,18 @@ mod tests {
         };
         let text = build_status_text(&chrome_from_app(&app, 10), "sample.pdf", 10, &[], 120);
         assert_eq!(text, "pp. 3- 4/10 | zoom 1.00x | sample.pdf");
+    }
+
+    #[test]
+    fn build_status_text_uses_single_page_segment_for_cover_solo_page() {
+        let app = AppState {
+            current_page: 0,
+            page_layout_mode: PageLayoutMode::Spread,
+            spread_cover_policy: SpreadCoverPolicy::Cover,
+            ..AppState::default()
+        };
+
+        let text = build_status_text(&chrome_from_app(&app, 10), "sample.pdf", 10, &[], 120);
+        assert_eq!(text, "p. 1/10 | zoom 1.00x | sample.pdf");
     }
 }

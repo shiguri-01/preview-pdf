@@ -71,6 +71,8 @@ source-page identities for both single-page and spread slots.
 Rules:
 
 - spread mode splits the viewer into left and right page slots with a fixed gap
+- when spread cover policy is `cover`, page 1 is presented through the
+  single-page path; later spreads use the normal left/right slot path
 - each slot draws the same source-page frame path used by single-page mode
 - a missing partner page is represented by clearing that slot
 - each page is independently fit within its slot, so differently sized pages do

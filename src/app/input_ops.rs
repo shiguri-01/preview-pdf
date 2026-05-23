@@ -478,14 +478,12 @@ mod tests {
     use crate::backend::test_support::{build_pdf, unique_temp_path};
     use crate::backend::{PdfDoc, SharedPdfBackend};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
-    use crate::config::Config;
     use crate::error::AppError;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
     use crate::palette::{PaletteKeyResult, PaletteKind};
-    use crate::presenter::PresenterKind;
 
-    use super::super::App;
+    use super::super::actors::InputActor;
     use super::super::core::InteractionSubsystem;
     use super::super::state::{NoticeLevel, notice_action_for_error};
 
@@ -623,62 +621,68 @@ mod tests {
 
     #[test]
     fn help_close_requests_viewer_area_clear() {
-        let mut app = App::new_with_config(PresenterKind::RatatuiImage, Config::default())
-            .expect("app should initialize");
-        app.state.mode = Mode::Help;
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState {
+            mode: Mode::Help,
+            ..AppState::default()
+        };
+        let mut actor = InputActor::new(std::time::Instant::now());
         let mut session = MockSession::new(80, 24);
-        let mut needs_redraw = false;
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        let mut last_input_at = std::time::Instant::now();
 
-        let outcome = app
-            .handle_input_event(
+        let effects = actor
+            .handle_terminal_event(
                 crossterm::event::Event::Key(key),
+                &mut interaction,
+                &mut state,
                 &mut session,
-                &mut needs_redraw,
-                &mut last_input_at,
             )
             .expect("help close should be handled");
+        let (commands, events, redraws, quit_requested) = effects.into_parts();
 
         assert_eq!(session.clear_count, 1);
-        assert_eq!(app.state.mode, Mode::Normal);
-        assert_eq!(app.state.help_scroll, 0);
-        assert!(needs_redraw);
-        assert!(outcome.commands.is_empty());
+        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.help_scroll, 0);
+        assert!(!redraws.is_empty());
+        assert!(commands.is_empty());
+        assert!(events.is_empty());
+        assert!(!quit_requested);
     }
 
     #[test]
     fn palette_close_clears_terminal_and_restores_normal_mode() {
-        let mut app = App::new_with_config(PresenterKind::RatatuiImage, Config::default())
-            .expect("app should initialize");
-        app.interaction
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState::default();
+        interaction
             .palette
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
                 payload: None,
             });
-        assert!(app.interaction.apply_palette_requests(&mut app.state));
-        assert_eq!(app.state.mode, Mode::Palette);
+        assert!(interaction.apply_palette_requests(&mut state));
+        assert_eq!(state.mode, Mode::Palette);
 
+        let mut actor = InputActor::new(std::time::Instant::now());
         let mut session = MockSession::new(80, 24);
-        let mut needs_redraw = false;
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
-        let mut last_input_at = std::time::Instant::now();
 
-        let outcome = app
-            .handle_input_event(
+        let effects = actor
+            .handle_terminal_event(
                 crossterm::event::Event::Key(key),
+                &mut interaction,
+                &mut state,
                 &mut session,
-                &mut needs_redraw,
-                &mut last_input_at,
             )
             .expect("palette close should be handled");
+        let (commands, events, redraws, quit_requested) = effects.into_parts();
 
         assert_eq!(session.clear_count, 1);
-        assert_eq!(app.state.mode, Mode::Normal);
-        assert!(needs_redraw);
-        assert!(outcome.commands.is_empty());
+        assert_eq!(state.mode, Mode::Normal);
+        assert!(!redraws.is_empty());
+        assert!(commands.is_empty());
+        assert!(events.is_empty());
+        assert!(!quit_requested);
     }
 
     #[test]

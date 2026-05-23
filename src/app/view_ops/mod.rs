@@ -38,7 +38,7 @@ const SPREAD_GAP_CELLS: u16 = 2;
 const INITIAL_PREVIEW_SCALE_RATIO: f32 = 0.25;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct InitialPreviewPlan {
+pub(super) struct InitialPreviewPlan {
     pub(super) scale: f32,
     pub(super) page_keys: Vec<RenderedPageKey>,
     pub(super) presenter_key: RenderedPageKey,

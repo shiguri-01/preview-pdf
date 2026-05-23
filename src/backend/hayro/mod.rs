@@ -13,14 +13,14 @@ use crate::error::AppResult;
 use super::traits::{OutlineNode, PdfBackend, PdfRenderContext, RgbaFrame, TextPage};
 
 pub struct PdfDoc {
-    pub(super) path: PathBuf,
-    pub(super) doc_id: u64,
-    pub(super) pdf: Pdf,
+    path: PathBuf,
+    doc_id: u64,
+    pdf: Pdf,
 }
 
 pub type HayroPdfBackend = PdfDoc;
 
-pub struct HayroRenderContext<'a> {
+struct HayroRenderContext<'a> {
     doc: &'a PdfDoc,
     render_cache: RenderCache<'a>,
 }

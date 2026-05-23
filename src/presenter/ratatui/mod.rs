@@ -29,23 +29,23 @@ use super::traits::{
     PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot, PresenterSlotOutcome, Viewport,
 };
 
-pub(crate) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
+pub(super) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
 
-pub(crate) struct PresenterConfig {
-    pub(crate) picker: Picker,
-    pub(crate) protocol_type: ProtocolType,
-    pub(crate) protocol_label: &'static str,
+pub(super) struct PresenterConfig {
+    pub(super) picker: Picker,
+    pub(super) protocol_type: ProtocolType,
+    pub(super) protocol_label: &'static str,
 }
 
-pub(crate) struct PresenterState {
-    pub(crate) terminal_initialized: bool,
-    pub(crate) l2_cache: TerminalFrameCache,
-    pub(crate) perf_stats: PerfStats,
-    pub(crate) current_keys: Vec<Option<TerminalFrameKey>>,
-    pub(crate) last_ready_keys: Vec<Option<TerminalFrameKey>>,
-    pub(crate) last_drawn_keys: Vec<Option<TerminalFrameKey>>,
-    pub(crate) last_drawn_areas: Vec<Option<Rect>>,
-    pub(crate) current_generations: Vec<u64>,
+pub(super) struct PresenterState {
+    pub(super) terminal_initialized: bool,
+    pub(super) l2_cache: TerminalFrameCache,
+    pub(super) perf_stats: PerfStats,
+    pub(super) current_keys: Vec<Option<TerminalFrameKey>>,
+    pub(super) last_ready_keys: Vec<Option<TerminalFrameKey>>,
+    pub(super) last_drawn_keys: Vec<Option<TerminalFrameKey>>,
+    pub(super) last_drawn_areas: Vec<Option<Rect>>,
+    pub(super) current_generations: Vec<u64>,
 }
 
 #[derive(Default)]
@@ -68,8 +68,8 @@ struct EncodeChannels {
 }
 
 pub struct RatatuiImagePresenter {
-    pub(crate) config: PresenterConfig,
-    pub(crate) state: PresenterState,
+    pub(super) config: PresenterConfig,
+    pub(super) state: PresenterState,
     encode: EncodeChannels,
 }
 
@@ -341,7 +341,7 @@ impl RatatuiImagePresenter {
         changed
     }
 
-    pub(crate) fn shutdown_worker(&mut self) {
+    pub(super) fn shutdown_worker(&mut self) {
         if let Some(request_tx) = self.encode.current.request_tx.take() {
             let _ = request_tx.send(EncodeWorkerRequest::Shutdown);
         }

@@ -1,4 +1,3 @@
-
 use super::geometry::{align_rect_within, center_rect_within, centered_fit_area};
 use std::thread;
 use std::time::{Duration, Instant};

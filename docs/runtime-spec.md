@@ -44,6 +44,8 @@ Rules:
     - `cover` shows page 1 by itself, then groups pages as `2-3`, `4-5`, ...
   - runtime commands are `page-layout-single` and
     `page-layout-spread [ltr|rtl] [paired|cover]`
+  - command arguments are positional; specifying a spread cover policy requires
+    specifying a spread direction first, e.g. `page-layout-spread ltr cover`
 
 - Zoom and viewport
   - zoom uses a bounded discrete ladder

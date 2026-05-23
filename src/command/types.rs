@@ -529,6 +529,10 @@ mod tests {
         for mode in [PageLayoutModeArg::Single, PageLayoutModeArg::Spread] {
             assert_eq!(PageLayoutModeArg::parse(mode.as_str()), Some(mode));
         }
+
+        for policy in [SpreadCoverPolicyArg::Paired, SpreadCoverPolicyArg::Cover] {
+            assert_eq!(SpreadCoverPolicyArg::parse(policy.as_str()), Some(policy));
+        }
     }
 
     #[test]

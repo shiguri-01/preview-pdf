@@ -874,8 +874,7 @@ mod tests {
         assert_eq!(
             effect,
             PaletteSubmitEffect::Dispatch {
-                command: Command::SetPageLayout {
-                    mode: crate::command::PageLayoutModeArg::Spread,
+                command: Command::PageLayoutSpread {
                     direction: None,
                     cover_policy: None,
                 },
@@ -959,8 +958,7 @@ mod tests {
         assert_eq!(
             effect,
             PaletteSubmitEffect::Dispatch {
-                command: Command::SetPageLayout {
-                    mode: crate::command::PageLayoutModeArg::Spread,
+                command: Command::PageLayoutSpread {
                     direction: None,
                     cover_policy: None,
                 },
@@ -1014,8 +1012,7 @@ mod tests {
         assert_eq!(
             effect,
             PaletteSubmitEffect::Dispatch {
-                command: Command::SetPageLayout {
-                    mode: crate::command::PageLayoutModeArg::Spread,
+                command: Command::PageLayoutSpread {
                     direction: Some(crate::command::SpreadDirectionArg::Rtl),
                     cover_policy: None,
                 },
@@ -1033,8 +1030,7 @@ mod tests {
         assert_eq!(
             effect,
             PaletteSubmitEffect::Dispatch {
-                command: Command::SetPageLayout {
-                    mode: crate::command::PageLayoutModeArg::Spread,
+                command: Command::PageLayoutSpread {
                     direction: Some(crate::command::SpreadDirectionArg::Rtl),
                     cover_policy: Some(crate::command::SpreadCoverPolicyArg::Cover),
                 },

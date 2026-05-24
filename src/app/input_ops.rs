@@ -66,19 +66,17 @@ impl InteractionSubsystem {
     }
 
     fn handle_escape_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
-        if let Some(outcome) = self.close_active_overlay(state) {
-            return outcome;
-        }
         if self.sequences.resolver.has_pending() {
             let resolution = self.sequences.resolver.handle_key(key);
             return Self::sequence_outcome(resolution, false);
         }
+        let overlay_active = matches!(state.mode, Mode::Palette | Mode::Help);
         let search_active = self.extensions.host.ui_snapshot().search_active;
         KeyEventOutcome {
-            redraw: search_active,
-            clear_terminal: false,
+            redraw: overlay_active || search_active,
+            clear_terminal: overlay_active,
             quit_requested: false,
-            commands: if search_active {
+            commands: if overlay_active || search_active {
                 vec![CommandRequest::new(
                     Command::Cancel,
                     CommandInvocationSource::Keymap,
@@ -165,17 +163,17 @@ impl InteractionSubsystem {
         Self::sequence_outcome(resolution, false)
     }
 
-    fn handle_help_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
+    fn handle_help_key_event(&mut self, _state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
         match Self::classify_help_key(key) {
-            HelpKeyAction::ScrollBy(delta) => {
-                state.scroll_help_by(delta);
-                KeyEventOutcome {
-                    redraw: true,
-                    clear_terminal: false,
-                    quit_requested: false,
-                    commands: Vec::new(),
-                }
-            }
+            HelpKeyAction::ScrollBy(delta) => KeyEventOutcome {
+                redraw: true,
+                clear_terminal: false,
+                quit_requested: false,
+                commands: vec![CommandRequest::new(
+                    Command::HelpScroll { delta },
+                    CommandInvocationSource::Keymap,
+                )],
+            },
             HelpKeyAction::Ignore => KeyEventOutcome::default(),
         }
     }
@@ -236,41 +234,6 @@ impl InteractionSubsystem {
         self.palette
             .manager
             .handle_key(&self.palette.registry, state, &extensions, key)
-    }
-
-    fn close_active_overlay(&mut self, state: &mut AppState) -> Option<KeyEventOutcome> {
-        let closed = match state.mode {
-            Mode::Palette => self.close_palette_overlay(state),
-            Mode::Help => self.close_help_overlay(state),
-            Mode::Normal => return None,
-        };
-        Some(KeyEventOutcome {
-            redraw: closed,
-            clear_terminal: closed,
-            quit_requested: false,
-            commands: Vec::new(),
-        })
-    }
-
-    fn close_palette_overlay(&mut self, state: &mut AppState) -> bool {
-        let changed = state.mode != Mode::Normal;
-        let _ = self.palette.manager.close();
-        if changed {
-            state.mode = Mode::Normal;
-            self.sync_sequences_with_mode(state);
-        }
-        changed
-    }
-
-    fn close_help_overlay(&mut self, state: &mut AppState) -> bool {
-        if state.mode != Mode::Help {
-            return false;
-        }
-
-        state.mode = Mode::Normal;
-        state.reset_help_scroll();
-        self.sync_sequences_with_mode(state);
-        true
     }
 
     pub(crate) fn handle_extension_input(
@@ -569,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn help_mode_scrolls_and_requests_close_help() {
+    fn help_mode_routes_scroll_and_close_through_commands() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState {
             mode: crate::app::Mode::Help,
@@ -582,17 +545,29 @@ mod tests {
                 KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
             )
             .expect("help scroll should be handled");
-        assert_eq!(state.help_scroll, 1);
+        assert_eq!(state.help_scroll, 0);
         assert!(down.redraw);
         assert!(!down.clear_terminal);
-        assert!(down.commands.is_empty());
+        assert_eq!(
+            down.commands,
+            vec![CommandRequest::new(
+                Command::HelpScroll { delta: 1 },
+                CommandInvocationSource::Keymap,
+            )]
+        );
 
         let closed = interaction
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("help close should be handled");
-        assert_eq!(state.mode, crate::app::Mode::Normal);
+        assert_eq!(state.mode, crate::app::Mode::Help);
         assert_eq!(state.help_scroll, 0);
-        assert!(closed.commands.is_empty());
+        assert_eq!(
+            closed.commands,
+            vec![CommandRequest::new(
+                Command::Cancel,
+                CommandInvocationSource::Keymap,
+            )]
+        );
         assert!(closed.redraw);
         assert!(closed.clear_terminal);
     }
@@ -641,10 +616,16 @@ mod tests {
         let (commands, events, redraws, quit_requested) = effects.into_parts();
 
         assert_eq!(session.clear_count, 1);
-        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.mode, Mode::Help);
         assert_eq!(state.help_scroll, 0);
         assert!(!redraws.is_empty());
-        assert!(commands.is_empty());
+        assert_eq!(
+            commands,
+            vec![CommandRequest::new(
+                Command::Cancel,
+                CommandInvocationSource::Keymap,
+            )]
+        );
         assert!(events.is_empty());
         assert!(!quit_requested);
     }
@@ -678,9 +659,15 @@ mod tests {
         let (commands, events, redraws, quit_requested) = effects.into_parts();
 
         assert_eq!(session.clear_count, 1);
-        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.mode, Mode::Palette);
         assert!(!redraws.is_empty());
-        assert!(commands.is_empty());
+        assert_eq!(
+            commands,
+            vec![CommandRequest::new(
+                Command::Cancel,
+                CommandInvocationSource::Keymap,
+            )]
+        );
         assert!(events.is_empty());
         assert!(!quit_requested);
     }
@@ -697,10 +684,16 @@ mod tests {
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("stale palette close should be handled");
 
-        assert_eq!(state.mode, Mode::Normal);
+        assert_eq!(state.mode, Mode::Palette);
         assert!(outcome.redraw);
         assert!(outcome.clear_terminal);
-        assert!(outcome.commands.is_empty());
+        assert_eq!(
+            outcome.commands,
+            vec![CommandRequest::new(
+                Command::Cancel,
+                CommandInvocationSource::Keymap,
+            )]
+        );
     }
 
     #[test]

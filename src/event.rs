@@ -1,7 +1,7 @@
 use crossterm::event::Event;
 
 use crate::app::Mode;
-use crate::command::{ActionId, CommandOutcome, CommandRequest};
+use crate::command::{CommandId, CommandOutcome, CommandRequest};
 use crate::presenter::PresenterBackgroundEvent;
 use crate::render::worker::RenderWorkerResult;
 
@@ -41,7 +41,7 @@ pub enum HistoryOp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AppEvent {
     CommandExecuted {
-        id: ActionId,
+        id: CommandId,
         outcome: CommandOutcome,
     },
     PageChanged {

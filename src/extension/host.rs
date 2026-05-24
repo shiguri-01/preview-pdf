@@ -335,9 +335,7 @@ mod tests {
         .expect("submit-search should succeed");
         assert!(host.ui_snapshot().search_active);
 
-        let canceled = host
-            .cancel_search(pdf)
-            .expect("cancel-search should succeed");
+        let canceled = host.cancel_search(pdf).expect("cancel should succeed");
         assert!(canceled);
         assert!(!host.ui_snapshot().search_active);
     }

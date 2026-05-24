@@ -7,7 +7,9 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 
-use super::super::runtime::RenderRuntime;
+use super::super::runtime::{
+    CurrentPagePrepareRequest, FramePrepareOptions, PrefetchEncodeRequest, RenderRuntime,
+};
 use crate::backend::test_support::{build_pdf, unique_temp_path};
 use crate::backend::{OutlineNode, PdfBackend, PdfDoc, PdfRect, RgbaFrame, SharedPdfBackend};
 use crate::error::{AppError, AppResult};
@@ -193,28 +195,42 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
     runtime
         .prepare_current_page(
             &doc,
-            &mut presenter,
-            viewport,
-            0,
-            1.0,
-            &mut pan,
-            None,
-            false,
-            &HighlightOverlaySnapshot::default(),
+            CurrentPagePrepareRequest {
+                viewport,
+                page: 0,
+                scale: 1.0,
+                pan,
+                options: FramePrepareOptions {
+                    cell_px: None,
+                    crop: false,
+                    overlay: &HighlightOverlaySnapshot::default(),
+                },
+            },
         )
+        .and_then(|prepared| {
+            pan = prepared.pan();
+            prepared.prepare_into(&mut presenter, 0)
+        })
         .expect("first prepare should succeed");
     runtime
         .prepare_current_page(
             &doc,
-            &mut presenter,
-            viewport,
-            0,
-            1.0,
-            &mut pan,
-            None,
-            false,
-            &HighlightOverlaySnapshot::default(),
+            CurrentPagePrepareRequest {
+                viewport,
+                page: 0,
+                scale: 1.0,
+                pan,
+                options: FramePrepareOptions {
+                    cell_px: None,
+                    crop: false,
+                    overlay: &HighlightOverlaySnapshot::default(),
+                },
+            },
         )
+        .and_then(|prepared| {
+            pan = prepared.pan();
+            prepared.prepare_into(&mut presenter, 0)
+        })
         .expect("second prepare should succeed");
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
@@ -270,15 +286,22 @@ fn prepare_current_page_uses_zero_overlay_stamp_when_decoration_falls_back() {
     runtime
         .prepare_current_page(
             &doc,
-            &mut presenter,
-            viewport,
-            0,
-            1.0,
-            &mut pan,
-            None,
-            false,
-            &overlay,
+            CurrentPagePrepareRequest {
+                viewport,
+                page: 0,
+                scale: 1.0,
+                pan,
+                options: FramePrepareOptions {
+                    cell_px: None,
+                    crop: false,
+                    overlay: &overlay,
+                },
+            },
         )
+        .and_then(|prepared| {
+            pan = prepared.pan();
+            prepared.prepare_into(&mut presenter, 0)
+        })
         .expect("prepare should succeed");
 
     assert_eq!(presenter.last_prepare_overlay_stamp, Some(0));
@@ -334,19 +357,21 @@ fn prefetch_encode_from_cache_invokes_presenter() {
         width: 80,
         height: 24,
     };
-    let mut pan = PanOffset::default();
+    let pan = PanOffset::default();
 
     let prefetched = runtime
         .try_prefetch_encode_from_cache(
             &mut presenter,
-            viewport,
-            key,
-            &mut pan,
-            0,
-            None,
-            false,
-            WorkClass::DirectionalLead,
-            1,
+            PrefetchEncodeRequest {
+                viewport,
+                key,
+                pan,
+                overlay_stamp: 0,
+                cell_px: None,
+                crop: false,
+                class: WorkClass::DirectionalLead,
+                generation: 1,
+            },
         )
         .expect("prefetch from cache should succeed");
     assert!(prefetched);
@@ -373,19 +398,21 @@ fn prefetch_encode_from_cache_skips_when_overlay_active() {
         width: 80,
         height: 24,
     };
-    let mut pan = PanOffset::default();
+    let pan = PanOffset::default();
 
     let prefetched = runtime
         .try_prefetch_encode_from_cache(
             &mut presenter,
-            viewport,
-            key,
-            &mut pan,
-            1,
-            None,
-            false,
-            WorkClass::DirectionalLead,
-            1,
+            PrefetchEncodeRequest {
+                viewport,
+                key,
+                pan,
+                overlay_stamp: 1,
+                cell_px: None,
+                crop: false,
+                class: WorkClass::DirectionalLead,
+                generation: 1,
+            },
         )
         .expect("prefetch from cache should succeed");
     assert!(!prefetched);

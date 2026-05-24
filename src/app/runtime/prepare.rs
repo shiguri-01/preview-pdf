@@ -280,11 +280,7 @@ impl RenderRuntime {
             PreparedRenderSlot::inactive(),
             PreparedRenderSlot::inactive(),
         ];
-        for (index, (page, clip)) in canvas_pages
-            .into_iter()
-            .zip(layout.clips.into_iter())
-            .enumerate()
-        {
+        for (index, (page, clip)) in canvas_pages.into_iter().zip(layout.clips).enumerate() {
             let Some(clip) = clip else {
                 continue;
             };

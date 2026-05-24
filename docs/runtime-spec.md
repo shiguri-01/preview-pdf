@@ -79,7 +79,8 @@ Rules:
   - the search-results palette can open even when there are zero hits
   - `next-search-hit` and `prev-search-hit` are available only while search is
     active
-  - `cancel-search` cancels the active search state when search is active
+  - `cancel` closes the active palette/help overlay, otherwise cancels active
+    search state when search is active
   - pressing `<esc>` in normal mode cancels active search state after any
     pending multi-key sequence resolves or clears
 

@@ -97,6 +97,6 @@ metrics, cache hit rates, redraw counts, final page, and visited step count.
 
 - `benches/perf.rs`
 - `benches/fixtures/`
-- `src/perf.rs`
+- `src/perf/`
 - `src/app/perf_runner.rs`
 - `src/app/event_loop.rs`

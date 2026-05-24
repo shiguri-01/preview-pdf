@@ -1,62 +1,51 @@
 use ratatui::Frame;
+
+mod draw;
+mod geometry;
 use ratatui::layout::Rect;
 use ratatui::widgets::Clear;
-use ratatui_image::Resize;
-use ratatui_image::StatefulImage;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::ProtocolType;
-use ratatui_image::protocol::StatefulProtocol;
-use std::time::Instant;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
 use tokio::task::JoinHandle;
 
 use crate::backend::RgbaFrame;
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::perf::PerfStats;
 use crate::render::cache::RenderedPageKey;
 use crate::work::WorkClass;
 
 use super::encode::{
-    ENCODE_RESIZE_FILTER, EncodeLaneKind, EncodeWorkerEvent, EncodeWorkerRequest,
-    EncodeWorkerResult, EncodeWorkerRuntime, send_encode_request, spawn_encode_worker,
+    EncodeLaneKind, EncodeWorkerEvent, EncodeWorkerRequest, EncodeWorkerResult,
+    EncodeWorkerRuntime, spawn_encode_worker,
 };
-use super::image_ops::{fit_downscale_dimensions, fit_resize_dimensions};
 use super::l2_cache::{
     L2_MAX_ENTRIES, L2_MEMORY_BUDGET_BYTES, TerminalFrameCache, TerminalFrameKey,
     TerminalFrameState,
 };
 use super::terminal_cell::{picker_with_resolved_cell_size, protocol_type_label};
 use super::traits::{
-    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
-    PresenterHorizontalAlign, PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot,
-    PresenterRuntimeInfo, PresenterSlot, PresenterSlotOutcome, Viewport,
+    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterRenderOutcome,
+    PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot, PresenterSlotOutcome, Viewport,
 };
 
-pub(crate) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
+pub(super) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
 
-pub(crate) struct PresenterConfig {
-    pub(crate) picker: Picker,
-    pub(crate) protocol_type: ProtocolType,
-    pub(crate) protocol_label: &'static str,
+pub(super) struct PresenterConfig {
+    pub(super) picker: Picker,
+    pub(super) protocol_type: ProtocolType,
+    pub(super) protocol_label: &'static str,
 }
 
-pub(crate) struct PresenterState {
-    pub(crate) terminal_initialized: bool,
-    pub(crate) l2_cache: TerminalFrameCache,
-    pub(crate) perf_stats: PerfStats,
-    pub(crate) current_keys: Vec<Option<TerminalFrameKey>>,
-    pub(crate) last_ready_keys: Vec<Option<TerminalFrameKey>>,
-    pub(crate) last_drawn_keys: Vec<Option<TerminalFrameKey>>,
-    pub(crate) last_drawn_areas: Vec<Option<Rect>>,
-    pub(crate) current_generations: Vec<u64>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ReadyDrawTarget {
-    area: Rect,
-    slot_index: usize,
-    horizontal_align: PresenterHorizontalAlign,
-    options: PresenterRenderOptions,
+pub(super) struct PresenterState {
+    pub(super) terminal_initialized: bool,
+    pub(super) l2_cache: TerminalFrameCache,
+    pub(super) perf_stats: PerfStats,
+    pub(super) current_keys: Vec<Option<TerminalFrameKey>>,
+    pub(super) last_ready_keys: Vec<Option<TerminalFrameKey>>,
+    pub(super) last_drawn_keys: Vec<Option<TerminalFrameKey>>,
+    pub(super) last_drawn_areas: Vec<Option<Rect>>,
+    pub(super) current_generations: Vec<u64>,
 }
 
 #[derive(Default)]
@@ -79,8 +68,8 @@ struct EncodeChannels {
 }
 
 pub struct RatatuiImagePresenter {
-    pub(crate) config: PresenterConfig,
-    pub(crate) state: PresenterState,
+    pub(super) config: PresenterConfig,
+    pub(super) state: PresenterState,
     encode: EncodeChannels,
 }
 
@@ -352,7 +341,7 @@ impl RatatuiImagePresenter {
         changed
     }
 
-    pub(crate) fn shutdown_worker(&mut self) {
+    pub(super) fn shutdown_worker(&mut self) {
         if let Some(request_tx) = self.encode.current.request_tx.take() {
             let _ = request_tx.send(EncodeWorkerRequest::Shutdown);
         }
@@ -365,403 +354,6 @@ impl RatatuiImagePresenter {
         if let Some(worker) = self.encode.background.worker.take() {
             worker.abort();
         }
-    }
-
-    fn draw_protocol(
-        frame: &mut Frame<'_>,
-        area: Rect,
-        protocol: &mut StatefulProtocol,
-    ) -> AppResult<()> {
-        frame.render_stateful_widget(
-            StatefulImage::<StatefulProtocol>::default()
-                .resize(Resize::Fit(Some(ENCODE_RESIZE_FILTER))),
-            area,
-            protocol,
-        );
-
-        if let Some(result) = protocol.last_encoding_result() {
-            result.map_err(|_| AppError::unsupported(ENCODE_FAILURE_MESSAGE))?;
-        }
-        Ok(())
-    }
-
-    fn preserve_terminal_area(frame: &mut Frame<'_>, area: Rect) {
-        // Do not redraw a stable terminal image just to satisfy ratatui's
-        // immediate-mode buffer. Re-emitting the image protocol can race with
-        // later text overlays and make the right spread slot appear to clear or
-        // paint over the overlay; skipped cells keep the existing image intact.
-        for y in area.top()..area.bottom() {
-            for x in area.left()..area.right() {
-                if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
-                    cell.set_skip(true);
-                }
-            }
-        }
-    }
-
-    fn stable_slot_is_drawn(
-        &self,
-        slot_index: usize,
-        key: TerminalFrameKey,
-        render_area: Rect,
-    ) -> bool {
-        self.state
-            .last_drawn_keys
-            .get(slot_index)
-            .is_some_and(|last_key| *last_key == Some(key))
-            && self
-                .state
-                .last_drawn_areas
-                .get(slot_index)
-                .is_some_and(|last_area| *last_area == Some(render_area))
-    }
-
-    fn record_drawn_slot(&mut self, slot_index: usize, key: TerminalFrameKey, render_area: Rect) {
-        if let Some(last_ready_key) = self.state.last_ready_keys.get_mut(slot_index) {
-            *last_ready_key = Some(key);
-        }
-        if let Some(last_drawn_key) = self.state.last_drawn_keys.get_mut(slot_index) {
-            *last_drawn_key = Some(key);
-        }
-        if let Some(last_drawn_area) = self.state.last_drawn_areas.get_mut(slot_index) {
-            *last_drawn_area = Some(render_area);
-        }
-    }
-
-    fn draw_ready_protocol(
-        &mut self,
-        frame: &mut Frame<'_>,
-        key: TerminalFrameKey,
-        mut protocol: Box<StatefulProtocol>,
-        target: ReadyDrawTarget,
-    ) -> AppResult<bool> {
-        let blit_start = std::time::Instant::now();
-        let target_size = protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), target.area);
-        let render_area = align_rect_within(
-            target.area,
-            target_size.width,
-            target_size.height,
-            target.horizontal_align,
-        );
-        if target.options.preserve_stable_image
-            && !target.options.force_image_redraw
-            && self.stable_slot_is_drawn(target.slot_index, key, render_area)
-        {
-            Self::preserve_terminal_area(frame, render_area);
-            self.set_l2_state(key, TerminalFrameState::Ready(protocol));
-            self.record_drawn_slot(target.slot_index, key, render_area);
-            return Ok(true);
-        }
-        if target.options.force_image_redraw
-            || self
-                .state
-                .last_drawn_areas
-                .get(target.slot_index)
-                .is_none_or(|last_area| *last_area != Some(render_area))
-        {
-            frame.render_widget(Clear, target.area);
-        }
-        if let Err(err) = Self::draw_protocol(frame, render_area, &mut protocol) {
-            self.set_l2_state(key, TerminalFrameState::Failed);
-            return Err(err);
-        }
-        self.state.perf_stats.record_blit(blit_start.elapsed());
-        self.set_l2_state(key, TerminalFrameState::Ready(protocol));
-        self.record_drawn_slot(target.slot_index, key, render_area);
-        Ok(true)
-    }
-
-    fn try_draw_ready_key(
-        &mut self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        key: TerminalFrameKey,
-        slot_index: usize,
-        horizontal_align: PresenterHorizontalAlign,
-        options: PresenterRenderOptions,
-    ) -> AppResult<bool> {
-        if self.state.l2_cache.cached_mut(&key).is_none() {
-            self.forget_last_ready_key_if_matches(slot_index, key);
-            return Ok(false);
-        };
-        let state = self
-            .state
-            .l2_cache
-            .replace_state(&key, TerminalFrameState::Encoding)
-            .expect("entry existence checked above");
-        match state {
-            TerminalFrameState::Ready(protocol) => self.draw_ready_protocol(
-                frame,
-                key,
-                protocol,
-                ReadyDrawTarget {
-                    area,
-                    slot_index,
-                    horizontal_align,
-                    options,
-                },
-            ),
-            TerminalFrameState::PendingFrame(frame) => {
-                self.set_l2_state(key, TerminalFrameState::PendingFrame(frame));
-                Ok(false)
-            }
-            TerminalFrameState::Encoding => {
-                self.set_l2_state(key, TerminalFrameState::Encoding);
-                Ok(false)
-            }
-            TerminalFrameState::Failed => {
-                self.set_l2_state(key, TerminalFrameState::Failed);
-                self.forget_last_ready_key_if_matches(slot_index, key);
-                Ok(false)
-            }
-        }
-    }
-
-    fn try_draw_stale_fallback(
-        &mut self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        current_key: Option<TerminalFrameKey>,
-        slot_index: usize,
-        horizontal_align: PresenterHorizontalAlign,
-        options: PresenterRenderOptions,
-    ) -> AppResult<bool> {
-        let Some(last_key) = self
-            .state
-            .last_ready_keys
-            .get(slot_index)
-            .copied()
-            .flatten()
-        else {
-            return Ok(false);
-        };
-        if Some(last_key) == current_key {
-            return Ok(false);
-        }
-        self.try_draw_ready_key(frame, area, last_key, slot_index, horizontal_align, options)
-    }
-
-    fn is_current_slot_key(&self, key: TerminalFrameKey) -> bool {
-        self.state.current_keys.contains(&Some(key))
-    }
-
-    fn current_encode_request(
-        &self,
-        key: TerminalFrameKey,
-        frame: RgbaFrame,
-        area: Rect,
-        slot_index: usize,
-        horizontal_align: PresenterHorizontalAlign,
-        options: PresenterRenderOptions,
-    ) -> EncodeWorkerRequest {
-        let picker = if options.is_initial_preview() {
-            Picker::halfblocks()
-        } else {
-            self.config.picker.clone()
-        };
-        let encode_area = aligned_fit_area(
-            frame.width,
-            frame.height,
-            picker.font_size(),
-            area,
-            horizontal_align,
-            options.is_initial_preview(),
-        );
-        EncodeWorkerRequest::Encode {
-            key,
-            picker,
-            frame,
-            area: encode_area,
-            allow_upscale: options.is_initial_preview(),
-            class: WorkClass::CriticalCurrent,
-            generation: self
-                .state
-                .current_generations
-                .get(slot_index)
-                .copied()
-                .unwrap_or(0),
-            enqueued_at: Instant::now(),
-        }
-    }
-
-    fn background_encode_request(
-        &self,
-        key: TerminalFrameKey,
-        frame: RgbaFrame,
-        viewport_area: Rect,
-        class: WorkClass,
-        generation: u64,
-    ) -> EncodeWorkerRequest {
-        let area = centered_fit_area(
-            frame.width,
-            frame.height,
-            self.config.picker.font_size(),
-            viewport_area,
-        );
-        EncodeWorkerRequest::Encode {
-            key,
-            picker: self.config.picker.clone(),
-            frame,
-            area,
-            allow_upscale: false,
-            class,
-            generation,
-            enqueued_at: Instant::now(),
-        }
-    }
-
-    fn enqueue_current_encode(
-        request_tx: &Option<UnboundedSender<EncodeWorkerRequest>>,
-        request: EncodeWorkerRequest,
-    ) -> (TerminalFrameState, PresenterFeedback) {
-        match send_encode_request(request_tx, request) {
-            Ok(()) => (TerminalFrameState::Encoding, PresenterFeedback::Pending),
-            Err(err) => match *err {
-                EncodeWorkerRequest::Encode { .. } | EncodeWorkerRequest::Shutdown => {
-                    (TerminalFrameState::Failed, PresenterFeedback::Failed)
-                }
-            },
-        }
-    }
-
-    fn enqueue_background_encode(
-        request_tx: &Option<UnboundedSender<EncodeWorkerRequest>>,
-        request: EncodeWorkerRequest,
-    ) -> TerminalFrameState {
-        match send_encode_request(request_tx, request) {
-            Ok(()) => TerminalFrameState::Encoding,
-            Err(err) => match *err {
-                EncodeWorkerRequest::Encode { frame, .. } => {
-                    TerminalFrameState::PendingFrame(frame)
-                }
-                EncodeWorkerRequest::Shutdown => TerminalFrameState::Failed,
-            },
-        }
-    }
-
-    fn render_slot(
-        &mut self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        options: PresenterRenderOptions,
-        slot_index: usize,
-        horizontal_align: PresenterHorizontalAlign,
-    ) -> AppResult<PresenterRenderOutcome> {
-        if area.width == 0 || area.height == 0 {
-            return Ok(PresenterRenderOutcome::from_slot(
-                PresenterSlotOutcome::active(area, false, PresenterFeedback::Pending, false),
-            ));
-        }
-
-        let current_key = self.state.current_keys.get(slot_index).copied().flatten();
-        let Some(key) = current_key else {
-            let drew_image = if options.allow_stale_fallback {
-                self.try_draw_stale_fallback(
-                    frame,
-                    area,
-                    None,
-                    slot_index,
-                    horizontal_align,
-                    options,
-                )?
-            } else {
-                false
-            };
-            return Ok(PresenterRenderOutcome::from_slot(
-                PresenterSlotOutcome::active(
-                    area,
-                    drew_image,
-                    PresenterFeedback::Pending,
-                    drew_image,
-                ),
-            ));
-        };
-        let request_tx = self.encode_request_tx(EncodeLaneKind::Current);
-        if self.state.l2_cache.cached_mut(&key).is_none() {
-            self.sync_l2_hit_rate();
-            let drew_image = if options.allow_stale_fallback {
-                self.try_draw_stale_fallback(
-                    frame,
-                    area,
-                    Some(key),
-                    slot_index,
-                    horizontal_align,
-                    options,
-                )?
-            } else {
-                false
-            };
-            return Ok(PresenterRenderOutcome::from_slot(
-                PresenterSlotOutcome::active(
-                    area,
-                    drew_image,
-                    PresenterFeedback::Pending,
-                    drew_image,
-                ),
-            ));
-        }
-
-        let feedback = {
-            let state = self
-                .state
-                .l2_cache
-                .replace_state(&key, TerminalFrameState::Encoding)
-                .expect("current key existence checked above");
-            match state {
-                TerminalFrameState::Ready(protocol) => {
-                    self.draw_ready_protocol(
-                        frame,
-                        key,
-                        protocol,
-                        ReadyDrawTarget {
-                            area,
-                            slot_index,
-                            horizontal_align,
-                            options,
-                        },
-                    )?;
-                    return Ok(PresenterRenderOutcome::from_slot(
-                        PresenterSlotOutcome::active(area, true, PresenterFeedback::None, false),
-                    ));
-                }
-                TerminalFrameState::PendingFrame(frame) => {
-                    let request = self.current_encode_request(
-                        key,
-                        frame,
-                        area,
-                        slot_index,
-                        horizontal_align,
-                        options,
-                    );
-                    let (new_state, feedback) = Self::enqueue_current_encode(&request_tx, request);
-                    self.set_l2_state(key, new_state);
-                    feedback
-                }
-                TerminalFrameState::Encoding => {
-                    self.set_l2_state(key, TerminalFrameState::Encoding);
-                    PresenterFeedback::Pending
-                }
-                TerminalFrameState::Failed => {
-                    self.set_l2_state(key, TerminalFrameState::Failed);
-                    PresenterFeedback::Failed
-                }
-            }
-        };
-        let drew_image = if options.allow_stale_fallback {
-            self.try_draw_stale_fallback(
-                frame,
-                area,
-                Some(key),
-                slot_index,
-                horizontal_align,
-                options,
-            )?
-        } else {
-            false
-        };
-        Ok(PresenterRenderOutcome::from_slot(
-            PresenterSlotOutcome::active(area, drew_image, feedback, drew_image),
-        ))
     }
 }
 
@@ -1007,85 +599,6 @@ fn preferred_max_render_scale(protocol: ProtocolType) -> f32 {
     }
 }
 
-fn centered_fit_area(
-    image_width_px: u32,
-    image_height_px: u32,
-    font_size: (u16, u16),
-    area: Rect,
-) -> Rect {
-    aligned_fit_area(
-        image_width_px,
-        image_height_px,
-        font_size,
-        area,
-        PresenterHorizontalAlign::Center,
-        false,
-    )
-}
-
-fn aligned_fit_area(
-    image_width_px: u32,
-    image_height_px: u32,
-    font_size: (u16, u16),
-    area: Rect,
-    horizontal_align: PresenterHorizontalAlign,
-    allow_upscale: bool,
-) -> Rect {
-    if area.width == 0 || area.height == 0 {
-        return area;
-    }
-
-    let cell_width_px = u32::from(font_size.0.max(1));
-    let cell_height_px = u32::from(font_size.1.max(1));
-    let max_width_px = u32::from(area.width).saturating_mul(cell_width_px);
-    let max_height_px = u32::from(area.height).saturating_mul(cell_height_px);
-
-    let fit_dimensions = if allow_upscale {
-        fit_resize_dimensions(
-            image_width_px,
-            image_height_px,
-            max_width_px,
-            max_height_px,
-            true,
-        )
-    } else {
-        fit_downscale_dimensions(image_width_px, image_height_px, max_width_px, max_height_px)
-    };
-    let (fit_width_px, fit_height_px) = fit_dimensions.unwrap_or((image_width_px, image_height_px));
-
-    let width_cells = px_to_cells(fit_width_px, cell_width_px, area.width);
-    let height_cells = px_to_cells(fit_height_px, cell_height_px, area.height);
-    align_rect_within(area, width_cells, height_cells, horizontal_align)
-}
-
-fn px_to_cells(px: u32, cell_px: u32, max_cells: u16) -> u16 {
-    let cells = px.saturating_add(cell_px.saturating_sub(1)) / cell_px.max(1);
-    cells.max(1).min(u32::from(max_cells)) as u16
-}
-
-#[cfg(test)]
-fn center_rect_within(area: Rect, width: u16, height: u16) -> Rect {
-    align_rect_within(area, width, height, PresenterHorizontalAlign::Center)
-}
-
-fn align_rect_within(
-    area: Rect,
-    width: u16,
-    height: u16,
-    horizontal_align: PresenterHorizontalAlign,
-) -> Rect {
-    let width = width.max(1).min(area.width);
-    let height = height.max(1).min(area.height);
-    let spare_width = area.width.saturating_sub(width);
-    let x = match horizontal_align {
-        PresenterHorizontalAlign::Start => area.x,
-        PresenterHorizontalAlign::Center => area.x + spare_width / 2,
-        PresenterHorizontalAlign::End => area.x + spare_width,
-    };
-    let y = area.y + area.height.saturating_sub(height) / 2;
-    Rect::new(x, y, width, height)
-}
-
 #[cfg(test)]
 mod tests {
     use std::thread;
@@ -1095,7 +608,6 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
 
-    use super::{align_rect_within, center_rect_within, centered_fit_area};
     use crate::backend::RgbaFrame;
     use crate::presenter::l2_cache::TerminalFrameState;
     use crate::presenter::{
@@ -1224,7 +736,6 @@ mod tests {
             "presenter should have ready frames for all slots"
         );
     }
-
     #[test]
     fn presenter_tracks_last_drawn_area_for_stable_redraws() {
         let mut presenter = super::RatatuiImagePresenter::new();
@@ -1262,7 +773,6 @@ mod tests {
 
         assert_eq!(presenter.state.last_drawn_areas[0], Some(first_drawn_area));
     }
-
     #[test]
     fn presenter_preserves_stable_ready_image_without_reblitting() {
         let mut presenter = super::RatatuiImagePresenter::new();
@@ -1314,7 +824,6 @@ mod tests {
         assert_eq!(presenter.state.last_drawn_areas[0], first_drawn_area);
         assert_eq!(presenter.perf_stats().blit_samples, 0);
     }
-
     #[test]
     fn inactive_spread_slot_forgets_last_drawn_area() {
         let mut presenter = super::RatatuiImagePresenter::new();
@@ -1402,7 +911,6 @@ mod tests {
         assert_eq!(presenter.state.last_drawn_areas[1], None);
         assert_eq!(presenter.state.last_drawn_keys[1], None);
     }
-
     #[test]
     fn presenter_prepare_slots_tracks_independent_current_keys() {
         let mut presenter = super::RatatuiImagePresenter::new();
@@ -1456,7 +964,6 @@ mod tests {
         );
         assert_eq!(presenter.l2_cache_len(), 2);
     }
-
     #[test]
     fn presenter_prepare_slots_preserves_empty_slot_positions() {
         let mut presenter = super::RatatuiImagePresenter::new();
@@ -1499,7 +1006,6 @@ mod tests {
         );
         assert_eq!(presenter.l2_cache_len(), 1);
     }
-
     #[test]
     fn render_slots_ignores_inactive_slots_for_feedback() {
         let mut presenter = super::RatatuiImagePresenter::new();
@@ -1530,7 +1036,6 @@ mod tests {
         assert_eq!(outcome.slots[0].area, Rect::new(0, 0, 12, 7));
         assert!(!outcome.slots[0].active);
     }
-
     #[test]
     fn render_slots_aggregates_failed_and_pending_feedback() {
         let mut presenter = super::RatatuiImagePresenter::new();
@@ -1605,7 +1110,6 @@ mod tests {
         assert_eq!(outcome.slots[0].feedback, PresenterFeedback::Failed);
         assert_eq!(outcome.slots[1].feedback, PresenterFeedback::Pending);
     }
-
     #[test]
     fn render_slots_reports_stale_fallback_per_slot() {
         let mut presenter = super::RatatuiImagePresenter::new();
@@ -1705,33 +1209,5 @@ mod tests {
         assert_eq!(outcome.slots[1].feedback, PresenterFeedback::Pending);
         assert!(outcome.slots[1].drew_image);
         assert!(outcome.slots[1].used_stale_fallback);
-    }
-
-    #[test]
-    fn center_rect_within_places_rect_in_the_middle() {
-        let area = Rect::new(10, 5, 20, 10);
-        let centered = center_rect_within(area, 8, 4);
-        assert_eq!(centered, Rect::new(16, 8, 8, 4));
-    }
-
-    #[test]
-    fn align_rect_within_can_pin_to_horizontal_edges() {
-        let area = Rect::new(10, 5, 20, 10);
-
-        assert_eq!(
-            align_rect_within(area, 8, 4, PresenterHorizontalAlign::Start),
-            Rect::new(10, 8, 8, 4)
-        );
-        assert_eq!(
-            align_rect_within(area, 8, 4, PresenterHorizontalAlign::End),
-            Rect::new(22, 8, 8, 4)
-        );
-    }
-
-    #[test]
-    fn centered_fit_area_keeps_aspect_and_centers() {
-        let area = Rect::new(0, 0, 40, 20);
-        let fit = centered_fit_area(2000, 1000, (10, 20), area);
-        assert_eq!(fit, Rect::new(0, 5, 40, 10));
     }
 }

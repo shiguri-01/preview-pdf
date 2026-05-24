@@ -209,7 +209,8 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
         )
         .and_then(|prepared| {
             pan = prepared.pan();
-            prepared.prepare_into(&mut presenter, 0)
+            let slots = prepared.presenter_slots(0);
+            presenter.prepare_slots(&slots)
         })
         .expect("first prepare should succeed");
     runtime
@@ -229,7 +230,8 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
         )
         .and_then(|prepared| {
             pan = prepared.pan();
-            prepared.prepare_into(&mut presenter, 0)
+            let slots = prepared.presenter_slots(0);
+            presenter.prepare_slots(&slots)
         })
         .expect("second prepare should succeed");
     let backend = TestBackend::new(80, 24);
@@ -300,7 +302,8 @@ fn prepare_current_page_uses_zero_overlay_stamp_when_decoration_falls_back() {
         )
         .and_then(|prepared| {
             pan = prepared.pan();
-            prepared.prepare_into(&mut presenter, 0)
+            let slots = prepared.presenter_slots(0);
+            presenter.prepare_slots(&slots)
         })
         .expect("prepare should succeed");
 

@@ -295,7 +295,8 @@ mod tests {
             CachePrepareResult::Prepared(prepared) => {
                 *pan = prepared.pan();
                 let areas = prepared.render_areas();
-                prepared.prepare_into(presenter, 1)?;
+                let slots = prepared.presenter_slots(1);
+                presenter.prepare_slots(&slots)?;
                 Ok(Some(areas))
             }
             CachePrepareResult::Miss {
@@ -328,7 +329,8 @@ mod tests {
         )? {
             CachePrepareResult::Prepared(prepared) => {
                 *pan = prepared.pan();
-                prepared.prepare_into(presenter, 1)?;
+                let slots = prepared.presenter_slots(1);
+                presenter.prepare_slots(&slots)?;
                 Ok(true)
             }
             CachePrepareResult::Miss {
@@ -496,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn spread_canvas_slots_keep_cached_slot_when_partner_page_misses() {
+    fn spread_canvas_slots_keep_pending_slot_when_partner_page_misses() {
         let doc = TwoPageRuntimePdf;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
@@ -504,8 +506,8 @@ mod tests {
             RenderedPageKey::new(doc.doc_id(), 1, 1.0),
             RgbaFrame {
                 width: 100,
-                height: 50,
-                pixels: vec![1; 100 * 50 * 4].into(),
+                height: 100,
+                pixels: vec![1; 100 * 100 * 4].into(),
             },
             false,
         );
@@ -536,7 +538,10 @@ mod tests {
         .expect("spread canvas prepare should pass")
         .expect("right cached slot should prepare");
 
-        assert_eq!(areas, [None, Some(Rect::new(4, 0, 6, 5))]);
+        assert_eq!(
+            areas,
+            [Some(Rect::new(0, 0, 2, 5)), Some(Rect::new(4, 0, 6, 5))]
+        );
         assert_eq!(presenter.prepared_slot_pages, vec![None, Some(1)]);
     }
 

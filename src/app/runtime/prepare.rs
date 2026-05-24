@@ -3,7 +3,10 @@ use ratatui::layout::Rect;
 use crate::backend::{PdfBackend, RgbaFrame};
 use crate::error::AppResult;
 use crate::highlight::HighlightOverlaySnapshot;
-use crate::presenter::{ImagePresenter, PanOffset, PresenterSlot, Viewport};
+use crate::presenter::{
+    ImagePresenter, PanOffset, PresenterHorizontalAlign, PresenterRenderMode,
+    PresenterRenderOptions, PresenterRenderSlot, PresenterSlot, Viewport,
+};
 use crate::render::cache::RenderedPageKey;
 use crate::work::WorkClass;
 
@@ -89,24 +92,37 @@ impl PreparedPresenterSlots {
         self.pan
     }
 
-    pub(crate) fn prepare_into(
-        &self,
-        presenter: &mut dyn ImagePresenter,
-        generation: u64,
-    ) -> AppResult<()> {
-        let slots: Vec<_> = self
-            .slots
+    pub(crate) fn presenter_slots(&self, generation: u64) -> Vec<PresenterSlot<'_>> {
+        self.slots
             .iter()
             .map(|slot| presenter_slot_from_prepared(slot.as_ref(), generation))
-            .collect();
-        presenter.prepare_slots(&slots)
+            .collect()
     }
 }
 
 pub(crate) struct PreparedSpreadCanvas {
     presenter_slots: [Option<PreparedPresenterSlot>; 2],
-    render_areas: [Option<Rect>; 2],
+    render_slots: [PreparedRenderSlot; 2],
     pan: PanOffset,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PreparedRenderSlot {
+    area: Rect,
+    active: bool,
+}
+
+impl PreparedRenderSlot {
+    const fn inactive() -> Self {
+        Self {
+            area: Rect::new(0, 0, 0, 0),
+            active: false,
+        }
+    }
+
+    const fn active(area: Rect) -> Self {
+        Self { area, active: true }
+    }
 }
 
 impl PreparedSpreadCanvas {
@@ -114,21 +130,38 @@ impl PreparedSpreadCanvas {
         self.pan
     }
 
+    #[cfg(test)]
     pub(crate) fn render_areas(&self) -> [Option<Rect>; 2] {
-        self.render_areas
+        self.render_slots
+            .map(|slot| slot.active.then_some(slot.area))
     }
 
-    pub(crate) fn prepare_into(
-        &self,
-        presenter: &mut dyn ImagePresenter,
-        generation: u64,
-    ) -> AppResult<()> {
-        let slots: Vec<_> = self
-            .presenter_slots
+    pub(crate) fn presenter_slots(&self, generation: u64) -> Vec<PresenterSlot<'_>> {
+        self.presenter_slots
             .iter()
             .map(|slot| presenter_slot_from_prepared(slot.as_ref(), generation))
-            .collect();
-        presenter.prepare_slots(&slots)
+            .collect()
+    }
+
+    pub(crate) fn render_slots(
+        &self,
+        render_mode: PresenterRenderMode,
+    ) -> Vec<PresenterRenderSlot> {
+        let options = PresenterRenderOptions::new(false, render_mode);
+        self.render_slots
+            .into_iter()
+            .enumerate()
+            .map(|(index, slot)| PresenterRenderSlot {
+                area: slot.area,
+                options,
+                active: slot.active,
+                horizontal_align: if index == 0 {
+                    PresenterHorizontalAlign::End
+                } else {
+                    PresenterHorizontalAlign::Start
+                },
+            })
+            .collect()
     }
 }
 
@@ -144,6 +177,12 @@ struct CachedDecoratedPage {
     key: RenderedPageKey,
     frame: RgbaFrame,
     overlay_stamp: u64,
+}
+
+struct SpreadCanvasSlotPage {
+    page: Option<CachedDecoratedPage>,
+    geometry: Option<SpreadCanvasPage>,
+    active: bool,
 }
 
 impl RenderRuntime {
@@ -213,22 +252,19 @@ impl RenderRuntime {
         doc: &dyn PdfBackend,
         request: SpreadCanvasPrepareRequest<'_>,
     ) -> AppResult<CachePrepareResult<PreparedSpreadCanvas>> {
-        let left = self.cached_decorated_page(
+        let left = self.spread_canvas_slot_page(
             doc,
             request.visible_pages.left_page,
             request.scale,
             request.overlay,
         )?;
-        let right = self.cached_decorated_page(
+        let right = self.spread_canvas_slot_page(
             doc,
             request.visible_pages.right_page,
             request.scale,
             request.overlay,
         )?;
-        let pages = [
-            left.as_ref().map(spread_canvas_page),
-            right.as_ref().map(spread_canvas_page),
-        ];
+        let pages = [left.geometry, right.geometry];
         let layout = spread_canvas::layout(SpreadCanvasLayoutRequest {
             pages,
             viewport: request.viewport,
@@ -238,40 +274,47 @@ impl RenderRuntime {
         });
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
 
-        let cached_pages = [left, right];
+        let canvas_pages = [left, right];
         let mut presenter_slots = [None, None];
-        let mut render_areas = [None, None];
-        for (index, (page, clip)) in cached_pages
+        let mut render_slots = [
+            PreparedRenderSlot::inactive(),
+            PreparedRenderSlot::inactive(),
+        ];
+        for (index, (page, clip)) in canvas_pages
             .into_iter()
             .zip(layout.clips.into_iter())
             .enumerate()
         {
-            let (Some(page), Some(clip)) = (page, clip) else {
+            let Some(clip) = clip else {
                 continue;
             };
-            let frame = crop_frame_region(
-                &page.frame,
-                clip.crop_x,
-                clip.crop_y,
-                clip.crop_width,
-                clip.crop_height,
-            );
-            presenter_slots[index] = Some(PreparedPresenterSlot {
-                cache_key: page.key,
-                frame,
-                viewport: clip.viewport,
-                pan: layout.pan,
-                overlay_stamp: page.overlay_stamp,
-            });
-            render_areas[index] = Some(clip.render_area);
+            if page.active {
+                render_slots[index] = PreparedRenderSlot::active(clip.render_area);
+            }
+            if let Some(page) = page.page {
+                let frame = crop_frame_region(
+                    &page.frame,
+                    clip.crop_x,
+                    clip.crop_y,
+                    clip.crop_width,
+                    clip.crop_height,
+                );
+                presenter_slots[index] = Some(PreparedPresenterSlot {
+                    cache_key: page.key,
+                    frame,
+                    viewport: clip.viewport,
+                    pan: layout.pan,
+                    overlay_stamp: page.overlay_stamp,
+                });
+            }
         }
 
-        if render_areas.iter().all(Option::is_none) {
+        if presenter_slots.iter().all(Option::is_none) {
             return Ok(CachePrepareResult::Miss { pan: layout.pan });
         }
         Ok(CachePrepareResult::Prepared(PreparedSpreadCanvas {
             presenter_slots,
-            render_areas,
+            render_slots,
             pan: layout.pan,
         }))
     }
@@ -380,6 +423,34 @@ impl RenderRuntime {
             overlay_stamp,
         }))
     }
+
+    fn spread_canvas_slot_page(
+        &mut self,
+        doc: &dyn PdfBackend,
+        page: Option<usize>,
+        scale: f32,
+        overlay: &HighlightOverlaySnapshot,
+    ) -> AppResult<SpreadCanvasSlotPage> {
+        let Some(page_index) = page else {
+            return Ok(SpreadCanvasSlotPage {
+                page: None,
+                geometry: None,
+                active: false,
+            });
+        };
+
+        let page = self.cached_decorated_page(doc, Some(page_index), scale, overlay)?;
+        let geometry = page
+            .as_ref()
+            .map(spread_canvas_page)
+            .or_else(|| estimated_spread_canvas_page(doc, page_index, scale));
+
+        Ok(SpreadCanvasSlotPage {
+            page,
+            geometry,
+            active: true,
+        })
+    }
 }
 
 fn spread_canvas_page(page: &CachedDecoratedPage) -> SpreadCanvasPage {
@@ -387,6 +458,24 @@ fn spread_canvas_page(page: &CachedDecoratedPage) -> SpreadCanvasPage {
         width: page.frame.width,
         height: page.frame.height,
     }
+}
+
+fn estimated_spread_canvas_page(
+    doc: &dyn PdfBackend,
+    page: usize,
+    scale: f32,
+) -> Option<SpreadCanvasPage> {
+    let (width_pt, height_pt) = doc.page_dimensions(page).ok()?;
+    let width = scaled_page_dimension(width_pt, scale);
+    let height = scaled_page_dimension(height_pt, scale);
+    Some(SpreadCanvasPage { width, height })
+}
+
+fn scaled_page_dimension(points: f32, scale: f32) -> u32 {
+    if !points.is_finite() || !scale.is_finite() || points <= 0.0 || scale <= 0.0 {
+        return 1;
+    }
+    (points * scale).round().clamp(1.0, u32::MAX as f32) as u32
 }
 
 fn presenter_slot_from_prepared(

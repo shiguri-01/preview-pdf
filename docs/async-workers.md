@@ -28,9 +28,11 @@ semantics.
 
 - Terminal input uses the loop event channel directly.
 - Render completion is polled by the event loop and wrapped as
-  `DomainEvent::RenderComplete`.
+  `DomainEvent::RenderComplete`; the loop router then delegates result
+  application to the render actor and render subsystem.
 - Presenter encode completion is polled by the event loop and wrapped as
-  `DomainEvent::EncodeComplete`.
+  `DomainEvent::EncodeComplete`; the loop router turns redraw-capable encode
+  completion into a UI redraw request.
 - Search events are drained by the search extension during background handling,
   not through `DomainEvent`.
 

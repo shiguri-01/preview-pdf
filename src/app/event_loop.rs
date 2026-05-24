@@ -1,158 +1,28 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crossterm::event::Event;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::{self, MissedTickBehavior};
 
 use crate::backend::{PdfBackend, SharedPdfBackend};
-use crate::command::{Command, CommandOutcome, CommandRequest, PanAmount};
 use crate::error::{AppError, AppResult};
-use crate::event::{AppEvent, DomainEvent};
-use crate::perf::{PerfIterationSnapshot, PerfScenarioId, PerfScenarioParameters, RedrawReason};
-use crate::presenter::{ImagePresenter, PresenterBackgroundEvent};
-use crate::render::cache::RenderedPageKey;
-use crate::render::scheduler::RenderTask;
-use crate::render::worker::{RenderWorker, RenderWorkerResult};
+use crate::event::DomainEvent;
+use crate::perf::{PerfIterationSnapshot, PerfScenarioId, PerfScenarioParameters};
+use crate::presenter::ImagePresenter;
+use crate::render::worker::RenderWorker;
 
 use super::actors::{InputActor, RenderActor, UiActor};
 use super::core::App;
 use super::event_bus::EventBusRuntime;
+use super::loop_runtime::{LoopControl, LoopRuntime, LoopStep, SessionRestore, WaitEvent};
 use super::perf_runner::{
     HeadlessTerminalSession, PERF_HEADLESS_HEIGHT, PERF_HEADLESS_WIDTH, PerfLoopDriver,
 };
-use super::render_ops::{
-    CurrentInterestKeys, CurrentTaskContext, PrefetchDispatchContext, PrefetchDispatchPlan,
-    RequiredRenderPages,
-};
+use super::render_ops::PrefetchDispatchPlan;
 use super::scale::select_input_poll_timeout;
-use super::state::notice_action_for_error;
 use super::terminal_session::{InteractiveTerminalSession, TerminalSurface};
-use super::view_ops::{InitialPreviewPlan, RenderFramePlan};
-
-struct LoopRuntime<S> {
-    page_count: usize,
-    prefetch_pause_after_input: Duration,
-    input_poll_timeout_idle: Duration,
-    input_poll_timeout_busy: Duration,
-    input_actor: InputActor,
-    render_actor: RenderActor,
-    ui_actor: UiActor,
-    session: S,
-    render_worker: RenderWorker,
-    prefetch_tick: time::Interval,
-    redraw_tick: time::Interval,
-    loop_event_tx: UnboundedSender<DomainEvent>,
-    loop_event_rx: UnboundedReceiver<DomainEvent>,
-    loop_event_runtime: EventBusRuntime,
-}
-
-struct LoopStep {
-    current_scale: f32,
-    visible_pages: super::state::VisiblePageSlots,
-    required: RequiredRenderPages,
-    current_interest_keys: CurrentInterestKeys,
-    initial_preview: Option<InitialPreviewPlan>,
-    initial_preview_tasks: Vec<RenderTask>,
-    prefetch_dispatch: PrefetchDispatchContext,
-    presenter_key: RenderedPageKey,
-    current_cached: bool,
-}
-
-enum WaitEvent {
-    Event(DomainEvent),
-    Closed,
-}
-
-enum LoopControl {
-    Continue,
-    Break,
-}
-
-trait SessionRestore {
-    fn restore(&mut self) -> std::io::Result<()>;
-}
-
-impl SessionRestore for InteractiveTerminalSession {
-    fn restore(&mut self) -> std::io::Result<()> {
-        InteractiveTerminalSession::restore(self)
-    }
-}
-
-impl SessionRestore for HeadlessTerminalSession {
-    fn restore(&mut self) -> std::io::Result<()> {
-        HeadlessTerminalSession::restore(self)
-    }
-}
 
 impl App {
-    fn enqueue_loop_event<S>(runtime: &mut LoopRuntime<S>, event: DomainEvent) -> LoopControl {
-        match runtime.loop_event_tx.send(event) {
-            Ok(()) => LoopControl::Continue,
-            Err(_) => LoopControl::Break,
-        }
-    }
-
-    fn enqueue_commands_and_optional_quit<S>(
-        runtime: &mut LoopRuntime<S>,
-        commands: Vec<CommandRequest>,
-        quit_requested: bool,
-    ) -> LoopControl {
-        for request in commands {
-            if matches!(
-                Self::enqueue_loop_event(runtime, DomainEvent::Command(request)),
-                LoopControl::Break
-            ) {
-                return LoopControl::Break;
-            }
-        }
-        if quit_requested {
-            return Self::enqueue_loop_event(runtime, DomainEvent::Quit);
-        }
-        LoopControl::Continue
-    }
-
-    fn resolve_command_request<S: TerminalSurface>(
-        &self,
-        session: &S,
-        request: CommandRequest,
-    ) -> CommandRequest {
-        CommandRequest {
-            command: self.resolve_command(session, request.command),
-            source: request.source,
-        }
-    }
-
-    fn resolve_command<S: TerminalSurface>(&self, session: &S, command: Command) -> Command {
-        match command {
-            Command::Pan {
-                direction,
-                amount: PanAmount::DefaultStep,
-            } => Command::Pan {
-                direction,
-                amount: PanAmount::Cells(self.default_pan_step_cells(session)),
-            },
-            _ => command,
-        }
-    }
-
-    fn default_pan_step_cells<S: TerminalSurface>(&self, session: &S) -> i32 {
-        let Some(viewport) = Self::current_viewport(session, self.state.debug_status_visible)
-        else {
-            return 1;
-        };
-        i32::from((viewport.width.min(viewport.height) / 5).max(1))
-    }
-
-    fn terminate_process_now<S>(runtime: &mut LoopRuntime<S>) -> !
-    where
-        S: TerminalSurface + SessionRestore,
-    {
-        runtime.loop_event_runtime.shutdown();
-        let _ = runtime.session.restore();
-        std::process::exit(0);
-    }
-
     pub async fn run(&mut self, pdf: SharedPdfBackend) -> AppResult<()> {
         let page_count = pdf.page_count();
         if page_count == 0 {
@@ -355,7 +225,7 @@ impl App {
     where
         S: TerminalSurface,
     {
-        let step = self.build_loop_step(
+        let pre_sync_step = self.build_loop_step(
             &runtime.session,
             pdf,
             &runtime.input_actor,
@@ -363,29 +233,31 @@ impl App {
             runtime.prefetch_pause_after_input,
             self.config.render.prefetch_dispatch_budget_per_tick,
         );
-        let changed = self.drain_background_and_sync_navigation(
-            pdf,
-            &mut runtime.render_actor,
-            step.current_scale,
-        );
-        self.render.ensure_current_task_enqueued(
+        let changed = runtime.render_actor.drain_background_and_sync_navigation(
+            &mut self.render,
+            &mut self.interaction,
             &mut self.state,
             pdf,
-            &runtime.render_actor,
-            &mut runtime.render_worker,
-            CurrentTaskContext {
-                current_scale: step.current_scale,
-                required: step.required,
-                current_interest_keys: step.current_interest_keys,
-                current_cached: step.current_cached,
-                preview_tasks: step.initial_preview_tasks.clone(),
-            },
+            pre_sync_step.current_scale,
         );
-        self.render.dispatch_prefetch_if_due(
+        let step = if changed {
+            self.build_loop_step(
+                &runtime.session,
+                pdf,
+                &runtime.input_actor,
+                runtime.render_actor.generation(),
+                runtime.prefetch_pause_after_input,
+                self.config.render.prefetch_dispatch_budget_per_tick,
+            )
+        } else {
+            pre_sync_step
+        };
+        runtime.render_actor.ensure_iteration_work(
+            &mut self.render,
             &mut self.state,
-            &mut runtime.render_actor,
+            pdf,
             &mut runtime.render_worker,
-            step.prefetch_dispatch,
+            &step,
         );
         self.update_ui_and_render_frame(runtime, pdf, changed, &step)?;
         Ok(step)
@@ -480,38 +352,6 @@ impl App {
         }
     }
 
-    fn drain_background_and_sync_navigation(
-        &mut self,
-        pdf: &dyn PdfBackend,
-        render_actor: &mut RenderActor,
-        current_scale: f32,
-    ) -> bool {
-        let mut changed = false;
-        let previous_page = self.state.current_page;
-        self.state.normalize_current_page(pdf.page_count());
-        if self.state.current_page != previous_page {
-            changed = true;
-        }
-        if self.interaction.drain_background_events(&mut self.state) {
-            changed = true;
-        }
-        if self.render.presenter.drain_background_events() {
-            changed = true;
-        }
-        if self.interaction.apply_palette_requests(&mut self.state) {
-            changed = true;
-        }
-
-        let mut nav_sync_parts = render_actor.nav_sync_parts_mut();
-        if self
-            .render
-            .sync_navigation_state(&self.state, pdf, &mut nav_sync_parts, current_scale)
-        {
-            changed = true;
-        }
-        changed
-    }
-
     fn update_ui_and_render_frame<S>(
         &mut self,
         runtime: &mut LoopRuntime<S>,
@@ -524,258 +364,21 @@ impl App {
     {
         let render_busy = runtime.render_worker.in_flight_len() > 0;
         let presenter_busy = self.render.presenter.has_pending_work();
-        if runtime.ui_actor.should_request_pending_redraw(
-            step.current_cached,
+        runtime.ui_actor.update_and_render_frame(
+            &mut self.render,
+            &self.interaction,
+            &mut self.state,
+            &self.config,
+            &mut runtime.session,
+            pdf,
+            runtime.page_count,
+            runtime.render_actor.generation(),
+            runtime.render_actor.nav_streak(),
             render_busy,
             presenter_busy,
-        ) {
-            self.request_redraw(runtime, RedrawReason::PendingWork);
-        }
-
-        if changed {
-            self.request_redraw(runtime, RedrawReason::StateChanged);
-        }
-
-        if runtime.ui_actor.needs_redraw() {
-            let palette_view = self.interaction.palette_view();
-            let mut status_bar_segments = self
-                .interaction
-                .extensions
-                .host
-                .status_bar_segments(&self.state);
-            if let Some(pending_sequence) = self.interaction.pending_sequence_status() {
-                status_bar_segments.push(pending_sequence);
-            }
-            self.render.render_frame(
-                &mut self.state,
-                &self.config,
-                &mut runtime.session,
-                pdf,
-                RenderFramePlan {
-                    palette_view,
-                    help_keymap: self.interaction.sequences.resolver.snapshot(),
-                    status_bar_segments,
-                    page_count: runtime.page_count,
-                    visible_pages: step.visible_pages,
-                    current_scale: step.current_scale,
-                    initial_preview: step.initial_preview.clone(),
-                    presenter_key: step.presenter_key,
-                    highlight_overlay: self
-                        .interaction
-                        .extensions
-                        .host
-                        .highlight_overlay_for(step.visible_pages.existing_pages()),
-                    generation: runtime.render_actor.generation(),
-                    nav_streak: runtime.render_actor.nav_streak(),
-                },
-            )?;
-            runtime.ui_actor.clear_redraw();
-            if !step.current_cached {
-                runtime.ui_actor.on_drawn_non_cached_page();
-            }
-        }
-        Ok(())
-    }
-
-    fn handle_waited_event<S>(
-        &mut self,
-        waited: WaitEvent,
-        runtime: &mut LoopRuntime<S>,
-        pdf: SharedPdfBackend,
-    ) -> AppResult<LoopControl>
-    where
-        S: TerminalSurface + SessionRestore,
-    {
-        // Wake events are not guaranteed to arrive before the next input event, so the
-        // loop checks for timed-out sequences at the start of every iteration as well.
-        if matches!(self.handle_timeout_outcome(runtime)?, LoopControl::Break) {
-            return Ok(LoopControl::Break);
-        }
-
-        match waited {
-            WaitEvent::Event(DomainEvent::Input(event)) => {
-                if matches!(
-                    self.handle_input_domain_event(event, runtime)?,
-                    LoopControl::Break
-                ) {
-                    return Ok(LoopControl::Break);
-                }
-            }
-            WaitEvent::Event(DomainEvent::InputError(message)) => {
-                self.state
-                    .set_error_notice(format!("input error: {message}"));
-                self.request_redraw(runtime, RedrawReason::InputError);
-            }
-            WaitEvent::Event(DomainEvent::Command(request)) => {
-                self.handle_command_event(request, runtime, pdf)?;
-            }
-            WaitEvent::Event(DomainEvent::App(event)) => {
-                let needs_redraw = !matches!(event, AppEvent::CommandExecuted { .. });
-                self.interaction.handle_app_event(&mut self.state, &event);
-                if needs_redraw {
-                    self.request_redraw(runtime, RedrawReason::AppEvent);
-                }
-            }
-            WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
-                self.handle_render_complete_event(completed, runtime, pdf.as_ref());
-            }
-            WaitEvent::Event(DomainEvent::EncodeComplete(
-                PresenterBackgroundEvent::EncodeComplete { redraw_requested },
-            )) => {
-                if redraw_requested {
-                    self.request_redraw(runtime, RedrawReason::RenderComplete);
-                }
-            }
-            WaitEvent::Event(DomainEvent::PrefetchTick) => {
-                runtime.render_actor.mark_prefetch_due();
-            }
-            WaitEvent::Event(DomainEvent::RedrawTick) => {
-                self.request_redraw(runtime, RedrawReason::Timer);
-            }
-            WaitEvent::Event(DomainEvent::Quit) => {
-                Self::terminate_process_now(runtime);
-            }
-            WaitEvent::Event(DomainEvent::Wake) => {}
-            WaitEvent::Closed => return Ok(LoopControl::Break),
-        }
-        Ok(LoopControl::Continue)
-    }
-
-    fn handle_timeout_outcome<S>(&mut self, runtime: &mut LoopRuntime<S>) -> AppResult<LoopControl>
-    where
-        S: TerminalSurface,
-    {
-        let timeout_outcome = self.interaction.flush_sequence_timeout(self.state.mode);
-        if timeout_outcome.clear_terminal {
-            runtime.session.clear()?;
-        }
-        if timeout_outcome.redraw {
-            self.request_redraw(runtime, RedrawReason::Input);
-        }
-        Ok(Self::enqueue_commands_and_optional_quit(
-            runtime,
-            timeout_outcome.commands,
-            timeout_outcome.quit_requested,
-        ))
-    }
-
-    fn handle_input_domain_event<S>(
-        &mut self,
-        event: Event,
-        runtime: &mut LoopRuntime<S>,
-    ) -> AppResult<LoopControl>
-    where
-        S: TerminalSurface,
-    {
-        let input_outcome = self.handle_input_event(
-            event,
-            &mut runtime.session,
-            runtime.ui_actor.needs_redraw_mut(),
-            runtime.input_actor.last_input_at_mut(),
-        )?;
-        if input_outcome.redraw_requested {
-            self.request_redraw(runtime, RedrawReason::Input);
-        }
-        Ok(Self::enqueue_commands_and_optional_quit(
-            runtime,
-            input_outcome.commands,
-            input_outcome.quit_requested,
-        ))
-    }
-
-    fn handle_command_event<S>(
-        &mut self,
-        request: CommandRequest,
-        runtime: &mut LoopRuntime<S>,
-        pdf: SharedPdfBackend,
-    ) -> AppResult<()>
-    where
-        S: TerminalSurface + SessionRestore,
-    {
-        let request = self.resolve_command_request(&runtime.session, request);
-        let state_before_command = self.state.clone();
-        let previous_page = self.state.current_page;
-        let dispatch =
-            match self
-                .interaction
-                .dispatch_command(&mut self.state, request, Arc::clone(&pdf))
-            {
-                Ok(dispatch) => dispatch,
-                Err(err) => {
-                    self.state.apply_notice_action(notice_action_for_error(err));
-                    self.request_redraw(runtime, RedrawReason::Command);
-                    return Ok(());
-                }
-            };
-        for event in dispatch.emitted_events {
-            let _ = runtime.loop_event_tx.send(DomainEvent::App(event));
-        }
-        let palette_changed = self.interaction.apply_palette_requests(&mut self.state);
-        if palette_changed {
-            self.request_redraw(runtime, RedrawReason::StateChanged);
-        }
-        if self.state.current_page != previous_page {
-            self.interaction
-                .sync_search_after_page_change(Arc::clone(&pdf), self.state.current_page);
-        }
-        match dispatch.outcome {
-            CommandOutcome::QuitRequested => {
-                Self::terminate_process_now(runtime);
-            }
-            CommandOutcome::Applied => self.request_redraw(runtime, RedrawReason::Command),
-            CommandOutcome::Noop => {
-                if !palette_changed && self.state != state_before_command {
-                    self.request_redraw(runtime, RedrawReason::Command);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn handle_render_complete_event<S>(
-        &mut self,
-        completed: RenderWorkerResult,
-        runtime: &mut LoopRuntime<S>,
-        pdf: &dyn PdfBackend,
-    ) where
-        S: TerminalSurface,
-    {
-        let viewport = Self::current_viewport(&runtime.session, self.state.debug_status_visible);
-        let visible_pages = self.state.visible_page_slots(pdf.page_count());
-        let current_scale = self.compute_current_scale(pdf, visible_pages.anchor_page, viewport);
-        let current_view = self.render.build_current_render_view(
-            &self.state,
-            pdf,
-            visible_pages,
-            current_scale,
-            runtime.render_actor.generation() == 0,
-        );
-        let pan = self.current_pan();
-        let enable_crop = self.state.zoom > 1.0;
-        if self.render.process_render_result(
-            &mut self.state,
-            completed,
-            current_view.current_interest_keys.as_slice(),
-            viewport,
-            pan,
-            enable_crop,
-            runtime
-                .input_actor
-                .is_interactive(runtime.prefetch_pause_after_input),
-        ) {
-            self.request_redraw(runtime, RedrawReason::RenderComplete);
-        }
-        self.render
-            .runtime
-            .set_queue_depth_with_inflight(runtime.render_worker.in_flight_len());
-    }
-
-    fn request_redraw<S>(&mut self, runtime: &mut LoopRuntime<S>, reason: RedrawReason)
-    where
-        S: TerminalSurface,
-    {
-        runtime.ui_actor.mark_redraw();
-        self.render.runtime.perf_stats.record_redraw(reason);
+            changed,
+            step,
+        )
     }
 }
 
@@ -880,7 +483,10 @@ mod tests {
         ImagePresenter, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
         PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot,
     };
+    use crate::render::cache::RenderedPageKey;
     use crate::render::worker::RenderWorker;
+    use crate::render::worker::RenderWorkerResult;
+    use crate::work::WorkClass;
 
     #[derive(Default)]
     struct StubPresenter {
@@ -991,6 +597,24 @@ mod tests {
         let doc = PdfDoc::open(&file).expect("pdf should open");
         fs::remove_file(&file).expect("test pdf should be removed");
         Arc::new(doc)
+    }
+
+    fn failed_render_result(
+        key: RenderedPageKey,
+        class: WorkClass,
+        generation: u64,
+    ) -> RenderWorkerResult {
+        RenderWorkerResult {
+            key,
+            class,
+            generation,
+            result: Err(crate::error::AppError::pdf_render(
+                key.page,
+                crate::error::AppError::invalid_argument("render failed"),
+            )),
+            queue_wait: Duration::from_millis(1),
+            elapsed: Duration::from_millis(2),
+        }
     }
 
     #[test]
@@ -1291,6 +915,167 @@ mod tests {
         assert_eq!(notice.level, crate::app::NoticeLevel::Warning);
         assert_eq!(notice.message, "page 999 is out of range (1-1)");
         assert!(runtime.loop_event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn command_event_returns_break_when_effect_channel_is_closed() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.loop_event_rx.close();
+
+        let control = app
+            .handle_waited_event(
+                WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
+                    Command::NextPage,
+                    CommandInvocationSource::Keymap,
+                ))),
+                &mut runtime,
+                Arc::clone(&pdf),
+            )
+            .expect("command should be handled");
+
+        assert!(matches!(control, super::LoopControl::Break));
+    }
+
+    #[test]
+    fn encode_complete_without_redraw_request_does_not_redraw() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.ui_actor.clear_redraw();
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::EncodeComplete(
+                PresenterBackgroundEvent::EncodeComplete {
+                    redraw_requested: false,
+                },
+            )),
+            &mut runtime,
+            Arc::clone(&pdf),
+        )
+        .expect("encode completion should be handled");
+
+        assert!(!runtime.ui_actor.needs_redraw());
+    }
+
+    #[test]
+    fn prefetch_tick_only_marks_prefetch_due() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        assert!(runtime.render_actor.take_prefetch_due());
+        assert!(!runtime.render_actor.take_prefetch_due());
+        runtime.ui_actor.clear_redraw();
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::PrefetchTick),
+            &mut runtime,
+            Arc::clone(&pdf),
+        )
+        .expect("prefetch tick should be handled");
+
+        assert!(runtime.render_actor.take_prefetch_due());
+        assert!(!runtime.ui_actor.needs_redraw());
+        assert!(runtime.loop_event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn non_current_render_complete_does_not_redraw() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.ui_actor.clear_redraw();
+        let viewport = App::current_viewport(&runtime.session, app.state.debug_status_visible);
+        let current_scale =
+            app.compute_current_scale(pdf.as_ref(), app.state.current_page, viewport);
+        let non_current_key = RenderedPageKey::new(pdf.doc_id(), 42, current_scale);
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::RenderComplete(failed_render_result(
+                non_current_key,
+                WorkClass::Background,
+                runtime.render_actor.generation(),
+            ))),
+            &mut runtime,
+            Arc::clone(&pdf),
+        )
+        .expect("render completion should be handled");
+
+        assert!(!runtime.ui_actor.needs_redraw());
+        assert!(app.state.notice.is_none());
     }
 
     #[test]

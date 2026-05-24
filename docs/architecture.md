@@ -17,7 +17,8 @@ here. Worker ownership and cancellation details live in `async-workers.md`.
 ## Top-level runtime model
 
 - `App` owns the interactive runtime state and the major subsystems.
-- The main event loop routes typed `DomainEvent` values.
+- The main event loop waits for typed `DomainEvent` values and delegates
+  routing to the loop router.
 - Commands are parsed and dispatched into typed outcomes and `AppEvent` values.
 - Rendering and presenter work are performed asynchronously and fed back into
   the event loop.
@@ -26,8 +27,14 @@ here. Worker ownership and cancellation details live in `async-workers.md`.
 ## Main subsystems
 
 - `src/app/`
-  - app construction, event loop orchestration, input handling, render
-    completion handling, and view operations
+  - app construction, event loop orchestration, loop event routing, input
+    handling, render completion handling, and view operations
+  - `event_loop.rs` owns loop setup and wait/select orchestration
+  - `loop_runtime.rs` owns loop-local runtime state shared by the loop shell
+    and router
+  - `loop_router.rs` routes `DomainEvent` values and applies loop-level
+    effects such as command enqueueing, redraw requests, and quit requests
+  - `actors.rs` owns loop-adjacent input, render, and UI actors
 
 - `src/command/`
   - command catalog, parser, dispatch, invocation checks, and command outcomes
@@ -65,8 +72,13 @@ here. Worker ownership and cancellation details live in `async-workers.md`.
 ## Event flow
 
 - terminal input enters the runtime as `DomainEvent::Input`
+- `loop_router.rs` handles `DomainEvent` dispatch and keeps the main loop
+  focused on orchestration
 - key handling either mutates state directly, dispatches a command, or forwards
   work to a palette or extension path
+- input, render, and UI actors own the loop-level decisions for their areas:
+  sequence timeouts and input effects, render/navigation synchronization and
+  work enqueueing, and redraw/frame rendering respectively
 - command dispatch emits typed `AppEvent` values when state changes need to be
   observed by the rest of the runtime
 - render workers report finished raster work through `DomainEvent::RenderComplete`
@@ -88,6 +100,9 @@ here. Worker ownership and cancellation details live in `async-workers.md`.
 
 - `src/app/core.rs`
 - `src/app/event_loop.rs`
+- `src/app/loop_router.rs`
+- `src/app/loop_runtime.rs`
+- `src/app/actors.rs`
 - `src/event.rs`
 - `src/command/`
 - `src/extension/host.rs`

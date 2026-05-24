@@ -1,5 +1,4 @@
 pub mod events;
-pub(crate) mod handler;
 pub mod history;
 pub mod keymap;
 pub mod sequence;

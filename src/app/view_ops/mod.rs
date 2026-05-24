@@ -184,23 +184,59 @@ impl RenderFrameDrawPlan {
     }
 }
 
+pub(super) fn current_viewport_for_session<S: TerminalSurface>(
+    session: &S,
+    debug_status_visible: bool,
+) -> Option<Viewport> {
+    let area = session.size().ok()?.into();
+    let layout = ui::split_layout(area, debug_status_visible);
+    if layout.viewer_inner.width == 0 || layout.viewer_inner.height == 0 {
+        return None;
+    }
+
+    Some(Viewport {
+        x: layout.viewer_inner.x,
+        y: layout.viewer_inner.y,
+        width: layout.viewer_inner.width.max(1),
+        height: layout.viewer_inner.height.max(1),
+    })
+}
+
+pub(super) fn compute_current_scale_for_state(
+    state: &AppState,
+    render: &RenderSubsystem,
+    config: &Config,
+    pdf: &dyn PdfBackend,
+    page: usize,
+    viewport: Option<Viewport>,
+) -> f32 {
+    let Some(viewport) = viewport else {
+        return quantize_scale(state.zoom);
+    };
+
+    let slots = state.visible_page_slots_for_page(page, pdf.page_count());
+    let page_presentation = state.page_presentation_for_slots(slots);
+    let (page_width_pt, page_height_pt) = resolve_layout_dimensions(pdf, page_presentation, slots);
+    let caps = render.presenter.capabilities();
+    let max_scale = caps
+        .preferred_max_render_scale
+        .clamp(1.0, config.render.max_render_scale);
+    let render_scale = compute_render_scale(
+        viewport,
+        caps.cell_px,
+        page_width_pt,
+        page_height_pt,
+        max_scale,
+    );
+    compute_scale(state.zoom, render_scale)
+}
+
 impl App {
     pub(super) fn current_viewport<S: TerminalSurface>(
         session: &S,
         debug_status_visible: bool,
     ) -> Option<Viewport> {
-        let area = session.size().ok()?.into();
-        let layout = ui::split_layout(area, debug_status_visible);
-        if layout.viewer_inner.width == 0 || layout.viewer_inner.height == 0 {
-            return None;
-        }
-
-        Some(Viewport {
-            x: layout.viewer_inner.x,
-            y: layout.viewer_inner.y,
-            width: layout.viewer_inner.width.max(1),
-            height: layout.viewer_inner.height.max(1),
-        })
+        current_viewport_for_session(session, debug_status_visible)
     }
 
     pub(super) fn compute_current_scale(
@@ -209,28 +245,14 @@ impl App {
         page: usize,
         viewport: Option<Viewport>,
     ) -> f32 {
-        let Some(viewport) = viewport else {
-            return quantize_scale(self.state.zoom);
-        };
-
-        let slots = self
-            .state
-            .visible_page_slots_for_page(page, pdf.page_count());
-        let page_presentation = self.state.page_presentation_for_slots(slots);
-        let (page_width_pt, page_height_pt) =
-            resolve_layout_dimensions(pdf, page_presentation, slots);
-        let caps = self.render.presenter.capabilities();
-        let max_scale = caps
-            .preferred_max_render_scale
-            .clamp(1.0, self.config.render.max_render_scale);
-        let render_scale = compute_render_scale(
+        compute_current_scale_for_state(
+            &self.state,
+            &self.render,
+            &self.config,
+            pdf,
+            page,
             viewport,
-            caps.cell_px,
-            page_width_pt,
-            page_height_pt,
-            max_scale,
-        );
-        compute_scale(self.state.zoom, render_scale)
+        )
     }
 
     pub(super) fn current_pan(&self) -> PanOffset {

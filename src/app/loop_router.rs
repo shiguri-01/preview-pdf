@@ -13,7 +13,7 @@ use super::loop_effects::LoopEffects;
 use super::loop_runtime::{
     LoopControl, LoopRuntime, SessionRestore, WaitEvent, terminate_process_now,
 };
-use super::state::notice_action_for_error;
+use super::state::{Mode, notice_action_for_error};
 use super::terminal_session::TerminalSurface;
 
 impl App {
@@ -217,6 +217,11 @@ impl App {
             return Ok(LoopControl::Break);
         }
         let palette_changed = self.interaction.apply_palette_requests(&mut self.state);
+        let overlay_closed = matches!(state_before_command.mode, Mode::Palette | Mode::Help)
+            && !matches!(self.state.mode, Mode::Palette | Mode::Help);
+        if overlay_closed {
+            runtime.session.clear()?;
+        }
         if palette_changed {
             self.request_redraw(runtime, RedrawReason::StateChanged);
         }

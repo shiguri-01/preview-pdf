@@ -73,8 +73,8 @@ impl InteractionSubsystem {
         let overlay_active = matches!(state.mode, Mode::Palette | Mode::Help);
         let search_active = self.extensions.host.ui_snapshot().search_active;
         KeyEventOutcome {
-            redraw: overlay_active || search_active,
-            clear_terminal: overlay_active,
+            redraw: false,
+            clear_terminal: false,
             quit_requested: false,
             commands: if overlay_active || search_active {
                 vec![CommandRequest::new(
@@ -568,8 +568,8 @@ mod tests {
                 CommandInvocationSource::Keymap,
             )]
         );
-        assert!(closed.redraw);
-        assert!(closed.clear_terminal);
+        assert!(!closed.redraw);
+        assert!(!closed.clear_terminal);
     }
 
     #[test]
@@ -595,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    fn help_close_requests_viewer_area_clear() {
+    fn help_close_queues_cancel_without_pre_redraw() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState {
             mode: Mode::Help,
@@ -615,10 +615,10 @@ mod tests {
             .expect("help close should be handled");
         let (commands, events, redraws, quit_requested) = effects.into_parts();
 
-        assert_eq!(session.clear_count, 1);
+        assert_eq!(session.clear_count, 0);
         assert_eq!(state.mode, Mode::Help);
         assert_eq!(state.help_scroll, 0);
-        assert!(!redraws.is_empty());
+        assert!(redraws.is_empty());
         assert_eq!(
             commands,
             vec![CommandRequest::new(
@@ -631,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_close_clears_terminal_and_restores_normal_mode() {
+    fn palette_close_queues_cancel_without_pre_redraw() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
         interaction
@@ -658,9 +658,9 @@ mod tests {
             .expect("palette close should be handled");
         let (commands, events, redraws, quit_requested) = effects.into_parts();
 
-        assert_eq!(session.clear_count, 1);
+        assert_eq!(session.clear_count, 0);
         assert_eq!(state.mode, Mode::Palette);
-        assert!(!redraws.is_empty());
+        assert!(redraws.is_empty());
         assert_eq!(
             commands,
             vec![CommandRequest::new(
@@ -685,8 +685,8 @@ mod tests {
             .expect("stale palette close should be handled");
 
         assert_eq!(state.mode, Mode::Palette);
-        assert!(outcome.redraw);
-        assert!(outcome.clear_terminal);
+        assert!(!outcome.redraw);
+        assert!(!outcome.clear_terminal);
         assert_eq!(
             outcome.commands,
             vec![CommandRequest::new(

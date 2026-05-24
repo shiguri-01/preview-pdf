@@ -169,7 +169,7 @@ const DEFAULT_SECTIONS: &[HelpSection] = &[
                 description: "Quit",
             },
             HelpRow {
-                sources: &[HelpKeySource::ExactCommand("cancel")],
+                sources: &[HelpKeySource::ExactCommand("cancel-search")],
                 description: "Cancel / Close",
             },
         ],

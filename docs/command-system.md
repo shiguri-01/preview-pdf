@@ -135,8 +135,6 @@ Command-specific parsing rules:
   - requires exactly one integer page argument
 - `outline-goto <page> <title>`
   - requires a 1-based page plus non-empty title text
-- `help-scroll <delta>`
-  - internal keymap-only command used by help-mode scrolling
 
 ## Dispatch contract
 
@@ -167,7 +165,7 @@ Navigation-aware commands may additionally emit:
 - `AppEvent::PageChanged`
 - `AppEvent::ModeChanged`
 
-Navigation reason emission is returned by the command handler:
+Navigation reason emission is derived by dispatch from the typed command:
 
 - page movement commands emit `Step` or `Goto(...)`
 - search-hit navigation emits `Search { query }`
@@ -210,7 +208,7 @@ Public commands:
   - `search-results`
   - `next-search-hit`
   - `prev-search-hit`
-  - `cancel`
+  - `cancel-search`
 
 - History and outline
   - `history-back`
@@ -226,7 +224,6 @@ Internal commands:
 - `open-palette <kind> [seed]`
 - `close-palette`
 - `close-help`
-- `help-scroll <delta>`
 - `submit-search <query> [matcher]`
 - `search-goto <page>`
 - `history-goto <page>`
@@ -237,6 +234,7 @@ Availability-gated public commands:
 - `next-search-hit`
 - `prev-search-hit`
 - `search-results`
+- `cancel-search`
 
 These are available only while search is active.
 

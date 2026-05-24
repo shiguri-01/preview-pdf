@@ -466,9 +466,9 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::{WaitEvent, wait_next_event};
+    use crate::app::App;
     use crate::app::core::InteractionSubsystem;
     use crate::app::terminal_session::TerminalSurface;
-    use crate::app::{App, Mode, PaletteRequest};
     use crate::backend::test_support::{build_pdf, unique_temp_path};
     use crate::backend::{PdfDoc, SharedPdfBackend};
     use crate::command::{
@@ -478,7 +478,6 @@ mod tests {
     use crate::event::DomainEvent;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
-    use crate::palette::PaletteKind;
     use crate::presenter::PresenterKind;
     use crate::presenter::{
         ImagePresenter, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
@@ -803,98 +802,6 @@ mod tests {
                 if request
                     == CommandRequest::new(Command::OpenHelp, CommandInvocationSource::Keymap)
         ));
-    }
-
-    #[test]
-    fn cancel_command_closes_help_before_clear_and_redraw() {
-        let tokio_runtime = Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime should build");
-        let _guard = tokio_runtime.enter();
-        let pdf = test_pdf_backend();
-        let mut app =
-            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
-        app.state.mode = Mode::Help;
-
-        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
-            crate::app::event_bus::EventBusRuntime::spawn_headless();
-        let session = StubSession::new(80, 24);
-        let mut runtime = app
-            .initialize_loop_runtime(
-                Arc::clone(&pdf),
-                pdf.page_count(),
-                session,
-                loop_event_tx,
-                loop_event_rx,
-                loop_event_runtime,
-            )
-            .expect("runtime should initialize");
-        runtime.ui_actor.clear_redraw();
-
-        app.handle_waited_event(
-            WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
-                Command::Cancel,
-                CommandInvocationSource::Keymap,
-            ))),
-            &mut runtime,
-            Arc::clone(&pdf),
-        )
-        .expect("cancel command should be handled");
-
-        assert_eq!(app.state.mode, Mode::Normal);
-        assert_eq!(runtime.session.clear_count, 1);
-        assert!(runtime.ui_actor.needs_redraw());
-    }
-
-    #[test]
-    fn cancel_command_closes_palette_before_clear_and_redraw() {
-        let tokio_runtime = Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("tokio runtime should build");
-        let _guard = tokio_runtime.enter();
-        let pdf = test_pdf_backend();
-        let mut app =
-            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
-        app.interaction
-            .palette
-            .pending_requests
-            .push_back(PaletteRequest::Open {
-                kind: PaletteKind::Command,
-                payload: None,
-            });
-        assert!(app.interaction.apply_palette_requests(&mut app.state));
-        assert_eq!(app.state.mode, Mode::Palette);
-
-        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
-            crate::app::event_bus::EventBusRuntime::spawn_headless();
-        let session = StubSession::new(80, 24);
-        let mut runtime = app
-            .initialize_loop_runtime(
-                Arc::clone(&pdf),
-                pdf.page_count(),
-                session,
-                loop_event_tx,
-                loop_event_rx,
-                loop_event_runtime,
-            )
-            .expect("runtime should initialize");
-        runtime.ui_actor.clear_redraw();
-
-        app.handle_waited_event(
-            WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
-                Command::Cancel,
-                CommandInvocationSource::Keymap,
-            ))),
-            &mut runtime,
-            Arc::clone(&pdf),
-        )
-        .expect("cancel command should be handled");
-
-        assert_eq!(app.state.mode, Mode::Normal);
-        assert_eq!(runtime.session.clear_count, 1);
-        assert!(runtime.ui_actor.needs_redraw());
     }
 
     #[test]

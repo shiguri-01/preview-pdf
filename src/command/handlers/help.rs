@@ -16,11 +16,3 @@ pub(in crate::command) fn close_help(
     let result = close_help_core(ctx.app)?;
     Ok(CommandExecution::from_notice_result(result))
 }
-
-pub(in crate::command) fn help_scroll(
-    ctx: &mut CommandExecContext<'_>,
-    delta: isize,
-) -> AppResult<CommandExecution> {
-    ctx.app.scroll_help_by(delta);
-    Ok(CommandExecution::applied())
-}

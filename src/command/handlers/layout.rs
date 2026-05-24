@@ -1,5 +1,4 @@
 use crate::error::AppResult;
-use crate::event::NavReason;
 
 use super::super::core::set_page_layout;
 use super::super::dispatch::{CommandExecContext, CommandExecution};
@@ -15,7 +14,7 @@ pub(in crate::command) fn page_layout_single(
         None,
         None,
     )?;
-    Ok(CommandExecution::from_notice_result(result).with_nav(NavReason::LayoutNormalize))
+    Ok(CommandExecution::from_notice_result(result))
 }
 
 pub(in crate::command) fn page_layout_spread(
@@ -30,5 +29,5 @@ pub(in crate::command) fn page_layout_spread(
         direction,
         cover_policy,
     )?;
-    Ok(CommandExecution::from_notice_result(result).with_nav(NavReason::LayoutNormalize))
+    Ok(CommandExecution::from_notice_result(result))
 }

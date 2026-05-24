@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use crate::error::AppResult;
-use crate::event::NavReason;
 
-use super::super::dispatch::{CommandExecContext, CommandExecution, TransitionHint};
+use super::super::dispatch::{CommandExecContext, CommandExecution};
 
 pub(in crate::command) fn open_outline(
     ctx: &mut CommandExecContext<'_>,
@@ -17,15 +16,10 @@ pub(in crate::command) fn open_outline(
 pub(in crate::command) fn outline_goto(
     ctx: &mut CommandExecContext<'_>,
     page: usize,
-    title: String,
+    _title: String,
 ) -> AppResult<CommandExecution> {
     let result = ctx
         .extension_host
         .outline_goto(ctx.app, ctx.page_count(), page)?;
-    Ok(
-        CommandExecution::from_notice_result(result).with_transition(TransitionHint {
-            nav_reason: NavReason::Outline { title },
-            emit_when_unchanged: true,
-        }),
-    )
+    Ok(CommandExecution::from_notice_result(result))
 }

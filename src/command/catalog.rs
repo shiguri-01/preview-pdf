@@ -78,12 +78,6 @@ const ARGS_SUBMIT_SEARCH: [ArgSpec; 2] = [
         hint: ArgHint::None,
     },
 ];
-const ARGS_HELP_SCROLL: [ArgSpec; 1] = [ArgSpec {
-    name: "delta",
-    kind: ArgKind::I32,
-    required: true,
-    hint: ArgHint::None,
-}];
 const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
     ArgSpec {
         name: "page",
@@ -410,16 +404,6 @@ define_commands! {
         parse: no_args,
         exec: super::handlers::close_help,
     }
-    HelpScroll(delta: isize) {
-        id: "help-scroll",
-        title: "Scroll Help",
-        args: &ARGS_HELP_SCROLL,
-        exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::KeymapOnly,
-        availability: CommandAvailability::Always,
-        parse: (super::parse::parse_help_scroll),
-        exec: super::handlers::help_scroll,
-    }
     OpenSearch {
         id: "search",
         title: "Search",
@@ -540,15 +524,15 @@ define_commands! {
         parse: (super::parse::parse_outline_goto),
         exec: super::handlers::outline_goto,
     }
-    Cancel {
-        id: "cancel",
-        title: "Cancel",
+    CancelSearch {
+        id: "cancel-search",
+        title: "Cancel Search",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
-        exec: super::handlers::cancel,
+        exec: super::handlers::cancel_search,
     }
     Quit {
         id: "quit",

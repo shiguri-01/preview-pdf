@@ -1,5 +1,4 @@
 use crate::error::AppResult;
-use crate::event::{HistoryOp, NavReason};
 
 use super::super::dispatch::{CommandExecContext, CommandExecution};
 
@@ -7,7 +6,7 @@ pub(in crate::command) fn history_back(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
     let result = ctx.extension_host.history_back(ctx.app, ctx.page_count());
-    Ok(CommandExecution::from_notice_result(result).with_nav(NavReason::History(HistoryOp::Back)))
+    Ok(CommandExecution::from_notice_result(result))
 }
 
 pub(in crate::command) fn history_forward(
@@ -16,8 +15,7 @@ pub(in crate::command) fn history_forward(
     let result = ctx
         .extension_host
         .history_forward(ctx.app, ctx.page_count());
-    Ok(CommandExecution::from_notice_result(result)
-        .with_nav(NavReason::History(HistoryOp::Forward)))
+    Ok(CommandExecution::from_notice_result(result))
 }
 
 pub(in crate::command) fn history_goto(
@@ -27,7 +25,7 @@ pub(in crate::command) fn history_goto(
     let result = ctx
         .extension_host
         .history_goto(ctx.app, ctx.page_count(), page)?;
-    Ok(CommandExecution::from_notice_result(result).with_nav(NavReason::History(HistoryOp::Goto)))
+    Ok(CommandExecution::from_notice_result(result))
 }
 
 pub(in crate::command) fn open_history(

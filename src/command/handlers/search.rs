@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use crate::error::AppResult;
-use crate::event::NavReason;
 
-use super::super::dispatch::{CommandExecContext, CommandExecution, TransitionHint};
+use super::super::dispatch::{CommandExecContext, CommandExecution};
 use super::super::types::SearchMatcherKind;
 
 pub(in crate::command) fn open_search(
@@ -39,40 +38,22 @@ pub(in crate::command) fn search_result_goto(
     ctx: &mut CommandExecContext<'_>,
     page: usize,
 ) -> AppResult<CommandExecution> {
-    let query = ctx.extension_host.search_query().to_string();
     let result = ctx
         .extension_host
         .search_result_goto(ctx.app, ctx.page_count(), page)?;
-    Ok(
-        CommandExecution::from_notice_result(result).with_transition(TransitionHint {
-            nav_reason: NavReason::Search { query },
-            emit_when_unchanged: true,
-        }),
-    )
+    Ok(CommandExecution::from_notice_result(result))
 }
 
 pub(in crate::command) fn next_search_hit(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let query = ctx.extension_host.search_query().to_string();
     let result = ctx.extension_host.next_search_hit(ctx.app);
-    Ok(
-        CommandExecution::from_notice_result(result).with_transition(TransitionHint {
-            nav_reason: NavReason::Search { query },
-            emit_when_unchanged: true,
-        }),
-    )
+    Ok(CommandExecution::from_notice_result(result))
 }
 
 pub(in crate::command) fn prev_search_hit(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let query = ctx.extension_host.search_query().to_string();
     let result = ctx.extension_host.prev_search_hit(ctx.app);
-    Ok(
-        CommandExecution::from_notice_result(result).with_transition(TransitionHint {
-            nav_reason: NavReason::Search { query },
-            emit_when_unchanged: true,
-        }),
-    )
+    Ok(CommandExecution::from_notice_result(result))
 }

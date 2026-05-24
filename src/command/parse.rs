@@ -73,7 +73,6 @@ pub(super) fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResul
         "close-palette" => "close-palette does not accept arguments",
         "help" => "help does not accept arguments",
         "close-help" => "close-help does not accept arguments",
-        "help-scroll" => "help-scroll requires 1 argument: delta",
         "search" => "search does not accept arguments",
         "search-results" => "search-results does not accept arguments",
         "next-search-hit" => "next-search-hit does not accept arguments",
@@ -82,7 +81,7 @@ pub(super) fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResul
         "history-forward" => "history-forward does not accept arguments",
         "history" => "history does not accept arguments",
         "outline" => "outline does not accept arguments",
-        "cancel" => "cancel does not accept arguments",
+        "cancel-search" => "cancel-search does not accept arguments",
         "quit" => "quit does not accept arguments",
         _ => "command does not accept arguments",
     }))
@@ -256,25 +255,6 @@ pub(super) fn parse_page_layout_spread(args_text: &str) -> AppResult<Command> {
         direction: Some(direction),
         cover_policy,
     })
-}
-
-pub(super) fn parse_help_scroll(args_text: &str) -> AppResult<Command> {
-    let mut parts = args_text.split_whitespace();
-    let Some(delta_text) = parts.next() else {
-        return Err(AppError::invalid_argument(
-            "help-scroll requires 1 argument: delta",
-        ));
-    };
-    if parts.next().is_some() {
-        return Err(AppError::invalid_argument(
-            "help-scroll accepts exactly 1 argument",
-        ));
-    }
-
-    let delta = delta_text
-        .parse::<isize>()
-        .map_err(|_| AppError::invalid_argument("help-scroll delta must be an integer"))?;
-    Ok(Command::HelpScroll { delta })
 }
 
 pub(super) fn parse_submit_search(args_text: &str) -> AppResult<Command> {

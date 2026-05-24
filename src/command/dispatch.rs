@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::app::{AppState, Mode, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::error::AppResult;
-use crate::event::{AppEvent, NavReason};
+use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::extension::ExtensionHost;
 
 use super::catalog::{Command, execute_registered_command};
@@ -30,42 +30,18 @@ impl CommandExecContext<'_> {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct TransitionHint {
-    pub nav_reason: NavReason,
-    pub emit_when_unchanged: bool,
-}
-
-#[derive(Debug, Clone)]
 pub(super) struct CommandExecution {
     pub outcome: CommandOutcome,
     pub notice: NoticeAction,
-    pub transition: Option<TransitionHint>,
 }
 
 impl CommandExecution {
     pub(super) fn from_notice_result((outcome, notice): (CommandOutcome, NoticeAction)) -> Self {
-        Self {
-            outcome,
-            notice,
-            transition: None,
-        }
+        Self { outcome, notice }
     }
 
     pub(super) fn applied() -> Self {
         Self::from_notice_result((CommandOutcome::Applied, NoticeAction::Clear))
-    }
-
-    pub(super) fn with_nav(mut self, nav_reason: NavReason) -> Self {
-        self.transition = Some(TransitionHint {
-            nav_reason,
-            emit_when_unchanged: false,
-        });
-        self
-    }
-
-    pub(super) fn with_transition(mut self, transition: TransitionHint) -> Self {
-        self.transition = Some(transition);
-        self
     }
 }
 
@@ -110,6 +86,7 @@ pub fn dispatch(
 
     let previous_page = app.current_page;
     let prev_mode = app.mode;
+    let dispatched_command = cmd.clone();
     let execution = execute_registered_command(
         &mut CommandExecContext {
             app,
@@ -123,9 +100,10 @@ pub fn dispatch(
 
     let mut emitted_events = collect_transition_events(
         app,
+        extension_host,
         previous_page,
         prev_mode,
-        execution.transition,
+        &dispatched_command,
         execution.outcome,
     );
     emitted_events.push(AppEvent::CommandExecuted {
@@ -145,20 +123,25 @@ pub fn drain_background_events(app: &mut AppState, extension_host: &mut Extensio
 
 fn collect_transition_events(
     app: &mut AppState,
+    extension_host: &ExtensionHost,
     prev_page: usize,
     prev_mode: Mode,
-    transition: Option<TransitionHint>,
+    command: &Command,
     outcome: CommandOutcome,
 ) -> Vec<AppEvent> {
     let mut events = Vec::new();
-    if let Some(transition) = transition {
-        let should_emit = app.current_page != prev_page
-            || (transition.emit_when_unchanged && outcome == CommandOutcome::Applied);
+    if let Some(reason) = derive_nav_reason(command, extension_host) {
+        let should_emit = match reason {
+            NavReason::Search { .. } | NavReason::Outline { .. } => {
+                outcome == CommandOutcome::Applied
+            }
+            _ => app.current_page != prev_page,
+        };
         if should_emit {
             events.push(AppEvent::PageChanged {
                 from: prev_page,
                 to: app.current_page,
-                reason: transition.nav_reason,
+                reason,
             });
         }
     }
@@ -170,6 +153,48 @@ fn collect_transition_events(
         });
     }
     events
+}
+
+fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Option<NavReason> {
+    match command {
+        Command::NextPage | Command::PrevPage => Some(NavReason::Step),
+        Command::FirstPage => Some(NavReason::Goto(GotoKind::FirstPage)),
+        Command::LastPage => Some(NavReason::Goto(GotoKind::LastPage)),
+        Command::GotoPage { .. } => Some(NavReason::Goto(GotoKind::SpecificPage)),
+        Command::PageLayoutSingle | Command::PageLayoutSpread { .. } => {
+            Some(NavReason::LayoutNormalize)
+        }
+        Command::SearchResultGoto { .. } | Command::NextSearchHit | Command::PrevSearchHit => {
+            Some(NavReason::Search {
+                query: extension_host.search_query().to_string(),
+            })
+        }
+        Command::HistoryBack => Some(NavReason::History(HistoryOp::Back)),
+        Command::HistoryForward => Some(NavReason::History(HistoryOp::Forward)),
+        Command::HistoryGoto { .. } => Some(NavReason::History(HistoryOp::Goto)),
+        Command::OutlineGoto { title, .. } => Some(NavReason::Outline {
+            title: title.clone(),
+        }),
+        Command::SetZoom { .. }
+        | Command::ZoomIn
+        | Command::ZoomOut
+        | Command::ZoomReset
+        | Command::Pan { .. }
+        | Command::DebugStatusShow
+        | Command::DebugStatusHide
+        | Command::DebugStatusToggle
+        | Command::OpenPalette { .. }
+        | Command::ClosePalette
+        | Command::OpenHelp
+        | Command::CloseHelp
+        | Command::OpenSearch
+        | Command::OpenSearchResults
+        | Command::SubmitSearch { .. }
+        | Command::OpenHistory
+        | Command::OpenOutline
+        | Command::CancelSearch
+        | Command::Quit => None,
+    }
 }
 
 #[cfg(test)]
@@ -188,7 +213,7 @@ mod tests {
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
 
-    use super::{TransitionHint, collect_transition_events, dispatch};
+    use super::{collect_transition_events, dispatch};
 
     struct StubPdf {
         path: PathBuf,
@@ -720,7 +745,7 @@ mod tests {
 
         let result = dispatch(
             &mut app,
-            Command::Cancel,
+            Command::CancelSearch,
             CommandInvocationSource::Keymap,
             pdf,
             &mut host,
@@ -752,14 +777,10 @@ mod tests {
         let prev_mode = app.mode;
         let events = collect_transition_events(
             &mut app,
+            &host,
             prev_page,
             prev_mode,
-            Some(TransitionHint {
-                nav_reason: NavReason::Search {
-                    query: "needle".to_string(),
-                },
-                emit_when_unchanged: true,
-            }),
+            &Command::NextSearchHit,
             CommandOutcome::Applied,
         );
 
@@ -870,17 +891,17 @@ mod tests {
             current_page: 4,
             ..AppState::default()
         };
+        let host = ExtensionHost::default();
         let prev_mode = app.mode;
         let events = collect_transition_events(
             &mut app,
+            &host,
             1,
             prev_mode,
-            Some(TransitionHint {
-                nav_reason: NavReason::Outline {
-                    title: "Section".to_string(),
-                },
-                emit_when_unchanged: true,
-            }),
+            &Command::OutlineGoto {
+                page: 4,
+                title: "Section".to_string(),
+            },
             CommandOutcome::Applied,
         );
 
@@ -898,17 +919,17 @@ mod tests {
     #[test]
     fn collect_transition_events_emits_outline_reason_when_page_is_unchanged() {
         let mut app = AppState::default();
+        let host = ExtensionHost::default();
         let prev_mode = app.mode;
         let events = collect_transition_events(
             &mut app,
+            &host,
             0,
             prev_mode,
-            Some(TransitionHint {
-                nav_reason: NavReason::Outline {
-                    title: "Section".to_string(),
-                },
-                emit_when_unchanged: true,
-            }),
+            &Command::OutlineGoto {
+                page: 0,
+                title: "Section".to_string(),
+            },
             CommandOutcome::Applied,
         );
 

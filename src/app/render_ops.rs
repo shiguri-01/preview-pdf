@@ -13,14 +13,14 @@ use super::state::{AppState, VisiblePageSlots};
 use super::view_ops::{InitialPreviewPlan, compute_initial_preview_plan};
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RequiredRenderPages {
+pub(super) struct RequiredRenderPages {
     pages: [usize; 2],
     keys: [RenderedPageKey; 2],
     len: usize,
 }
 
 impl RequiredRenderPages {
-    pub(crate) fn new(anchor_page: usize, anchor_key: RenderedPageKey) -> Self {
+    pub(super) fn new(anchor_page: usize, anchor_key: RenderedPageKey) -> Self {
         Self {
             pages: [anchor_page, 0],
             keys: [anchor_key, anchor_key],
@@ -28,14 +28,14 @@ impl RequiredRenderPages {
         }
     }
 
-    pub(crate) fn push_trailing(&mut self, page: usize, key: RenderedPageKey) {
+    pub(super) fn push_trailing(&mut self, page: usize, key: RenderedPageKey) {
         debug_assert!(self.len < self.pages.len());
         self.pages[self.len] = page;
         self.keys[self.len] = key;
         self.len += 1;
     }
 
-    pub(crate) fn keys(&self) -> &[RenderedPageKey] {
+    pub(super) fn keys(&self) -> &[RenderedPageKey] {
         &self.keys[..self.len]
     }
 
@@ -45,13 +45,13 @@ impl RequiredRenderPages {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct CurrentInterestKeys {
+pub(super) struct CurrentInterestKeys {
     keys: [RenderedPageKey; 4],
     len: usize,
 }
 
 impl CurrentInterestKeys {
-    pub(crate) fn from_required(required: &RequiredRenderPages) -> Self {
+    pub(super) fn from_required(required: &RequiredRenderPages) -> Self {
         let mut keys = [required.keys[0]; 4];
         keys[..required.len].copy_from_slice(required.keys());
         Self {
@@ -60,7 +60,7 @@ impl CurrentInterestKeys {
         }
     }
 
-    pub(crate) fn extend(&mut self, keys: impl IntoIterator<Item = RenderedPageKey>) {
+    pub(super) fn extend(&mut self, keys: impl IntoIterator<Item = RenderedPageKey>) {
         for key in keys {
             debug_assert!(self.len < self.keys.len());
             self.keys[self.len] = key;
@@ -68,51 +68,51 @@ impl CurrentInterestKeys {
         }
     }
 
-    pub(crate) fn as_slice(&self) -> &[RenderedPageKey] {
+    pub(super) fn as_slice(&self) -> &[RenderedPageKey] {
         &self.keys[..self.len]
     }
 }
 
-pub(crate) struct CurrentTaskContext {
-    pub(crate) current_scale: f32,
-    pub(crate) required: RequiredRenderPages,
-    pub(crate) current_interest_keys: CurrentInterestKeys,
-    pub(crate) current_cached: bool,
-    pub(crate) preview_tasks: Vec<RenderTask>,
+pub(super) struct CurrentTaskContext {
+    pub(super) current_scale: f32,
+    pub(super) required: RequiredRenderPages,
+    pub(super) current_interest_keys: CurrentInterestKeys,
+    pub(super) current_cached: bool,
+    pub(super) preview_tasks: Vec<RenderTask>,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct PrefetchDispatchContext {
-    pub(crate) required: RequiredRenderPages,
-    pub(crate) current_cached: bool,
-    pub(crate) overlay_stamp: u64,
-    pub(crate) prefetch_viewport: Option<Viewport>,
-    pub(crate) base_pan: PanOffset,
-    pub(crate) enable_crop: bool,
-    pub(crate) interactive: bool,
-    pub(crate) dispatch_budget: usize,
+pub(super) struct PrefetchDispatchContext {
+    pub(super) required: RequiredRenderPages,
+    pub(super) current_cached: bool,
+    pub(super) overlay_stamp: u64,
+    pub(super) prefetch_viewport: Option<Viewport>,
+    pub(super) base_pan: PanOffset,
+    pub(super) enable_crop: bool,
+    pub(super) interactive: bool,
+    pub(super) dispatch_budget: usize,
 }
 
-pub(crate) struct PrefetchDispatchPlan {
-    pub(crate) overlay_stamp: u64,
-    pub(crate) prefetch_viewport: Option<Viewport>,
-    pub(crate) base_pan: PanOffset,
-    pub(crate) interactive: bool,
-    pub(crate) dispatch_budget: usize,
+pub(super) struct PrefetchDispatchPlan {
+    pub(super) overlay_stamp: u64,
+    pub(super) prefetch_viewport: Option<Viewport>,
+    pub(super) base_pan: PanOffset,
+    pub(super) interactive: bool,
+    pub(super) dispatch_budget: usize,
 }
 
-pub(crate) struct CurrentRenderView {
-    pub(crate) visible_pages: VisiblePageSlots,
-    pub(crate) current_scale: f32,
-    pub(crate) required: RequiredRenderPages,
-    pub(crate) current_interest_keys: CurrentInterestKeys,
-    pub(crate) initial_preview: Option<InitialPreviewPlan>,
-    pub(crate) presenter_key: RenderedPageKey,
-    pub(crate) current_cached: bool,
+pub(super) struct CurrentRenderView {
+    pub(super) visible_pages: VisiblePageSlots,
+    pub(super) current_scale: f32,
+    pub(super) required: RequiredRenderPages,
+    pub(super) current_interest_keys: CurrentInterestKeys,
+    pub(super) initial_preview: Option<InitialPreviewPlan>,
+    pub(super) presenter_key: RenderedPageKey,
+    pub(super) current_cached: bool,
 }
 
 impl CurrentRenderView {
-    pub(crate) fn preview_tasks(&self, generation: u64) -> Vec<RenderTask> {
+    pub(super) fn preview_tasks(&self, generation: u64) -> Vec<RenderTask> {
         self.initial_preview
             .as_ref()
             .map(|plan| {
@@ -136,7 +136,7 @@ impl CurrentRenderView {
             .unwrap_or_default()
     }
 
-    pub(crate) fn prefetch_dispatch_context(
+    pub(super) fn prefetch_dispatch_context(
         &self,
         state: &AppState,
         plan: PrefetchDispatchPlan,
@@ -154,7 +154,7 @@ impl CurrentRenderView {
     }
 }
 
-pub(crate) fn cold_start_initial_preview_plan(
+pub(super) fn cold_start_initial_preview_plan(
     is_cold_start: bool,
     current_cached: bool,
     doc_id: u64,
@@ -170,7 +170,7 @@ pub(crate) fn cold_start_initial_preview_plan(
 }
 
 impl RenderSubsystem {
-    pub(crate) fn build_current_render_view(
+    pub(super) fn build_current_render_view(
         &self,
         state: &AppState,
         pdf: &dyn PdfBackend,
@@ -226,7 +226,7 @@ impl RenderSubsystem {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn process_render_result(
+    pub(super) fn process_render_result(
         &mut self,
         state: &mut AppState,
         completed: RenderWorkerResult,
@@ -291,7 +291,7 @@ impl RenderSubsystem {
         }
     }
 
-    pub(crate) fn sync_navigation_state(
+    pub(super) fn sync_navigation_state(
         &mut self,
         state: &AppState,
         pdf: &dyn PdfBackend,
@@ -336,7 +336,7 @@ impl RenderSubsystem {
         false
     }
 
-    pub(crate) fn ensure_current_task_enqueued(
+    pub(super) fn ensure_current_task_enqueued(
         &mut self,
         _state: &mut AppState,
         pdf: &dyn PdfBackend,
@@ -412,7 +412,7 @@ impl RenderSubsystem {
         }
     }
 
-    pub(crate) fn dispatch_prefetch_if_due(
+    pub(super) fn dispatch_prefetch_if_due(
         &mut self,
         _state: &mut AppState,
         render_actor: &mut RenderActor,

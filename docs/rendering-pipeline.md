@@ -226,4 +226,4 @@ subcommand.
 - `src/render/worker.rs`
 - `src/presenter/encode.rs`
 - `src/presenter/l2_cache.rs`
-- `src/presenter/ratatui.rs`
+- `src/presenter/ratatui/`

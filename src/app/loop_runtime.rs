@@ -75,6 +75,8 @@ where
     S: super::terminal_session::TerminalSurface + SessionRestore,
 {
     runtime.loop_event_runtime.shutdown();
-    let _ = runtime.session.restore();
+    if let Err(err) = runtime.session.restore() {
+        eprintln!("failed to restore terminal session before exit: {err}");
+    }
     std::process::exit(0);
 }

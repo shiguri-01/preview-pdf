@@ -93,7 +93,12 @@ impl App {
                 self.request_redraw(runtime, RedrawReason::InputError);
             }
             WaitEvent::Event(DomainEvent::Command(request)) => {
-                self.handle_command_event(request, runtime, pdf)?;
+                if matches!(
+                    self.handle_command_event(request, runtime, pdf)?,
+                    LoopControl::Break
+                ) {
+                    return Ok(LoopControl::Break);
+                }
             }
             WaitEvent::Event(DomainEvent::App(event)) => {
                 let needs_redraw = !matches!(event, AppEvent::CommandExecuted { .. });
@@ -182,7 +187,7 @@ impl App {
         request: CommandRequest,
         runtime: &mut LoopRuntime<S>,
         pdf: SharedPdfBackend,
-    ) -> AppResult<()>
+    ) -> AppResult<LoopControl>
     where
         S: TerminalSurface + SessionRestore,
     {
@@ -198,7 +203,7 @@ impl App {
                 Err(err) => {
                     self.state.apply_notice_action(notice_action_for_error(err));
                     self.request_redraw(runtime, RedrawReason::Command);
-                    return Ok(());
+                    return Ok(LoopControl::Continue);
                 }
             };
         let mut effects = LoopEffects::none();
@@ -209,7 +214,7 @@ impl App {
             self.apply_loop_effects(runtime, effects),
             LoopControl::Break
         ) {
-            return Ok(());
+            return Ok(LoopControl::Break);
         }
         let palette_changed = self.interaction.apply_palette_requests(&mut self.state);
         if palette_changed {
@@ -230,7 +235,7 @@ impl App {
                 }
             }
         }
-        Ok(())
+        Ok(LoopControl::Continue)
     }
 
     pub(super) fn request_redraw<S>(&mut self, runtime: &mut LoopRuntime<S>, reason: RedrawReason)

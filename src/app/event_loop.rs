@@ -225,7 +225,7 @@ impl App {
     where
         S: TerminalSurface,
     {
-        let step = self.build_loop_step(
+        let pre_sync_step = self.build_loop_step(
             &runtime.session,
             pdf,
             &runtime.input_actor,
@@ -238,8 +238,20 @@ impl App {
             &mut self.interaction,
             &mut self.state,
             pdf,
-            step.current_scale,
+            pre_sync_step.current_scale,
         );
+        let step = if changed {
+            self.build_loop_step(
+                &runtime.session,
+                pdf,
+                &runtime.input_actor,
+                runtime.render_actor.generation(),
+                runtime.prefetch_pause_after_input,
+                self.config.render.prefetch_dispatch_budget_per_tick,
+            )
+        } else {
+            pre_sync_step
+        };
         runtime.render_actor.ensure_iteration_work(
             &mut self.render,
             &mut self.state,
@@ -587,11 +599,15 @@ mod tests {
         Arc::new(doc)
     }
 
-    fn failed_render_result(key: RenderedPageKey, class: WorkClass) -> RenderWorkerResult {
+    fn failed_render_result(
+        key: RenderedPageKey,
+        class: WorkClass,
+        generation: u64,
+    ) -> RenderWorkerResult {
         RenderWorkerResult {
             key,
             class,
-            generation: 0,
+            generation,
             result: Err(crate::error::AppError::pdf_render(
                 key.page,
                 crate::error::AppError::invalid_argument("render failed"),
@@ -902,6 +918,45 @@ mod tests {
     }
 
     #[test]
+    fn command_event_returns_break_when_effect_channel_is_closed() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.loop_event_rx.close();
+
+        let control = app
+            .handle_waited_event(
+                WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
+                    Command::NextPage,
+                    CommandInvocationSource::Keymap,
+                ))),
+                &mut runtime,
+                Arc::clone(&pdf),
+            )
+            .expect("command should be handled");
+
+        assert!(matches!(control, super::LoopControl::Break));
+    }
+
+    #[test]
     fn encode_complete_without_redraw_request_does_not_redraw() {
         let tokio_runtime = Builder::new_current_thread()
             .enable_all()
@@ -1012,6 +1067,7 @@ mod tests {
             WaitEvent::Event(DomainEvent::RenderComplete(failed_render_result(
                 non_current_key,
                 WorkClass::Background,
+                runtime.render_actor.generation(),
             ))),
             &mut runtime,
             Arc::clone(&pdf),

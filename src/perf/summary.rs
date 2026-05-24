@@ -228,3 +228,71 @@ fn percentile(sorted: &[f64], percentile: f64) -> f64 {
     let index = ((sorted.len() - 1) as f64 * percentile).round() as usize;
     sorted[index.min(sorted.len() - 1)]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    use crate::perf::{PerfStats, RedrawReason};
+
+    #[test]
+    fn summarizes_metrics_and_scalars() {
+        let metric = summarize_metric(&[1.0, 2.0, 3.0, 4.0]);
+        let scalar = summarize_scalar(&[1, 2, 3, 4]);
+
+        assert_eq!(metric.count, 4);
+        assert_eq!(metric.min_ms, 1.0);
+        assert_eq!(metric.max_ms, 4.0);
+        assert_eq!(scalar.count, 4);
+        assert_eq!(scalar.min, 1.0);
+        assert_eq!(scalar.max, 4.0);
+    }
+    #[test]
+    fn merge_stats_averages_cache_hit_rates() {
+        let mut first = PerfStats::default();
+        first.set_l1_hit_rate(0.25);
+        first.set_l2_hit_rate(0.5);
+
+        let mut second = PerfStats::default();
+        second.set_l1_hit_rate(0.75);
+        second.set_l2_hit_rate(0.25);
+        second.record_redraw(RedrawReason::Timer);
+
+        let merged = merge_stats([&first, &second].into_iter());
+        assert_eq!(merged.cache_hit_rate_l1, 0.5);
+        assert_eq!(merged.cache_hit_rate_l2, 0.375);
+        assert_eq!(merged.redraw_by_reason.timer, 1);
+    }
+    #[test]
+    fn aggregates_wall_phase_redraw_queue_and_cache_metrics() {
+        let mut runtime = PerfStats::default();
+        runtime.enable_sample_collection();
+        runtime.record_render(Duration::from_millis(10));
+        runtime.record_render_queue_wait(Duration::from_millis(2));
+        runtime.set_queue_depth(3);
+        runtime.set_render_in_flight(1);
+        runtime.set_l1_hit_rate(0.5);
+        runtime.record_redraw(RedrawReason::PendingWork);
+
+        let mut presenter = PerfStats::default();
+        presenter.enable_sample_collection();
+        presenter.record_convert(Duration::from_millis(4));
+        presenter.record_blit(Duration::from_millis(1));
+        presenter.record_encode_queue_wait(Duration::from_millis(3));
+        presenter.set_encode_queue_depth(2);
+        presenter.set_encode_in_flight(1);
+        presenter.set_l2_hit_rate(0.25);
+
+        let aggregate = build_aggregate_report(&runtime, &presenter, &[12.0, 16.0]);
+
+        assert_eq!(aggregate.wall_time_ms.count, 2);
+        assert_eq!(aggregate.wall_time_ms.avg_ms, 14.0);
+        assert_eq!(aggregate.phase_metrics.render_ms.count, 1);
+        assert_eq!(aggregate.redraw.total, 1);
+        assert_eq!(aggregate.queues.render_depth.max, 3.0);
+        assert_eq!(aggregate.queues.encode_depth.max, 2.0);
+        assert_eq!(aggregate.cache.l1_hit_rate, 0.5);
+        assert_eq!(aggregate.cache.l2_hit_rate, 0.25);
+    }
+}

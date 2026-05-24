@@ -153,3 +153,324 @@ pub(super) fn presenter_render_options(
     options.force_image_redraw = force_image_redraw || (image_occluded && !viewer_has_image);
     options
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::spread::SpreadSlotAreas;
+    use super::*;
+    use crate::app::{AppState, VisiblePageSlots};
+    use crate::presenter::{
+        PresenterFeedback, PresenterRenderMode, PresenterRenderOutcome, PresenterSlotOutcome,
+    };
+    use ratatui::layout::Rect;
+
+    fn render_outcome(
+        drew_image: bool,
+        feedback: PresenterFeedback,
+        used_stale_fallback: bool,
+    ) -> PresenterRenderOutcome {
+        PresenterRenderOutcome {
+            drew_image,
+            feedback,
+            used_stale_fallback,
+            slots: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn display_decision_clears_when_no_image_drawn() {
+        let outcome = render_outcome(false, PresenterFeedback::None, false);
+        let decision = decide_viewer_display(&outcome, false);
+        assert_eq!(
+            decision,
+            ViewerDisplayDecision {
+                clear: true,
+                show_loading: true,
+                show_error: false,
+            }
+        );
+    }
+    #[test]
+    fn normalize_render_outcome_keeps_loading_feedback_for_initial_preview() {
+        let outcome = normalize_render_outcome(
+            PresenterRenderMode::InitialPreview,
+            PresenterRenderOutcome {
+                drew_image: true,
+                feedback: PresenterFeedback::None,
+                used_stale_fallback: true,
+                slots: vec![PresenterSlotOutcome::active(
+                    Rect::new(2, 3, 10, 5),
+                    true,
+                    PresenterFeedback::None,
+                    true,
+                )],
+            },
+        );
+
+        assert!(outcome.drew_image);
+        assert_eq!(outcome.feedback, PresenterFeedback::Pending);
+        assert!(outcome.used_stale_fallback);
+        assert_eq!(outcome.slots[0].feedback, PresenterFeedback::Pending);
+    }
+    #[test]
+    fn normalize_render_outcome_keeps_full_feedback_unchanged() {
+        let outcome = normalize_render_outcome(
+            PresenterRenderMode::Full,
+            PresenterRenderOutcome {
+                drew_image: true,
+                feedback: PresenterFeedback::Failed,
+                used_stale_fallback: true,
+                slots: Vec::new(),
+            },
+        );
+
+        assert!(outcome.drew_image);
+        assert_eq!(outcome.feedback, PresenterFeedback::Failed);
+        assert!(outcome.used_stale_fallback);
+    }
+    #[test]
+    fn display_decision_overlays_loading_on_pending_stale_fallback() {
+        let outcome = render_outcome(true, PresenterFeedback::Pending, true);
+        let decision = decide_viewer_display(&outcome, true);
+        assert_eq!(
+            decision,
+            ViewerDisplayDecision {
+                clear: false,
+                show_loading: true,
+                show_error: false,
+            }
+        );
+    }
+    #[test]
+    fn display_decision_overlays_loading_on_pending_fresh_image() {
+        let outcome = render_outcome(true, PresenterFeedback::Pending, false);
+        let decision = decide_viewer_display(&outcome, true);
+        assert_eq!(
+            decision,
+            ViewerDisplayDecision {
+                clear: false,
+                show_loading: true,
+                show_error: false,
+            }
+        );
+    }
+    #[test]
+    fn display_decision_overlays_error_on_failed_image() {
+        let outcome = render_outcome(true, PresenterFeedback::Failed, true);
+        let decision = decide_viewer_display(&outcome, true);
+        assert_eq!(
+            decision,
+            ViewerDisplayDecision {
+                clear: false,
+                show_loading: false,
+                show_error: true,
+            }
+        );
+    }
+    #[test]
+    fn display_decision_clears_and_loading_for_pending_without_image() {
+        let outcome = render_outcome(false, PresenterFeedback::Pending, false);
+        let decision = decide_viewer_display(&outcome, false);
+        assert_eq!(
+            decision,
+            ViewerDisplayDecision {
+                clear: true,
+                show_loading: true,
+                show_error: false,
+            }
+        );
+    }
+    #[test]
+    fn display_decision_clears_and_error_for_failed_without_image() {
+        let outcome = render_outcome(false, PresenterFeedback::Failed, false);
+        let decision = decide_viewer_display(&outcome, false);
+        assert_eq!(
+            decision,
+            ViewerDisplayDecision {
+                clear: true,
+                show_loading: false,
+                show_error: true,
+            }
+        );
+    }
+    #[test]
+    fn display_decision_overlays_loading_when_pending_without_drawn_image() {
+        let outcome = render_outcome(false, PresenterFeedback::Pending, false);
+        let decision = decide_viewer_display(&outcome, true);
+        assert_eq!(
+            decision,
+            ViewerDisplayDecision {
+                clear: false,
+                show_loading: true,
+                show_error: false,
+            }
+        );
+    }
+    #[test]
+    fn spread_loading_overlays_selects_pending_slots_with_page_labels() {
+        let left_area = Rect::new(0, 1, 10, 8);
+        let right_area = Rect::new(12, 1, 10, 8);
+        let visible_pages = VisiblePageSlots {
+            anchor_page: 10,
+            trailing_page: Some(11),
+            left_page: Some(10),
+            right_page: Some(11),
+        };
+        let outcome = PresenterRenderOutcome::aggregate_slots(vec![
+            PresenterSlotOutcome::active(left_area, false, PresenterFeedback::Pending, false),
+            PresenterSlotOutcome::active(right_area, true, PresenterFeedback::Pending, true),
+        ]);
+
+        assert_eq!(
+            spread_loading_overlays(&outcome, visible_pages),
+            vec![
+                (left_area, "p.11".to_string()),
+                (right_area, "p.12".to_string())
+            ]
+        );
+    }
+    #[test]
+    fn pending_spread_outcome_uses_slot_loading_areas_from_first_pending_frame() {
+        let slot_areas = SpreadSlotAreas {
+            left: Rect::new(0, 1, 10, 8),
+            gap: Rect::new(10, 1, 2, 8),
+            right: Rect::new(12, 1, 10, 8),
+        };
+        let visible_pages = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: Some(1),
+            left_page: Some(0),
+            right_page: Some(1),
+        };
+
+        let outcome = pending_spread_outcome(slot_areas, visible_pages, PresenterFeedback::Pending);
+
+        assert!(!outcome.drew_image);
+        assert_eq!(outcome.feedback, PresenterFeedback::Pending);
+        assert_eq!(
+            spread_loading_overlays(&outcome, visible_pages),
+            vec![
+                (slot_areas.left, "p.1".to_string()),
+                (slot_areas.right, "p.2".to_string())
+            ]
+        );
+    }
+    #[test]
+    fn spread_loading_overlays_ignores_fresh_ready_slots() {
+        let visible_pages = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: Some(1),
+            left_page: Some(0),
+            right_page: Some(1),
+        };
+        let outcome = PresenterRenderOutcome::aggregate_slots(vec![
+            PresenterSlotOutcome::active(
+                Rect::new(0, 1, 10, 8),
+                true,
+                PresenterFeedback::None,
+                false,
+            ),
+            PresenterSlotOutcome::active(
+                Rect::new(12, 1, 10, 8),
+                true,
+                PresenterFeedback::None,
+                false,
+            ),
+        ]);
+
+        assert!(spread_loading_overlays(&outcome, visible_pages).is_empty());
+    }
+    #[test]
+    fn spread_loading_overlays_ignores_inactive_tail_slot() {
+        let visible_pages = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+        let outcome = PresenterRenderOutcome::aggregate_slots(vec![
+            PresenterSlotOutcome::active(
+                Rect::new(0, 1, 10, 8),
+                true,
+                PresenterFeedback::None,
+                false,
+            ),
+            PresenterSlotOutcome::inactive(Rect::new(12, 1, 10, 8)),
+        ]);
+
+        assert!(spread_loading_overlays(&outcome, visible_pages).is_empty());
+        assert_eq!(outcome.feedback, PresenterFeedback::None);
+    }
+    #[test]
+    fn sync_render_notice_clears_stale_render_error_after_success() {
+        let mut app = AppState::default();
+        app.set_error_notice("Could not render p.12.");
+
+        sync_render_notice(&mut app, false, PresenterFeedback::None, "p.12");
+
+        assert!(app.notice.is_none());
+    }
+    #[test]
+    fn sync_render_notice_clears_stale_render_error_while_pending() {
+        let mut app = AppState::default();
+        app.set_error_notice("Could not render p.12.");
+
+        sync_render_notice(&mut app, false, PresenterFeedback::Pending, "p.12");
+
+        assert!(app.notice.is_none());
+    }
+    #[test]
+    fn sync_render_notice_preserves_non_render_notice() {
+        let mut app = AppState::default();
+        app.set_error_notice("search failed: backend failed");
+
+        sync_render_notice(&mut app, false, PresenterFeedback::None, "p.12");
+
+        assert_eq!(
+            app.notice.as_ref().map(|notice| notice.message.as_str()),
+            Some("search failed: backend failed")
+        );
+    }
+    #[test]
+    fn render_failure_message_uses_single_page_label() {
+        assert_eq!(
+            render_failure_message(Some("p.12")),
+            "Could not render p.12."
+        );
+    }
+    #[test]
+    fn render_failure_message_uses_spread_label() {
+        assert_eq!(
+            render_failure_message(Some("pp.12-13")),
+            "Could not render pp.12-13."
+        );
+    }
+    #[test]
+    fn render_failure_message_falls_back_to_current_page() {
+        assert_eq!(
+            render_failure_message(None),
+            "Could not render the current page."
+        );
+    }
+    #[test]
+    fn presenter_render_options_derive_stale_fallback_from_viewer_image_state() {
+        let with_image = presenter_render_options(true, PresenterRenderMode::Full, false, false);
+        let without_image =
+            presenter_render_options(false, PresenterRenderMode::InitialPreview, false, false);
+
+        assert!(with_image.allow_stale_fallback);
+        assert!(!without_image.allow_stale_fallback);
+        assert!(with_image.preserve_stable_image);
+        assert!(!with_image.force_image_redraw);
+        assert_eq!(with_image.render_mode, PresenterRenderMode::Full);
+        assert_eq!(
+            without_image.render_mode,
+            PresenterRenderMode::InitialPreview
+        );
+    }
+    #[test]
+    fn presenter_render_options_force_redraw_after_occlusion() {
+        let after_overlay = presenter_render_options(true, PresenterRenderMode::Full, false, true);
+        assert!(after_overlay.force_image_redraw);
+    }
+}

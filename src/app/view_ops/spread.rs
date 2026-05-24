@@ -131,3 +131,68 @@ pub(super) fn format_render_target(slots: VisiblePageSlots) -> String {
         None => format!("p.{}", slots.anchor_page + 1),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::VisiblePageSlots;
+    use crate::presenter::{PresenterHorizontalAlign, PresenterRenderMode};
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn split_spread_slot_areas_preserves_gap_and_stable_widths() {
+        let slots = split_spread_slot_areas(Rect::new(10, 2, 41, 20), 3);
+
+        assert_eq!(slots.left, Rect::new(10, 2, 19, 20));
+        assert_eq!(slots.gap, Rect::new(29, 2, 3, 20));
+        assert_eq!(slots.right, Rect::new(32, 2, 19, 20));
+        assert_eq!(slots.right.x - (slots.left.x + slots.left.width), 3);
+    }
+    #[test]
+    fn render_areas_to_slots_preserves_offscreen_spread_slot_positions() {
+        let right_area = Rect::new(4, 2, 12, 8);
+
+        let slots = render_areas_to_slots([None, Some(right_area)], PresenterRenderMode::Full);
+
+        assert_eq!(slots.len(), 2);
+        assert!(!slots[0].active);
+        assert_eq!(slots[0].area, Rect::default());
+        assert_eq!(slots[0].horizontal_align, PresenterHorizontalAlign::End);
+        assert!(slots[1].active);
+        assert_eq!(slots[1].area, right_area);
+        assert_eq!(slots[1].horizontal_align, PresenterHorizontalAlign::Start);
+    }
+    #[test]
+    fn loading_target_formats_single_page_with_p_prefix() {
+        let label = format_loading_target(VisiblePageSlots {
+            anchor_page: 11,
+            trailing_page: None,
+            left_page: Some(11),
+            right_page: None,
+        });
+
+        assert_eq!(label, "p.12");
+    }
+    #[test]
+    fn loading_target_formats_spread_with_pp_prefix() {
+        let label = format_loading_target(VisiblePageSlots {
+            anchor_page: 11,
+            trailing_page: Some(12),
+            left_page: Some(11),
+            right_page: Some(12),
+        });
+
+        assert_eq!(label, "pp.12-13");
+    }
+    #[test]
+    fn render_target_uses_error_label_convention() {
+        let label = format_render_target(VisiblePageSlots {
+            anchor_page: 11,
+            trailing_page: Some(12),
+            left_page: Some(11),
+            right_page: Some(12),
+        });
+
+        assert_eq!(label, "pp.12-13");
+    }
+}

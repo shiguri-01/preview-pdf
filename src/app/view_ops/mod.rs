@@ -702,4 +702,164 @@ pub(super) fn compute_initial_preview_plan(
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    use crate::app::{PageLayoutMode, VisiblePageSlots};
+    use crate::backend::{PdfBackend, RgbaFrame, TextPage};
+    use crate::render::cache::RenderedPageKey;
+
+    struct DimPdf {
+        path: PathBuf,
+        dims: Vec<(f32, f32)>,
+    }
+
+    impl DimPdf {
+        fn new(dims: Vec<(f32, f32)>) -> Self {
+            Self {
+                path: PathBuf::from("dims.pdf"),
+                dims,
+            }
+        }
+    }
+
+    impl PdfBackend for DimPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            1
+        }
+
+        fn page_count(&self) -> usize {
+            self.dims.len()
+        }
+
+        fn page_dimensions(&self, page: usize) -> crate::error::AppResult<(f32, f32)> {
+            self.dims
+                .get(page)
+                .copied()
+                .ok_or(crate::error::AppError::invalid_argument("out of range"))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> crate::error::AppResult<RgbaFrame> {
+            Ok(RgbaFrame {
+                width: 1,
+                height: 1,
+                pixels: vec![0_u8; 4].into(),
+            })
+        }
+
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(String::new())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(TextPage {
+                width_pt: 612.0,
+                height_pt: 792.0,
+                glyphs: Vec::new(),
+                dropped_glyphs: 0,
+            })
+        }
+
+        fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn resolve_layout_dimensions_uses_blank_partner_width_for_tail_spread() {
+        let pdf = DimPdf::new(vec![(200.0, 300.0)]);
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let single = resolve_layout_dimensions(&pdf, PageLayoutMode::Single, slots);
+        let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
+
+        assert_eq!(single, (200.0, 300.0));
+        assert_eq!(spread, (400.0, 300.0));
+    }
+    #[test]
+    fn resolve_layout_dimensions_uses_both_pages_when_trailing_exists() {
+        let pdf = DimPdf::new(vec![(200.0, 300.0), (180.0, 280.0)]);
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: Some(1),
+            left_page: Some(0),
+            right_page: Some(1),
+        };
+
+        let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
+        assert_eq!(spread, (400.0, 300.0));
+    }
+    #[test]
+    fn compute_initial_preview_plan_uses_lower_scale_on_cold_start() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: None,
+            left_page: Some(0),
+            right_page: None,
+        };
+
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Single, 1.0);
+
+        assert_eq!(
+            preview,
+            Some(InitialPreviewPlan {
+                scale: 0.25,
+                page_keys: vec![RenderedPageKey::new(7, 0, 0.25)],
+                presenter_key: RenderedPageKey::new(7, 0, 0.25),
+            })
+        );
+    }
+    #[test]
+    fn compute_initial_preview_plan_includes_both_spread_pages() {
+        let slots = VisiblePageSlots {
+            anchor_page: 0,
+            trailing_page: Some(1),
+            left_page: Some(0),
+            right_page: Some(1),
+        };
+
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Spread, 1.0);
+
+        assert_eq!(
+            preview,
+            Some(InitialPreviewPlan {
+                scale: 0.25,
+                page_keys: vec![
+                    RenderedPageKey::new(7, 0, 0.25),
+                    RenderedPageKey::new(7, 1, 0.25),
+                ],
+                presenter_key: RenderedPageKey::new(7, 0, 0.25),
+            })
+        );
+    }
+    #[test]
+    fn compute_initial_preview_plan_handles_tail_spread() {
+        let slots = VisiblePageSlots {
+            anchor_page: 2,
+            trailing_page: None,
+            left_page: Some(2),
+            right_page: None,
+        };
+
+        let preview = compute_initial_preview_plan(7, slots, PageLayoutMode::Spread, 1.0);
+
+        assert_eq!(
+            preview,
+            Some(InitialPreviewPlan {
+                scale: 0.25,
+                page_keys: vec![RenderedPageKey::new(7, 2, 0.25)],
+                presenter_key: RenderedPageKey::new(7, 2, 0.25),
+            })
+        );
+    }
+}

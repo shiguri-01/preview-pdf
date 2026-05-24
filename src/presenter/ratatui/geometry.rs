@@ -81,3 +81,36 @@ pub(super) fn align_rect_within(
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect::new(x, y, width, height)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::presenter::PresenterHorizontalAlign;
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn center_rect_within_places_rect_in_the_middle() {
+        let area = Rect::new(10, 5, 20, 10);
+        let centered = center_rect_within(area, 8, 4);
+        assert_eq!(centered, Rect::new(16, 8, 8, 4));
+    }
+    #[test]
+    fn align_rect_within_can_pin_to_horizontal_edges() {
+        let area = Rect::new(10, 5, 20, 10);
+
+        assert_eq!(
+            align_rect_within(area, 8, 4, PresenterHorizontalAlign::Start),
+            Rect::new(10, 8, 8, 4)
+        );
+        assert_eq!(
+            align_rect_within(area, 8, 4, PresenterHorizontalAlign::End),
+            Rect::new(22, 8, 8, 4)
+        );
+    }
+    #[test]
+    fn centered_fit_area_keeps_aspect_and_centers() {
+        let area = Rect::new(0, 0, 40, 20);
+        let fit = centered_fit_area(2000, 1000, (10, 20), area);
+        assert_eq!(fit, Rect::new(0, 5, 40, 10));
+    }
+}

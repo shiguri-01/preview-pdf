@@ -80,7 +80,7 @@ impl InteractionSubsystem {
             quit_requested: false,
             commands: if search_active {
                 vec![CommandRequest::new(
-                    Command::Cancel,
+                    Command::CancelSearch,
                     CommandInvocationSource::Keymap,
                 )]
             } else {

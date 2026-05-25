@@ -21,13 +21,18 @@ interaction stays in `palette-provider.md`.
 
 Commands are first-class runtime actions with three layers:
 
-- typed command values in `Command`
-- metadata in `CommandSpec`
+- typed command values and canonical ids generated from the command catalog
+- metadata in `CommandSpec`, generated from the same catalog entries
 - source-aware validation and dispatch
 
 Command ids are stable kebab-case strings. Parsing turns command text into
 typed commands, validation checks whether the source is allowed to invoke the
 command right now, and dispatch executes the command and emits runtime events.
+`src/command/catalog.rs` is the single source for the command enum, command id
+enum, metadata registry, parser routing, and execution routing.
+Command execution bodies live under `src/command/handlers/`, split by feature
+area. The catalog names the handler for each command, but does not own feature
+behavior.
 
 ## Command metadata contract
 
@@ -48,7 +53,7 @@ field on `CommandSpec`.
 Rules:
 
 - command ids are the canonical string representation
-- the registry is static
+- the registry is static and catalog-generated
 - typed commands are expected to have a matching registry entry
 - command palette visibility is derived from metadata rather than hand-coded
   per-command UI rules
@@ -152,19 +157,23 @@ Dispatch rules:
   extensions, or request quit
 - notice application is part of dispatch
 - `AppEvent::CommandExecuted` is always emitted after dispatch completes
+- `dispatch.rs` mediates validation, notices, and event emission; feature
+  modules under `handlers/` perform command-specific state changes
 
 Navigation-aware commands may additionally emit:
 
 - `AppEvent::PageChanged`
 - `AppEvent::ModeChanged`
 
-Navigation reason derivation is tied to the dispatched command:
+Navigation reason emission is derived by dispatch from the typed command:
 
 - page movement commands emit `Step` or `Goto(...)`
 - search-hit navigation emits `Search { query }`
 - history commands emit `History(...)`
 - outline selection emits `Outline { title }`
 - layout changes may emit `LayoutNormalize`
+- command execution events carry `CommandId`; there is no separate command
+  action-id enum
 
 ## Current command set
 
@@ -225,6 +234,7 @@ Availability-gated public commands:
 - `next-search-hit`
 - `prev-search-hit`
 - `search-results`
+- `cancel-search`
 
 These are available only while search is active.
 
@@ -234,4 +244,5 @@ These are available only while search is active.
 - `src/command/spec.rs`
 - `src/command/parse.rs`
 - `src/command/dispatch.rs`
+- `src/command/handlers/`
 - `src/command/core.rs`

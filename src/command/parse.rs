@@ -4,10 +4,11 @@ use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
+use super::catalog::{self, Command};
 use super::spec::{CommandConditionContext, find_command_spec, validate_command_id_for_source};
 use super::types::{
-    Command, CommandInvocationSource, PageLayoutModeArg, PanAmount, PanDirection,
-    SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
+    CommandInvocationSource, PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
+    SpreadDirectionArg,
 };
 
 pub fn parse_command_text(input: &str) -> AppResult<Command> {
@@ -25,44 +26,7 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
         return Err(AppError::invalid_argument("unknown command id"));
     }
 
-    match id {
-        "next-page" => parse_no_args(id, args_text, Command::NextPage),
-        "prev-page" => parse_no_args(id, args_text, Command::PrevPage),
-        "first-page" => parse_no_args(id, args_text, Command::FirstPage),
-        "last-page" => parse_no_args(id, args_text, Command::LastPage),
-        "goto-page" => parse_goto_page(args_text),
-        "zoom" => parse_zoom(args_text),
-        "zoom-in" => parse_no_args(id, args_text, Command::ZoomIn),
-        "zoom-out" => parse_no_args(id, args_text, Command::ZoomOut),
-        "zoom-reset" => parse_no_args(id, args_text, Command::ZoomReset),
-        "pan" => parse_pan(args_text),
-        "page-layout-single" => parse_page_layout_single(args_text),
-        "page-layout-spread" => parse_page_layout_spread(args_text),
-        "debug-status-show" => parse_no_args(id, args_text, Command::DebugStatusShow),
-        "debug-status-hide" => parse_no_args(id, args_text, Command::DebugStatusHide),
-        "debug-status-toggle" => parse_no_args(id, args_text, Command::DebugStatusToggle),
-        "open-palette" => parse_open_palette(args_text),
-        "close-palette" => parse_no_args(id, args_text, Command::ClosePalette),
-        "help" => parse_no_args(id, args_text, Command::OpenHelp),
-        "close-help" => parse_no_args(id, args_text, Command::CloseHelp),
-        "search" => parse_no_args(id, args_text, Command::OpenSearch),
-        "search-results" => parse_no_args(id, args_text, Command::OpenSearchResults),
-        "submit-search" => parse_submit_search(args_text),
-        "search-goto" => parse_search_goto(args_text),
-        "next-search-hit" => parse_no_args(id, args_text, Command::NextSearchHit),
-        "prev-search-hit" => parse_no_args(id, args_text, Command::PrevSearchHit),
-        "history-back" => parse_no_args(id, args_text, Command::HistoryBack),
-        "history-forward" => parse_no_args(id, args_text, Command::HistoryForward),
-        "history-goto" => parse_history_goto(args_text),
-        "history" => parse_no_args(id, args_text, Command::OpenHistory),
-        "outline" => parse_no_args(id, args_text, Command::OpenOutline),
-        "outline-goto" => parse_outline_goto(args_text),
-        "cancel-search" => parse_no_args(id, args_text, Command::Cancel),
-        "quit" => parse_no_args(id, args_text, Command::Quit),
-        _ => Err(AppError::unsupported(
-            "command parser is out of sync with registry",
-        )),
-    }
+    catalog::parse_registered_command(id, args_text)
 }
 
 pub fn parse_invocable_command_text(
@@ -89,7 +53,7 @@ pub(crate) fn first_token(input: &str) -> &str {
     }
 }
 
-fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResult<Command> {
+pub(super) fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResult<Command> {
     if args_text.is_empty() {
         return Ok(cmd);
     }
@@ -123,7 +87,7 @@ fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResult<Command> 
     }))
 }
 
-fn parse_open_palette(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_open_palette(args_text: &str) -> AppResult<Command> {
     let trimmed = args_text.trim();
     if trimmed.is_empty() {
         return Err(AppError::invalid_argument(
@@ -164,7 +128,7 @@ fn parse_open_palette_payload(kind: PaletteKind, input: &str) -> Option<PaletteO
     })
 }
 
-fn parse_goto_page(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_goto_page(args_text: &str) -> AppResult<Command> {
     let mut parts = args_text.split_whitespace();
     let Some(page_text) = parts.next() else {
         return Err(AppError::invalid_argument(
@@ -189,7 +153,7 @@ fn parse_goto_page(args_text: &str) -> AppResult<Command> {
     })
 }
 
-fn parse_zoom(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_zoom(args_text: &str) -> AppResult<Command> {
     let mut parts = args_text.split_whitespace();
     let Some(value_text) = parts.next() else {
         return Err(AppError::invalid_argument(
@@ -209,7 +173,7 @@ fn parse_zoom(args_text: &str) -> AppResult<Command> {
     Ok(Command::SetZoom { value })
 }
 
-fn parse_pan(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_pan(args_text: &str) -> AppResult<Command> {
     let parts = args_text.split_whitespace().collect::<Vec<_>>();
     if parts.is_empty() {
         return Err(AppError::invalid_argument(
@@ -259,23 +223,10 @@ fn parse_pan_direction_token(value: &str) -> Option<PanDirection> {
     PanDirection::parse(value)
 }
 
-fn parse_page_layout_single(args_text: &str) -> AppResult<Command> {
-    parse_no_args(
-        "page-layout-single",
-        args_text,
-        Command::SetPageLayout {
-            mode: PageLayoutModeArg::Single,
-            direction: None,
-            cover_policy: None,
-        },
-    )
-}
-
-fn parse_page_layout_spread(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_page_layout_spread(args_text: &str) -> AppResult<Command> {
     let trimmed = args_text.trim();
     if trimmed.is_empty() {
-        return Ok(Command::SetPageLayout {
-            mode: PageLayoutModeArg::Spread,
+        return Ok(Command::PageLayoutSpread {
             direction: None,
             cover_policy: None,
         });
@@ -300,14 +251,13 @@ fn parse_page_layout_spread(args_text: &str) -> AppResult<Command> {
         ));
     }
 
-    Ok(Command::SetPageLayout {
-        mode: PageLayoutModeArg::Spread,
+    Ok(Command::PageLayoutSpread {
         direction: Some(direction),
         cover_policy,
     })
 }
 
-fn parse_submit_search(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_submit_search(args_text: &str) -> AppResult<Command> {
     let trimmed = args_text.trim();
     if trimmed.is_empty() {
         return Err(AppError::invalid_argument(
@@ -333,7 +283,7 @@ fn parse_submit_search(args_text: &str) -> AppResult<Command> {
     Ok(Command::SubmitSearch { query, matcher })
 }
 
-fn parse_search_goto(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_search_goto(args_text: &str) -> AppResult<Command> {
     let mut parts = args_text.split_whitespace();
     let Some(page_text) = parts.next() else {
         return Err(AppError::invalid_argument(
@@ -358,7 +308,7 @@ fn parse_search_goto(args_text: &str) -> AppResult<Command> {
     })
 }
 
-fn parse_history_goto(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_history_goto(args_text: &str) -> AppResult<Command> {
     let mut parts = args_text.split_whitespace();
     let Some(page_text) = parts.next() else {
         return Err(AppError::invalid_argument(
@@ -383,7 +333,7 @@ fn parse_history_goto(args_text: &str) -> AppResult<Command> {
     })
 }
 
-fn parse_outline_goto(args_text: &str) -> AppResult<Command> {
+pub(super) fn parse_outline_goto(args_text: &str) -> AppResult<Command> {
     let trimmed = args_text.trim();
     if trimmed.is_empty() {
         return Err(AppError::invalid_argument(
@@ -433,9 +383,8 @@ fn split_last_token(input: &str) -> Option<(&str, &str)> {
 mod tests {
     use super::{first_token, parse_command_text};
     use crate::command::{
-        ArgHint, ArgKind, ArgSpec, Command, CommandExposure, PageLayoutModeArg, PanAmount,
-        PanDirection, SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
-        all_command_specs,
+        ArgHint, ArgKind, ArgSpec, Command, CommandExposure, PanAmount, PanDirection,
+        SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg, all_command_specs,
     };
     use crate::palette::{PaletteKind, PaletteOpenPayload};
 
@@ -558,32 +507,25 @@ mod tests {
     fn parse_page_layout_aliases_support_mode_and_direction() {
         assert_eq!(
             parse_command_text("page-layout-single").expect("parse should succeed"),
-            Command::SetPageLayout {
-                mode: PageLayoutModeArg::Single,
-                direction: None,
-                cover_policy: None,
-            }
+            Command::PageLayoutSingle
         );
         assert_eq!(
             parse_command_text("page-layout-spread").expect("parse should succeed"),
-            Command::SetPageLayout {
-                mode: PageLayoutModeArg::Spread,
+            Command::PageLayoutSpread {
                 direction: None,
                 cover_policy: None,
             }
         );
         assert_eq!(
             parse_command_text("page-layout-spread rtl").expect("parse should succeed"),
-            Command::SetPageLayout {
-                mode: PageLayoutModeArg::Spread,
+            Command::PageLayoutSpread {
                 direction: Some(SpreadDirectionArg::Rtl),
                 cover_policy: None,
             }
         );
         assert_eq!(
             parse_command_text("page-layout-spread rtl cover").expect("parse should succeed"),
-            Command::SetPageLayout {
-                mode: PageLayoutModeArg::Spread,
+            Command::PageLayoutSpread {
                 direction: Some(SpreadDirectionArg::Rtl),
                 cover_policy: Some(SpreadCoverPolicyArg::Cover),
             }

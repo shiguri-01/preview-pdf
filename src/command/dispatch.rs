@@ -1,24 +1,48 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
 
-use crate::app::scale::{ZOOM_MAX, ZOOM_MIN, next_zoom_step, prev_zoom_step};
 use crate::app::{AppState, Mode, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::error::AppResult;
 use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::extension::ExtensionHost;
 
-use super::core::{
-    close_help, first_page, goto_page, last_page, next_page, open_help, prev_page, reset_zoom,
-    set_debug_status_visible, set_page_layout, set_zoom, set_zoom_with_notice,
-};
+use super::catalog::{Command, execute_registered_command};
 use super::spec::{CommandConditionContext, rejection_message_for_command};
-use super::types::{Command, CommandInvocationSource, CommandOutcome, PanAmount, PanDirection};
+use super::types::{CommandInvocationSource, CommandOutcome};
 
 #[derive(Debug, Clone)]
 pub struct CommandDispatchResult {
     pub outcome: CommandOutcome,
     pub emitted_events: Vec<AppEvent>,
+}
+
+pub(super) struct CommandExecContext<'a> {
+    pub app: &'a mut AppState,
+    pub pdf: SharedPdfBackend,
+    pub extension_host: &'a mut ExtensionHost,
+    pub palette_requests: &'a mut VecDeque<PaletteRequest>,
+}
+
+impl CommandExecContext<'_> {
+    pub(super) fn page_count(&self) -> usize {
+        self.pdf.page_count()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct CommandExecution {
+    pub outcome: CommandOutcome,
+    pub notice: NoticeAction,
+}
+
+impl CommandExecution {
+    pub(super) fn from_notice_result((outcome, notice): (CommandOutcome, NoticeAction)) -> Self {
+        Self { outcome, notice }
+    }
+
+    pub(super) fn applied() -> Self {
+        Self::from_notice_result((CommandOutcome::Applied, NoticeAction::Clear))
+    }
 }
 
 fn apply_notice(app: &mut AppState, action: NoticeAction) {
@@ -42,7 +66,7 @@ pub fn dispatch(
     extension_host: &mut ExtensionHost,
     palette_requests: &mut VecDeque<PaletteRequest>,
 ) -> AppResult<CommandDispatchResult> {
-    let action_id = cmd.action_id();
+    let command_id = cmd.command_id();
     let extensions = extension_host.ui_snapshot();
     let ctx = CommandConditionContext {
         extensions: &extensions,
@@ -54,7 +78,7 @@ pub fn dispatch(
         return Ok(CommandDispatchResult {
             outcome,
             emitted_events: vec![AppEvent::CommandExecuted {
-                id: action_id,
+                id: command_id,
                 outcome,
             }],
         });
@@ -63,90 +87,16 @@ pub fn dispatch(
     let previous_page = app.current_page;
     let prev_mode = app.mode;
     let dispatched_command = cmd.clone();
-    let page_count = pdf.page_count();
-
-    let (outcome, notice) = match cmd {
-        Command::NextPage => next_page(app, page_count),
-        Command::PrevPage => prev_page(app, page_count),
-        Command::FirstPage => first_page(app, page_count),
-        Command::LastPage => last_page(app, page_count),
-        Command::GotoPage { page } => goto_page(app, page_count, page),
-        Command::SetZoom { value } => set_zoom(app, value),
-        Command::ZoomIn => {
-            let next = next_zoom_step(app.zoom);
-            let notice = if next <= app.zoom {
-                NoticeAction::warning(format!("maximum zoom is {ZOOM_MAX:.2}x"))
-            } else {
-                NoticeAction::Clear
-            };
-            set_zoom_with_notice(app, next, notice)
-        }
-        Command::ZoomOut => {
-            let prev = prev_zoom_step(app.zoom);
-            let notice = if prev >= app.zoom {
-                NoticeAction::warning(format!("minimum zoom is {ZOOM_MIN:.2}x"))
-            } else {
-                NoticeAction::Clear
-            };
-            set_zoom_with_notice(app, prev, notice)
-        }
-        Command::ZoomReset => reset_zoom(app),
-        Command::Pan { direction, amount } => {
-            let cells = match amount {
-                PanAmount::DefaultStep => 1,
-                PanAmount::Cells(cells) => cells,
-            };
-            let (dx, dy) = pan_delta(direction, cells);
-            app.pan_x = app.pan_x.saturating_add(dx);
-            app.pan_y = app.pan_y.saturating_add(dy);
-            Ok((CommandOutcome::Applied, NoticeAction::Clear))
-        }
-        Command::SetPageLayout {
-            mode,
-            direction,
-            cover_policy,
-        } => set_page_layout(app, page_count, mode, direction, cover_policy),
-        Command::DebugStatusShow => set_debug_status_visible(app, true),
-        Command::DebugStatusHide => set_debug_status_visible(app, false),
-        Command::DebugStatusToggle => {
-            let visible = !app.debug_status_visible;
-            set_debug_status_visible(app, visible)
-        }
-        Command::OpenPalette { kind, payload } => {
-            palette_requests.push_back(PaletteRequest::Open { kind, payload });
-            Ok((CommandOutcome::Applied, NoticeAction::Clear))
-        }
-        Command::ClosePalette => {
-            palette_requests.push_back(PaletteRequest::Close);
-            Ok((CommandOutcome::Applied, NoticeAction::Clear))
-        }
-        Command::OpenHelp => open_help(app),
-        Command::CloseHelp => close_help(app),
-        Command::OpenSearch => Ok(extension_host.open_search_palette(app, palette_requests)),
-        Command::OpenSearchResults => {
-            Ok(extension_host.open_search_results_palette(app, palette_requests))
-        }
-        Command::SubmitSearch { query, matcher } => {
-            extension_host.submit_search(app, Arc::clone(&pdf), query, matcher)
-        }
-        Command::SearchResultGoto { page } => {
-            extension_host.search_result_goto(app, page_count, page)
-        }
-        Command::NextSearchHit => Ok(extension_host.next_search_hit(app)),
-        Command::PrevSearchHit => Ok(extension_host.prev_search_hit(app)),
-        Command::HistoryBack => Ok(extension_host.history_back(app, page_count)),
-        Command::HistoryForward => Ok(extension_host.history_forward(app, page_count)),
-        Command::HistoryGoto { page } => extension_host.history_goto(app, page_count, page),
-        Command::OpenHistory => Ok(extension_host.open_history_palette(app, palette_requests)),
-        Command::OpenOutline => extension_host.open_outline_palette(pdf, palette_requests),
-        Command::OutlineGoto { page, .. } => extension_host.outline_goto(app, page_count, page),
-        Command::Cancel => {
-            let _ = extension_host.cancel_search(pdf)?;
-            Ok((CommandOutcome::Applied, NoticeAction::Clear))
-        }
-        Command::Quit => Ok((CommandOutcome::QuitRequested, NoticeAction::Keep)),
-    }?;
-    apply_notice(app, notice);
+    let execution = execute_registered_command(
+        &mut CommandExecContext {
+            app,
+            pdf,
+            extension_host,
+            palette_requests,
+        },
+        cmd,
+    )?;
+    apply_notice(app, execution.notice);
 
     let mut emitted_events = collect_transition_events(
         app,
@@ -154,26 +104,17 @@ pub fn dispatch(
         previous_page,
         prev_mode,
         &dispatched_command,
-        outcome,
+        execution.outcome,
     );
     emitted_events.push(AppEvent::CommandExecuted {
-        id: action_id,
-        outcome,
+        id: command_id,
+        outcome: execution.outcome,
     });
 
     Ok(CommandDispatchResult {
-        outcome,
+        outcome: execution.outcome,
         emitted_events,
     })
-}
-
-fn pan_delta(direction: PanDirection, cells: i32) -> (i32, i32) {
-    match direction {
-        PanDirection::Left => (cells.saturating_neg(), 0),
-        PanDirection::Right => (cells, 0),
-        PanDirection::Up => (0, cells.saturating_neg()),
-        PanDirection::Down => (0, cells),
-    }
 }
 
 pub fn drain_background_events(app: &mut AppState, extension_host: &mut ExtensionHost) -> bool {
@@ -191,9 +132,6 @@ fn collect_transition_events(
     let mut events = Vec::new();
     if let Some(reason) = derive_nav_reason(command, extension_host) {
         let should_emit = match reason {
-            // Search/outline are intent-driven navigations. Even if layout normalization
-            // leaves the visible anchor page unchanged, history still needs the event so the
-            // attempted destination is recorded consistently.
             NavReason::Search { .. } | NavReason::Outline { .. } => {
                 outcome == CommandOutcome::Applied
             }
@@ -223,7 +161,9 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         Command::FirstPage => Some(NavReason::Goto(GotoKind::FirstPage)),
         Command::LastPage => Some(NavReason::Goto(GotoKind::LastPage)),
         Command::GotoPage { .. } => Some(NavReason::Goto(GotoKind::SpecificPage)),
-        Command::SetPageLayout { .. } => Some(NavReason::LayoutNormalize),
+        Command::PageLayoutSingle | Command::PageLayoutSpread { .. } => {
+            Some(NavReason::LayoutNormalize)
+        }
         Command::SearchResultGoto { .. } | Command::NextSearchHit | Command::PrevSearchHit => {
             Some(NavReason::Search {
                 query: extension_host.search_query().to_string(),
@@ -252,7 +192,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::SubmitSearch { .. }
         | Command::OpenHistory
         | Command::OpenOutline
-        | Command::Cancel
+        | Command::CancelSearch
         | Command::Quit => None,
     }
 }
@@ -267,8 +207,8 @@ mod tests {
     use crate::app::{AppState, Notice, NoticeLevel, PaletteRequest, SpreadCoverPolicy};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{
-        ActionId, Command, CommandInvocationSource, CommandOutcome, PageLayoutModeArg, PanAmount,
-        PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
+        Command, CommandId, CommandInvocationSource, CommandOutcome, PanAmount, PanDirection,
+        SearchMatcherKind, SpreadCoverPolicyArg,
     };
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
@@ -372,7 +312,7 @@ mod tests {
         assert!(matches!(
             result.emitted_events[1],
             AppEvent::CommandExecuted {
-                id: ActionId::NextPage,
+                id: CommandId::NextPage,
                 outcome: CommandOutcome::Applied
             }
         ));
@@ -442,7 +382,7 @@ mod tests {
         assert!(matches!(
             result.emitted_events[0],
             AppEvent::CommandExecuted {
-                id: ActionId::ZoomReset,
+                id: CommandId::ZoomReset,
                 outcome: CommandOutcome::Applied
             }
         ));
@@ -704,7 +644,7 @@ mod tests {
         assert!(matches!(
             result.emitted_events[0],
             AppEvent::CommandExecuted {
-                id: ActionId::ClosePalette,
+                id: CommandId::ClosePalette,
                 outcome: CommandOutcome::Applied
             }
         ));
@@ -740,7 +680,7 @@ mod tests {
         assert!(matches!(
             result.emitted_events[1],
             AppEvent::CommandExecuted {
-                id: ActionId::Help,
+                id: CommandId::OpenHelp,
                 outcome: CommandOutcome::Applied
             }
         ));
@@ -781,7 +721,7 @@ mod tests {
         assert!(matches!(
             result.emitted_events[1],
             AppEvent::CommandExecuted {
-                id: ActionId::CloseHelp,
+                id: CommandId::CloseHelp,
                 outcome: CommandOutcome::Applied
             }
         ));
@@ -805,7 +745,7 @@ mod tests {
 
         let result = dispatch(
             &mut app,
-            Command::Cancel,
+            Command::CancelSearch,
             CommandInvocationSource::Keymap,
             pdf,
             &mut host,
@@ -867,8 +807,7 @@ mod tests {
 
         let result = dispatch(
             &mut app,
-            Command::SetPageLayout {
-                mode: PageLayoutModeArg::Spread,
+            Command::PageLayoutSpread {
                 direction: None,
                 cover_policy: None,
             },
@@ -905,8 +844,7 @@ mod tests {
 
         let result = dispatch(
             &mut app,
-            Command::SetPageLayout {
-                mode: PageLayoutModeArg::Spread,
+            Command::PageLayoutSpread {
                 direction: None,
                 cover_policy: None,
             },
@@ -931,8 +869,7 @@ mod tests {
 
         let result = dispatch(
             &mut app,
-            Command::SetPageLayout {
-                mode: PageLayoutModeArg::Spread,
+            Command::PageLayoutSpread {
                 direction: None,
                 cover_policy: Some(SpreadCoverPolicyArg::Cover),
             },

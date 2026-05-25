@@ -121,6 +121,12 @@ macro_rules! define_commands {
         }
 
         impl CommandId {
+            pub const ALL: &'static [Self] = &[$(Self::$variant,)+];
+
+            pub fn all() -> &'static [Self] {
+                Self::ALL
+            }
+
             pub fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $id,)+
@@ -543,5 +549,138 @@ define_commands! {
         availability: CommandAvailability::Always,
         parse: no_args,
         exec: super::handlers::quit,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+
+    use crate::app::{AppState, PaletteRequest};
+    use crate::backend::{OutlineNode, PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
+    use crate::extension::ExtensionHost;
+
+    use super::{
+        CommandExecContext, CommandId, command_registry, execute_registered_command,
+        find_command_spec, parse_registered_command,
+    };
+
+    struct StubPdf {
+        path: PathBuf,
+        page_count: usize,
+    }
+
+    impl StubPdf {
+        fn new(page_count: usize) -> Self {
+            Self {
+                path: PathBuf::from("stub.pdf"),
+                page_count,
+            }
+        }
+    }
+
+    impl PdfBackend for StubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            7
+        }
+
+        fn page_count(&self) -> usize {
+            self.page_count
+        }
+
+        fn page_dimensions(&self, _page: usize) -> crate::error::AppResult<(f32, f32)> {
+            Ok((612.0, 792.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> crate::error::AppResult<RgbaFrame> {
+            Ok(RgbaFrame {
+                width: 1,
+                height: 1,
+                pixels: vec![0; 4].into(),
+            })
+        }
+
+        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
+            Ok(String::new())
+        }
+
+        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(TextPage {
+                width_pt: 612.0,
+                height_pt: 792.0,
+                glyphs: Vec::new(),
+                dropped_glyphs: 0,
+            })
+        }
+
+        fn extract_outline(&self) -> crate::error::AppResult<Vec<OutlineNode>> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn test_pdf() -> SharedPdfBackend {
+        Arc::new(StubPdf::new(3)) as SharedPdfBackend
+    }
+
+    #[test]
+    fn command_ids_resolve_to_matching_specs() {
+        assert_eq!(CommandId::all().len(), command_registry().len());
+
+        for id in CommandId::all() {
+            let spec = find_command_spec(id.as_str()).expect("command id should resolve to a spec");
+            assert_eq!(spec.id, id.as_str());
+        }
+    }
+
+    #[test]
+    fn command_registry_entries_have_matching_ids() {
+        let ids = CommandId::all()
+            .iter()
+            .map(|id| id.as_str())
+            .collect::<Vec<_>>();
+
+        for spec in command_registry() {
+            assert!(
+                ids.contains(&spec.id),
+                "registered spec should have a CommandId: {}",
+                spec.id
+            );
+        }
+    }
+
+    #[test]
+    fn parser_rejects_unknown_registered_command_id() {
+        assert!(parse_registered_command("missing-command", "").is_err());
+    }
+
+    #[test]
+    fn no_arg_commands_parse_to_matching_ids_and_execute() {
+        for spec in command_registry()
+            .iter()
+            .filter(|spec| spec.args.is_empty())
+        {
+            let command =
+                parse_registered_command(spec.id, "").expect("no-arg command should parse");
+            assert_eq!(command.id(), spec.id);
+
+            let mut app = AppState::default();
+            let mut extension_host = ExtensionHost::default();
+            let mut palette_requests = VecDeque::<PaletteRequest>::new();
+            let mut ctx = CommandExecContext {
+                app: &mut app,
+                pdf: test_pdf(),
+                extension_host: &mut extension_host,
+                palette_requests: &mut palette_requests,
+            };
+
+            execute_registered_command(&mut ctx, command)
+                .expect("parsed no-arg command should execute");
+        }
     }
 }

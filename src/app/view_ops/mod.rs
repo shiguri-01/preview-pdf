@@ -6,7 +6,7 @@ use crate::highlight::HighlightOverlaySnapshot;
 use crate::input::sequence::SequenceRegistrySnapshot;
 use crate::palette::PaletteView;
 use crate::presenter::{
-    PanOffset, PresenterFeedback, PresenterHorizontalAlign, PresenterRenderMode,
+    ImagePresenter, PanOffset, PresenterFeedback, PresenterHorizontalAlign, PresenterRenderMode,
     PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo,
     PresenterSlotOutcome, Viewport,
 };
@@ -19,7 +19,7 @@ mod viewer_outcome;
 
 use spread::{
     SpreadSlotAreas, clear_pending_spread_regions, format_loading_target, format_render_target,
-    render_areas_to_slots, split_spread_slot_areas,
+    split_spread_slot_areas,
 };
 use viewer_outcome::{
     draw_spread_loading_overlays, draw_viewer_outcome, normalize_render_outcome,
@@ -28,6 +28,9 @@ use viewer_outcome::{
 
 use super::constants::DEFAULT_PAGE_SIZE_PT;
 use super::core::{App, RenderSubsystem};
+use super::runtime::{
+    CachePrepareResult, FramePrepareOptions, PageSlotPrepareRequest, SpreadCanvasPrepareRequest,
+};
 use super::scale::{
     compute_render_scale, compute_scale, quantize_scale, resolved_cell_size_px, scale_eq,
 };
@@ -99,6 +102,15 @@ struct RenderFrameFeedback {
     viewer_has_image: bool,
     image_occluded: bool,
     render_target: String,
+}
+
+struct FrameCachePreparer<'a> {
+    runtime: &'a mut super::runtime::RenderRuntime,
+    presenter: &'a mut dyn ImagePresenter,
+    pdf: &'a dyn PdfBackend,
+    cell_px: Option<(u16, u16)>,
+    highlight_overlay: &'a HighlightOverlaySnapshot,
+    generation: u64,
 }
 
 impl RenderFrameDrawPlan {
@@ -263,49 +275,52 @@ impl App {
     }
 }
 
-impl RenderSubsystem {
-    #[allow(clippy::too_many_arguments)]
+impl FrameCachePreparer<'_> {
     fn prepare_single_page_or_preview_from_cache(
         &mut self,
-        pdf: &dyn PdfBackend,
         viewport: Viewport,
         page: usize,
         full_scale: f32,
         initial_preview: Option<&InitialPreviewPlan>,
         pan: &mut PanOffset,
-        cell_px: Option<(u16, u16)>,
         enable_crop: bool,
-        highlight_overlay: &HighlightOverlaySnapshot,
-        generation: u64,
     ) -> AppResult<Option<(PresenterRenderMode, Vec<PresenterRenderSlot>)>> {
         let attempts = initial_preview.map_or_else(
             || {
                 vec![(
                     PresenterRenderMode::Full,
-                    RenderedPageKey::new(pdf.doc_id(), page, full_scale),
+                    RenderedPageKey::new(self.pdf.doc_id(), page, full_scale),
                 )]
             },
             |preview| {
                 vec![
                     (
                         PresenterRenderMode::Full,
-                        RenderedPageKey::new(pdf.doc_id(), page, full_scale),
+                        RenderedPageKey::new(self.pdf.doc_id(), page, full_scale),
                     ),
                     (PresenterRenderMode::InitialPreview, preview.page_keys[0]),
                 ]
             },
         );
         for (render_mode, key) in attempts {
-            if self.runtime.try_prepare_page_slots_from_cache(
-                pdf,
-                self.presenter.as_mut(),
-                &[(Some(key), viewport)],
-                pan,
-                cell_px,
-                enable_crop,
-                highlight_overlay,
-                generation,
-            )? {
+            let page_slots = [(Some(key), viewport)];
+            let options = FramePrepareOptions {
+                cell_px: self.cell_px,
+                crop: enable_crop,
+                overlay: self.highlight_overlay,
+            };
+            let result = self.runtime.prepare_page_slots_from_cache(
+                self.pdf,
+                PageSlotPrepareRequest {
+                    page_slots: &page_slots,
+                    pan: *pan,
+                    options,
+                },
+            )?;
+            if let CachePrepareResult::Prepared(prepared) = result {
+                *pan = prepared.pan();
+                let presenter_slots = prepared.presenter_slots(self.generation);
+                self.presenter.prepare_slots(&presenter_slots)?;
                 return Ok(Some((
                     render_mode,
                     vec![PresenterRenderSlot {
@@ -321,44 +336,29 @@ impl RenderSubsystem {
         Ok(None)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn prepare_spread_or_preview_from_cache(
         &mut self,
-        pdf: &dyn PdfBackend,
         viewport: Viewport,
-        visible_pages: VisiblePageSlots,
         slot_areas: SpreadSlotAreas,
-        full_scale: f32,
-        initial_preview: Option<&InitialPreviewPlan>,
+        draw_plan: &RenderFrameDrawPlan,
         pan: &mut PanOffset,
-        cell_px: Option<(u16, u16)>,
-        enable_crop: bool,
-        highlight_overlay: &HighlightOverlaySnapshot,
-        generation: u64,
-        spread_gap_px: u32,
     ) -> AppResult<Option<(PresenterRenderMode, Vec<PresenterRenderSlot>)>> {
-        let attempts = initial_preview.map_or_else(
-            || vec![(PresenterRenderMode::Full, full_scale)],
+        let attempts = draw_plan.initial_preview.as_ref().map_or_else(
+            || vec![(PresenterRenderMode::Full, draw_plan.current_scale)],
             |preview| {
                 vec![
-                    (PresenterRenderMode::Full, full_scale),
+                    (PresenterRenderMode::Full, draw_plan.current_scale),
                     (PresenterRenderMode::InitialPreview, preview.scale),
                 ]
             },
         );
         for (render_mode, scale) in attempts {
             if let Some(render_slots) = self.try_prepare_spread_slots_from_cache(
-                pdf,
                 viewport,
-                visible_pages,
                 slot_areas,
+                draw_plan,
                 scale,
                 pan,
-                cell_px,
-                enable_crop,
-                highlight_overlay,
-                generation,
-                spread_gap_px,
                 render_mode,
             )? {
                 return Ok(Some((render_mode, render_slots)));
@@ -368,59 +368,74 @@ impl RenderSubsystem {
         Ok(None)
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn try_prepare_spread_slots_from_cache(
         &mut self,
-        pdf: &dyn PdfBackend,
         viewport: Viewport,
-        visible_pages: VisiblePageSlots,
         slot_areas: SpreadSlotAreas,
+        draw_plan: &RenderFrameDrawPlan,
         scale: f32,
         pan: &mut PanOffset,
-        cell_px: Option<(u16, u16)>,
-        enable_crop: bool,
-        highlight_overlay: &HighlightOverlaySnapshot,
-        generation: u64,
-        spread_gap_px: u32,
         render_mode: PresenterRenderMode,
     ) -> AppResult<Option<Vec<PresenterRenderSlot>>> {
-        if enable_crop {
-            return self
-                .runtime
-                .try_prepare_spread_canvas_slots_from_cache(
-                    pdf,
-                    self.presenter.as_mut(),
+        if draw_plan.enable_crop {
+            let result = self.runtime.prepare_spread_canvas_from_cache(
+                self.pdf,
+                SpreadCanvasPrepareRequest {
                     viewport,
-                    visible_pages,
+                    visible_pages: draw_plan.visible_pages,
                     scale,
-                    pan,
-                    cell_px,
-                    highlight_overlay,
-                    generation,
-                    spread_gap_px,
-                )
-                .map(|areas| areas.map(|areas| render_areas_to_slots(areas, render_mode)));
+                    pan: *pan,
+                    cell_px: self.cell_px,
+                    overlay: self.highlight_overlay,
+                    gap_px: draw_plan.spread_gap_px,
+                },
+            )?;
+            return match result {
+                CachePrepareResult::Prepared(prepared) => {
+                    *pan = prepared.pan();
+                    let render_slots = prepared.render_slots(render_mode);
+                    let presenter_slots = prepared.presenter_slots(self.generation);
+                    self.presenter.prepare_slots(&presenter_slots)?;
+                    Ok(Some(render_slots))
+                }
+                CachePrepareResult::Miss {
+                    pan: normalized_pan,
+                } => {
+                    *pan = normalized_pan;
+                    Ok(None)
+                }
+            };
         }
 
-        if self.runtime.try_prepare_page_slots_from_cache(
-            pdf,
-            self.presenter.as_mut(),
-            &slot_areas.page_slots(pdf.doc_id(), visible_pages, scale),
-            pan,
-            cell_px,
-            false,
-            highlight_overlay,
-            generation,
-        )? {
+        let page_slots = slot_areas.page_slots(self.pdf.doc_id(), draw_plan.visible_pages, scale);
+        let options = FramePrepareOptions {
+            cell_px: self.cell_px,
+            crop: false,
+            overlay: self.highlight_overlay,
+        };
+        let result = self.runtime.prepare_page_slots_from_cache(
+            self.pdf,
+            PageSlotPrepareRequest {
+                page_slots: &page_slots,
+                pan: *pan,
+                options,
+            },
+        )?;
+        if let CachePrepareResult::Prepared(prepared) = result {
+            *pan = prepared.pan();
+            let presenter_slots = prepared.presenter_slots(self.generation);
+            self.presenter.prepare_slots(&presenter_slots)?;
             let options = PresenterRenderOptions::new(false, render_mode);
             return Ok(Some(
-                slot_areas.render_slots_for_pages(visible_pages, options),
+                slot_areas.render_slots_for_pages(draw_plan.visible_pages, options),
             ));
         }
 
         Ok(None)
     }
+}
 
+impl RenderSubsystem {
     pub(super) fn render_frame(
         &mut self,
         state: &mut AppState,
@@ -480,33 +495,31 @@ impl RenderSubsystem {
             let image_area = layout.viewer_inner;
             let spread_slot_areas = split_spread_slot_areas(image_area, SPREAD_GAP_CELLS);
 
-            let prepare_result = match draw_plan.page_presentation {
-                PageLayoutMode::Single => self.prepare_single_page_or_preview_from_cache(
+            let prepare_result = {
+                let mut preparer = FrameCachePreparer {
+                    runtime: &mut self.runtime,
+                    presenter: self.presenter.as_mut(),
                     pdf,
-                    viewport,
-                    draw_plan.visible_pages.anchor_page,
-                    draw_plan.current_scale,
-                    draw_plan.initial_preview.as_ref(),
-                    &mut pan,
-                    draw_plan.presenter_cell_px,
-                    draw_plan.enable_crop,
-                    &draw_plan.highlight_overlay,
-                    draw_plan.generation,
-                ),
-                PageLayoutMode::Spread => self.prepare_spread_or_preview_from_cache(
-                    pdf,
-                    viewport,
-                    draw_plan.visible_pages,
-                    spread_slot_areas,
-                    draw_plan.current_scale,
-                    draw_plan.initial_preview.as_ref(),
-                    &mut pan,
-                    draw_plan.presenter_cell_px,
-                    draw_plan.enable_crop,
-                    &draw_plan.highlight_overlay,
-                    draw_plan.generation,
-                    draw_plan.spread_gap_px,
-                ),
+                    cell_px: draw_plan.presenter_cell_px,
+                    highlight_overlay: &draw_plan.highlight_overlay,
+                    generation: draw_plan.generation,
+                };
+                match draw_plan.page_presentation {
+                    PageLayoutMode::Single => preparer.prepare_single_page_or_preview_from_cache(
+                        viewport,
+                        draw_plan.visible_pages.anchor_page,
+                        draw_plan.current_scale,
+                        draw_plan.initial_preview.as_ref(),
+                        &mut pan,
+                        draw_plan.enable_crop,
+                    ),
+                    PageLayoutMode::Spread => preparer.prepare_spread_or_preview_from_cache(
+                        viewport,
+                        spread_slot_areas,
+                        &draw_plan,
+                        &mut pan,
+                    ),
+                }
             };
 
             match prepare_result {

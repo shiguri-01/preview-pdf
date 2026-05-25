@@ -8,6 +8,7 @@ use crate::work::WorkClass;
 use super::actors::{RenderActor, RenderNavSyncParts};
 use super::core::RenderSubsystem;
 use super::frame_ops::{encode_work_class_for_completed_render, prepare_presenter_frame};
+use super::runtime::PrefetchEncodeRequest;
 use super::scale::{scale_eq, zoom_eq};
 use super::state::{AppState, VisiblePageSlots};
 use super::view_ops::{InitialPreviewPlan, compute_initial_preview_plan};
@@ -436,18 +437,20 @@ impl RenderSubsystem {
                     continue;
                 }
                 if let Some(viewport) = ctx.prefetch_viewport {
-                    let mut prefetch_pan = ctx.base_pan;
+                    let prefetch_pan = ctx.base_pan;
                     let presenter_caps = self.presenter.capabilities();
                     if let Err(err) = self.runtime.try_prefetch_encode_from_cache(
                         self.presenter.as_mut(),
-                        viewport,
-                        key,
-                        &mut prefetch_pan,
-                        ctx.overlay_stamp,
-                        presenter_caps.cell_px,
-                        ctx.enable_crop,
-                        encode_work_class_for_completed_render(task.class),
-                        task.generation,
+                        PrefetchEncodeRequest {
+                            viewport,
+                            key,
+                            pan: prefetch_pan,
+                            overlay_stamp: ctx.overlay_stamp,
+                            cell_px: presenter_caps.cell_px,
+                            crop: ctx.enable_crop,
+                            class: encode_work_class_for_completed_render(task.class),
+                            generation: task.generation,
+                        },
                     ) {
                         let _ = err;
                     }

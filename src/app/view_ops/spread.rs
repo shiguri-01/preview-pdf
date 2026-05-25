@@ -2,9 +2,11 @@ use ratatui::layout::Rect;
 use ratatui::widgets::Clear;
 
 use crate::app::state::VisiblePageSlots;
+#[cfg(test)]
+use crate::presenter::PresenterRenderMode;
 use crate::presenter::{
-    PresenterHorizontalAlign, PresenterRenderMode, PresenterRenderOptions, PresenterRenderOutcome,
-    PresenterRenderSlot, Viewport,
+    PresenterHorizontalAlign, PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot,
+    Viewport,
 };
 use crate::render::cache::RenderedPageKey;
 
@@ -93,6 +95,7 @@ pub(super) fn split_spread_slot_areas(area: Rect, gap_cells: u16) -> SpreadSlotA
     }
 }
 
+#[cfg(test)]
 pub(super) fn render_areas_to_slots(
     render_areas: [Option<Rect>; 2],
     render_mode: PresenterRenderMode,

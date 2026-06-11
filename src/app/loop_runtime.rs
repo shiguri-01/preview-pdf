@@ -1,8 +1,11 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time;
 
+use crate::backend::SharedPdfBackend;
+use crate::event::DocumentReloadRequest;
 use crate::event::DomainEvent;
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::RenderTask;
@@ -30,6 +33,26 @@ pub(super) struct LoopRuntime<S> {
     pub(super) loop_event_tx: UnboundedSender<DomainEvent>,
     pub(super) loop_event_rx: UnboundedReceiver<DomainEvent>,
     pub(super) loop_event_runtime: EventBusRuntime,
+    pub(super) reload_in_flight: bool,
+    pub(super) pending_reload: Option<DocumentReloadRequest>,
+    pub(super) reload_retry_attempts: u8,
+}
+
+pub(super) struct ActiveDocument {
+    pub(super) pdf: SharedPdfBackend,
+    pub(super) path: PathBuf,
+}
+
+impl ActiveDocument {
+    pub(super) fn new(pdf: SharedPdfBackend) -> Self {
+        let path = pdf.path().to_path_buf();
+        Self { pdf, path }
+    }
+
+    pub(super) fn replace(&mut self, pdf: SharedPdfBackend) {
+        self.path = pdf.path().to_path_buf();
+        self.pdf = pdf;
+    }
 }
 
 pub(super) struct LoopStep {

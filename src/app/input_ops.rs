@@ -196,6 +196,14 @@ impl InteractionSubsystem {
         self.extensions.host.prewarm_search_text(pdf);
     }
 
+    pub(crate) fn reset_extensions_for_document_reload(
+        &mut self,
+        state: &mut AppState,
+        pdf: SharedPdfBackend,
+    ) {
+        self.extensions.host.reset_for_document_reload(state, pdf);
+    }
+
     pub(crate) fn sync_search_after_page_change(
         &mut self,
         pdf: SharedPdfBackend,

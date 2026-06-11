@@ -92,6 +92,12 @@ pub struct App {
     pub render: RenderSubsystem,
     pub interaction: InteractionSubsystem,
     pub config: Config,
+    run_options: RunOptions,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RunOptions {
+    pub watch: bool,
 }
 
 impl App {
@@ -126,6 +132,15 @@ impl App {
             ),
             interaction: InteractionSubsystem::default(),
             config,
+            run_options: RunOptions::default(),
         })
+    }
+
+    pub fn set_watch(&mut self, watch: bool) {
+        self.run_options.watch = watch;
+    }
+
+    pub(crate) fn run_options(&self) -> RunOptions {
+        self.run_options
     }
 }

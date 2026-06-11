@@ -1,8 +1,16 @@
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
 use crossterm::event::EventStream;
 use futures_util::StreamExt;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
+use tokio::time::{self, Duration, Instant};
 
+use crate::backend::open_default_backend;
+use crate::event::DocumentReloadReason;
+use crate::event::DocumentReloadRequest;
+use crate::event::DocumentReloadResult;
 use crate::event::DomainEvent;
 
 pub(crate) struct EventBusRuntime {
@@ -33,6 +41,30 @@ impl EventBusRuntime {
         self.tasks.push(spawn_input_task(tx));
     }
 
+    pub(crate) fn start_file_watch(&mut self, path: PathBuf, tx: UnboundedSender<DomainEvent>) {
+        self.tasks.push(spawn_file_watch_task(path, tx));
+    }
+
+    pub(crate) fn start_document_reload(
+        &mut self,
+        path: PathBuf,
+        reason: DocumentReloadReason,
+        tx: UnboundedSender<DomainEvent>,
+    ) {
+        self.tasks
+            .push(spawn_document_reload_task(path, reason, tx));
+    }
+
+    pub(crate) fn start_delayed_document_reload(
+        &mut self,
+        request: DocumentReloadRequest,
+        delay: Duration,
+        tx: UnboundedSender<DomainEvent>,
+    ) {
+        self.tasks
+            .push(spawn_delayed_document_reload_task(request, delay, tx));
+    }
+
     pub(crate) fn shutdown(&mut self) {
         for task in self.tasks.drain(..) {
             task.abort();
@@ -55,8 +87,101 @@ fn spawn_input_task(tx: UnboundedSender<DomainEvent>) -> JoinHandle<()> {
     })
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileSignature {
+    exists: bool,
+    len: Option<u64>,
+    modified: Option<SystemTime>,
+}
+
+fn file_signature(path: &Path) -> FileSignature {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return FileSignature {
+            exists: false,
+            len: None,
+            modified: None,
+        };
+    };
+    FileSignature {
+        exists: true,
+        len: Some(metadata.len()),
+        modified: metadata.modified().ok(),
+    }
+}
+
+fn spawn_file_watch_task(path: PathBuf, tx: UnboundedSender<DomainEvent>) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        const POLL_INTERVAL: Duration = Duration::from_millis(250);
+        const DEBOUNCE: Duration = Duration::from_millis(500);
+
+        let mut last_seen = file_signature(&path);
+        let mut pending_since: Option<Instant> = None;
+        let mut interval = time::interval(POLL_INTERVAL);
+        interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
+
+        loop {
+            interval.tick().await;
+            let current = file_signature(&path);
+            if current != last_seen {
+                last_seen = current;
+                pending_since = Some(Instant::now());
+                continue;
+            }
+
+            let Some(started_at) = pending_since else {
+                continue;
+            };
+            if started_at.elapsed() < DEBOUNCE {
+                continue;
+            }
+            pending_since = None;
+            if tx
+                .send(DomainEvent::ReloadDocument(DocumentReloadRequest::new(
+                    DocumentReloadReason::FileChanged,
+                )))
+                .is_err()
+            {
+                return;
+            }
+        }
+    })
+}
+
+fn spawn_document_reload_task(
+    path: PathBuf,
+    reason: DocumentReloadReason,
+    tx: UnboundedSender<DomainEvent>,
+) -> JoinHandle<()> {
+    tokio::task::spawn_blocking(move || {
+        let result = open_default_backend(&path).map_err(|err| err.to_string());
+        let _ = tx.send(DomainEvent::DocumentReloaded(DocumentReloadResult {
+            reason,
+            result,
+        }));
+    })
+}
+
+fn spawn_delayed_document_reload_task(
+    request: DocumentReloadRequest,
+    delay: Duration,
+    tx: UnboundedSender<DomainEvent>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        time::sleep(delay).await;
+        let _ = tx.send(DomainEvent::ReloadDocument(request));
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::time::Duration;
+
+    use tokio::time;
+
+    use crate::backend::test_support::{build_pdf, unique_temp_path};
+    use crate::event::{DocumentReloadReason, DomainEvent};
+
     use super::EventBusRuntime;
 
     #[test]
@@ -77,5 +202,35 @@ mod tests {
             runtime.start_input(tx);
             runtime.shutdown();
         });
+    }
+
+    #[test]
+    fn file_watch_emits_reload_after_changed_file_settles() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should initialize");
+        let file = unique_temp_path("watch_reload.pdf");
+        fs::write(&file, build_pdf(&["before"])).expect("test pdf should be written");
+
+        runtime.block_on(async {
+            let (tx, mut rx, mut event_runtime) = EventBusRuntime::spawn_headless();
+            event_runtime.start_file_watch(file.clone(), tx);
+            time::sleep(Duration::from_millis(300)).await;
+            fs::write(&file, build_pdf(&["after"])).expect("test pdf should change");
+
+            let event = time::timeout(Duration::from_secs(2), rx.recv())
+                .await
+                .expect("watcher should emit before timeout")
+                .expect("watcher channel should stay open");
+            assert!(matches!(
+                event,
+                DomainEvent::ReloadDocument(request)
+                    if request.reason == DocumentReloadReason::FileChanged && !request.retry
+            ));
+            event_runtime.shutdown();
+        });
+
+        fs::remove_file(&file).expect("test file should be removed");
     }
 }

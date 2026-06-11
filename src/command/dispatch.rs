@@ -193,6 +193,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::OpenHistory
         | Command::OpenOutline
         | Command::CancelSearch
+        | Command::ReloadDocument
         | Command::Quit => None,
     }
 }

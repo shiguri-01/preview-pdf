@@ -9,7 +9,7 @@ mod palette;
 mod search;
 mod viewport;
 
-pub(super) use control::{cancel_search, quit};
+pub(super) use control::{cancel_search, quit, reload_document};
 pub(super) use debug::{debug_status_hide, debug_status_show, debug_status_toggle};
 pub(super) use help::{close_help, open_help};
 pub(super) use history::{history_back, history_forward, history_goto, open_history};

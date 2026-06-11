@@ -20,7 +20,7 @@ mod view_ops;
 #[cfg(test)]
 mod tests;
 
-pub use core::App;
+pub use core::{App, RunOptions};
 pub use runtime::RenderRuntime;
 pub use state::{
     AppState, CacheHandle, CacheRefs, Mode, Notice, NoticeAction, NoticeLevel, PageLayoutMode,

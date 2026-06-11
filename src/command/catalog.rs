@@ -540,6 +540,16 @@ define_commands! {
         parse: no_args,
         exec: super::handlers::cancel_search,
     }
+    ReloadDocument {
+        id: "reload-document",
+        title: "Reload Document",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::reload_document,
+    }
     Quit {
         id: "quit",
         title: "Quit",

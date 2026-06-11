@@ -1,6 +1,8 @@
 use crossterm::event::Event;
+use std::fmt;
 
 use crate::app::Mode;
+use crate::backend::SharedPdfBackend;
 use crate::command::{CommandId, CommandOutcome, CommandRequest};
 use crate::presenter::PresenterBackgroundEvent;
 use crate::render::worker::RenderWorkerResult;
@@ -55,6 +57,52 @@ pub enum AppEvent {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DocumentReloadReason {
+    Manual,
+    FileChanged,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DocumentReloadRequest {
+    pub(crate) reason: DocumentReloadReason,
+    pub(crate) retry: bool,
+}
+
+impl DocumentReloadRequest {
+    pub(crate) fn new(reason: DocumentReloadReason) -> Self {
+        Self {
+            reason,
+            retry: false,
+        }
+    }
+
+    pub(crate) fn retry(reason: DocumentReloadReason) -> Self {
+        Self {
+            reason,
+            retry: true,
+        }
+    }
+}
+
+pub(crate) struct DocumentReloadResult {
+    pub(crate) reason: DocumentReloadReason,
+    pub(crate) result: Result<SharedPdfBackend, String>,
+}
+
+impl fmt::Debug for DocumentReloadResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let result = match &self.result {
+            Ok(pdf) => format!("Ok(doc_id: {}, pages: {})", pdf.doc_id(), pdf.page_count()),
+            Err(message) => format!("Err({message:?})"),
+        };
+        f.debug_struct("DocumentReloadResult")
+            .field("reason", &self.reason)
+            .field("result", &result)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum DomainEvent {
     Input(Event),
@@ -62,6 +110,8 @@ pub(crate) enum DomainEvent {
     Command(CommandRequest),
     Quit,
     App(AppEvent),
+    ReloadDocument(DocumentReloadRequest),
+    DocumentReloaded(DocumentReloadResult),
     RenderComplete(RenderWorkerResult),
     EncodeComplete(PresenterBackgroundEvent),
     PrefetchTick,

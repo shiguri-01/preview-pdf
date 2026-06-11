@@ -569,6 +569,10 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.drain_encode_results()
     }
 
+    fn reset_terminal_state(&mut self) {
+        RatatuiImagePresenter::reset_terminal_state(self);
+    }
+
     fn recv_background_event<'a>(
         &'a mut self,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<PresenterBackgroundEvent>> + 'a>>

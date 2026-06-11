@@ -349,6 +349,8 @@ pub trait ImagePresenter {
         false
     }
 
+    fn reset_terminal_state(&mut self) {}
+
     fn recv_background_event<'a>(
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Option<PresenterBackgroundEvent>> + 'a>> {

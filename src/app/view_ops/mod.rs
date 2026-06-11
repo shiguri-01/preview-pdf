@@ -282,7 +282,7 @@ impl FrameCachePreparer<'_> {
         page: usize,
         full_scale: f32,
         initial_preview: Option<&InitialPreviewPlan>,
-        pan: &mut PanOffset,
+        requested_pan: PanOffset,
         enable_crop: bool,
     ) -> AppResult<Option<(PresenterRenderMode, Vec<PresenterRenderSlot>)>> {
         let attempts = initial_preview.map_or_else(
@@ -313,12 +313,11 @@ impl FrameCachePreparer<'_> {
                 self.pdf,
                 PageSlotPrepareRequest {
                     page_slots: &page_slots,
-                    pan: *pan,
+                    pan: requested_pan,
                     options,
                 },
             )?;
             if let CachePrepareResult::Prepared(prepared) = result {
-                *pan = prepared.pan();
                 let presenter_slots = prepared.presenter_slots(self.generation);
                 self.presenter.prepare_slots(&presenter_slots)?;
                 return Ok(Some((
@@ -341,7 +340,7 @@ impl FrameCachePreparer<'_> {
         viewport: Viewport,
         slot_areas: SpreadSlotAreas,
         draw_plan: &RenderFrameDrawPlan,
-        pan: &mut PanOffset,
+        requested_pan: PanOffset,
     ) -> AppResult<Option<(PresenterRenderMode, Vec<PresenterRenderSlot>)>> {
         let attempts = draw_plan.initial_preview.as_ref().map_or_else(
             || vec![(PresenterRenderMode::Full, draw_plan.current_scale)],
@@ -358,7 +357,7 @@ impl FrameCachePreparer<'_> {
                 slot_areas,
                 draw_plan,
                 scale,
-                pan,
+                requested_pan,
                 render_mode,
             )? {
                 return Ok(Some((render_mode, render_slots)));
@@ -374,7 +373,7 @@ impl FrameCachePreparer<'_> {
         slot_areas: SpreadSlotAreas,
         draw_plan: &RenderFrameDrawPlan,
         scale: f32,
-        pan: &mut PanOffset,
+        requested_pan: PanOffset,
         render_mode: PresenterRenderMode,
     ) -> AppResult<Option<Vec<PresenterRenderSlot>>> {
         if draw_plan.enable_crop {
@@ -384,7 +383,7 @@ impl FrameCachePreparer<'_> {
                     viewport,
                     visible_pages: draw_plan.visible_pages,
                     scale,
-                    pan: *pan,
+                    pan: requested_pan,
                     cell_px: self.cell_px,
                     overlay: self.highlight_overlay,
                     gap_px: draw_plan.spread_gap_px,
@@ -392,18 +391,12 @@ impl FrameCachePreparer<'_> {
             )?;
             return match result {
                 CachePrepareResult::Prepared(prepared) => {
-                    *pan = prepared.pan();
                     let render_slots = prepared.render_slots(render_mode);
                     let presenter_slots = prepared.presenter_slots(self.generation);
                     self.presenter.prepare_slots(&presenter_slots)?;
                     Ok(Some(render_slots))
                 }
-                CachePrepareResult::Miss {
-                    pan: normalized_pan,
-                } => {
-                    *pan = normalized_pan;
-                    Ok(None)
-                }
+                CachePrepareResult::Miss => Ok(None),
             };
         }
 
@@ -417,12 +410,11 @@ impl FrameCachePreparer<'_> {
             self.pdf,
             PageSlotPrepareRequest {
                 page_slots: &page_slots,
-                pan: *pan,
+                pan: requested_pan,
                 options,
             },
         )?;
         if let CachePrepareResult::Prepared(prepared) = result {
-            *pan = prepared.pan();
             let presenter_slots = prepared.presenter_slots(self.generation);
             self.presenter.prepare_slots(&presenter_slots)?;
             let options = PresenterRenderOptions::new(false, render_mode);
@@ -469,7 +461,7 @@ impl RenderSubsystem {
         pdf: &dyn PdfBackend,
         draw_plan: RenderFrameDrawPlan,
     ) -> AppResult<RenderFrameFeedback> {
-        let mut pan = draw_plan.pan;
+        let requested_pan = draw_plan.pan;
         let mut render_failed = false;
         let mut render_feedback = PresenterFeedback::None;
         let mut viewer_has_image = self.viewer_has_image;
@@ -510,14 +502,14 @@ impl RenderSubsystem {
                         draw_plan.visible_pages.anchor_page,
                         draw_plan.current_scale,
                         draw_plan.initial_preview.as_ref(),
-                        &mut pan,
+                        requested_pan,
                         draw_plan.enable_crop,
                     ),
                     PageLayoutMode::Spread => preparer.prepare_spread_or_preview_from_cache(
                         viewport,
                         spread_slot_areas,
                         &draw_plan,
-                        &mut pan,
+                        requested_pan,
                     ),
                 }
             };
@@ -653,7 +645,7 @@ impl RenderSubsystem {
         })?;
 
         Ok(RenderFrameFeedback {
-            pan,
+            pan: requested_pan,
             render_failed,
             render_feedback,
             viewer_has_image,

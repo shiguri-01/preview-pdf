@@ -80,6 +80,9 @@ Rules:
 - if zoomed content exceeds the viewport, only the visible region is forwarded
 - crop is cell-aligned
 - if the full frame already fits, the uncropped frame is forwarded
+- viewer state stores the requested pan from user commands; crop preparation
+  derives a separate effective pan clamped to the currently available image and
+  viewport bounds
 - zoomed spread-canvas crops still preserve left/right slot identity; a page
   outside the viewport is represented as an inactive slot rather than removing
   that slot from the presenter input
@@ -154,8 +157,9 @@ L2 cache rules:
   entry may temporarily coexist with the currently visible ready frame to avoid
   regressing to a blank viewer
 
-`viewport`, `pan`, and `overlay_stamp` are part of the L2 key because terminal
-output depends on all three.
+`viewport`, effective `pan`, and `overlay_stamp` are part of the L2 key because
+terminal output depends on all three. The requested pan stored in viewer state
+is not rewritten by cache preparation.
 
 ## Presenter draw contract
 

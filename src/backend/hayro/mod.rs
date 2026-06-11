@@ -122,6 +122,40 @@ mod tests {
     }
 
     #[test]
+    fn doc_id_changes_when_same_path_same_size_pdf_content_changes() {
+        let file = unique_temp_path("doc_id_same_size.pdf");
+        let first = build_pdf(&["alpha"]);
+        let second = build_pdf(&["bravo"]);
+        assert_eq!(
+            first.len(),
+            second.len(),
+            "fixture PDFs must be the same byte length"
+        );
+
+        fs::write(&file, first).expect("first test pdf should be created");
+        let first_doc = PdfDoc::open(&file).expect("first pdf should open");
+        let first_doc_id = first_doc.doc_id();
+
+        fs::write(&file, second).expect("second test pdf should replace first");
+        let second_doc = PdfDoc::open(&file).expect("second pdf should open");
+
+        assert_ne!(first_doc_id, second_doc.doc_id());
+        fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn doc_id_is_stable_for_same_path_and_content() {
+        let file = unique_temp_path("doc_id_stable.pdf");
+        fs::write(&file, build_pdf(&["stable"])).expect("test pdf should be created");
+
+        let first = PdfDoc::open(&file).expect("first pdf open should succeed");
+        let second = PdfDoc::open(&file).expect("second pdf open should succeed");
+
+        assert_eq!(first.doc_id(), second.doc_id());
+        fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
     fn render_page_rejects_out_of_range_page() {
         let file = unique_temp_path("render.pdf");
         fs::write(&file, build_pdf(&["hello"])).expect("test file should be created");

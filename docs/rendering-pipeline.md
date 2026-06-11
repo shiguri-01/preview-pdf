@@ -50,6 +50,8 @@ Rules:
 - raster output uses RGBA pixel storage
 - cache identity includes document identity, page identity, scale, and an
   optional layout identity
+- document identity changes when the opened path's PDF bytes change, even if
+  the replacement file has the same byte length
 - render-worker page tasks use layout tag `0` for source-page identity
 - text extraction is a separate backend path used by search
 - raw render cache entries do not include highlight overlays

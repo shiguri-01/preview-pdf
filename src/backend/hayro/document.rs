@@ -58,7 +58,7 @@ impl PdfDoc {
                 "input is not a valid PDF header",
             ));
         }
-        let doc_id = calculate_doc_id(path, bytes.len());
+        let doc_id = calculate_doc_id(path, bytes.as_slice());
         let pdf = Pdf::new(bytes)
             .map_err(|_| AppError::invalid_argument("failed to parse PDF with hayro"))?;
 
@@ -174,10 +174,10 @@ impl PdfDoc {
         extract_outline_nodes(&self.pdf)
     }
 }
-fn calculate_doc_id(path: &Path, byte_len: usize) -> u64 {
+fn calculate_doc_id(path: &Path, bytes: &[u8]) -> u64 {
     let mut hasher = DefaultHasher::new();
     path.hash(&mut hasher);
-    byte_len.hash(&mut hasher);
+    bytes.hash(&mut hasher);
     hasher.finish()
 }
 

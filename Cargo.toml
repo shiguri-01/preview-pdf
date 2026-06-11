@@ -2,6 +2,13 @@
 name = "preview-pdf"
 version = "0.1.0"
 edition = "2024"
+description = "pvf is a keyboard-first PDF viewer for the terminal."
+license = "MIT"
+repository = "https://github.com/shiguri-01/preview-pdf"
+readme = "README.md"
+keywords = ["pdf", "terminal", "tui", "viewer", "cli"]
+categories = ["command-line-utilities"]
+exclude = ["/.agents", "/.github", "/.envrc", "/flake.lock", "/flake.nix"]
 default-run = "pvf"
 
 [lib]

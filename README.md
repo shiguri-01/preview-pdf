@@ -1,18 +1,20 @@
 # pvf (preview-pdf)
 
-`pvf` is a PDF viewer for the terminal.
+`pvf` is a keyboard-first PDF viewer for the terminal.
 
 ```bash
 pvf <file.pdf>
 ```
 
-## Highlights
+## Install
 
-- Keyboard-first PDF viewer for the terminal
-- Single-page and spread layout
-- Full-text search across the document
-- Outline navigation for structured PDFs
-- Command palette for all viewer actions
+Download a prebuilt binary from the
+[GitHub releases](https://github.com/shiguri-01/preview-pdf/releases),
+or install from crates.io:
+
+```bash
+cargo install preview-pdf
+```
 
 ## Keys
 

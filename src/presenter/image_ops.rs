@@ -3,6 +3,7 @@ use std::cell::RefCell;
 use fast_image_resize as fr;
 use image::{DynamicImage, RgbaImage};
 use ratatui::layout::Rect;
+use ratatui_image::FontSize;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
 
@@ -46,6 +47,10 @@ pub(crate) fn resize_frame_for_area(
     };
 
     resize_frame_simd(frame, dst_width, dst_height)
+}
+
+pub(crate) fn font_size_px(font_size: FontSize) -> (u16, u16) {
+    (font_size.width, font_size.height)
 }
 
 pub(crate) fn fit_downscale_dimensions(

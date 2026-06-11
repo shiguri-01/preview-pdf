@@ -1,18 +1,20 @@
 use crossterm::terminal;
 use ratatui_image::picker::{Capability, Picker, ProtocolType};
 
+use super::image_ops::font_size_px;
+
 pub(crate) fn picker_with_resolved_cell_size(
     picker: Picker,
     protocol_type: ProtocolType,
 ) -> Picker {
-    let current = picker.font_size();
+    let current = font_size_px(picker.font_size());
     let resolved = resolve_cell_size_px(&picker).unwrap_or(current);
     if resolved == current {
         return picker;
     }
 
     #[allow(deprecated)]
-    let mut rebuilt = Picker::from_fontsize(resolved);
+    let mut rebuilt = Picker::from_fontsize(resolved.into());
     rebuilt.set_protocol_type(protocol_type);
     rebuilt
 }

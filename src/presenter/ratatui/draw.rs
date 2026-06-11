@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use ratatui::Frame;
+use ratatui::buffer::CellDiffOption;
 use ratatui::layout::Rect;
 use ratatui::widgets::Clear;
 use ratatui_image::Resize;
@@ -16,6 +17,7 @@ use crate::work::WorkClass;
 use super::super::encode::{
     ENCODE_RESIZE_FILTER, EncodeLaneKind, EncodeWorkerRequest, send_encode_request,
 };
+use super::super::image_ops::font_size_px;
 use super::super::l2_cache::{TerminalFrameKey, TerminalFrameState};
 use super::super::traits::{
     PresenterFeedback, PresenterHorizontalAlign, PresenterRenderOptions, PresenterRenderOutcome,
@@ -59,7 +61,7 @@ impl RatatuiImagePresenter {
         for y in area.top()..area.bottom() {
             for x in area.left()..area.right() {
                 if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
-                    cell.set_skip(true);
+                    cell.set_diff_option(CellDiffOption::Skip);
                 }
             }
         }
@@ -102,7 +104,8 @@ impl RatatuiImagePresenter {
         target: ReadyDrawTarget,
     ) -> AppResult<bool> {
         let blit_start = std::time::Instant::now();
-        let target_size = protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), target.area);
+        let target_size =
+            protocol.size_for(Resize::Fit(Some(ENCODE_RESIZE_FILTER)), target.area.into());
         let render_area = align_rect_within(
             target.area,
             target_size.width,
@@ -228,7 +231,7 @@ impl RatatuiImagePresenter {
         let encode_area = aligned_fit_area(
             frame.width,
             frame.height,
-            picker.font_size(),
+            font_size_px(picker.font_size()),
             area,
             horizontal_align,
             options.is_initial_preview(),
@@ -261,7 +264,7 @@ impl RatatuiImagePresenter {
         let area = centered_fit_area(
             frame.width,
             frame.height,
-            self.config.picker.font_size(),
+            font_size_px(self.config.picker.font_size()),
             viewport_area,
         );
         EncodeWorkerRequest::Encode {

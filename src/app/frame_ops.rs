@@ -89,15 +89,8 @@ pub(crate) fn crop_frame_for_viewport(
     let src_height = frame.height;
     let max_x = src_width.saturating_sub(target_width);
     let max_y = src_height.saturating_sub(target_height);
-    let max_cells_x = (max_x / cell_width_px as u32) as i32;
-    let max_cells_y = (max_y / cell_height_px as u32) as i32;
-    pan.cells_x = pan.cells_x.clamp(0, max_cells_x);
-    pan.cells_y = pan.cells_y.clamp(0, max_cells_y);
-
-    let pan_px_x = pan.cells_x.saturating_mul(cell_width_px as i32);
-    let pan_px_y = pan.cells_y.saturating_mul(cell_height_px as i32);
-    let origin_x = pan_px_x.clamp(0, max_x as i32) as u32;
-    let origin_y = pan_px_y.clamp(0, max_y as i32) as u32;
+    pan.clamp_to_pixel_bounds(max_x, max_y, cell_width_px, cell_height_px);
+    let (origin_x, origin_y) = pan.pixel_origin(max_x, max_y, cell_width_px, cell_height_px);
 
     let copy_width = target_width.min(src_width.saturating_sub(origin_x));
     let copy_height = target_height.min(src_height.saturating_sub(origin_y));

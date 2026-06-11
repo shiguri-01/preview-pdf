@@ -40,6 +40,47 @@ pub struct PanOffset {
     pub cells_y: i32,
 }
 
+impl PanOffset {
+    pub(crate) fn clamp_to_pixel_bounds(
+        &mut self,
+        max_x_px: u32,
+        max_y_px: u32,
+        cell_width_px: u16,
+        cell_height_px: u16,
+    ) {
+        self.cells_x = self
+            .cells_x
+            .clamp(0, max_pan_cells(max_x_px, cell_width_px));
+        self.cells_y = self
+            .cells_y
+            .clamp(0, max_pan_cells(max_y_px, cell_height_px));
+    }
+
+    pub(crate) fn pixel_origin(
+        self,
+        max_x_px: u32,
+        max_y_px: u32,
+        cell_width_px: u16,
+        cell_height_px: u16,
+    ) -> (u32, u32) {
+        (
+            pan_cell_origin_px(self.cells_x, cell_width_px, max_x_px),
+            pan_cell_origin_px(self.cells_y, cell_height_px, max_y_px),
+        )
+    }
+}
+
+fn max_pan_cells(max_px: u32, cell_px: u16) -> i32 {
+    (max_px / u32::from(cell_px.max(1))).min(i32::MAX as u32) as i32
+}
+
+fn pan_cell_origin_px(cells: i32, cell_px: u16, max_px: u32) -> u32 {
+    u32::try_from(cells)
+        .unwrap_or(0)
+        .saturating_mul(u32::from(cell_px.max(1)))
+        .min(max_px)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PresenterCaps {
     pub backend_name: &'static str,
@@ -334,5 +375,49 @@ pub fn combine_feedback(left: PresenterFeedback, right: PresenterFeedback) -> Pr
             PresenterFeedback::Pending
         }
         (PresenterFeedback::None, PresenterFeedback::None) => PresenterFeedback::None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PanOffset;
+
+    #[test]
+    fn pan_pixel_bounds_cap_cells_before_signed_overflow() {
+        let mut pan = PanOffset {
+            cells_x: i32::MAX,
+            cells_y: i32::MAX,
+        };
+
+        pan.clamp_to_pixel_bounds(u32::MAX, u32::MAX, 1, 1);
+
+        assert_eq!(pan.cells_x, i32::MAX);
+        assert_eq!(pan.cells_y, i32::MAX);
+    }
+
+    #[test]
+    fn pan_pixel_origin_saturates_before_unsigned_overflow() {
+        let pan = PanOffset {
+            cells_x: i32::MAX,
+            cells_y: i32::MAX,
+        };
+
+        let origin = pan.pixel_origin(u32::MAX, u32::MAX, 3, 3);
+
+        assert_eq!(origin, (u32::MAX, u32::MAX));
+    }
+
+    #[test]
+    fn pan_pixel_bounds_clamp_negative_cells_to_zero() {
+        let mut pan = PanOffset {
+            cells_x: -1,
+            cells_y: -2,
+        };
+
+        pan.clamp_to_pixel_bounds(100, 200, 10, 20);
+        let origin = pan.pixel_origin(100, 200, 10, 20);
+
+        assert_eq!(pan, PanOffset::default());
+        assert_eq!(origin, (0, 0));
     }
 }

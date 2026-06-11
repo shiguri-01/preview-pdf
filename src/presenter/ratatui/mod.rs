@@ -19,6 +19,7 @@ use super::encode::{
     EncodeLaneKind, EncodeWorkerEvent, EncodeWorkerRequest, EncodeWorkerResult,
     EncodeWorkerRuntime, spawn_encode_worker,
 };
+use super::image_ops::font_size_px;
 use super::l2_cache::{
     L2_MAX_ENTRIES, L2_MEMORY_BUDGET_BYTES, TerminalFrameCache, TerminalFrameKey,
     TerminalFrameState,
@@ -539,7 +540,7 @@ impl ImagePresenter for RatatuiImagePresenter {
         PresenterCaps {
             backend_name: "ratatui-image",
             supports_l2_cache: true,
-            cell_px: Some(self.config.picker.font_size()),
+            cell_px: Some(font_size_px(self.config.picker.font_size())),
             preferred_max_render_scale: preferred_max_render_scale(self.config.protocol_type),
         }
     }

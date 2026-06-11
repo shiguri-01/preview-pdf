@@ -14,7 +14,7 @@ use crate::backend::RgbaFrame;
 use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
 use crate::work::WorkClass;
 
-use super::image_ops::{create_protocol_with_picker, resize_frame_for_area};
+use super::image_ops::{create_protocol_with_picker, font_size_px, resize_frame_for_area};
 use super::l2_cache::TerminalFrameKey;
 
 pub(crate) const ENCODE_RESIZE_FILTER: FilterType = FilterType::Nearest;
@@ -330,7 +330,7 @@ fn encode_worker_main(
         let frame = match resize_frame_for_area(
             task.frame,
             task.area,
-            task.picker.font_size(),
+            font_size_px(task.picker.font_size()),
             task.allow_upscale,
         ) {
             Ok(frame) => frame,
@@ -378,7 +378,7 @@ fn encode_worker_main(
                 continue;
             }
         };
-        protocol.resize_encode(&Resize::Fit(Some(ENCODE_RESIZE_FILTER)), task.area);
+        protocol.resize_encode(&Resize::Fit(Some(ENCODE_RESIZE_FILTER)), task.area.into());
         let succeeded = protocol
             .last_encoding_result()
             .map(|result| result.is_ok())

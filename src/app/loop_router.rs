@@ -308,10 +308,13 @@ impl App {
         S: TerminalSurface,
     {
         runtime.reload_in_flight = false;
+        if self.start_pending_document_reload(runtime, document) {
+            return Ok(());
+        }
+
         match reload.result {
             Ok(pdf) => {
-                if let Err(err) = self.apply_document_reload(runtime, document, pdf, reload.reason)
-                {
+                if let Err(err) = self.apply_document_reload(runtime, document, pdf) {
                     self.state
                         .set_error_notice(format!("Could not reload document: {err}"));
                     self.request_redraw(runtime, RedrawReason::AppEvent);
@@ -322,9 +325,6 @@ impl App {
                     self.state
                         .set_error_notice(format!("Could not reload document: {message}"));
                     self.request_redraw(runtime, RedrawReason::AppEvent);
-                } else if runtime.pending_reload.is_some() {
-                    // A fresh change arrived while the failed reload was running; handle it below
-                    // instead of spending a retry attempt on the stale result.
                 } else if self.schedule_file_reload_retry(runtime) {
                     return Ok(());
                 } else {
@@ -336,10 +336,23 @@ impl App {
             }
         }
 
+        self.start_pending_document_reload(runtime, document);
+        Ok(())
+    }
+
+    fn start_pending_document_reload<S>(
+        &mut self,
+        runtime: &mut LoopRuntime<S>,
+        document: &ActiveDocument,
+    ) -> bool
+    where
+        S: TerminalSurface,
+    {
         if let Some(request) = runtime.pending_reload.take() {
             self.request_document_reload(runtime, document, request);
+            return true;
         }
-        Ok(())
+        false
     }
 
     fn schedule_file_reload_retry<S>(&mut self, runtime: &mut LoopRuntime<S>) -> bool
@@ -364,7 +377,6 @@ impl App {
         runtime: &mut LoopRuntime<S>,
         document: &mut ActiveDocument,
         pdf: SharedPdfBackend,
-        reason: DocumentReloadReason,
     ) -> AppResult<()>
     where
         S: TerminalSurface,
@@ -372,21 +384,13 @@ impl App {
         if pdf.page_count() == 0 {
             return Err(AppError::invalid_argument("reloaded pdf has no pages"));
         }
-        if pdf.doc_id() == document.pdf.doc_id() {
-            runtime.reload_retry_attempts = 0;
-            if matches!(reason, DocumentReloadReason::Manual) {
-                self.state.clear_notice();
-                self.request_redraw(runtime, RedrawReason::Command);
-            }
-            return Ok(());
-        }
-
         let old_doc_id = document.pdf.doc_id();
         runtime.reload_retry_attempts = 0;
         document.replace(Arc::clone(&pdf));
         runtime.page_count = pdf.page_count();
         self.state.current_page = self.state.current_page.min(runtime.page_count - 1);
         self.state.normalize_current_page(runtime.page_count);
+        self.state.clear_reload_notice();
         self.state.clear_render_notice();
 
         self.render.runtime.l1_cache.remove_doc(old_doc_id);

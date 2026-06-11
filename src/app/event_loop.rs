@@ -1039,6 +1039,107 @@ mod tests {
     }
 
     #[test]
+    fn document_reload_success_applies_even_when_doc_id_matches() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let file = unique_temp_path("reload_same_doc_id.pdf");
+        fs::write(&file, build_pdf(&["same content"])).expect("test pdf should be created");
+        let first =
+            Arc::new(PdfDoc::open(&file).expect("first pdf should open")) as SharedPdfBackend;
+        let second =
+            Arc::new(PdfDoc::open(&file).expect("second pdf should open")) as SharedPdfBackend;
+        assert_eq!(first.doc_id(), second.doc_id());
+        assert!(!Arc::ptr_eq(&first, &second));
+
+        let mut document = ActiveDocument::new(Arc::clone(&first));
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&first),
+                first.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.ui_actor.clear_redraw();
+        runtime.reload_in_flight = true;
+        runtime.reload_retry_attempts = 2;
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
+                reason: DocumentReloadReason::Manual,
+                result: Ok(Arc::clone(&second)),
+            })),
+            &mut runtime,
+            &mut document,
+        )
+        .expect("reload result should be handled");
+
+        assert!(Arc::ptr_eq(&document.pdf, &second));
+        assert_eq!(runtime.reload_retry_attempts, 0);
+        assert!(runtime.ui_actor.needs_redraw());
+        fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn document_reload_success_clears_previous_reload_notice() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let file = unique_temp_path("reload_clears_notice.pdf");
+        fs::write(&file, build_pdf(&["one"])).expect("first test pdf should be created");
+        let first =
+            Arc::new(PdfDoc::open(&file).expect("first pdf should open")) as SharedPdfBackend;
+        let mut document = ActiveDocument::new(Arc::clone(&first));
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        app.state
+            .set_warning_notice("Could not reload changed document: still invalid");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&first),
+                first.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.reload_in_flight = true;
+
+        fs::write(&file, build_pdf(&["two"])).expect("second test pdf should replace first");
+        let second =
+            Arc::new(PdfDoc::open(&file).expect("second pdf should open")) as SharedPdfBackend;
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
+                reason: DocumentReloadReason::FileChanged,
+                result: Ok(second),
+            })),
+            &mut runtime,
+            &mut document,
+        )
+        .expect("reload result should be handled");
+
+        assert!(app.state.notice.is_none());
+        fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
     fn manual_document_reload_failure_keeps_previous_document() {
         let tokio_runtime = Builder::new_current_thread()
             .enable_all()
@@ -1297,6 +1398,69 @@ mod tests {
         assert_eq!(runtime.reload_retry_attempts, 0);
         assert!(app.state.notice.is_none());
         assert!(!runtime.ui_actor.needs_redraw());
+    }
+
+    #[test]
+    fn stale_file_reload_success_yields_to_pending_fresh_reload() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let file = unique_temp_path("reload_stale_success.pdf");
+        fs::write(&file, build_pdf(&["one", "two", "three"]))
+            .expect("first test pdf should be created");
+        let first =
+            Arc::new(PdfDoc::open(&file).expect("first pdf should open")) as SharedPdfBackend;
+        let old_doc_id = first.doc_id();
+        let mut document = ActiveDocument::new(Arc::clone(&first));
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&first),
+                first.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.ui_actor.clear_redraw();
+        runtime.reload_in_flight = true;
+        runtime.reload_retry_attempts = 2;
+        runtime.pending_reload = Some(DocumentReloadRequest::new(
+            DocumentReloadReason::FileChanged,
+        ));
+
+        fs::write(&file, build_pdf(&["stale one", "stale two"]))
+            .expect("second test pdf should replace first");
+        let stale =
+            Arc::new(PdfDoc::open(&file).expect("stale pdf should open")) as SharedPdfBackend;
+        assert_ne!(old_doc_id, stale.doc_id());
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
+                reason: DocumentReloadReason::FileChanged,
+                result: Ok(stale),
+            })),
+            &mut runtime,
+            &mut document,
+        )
+        .expect("reload result should be handled");
+
+        assert_eq!(document.pdf.doc_id(), old_doc_id);
+        assert!(runtime.reload_in_flight);
+        assert!(runtime.pending_reload.is_none());
+        assert_eq!(runtime.reload_retry_attempts, 0);
+        assert!(app.state.notice.is_none());
+        assert!(!runtime.ui_actor.needs_redraw());
+
+        runtime.loop_event_runtime.shutdown();
+        fs::remove_file(&file).expect("test file should be removed");
     }
 
     #[test]

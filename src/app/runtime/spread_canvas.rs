@@ -67,14 +67,12 @@ pub(super) fn layout(request: SpreadCanvasLayoutRequest) -> SpreadCanvasLayout {
     let mut pan = request.pan;
     let max_x = canvas_width.saturating_sub(viewport_width_px);
     let max_y = canvas_height.saturating_sub(viewport_height_px);
-    let max_cells_x = (max_x / u32::from(cell_width_px)) as i32;
-    let max_cells_y = (max_y / u32::from(cell_height_px)) as i32;
-    pan.cells_x = pan.cells_x.clamp(0, max_cells_x);
-    pan.cells_y = pan.cells_y.clamp(0, max_cells_y);
+    pan.clamp_to_pixel_bounds(max_x, max_y, cell_width_px, cell_height_px);
+    let (origin_x, origin_y) = pan.pixel_origin(max_x, max_y, cell_width_px, cell_height_px);
 
     let view = CanvasView {
-        x: pan.cells_x.saturating_mul(i32::from(cell_width_px)).max(0) as u32,
-        y: pan.cells_y.saturating_mul(i32::from(cell_height_px)).max(0) as u32,
+        x: origin_x,
+        y: origin_y,
         width: viewport_width_px,
         height: viewport_height_px,
         viewport: request.viewport,
@@ -300,5 +298,43 @@ mod tests {
             layout.clips.map(|clip| clip.map(|clip| clip.render_area)),
             [None, Some(Rect::new(4, 0, 6, 5))]
         );
+    }
+
+    #[test]
+    fn clamps_pan_for_oversized_canvas_without_signed_overflow() {
+        let layout = layout(SpreadCanvasLayoutRequest {
+            pages: [
+                Some(SpreadCanvasPage {
+                    width: u32::MAX,
+                    height: u32::MAX,
+                }),
+                None,
+            ],
+            viewport: Viewport {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            pan: PanOffset {
+                cells_x: i32::MAX,
+                cells_y: i32::MAX,
+            },
+            cell_px: Some((1, 1)),
+            gap_px: 0,
+        });
+
+        assert_eq!(
+            layout.pan,
+            PanOffset {
+                cells_x: i32::MAX,
+                cells_y: i32::MAX
+            }
+        );
+        let clip = layout.clips[0].expect("oversized page should intersect the viewport");
+        assert_eq!(clip.crop_x, i32::MAX as u32);
+        assert_eq!(clip.crop_y, i32::MAX as u32);
+        assert_eq!(clip.crop_width, 1);
+        assert_eq!(clip.crop_height, 1);
     }
 }

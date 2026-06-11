@@ -75,6 +75,27 @@ pub(crate) fn prepare_presenter_frame(
     (frame, *pan)
 }
 
+pub(crate) fn effective_pan_for_viewport(
+    frame: &RgbaFrame,
+    viewport: Viewport,
+    pan: PanOffset,
+    cell_px: Option<(u16, u16)>,
+    enable_crop: bool,
+) -> PanOffset {
+    if !enable_crop {
+        return PanOffset::default();
+    }
+
+    let (cell_width_px, cell_height_px) = resolved_cell_size_px(cell_px);
+    let target_width = (viewport.width.max(1) as u32).saturating_mul(cell_width_px as u32);
+    let target_height = (viewport.height.max(1) as u32).saturating_mul(cell_height_px as u32);
+    let max_x = frame.width.saturating_sub(target_width);
+    let max_y = frame.height.saturating_sub(target_height);
+    let mut effective_pan = pan;
+    effective_pan.clamp_to_pixel_bounds(max_x, max_y, cell_width_px, cell_height_px);
+    effective_pan
+}
+
 pub(crate) fn crop_frame_for_viewport(
     frame: &RgbaFrame,
     viewport: Viewport,

@@ -11,7 +11,8 @@ use crate::render::cache::RenderedPageKey;
 use crate::work::WorkClass;
 
 use super::super::frame_ops::{
-    PageRenderSpace, apply_highlight_overlay, crop_frame_region, prepare_presenter_frame,
+    PageRenderSpace, apply_highlight_overlay, crop_frame_region, effective_pan_for_viewport,
+    prepare_presenter_frame,
 };
 use super::super::state::VisiblePageSlots;
 use super::RenderRuntime;
@@ -70,26 +71,35 @@ pub(crate) struct PrefetchEncodeRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CachePrepareResult<T> {
     Prepared(T),
-    Miss { pan: PanOffset },
+    Miss,
 }
 
 pub(crate) struct PreparedPresenterSlots {
     slots: Vec<Option<PreparedPresenterSlot>>,
-    pan: PanOffset,
+    #[cfg(test)]
+    effective_pan: PanOffset,
 }
 
 impl PreparedPresenterSlots {
-    fn new(slots: Vec<Option<PreparedPresenterSlot>>, pan: PanOffset) -> Self {
-        Self { slots, pan }
+    fn new(
+        slots: Vec<Option<PreparedPresenterSlot>>,
+        #[cfg_attr(not(test), allow(unused_variables))] effective_pan: PanOffset,
+    ) -> Self {
+        Self {
+            slots,
+            #[cfg(test)]
+            effective_pan,
+        }
     }
 
     #[cfg(test)]
-    fn single(slot: PreparedPresenterSlot, pan: PanOffset) -> Self {
-        Self::new(vec![Some(slot)], pan)
+    fn single(slot: PreparedPresenterSlot, effective_pan: PanOffset) -> Self {
+        Self::new(vec![Some(slot)], effective_pan)
     }
 
-    pub(crate) fn pan(&self) -> PanOffset {
-        self.pan
+    #[cfg(test)]
+    pub(crate) fn effective_pan(&self) -> PanOffset {
+        self.effective_pan
     }
 
     pub(crate) fn presenter_slots(&self, generation: u64) -> Vec<PresenterSlot<'_>> {
@@ -103,7 +113,6 @@ impl PreparedPresenterSlots {
 pub(crate) struct PreparedSpreadCanvas {
     presenter_slots: [Option<PreparedPresenterSlot>; 2],
     render_slots: [PreparedRenderSlot; 2],
-    pan: PanOffset,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,10 +135,6 @@ impl PreparedRenderSlot {
 }
 
 impl PreparedSpreadCanvas {
-    pub(crate) fn pan(&self) -> PanOffset {
-        self.pan
-    }
-
     #[cfg(test)]
     pub(crate) fn render_areas(&self) -> [Option<Rect>; 2] {
         self.render_slots
@@ -171,6 +176,12 @@ struct PreparedPresenterSlot {
     viewport: Viewport,
     pan: PanOffset,
     overlay_stamp: u64,
+}
+
+struct CachedPageSlot {
+    key: RenderedPageKey,
+    frame: RgbaFrame,
+    viewport: Viewport,
 }
 
 struct CachedDecoratedPage {
@@ -229,20 +240,10 @@ impl RenderRuntime {
         doc: &dyn PdfBackend,
         request: PageSlotPrepareRequest<'_>,
     ) -> AppResult<CachePrepareResult<PreparedPresenterSlots>> {
-        let Some(mut prepared) = self.build_page_slots_from_cache(doc, request)? else {
+        let Some(prepared) = self.build_page_slots_from_cache(doc, request)? else {
             self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
-            return Ok(CachePrepareResult::Miss { pan: request.pan });
+            return Ok(CachePrepareResult::Miss);
         };
-
-        if prepared.pan != request.pan {
-            let normalized_request = PageSlotPrepareRequest {
-                pan: prepared.pan,
-                ..request
-            };
-            if let Some(rebuilt) = self.build_page_slots_from_cache(doc, normalized_request)? {
-                prepared = rebuilt;
-            }
-        }
 
         Ok(CachePrepareResult::Prepared(prepared))
     }
@@ -306,12 +307,11 @@ impl RenderRuntime {
         }
 
         if presenter_slots.iter().all(Option::is_none) {
-            return Ok(CachePrepareResult::Miss { pan: layout.pan });
+            return Ok(CachePrepareResult::Miss);
         }
         Ok(CachePrepareResult::Prepared(PreparedSpreadCanvas {
             presenter_slots,
             render_slots,
-            pan: layout.pan,
         }))
     }
 
@@ -356,46 +356,76 @@ impl RenderRuntime {
         doc: &dyn PdfBackend,
         request: PageSlotPrepareRequest<'_>,
     ) -> AppResult<Option<PreparedPresenterSlots>> {
-        let mut prepared = Vec::new();
-        let mut normalized_pan = PanOffset {
-            cells_x: request.pan.cells_x.max(0),
-            cells_y: request.pan.cells_y.max(0),
-        };
-        let mut saw_cached_page = false;
+        let mut cached = Vec::with_capacity(request.page_slots.len());
+        let mut effective_pan: Option<PanOffset> = None;
 
         for (key, viewport) in request.page_slots {
             let Some(key) = *key else {
-                prepared.push(None);
+                cached.push(None);
                 continue;
             };
             let Some(frame) = self.l1_cache.get(&key) else {
+                cached.push(None);
+                continue;
+            };
+            let frame = frame.clone();
+            let slot_effective_pan = effective_pan_for_viewport(
+                &frame,
+                *viewport,
+                request.pan,
+                request.options.cell_px,
+                request.options.crop,
+            );
+            effective_pan = Some(match effective_pan {
+                Some(pan) => PanOffset {
+                    cells_x: pan.cells_x.min(slot_effective_pan.cells_x),
+                    cells_y: pan.cells_y.min(slot_effective_pan.cells_y),
+                },
+                None => slot_effective_pan,
+            });
+            cached.push(Some(CachedPageSlot {
+                key,
+                frame,
+                viewport: *viewport,
+            }));
+        }
+
+        let Some(effective_pan) = effective_pan else {
+            self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
+            return Ok(None);
+        };
+
+        let mut prepared = Vec::with_capacity(cached.len());
+        for slot in cached {
+            let Some(slot) = slot else {
                 prepared.push(None);
                 continue;
             };
-            saw_cached_page = true;
-            let (frame, overlay_stamp) =
-                decorate_single_page_frame(doc, key.page, frame, request.options.overlay);
-            let mut slot_pan = request.pan;
+            let (frame, overlay_stamp) = decorate_single_page_frame(
+                doc,
+                slot.key.page,
+                &slot.frame,
+                request.options.overlay,
+            );
+            let mut slot_pan = effective_pan;
             let (frame, pan_for_presenter) = prepare_presenter_frame(
                 &frame,
-                *viewport,
+                slot.viewport,
                 &mut slot_pan,
                 request.options.cell_px,
                 request.options.crop,
             );
-            normalized_pan.cells_x = normalized_pan.cells_x.min(slot_pan.cells_x);
-            normalized_pan.cells_y = normalized_pan.cells_y.min(slot_pan.cells_y);
             prepared.push(Some(PreparedPresenterSlot {
-                cache_key: key,
+                cache_key: slot.key,
                 frame,
-                viewport: *viewport,
+                viewport: slot.viewport,
                 pan: pan_for_presenter,
                 overlay_stamp,
             }));
         }
 
         self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
-        Ok(saw_cached_page.then(|| PreparedPresenterSlots::new(prepared, normalized_pan)))
+        Ok(Some(PreparedPresenterSlots::new(prepared, effective_pan)))
     }
 
     fn cached_decorated_page(

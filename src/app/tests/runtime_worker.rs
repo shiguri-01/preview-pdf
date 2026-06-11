@@ -208,7 +208,7 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
             },
         )
         .and_then(|prepared| {
-            pan = prepared.pan();
+            pan = prepared.effective_pan();
             let slots = prepared.presenter_slots(0);
             presenter.prepare_slots(&slots)
         })
@@ -229,7 +229,7 @@ fn prepare_current_page_updates_l1_and_presenter_metrics() {
             },
         )
         .and_then(|prepared| {
-            pan = prepared.pan();
+            pan = prepared.effective_pan();
             let slots = prepared.presenter_slots(0);
             presenter.prepare_slots(&slots)
         })
@@ -301,7 +301,7 @@ fn prepare_current_page_uses_zero_overlay_stamp_when_decoration_falls_back() {
             },
         )
         .and_then(|prepared| {
-            pan = prepared.pan();
+            pan = prepared.effective_pan();
             let slots = prepared.presenter_slots(0);
             presenter.prepare_slots(&slots)
         })

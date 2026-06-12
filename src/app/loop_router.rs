@@ -230,8 +230,10 @@ impl App {
         }
         let state_before_command = self.state.clone();
         let previous_page = self.state.current_page;
+        let view_policy = self.view_policy;
         let dispatch = match self.interaction.dispatch_command(
             &mut self.state,
+            view_policy,
             request,
             Arc::clone(&document.pdf),
         ) {

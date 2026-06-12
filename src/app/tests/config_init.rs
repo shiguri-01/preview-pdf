@@ -1,7 +1,9 @@
 use std::time::Duration;
 
-use crate::app::{App, AppBuilder};
-use crate::config::{AppOptions, CacheOptions, Config, InputOptions, RenderOptions};
+use crate::app::{App, AppBuilder, PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
+use crate::config::{
+    AppOptions, CacheOptions, Config, InputOptions, RenderOptions, ViewOptions, WatchOptions,
+};
 use crate::presenter::PresenterKind;
 
 #[test]
@@ -82,6 +84,18 @@ fn new_with_options_threads_runtime_policies_to_owners() {
         input: InputOptions {
             sequence_timeout_ms: Some(250),
         },
+        view: ViewOptions {
+            initial_page: Some(3),
+            initial_zoom: Some(1.25),
+            initial_layout: Some(PageLayoutMode::Spread),
+            spread_direction: Some(SpreadDirection::Rtl),
+            spread_cover: Some(SpreadCoverPolicy::Cover),
+        },
+        watch: WatchOptions {
+            enabled: Some(true),
+            poll_interval_ms: Some(125),
+            settle_delay_ms: Some(375),
+        },
         ..AppOptions::default()
     };
 
@@ -114,4 +128,33 @@ fn new_with_options_threads_runtime_policies_to_owners() {
         app.interaction.sequences.resolver.timeout(),
         Duration::from_millis(250)
     );
+    assert_eq!(app.state.current_page, 2);
+    assert_eq!(app.state.zoom, 1.25);
+    assert_eq!(app.state.page_layout_mode, PageLayoutMode::Spread);
+    assert_eq!(app.state.spread_direction, SpreadDirection::Rtl);
+    assert_eq!(app.state.spread_cover_policy, SpreadCoverPolicy::Cover);
+    assert!(app.run_options().watch);
+    assert!(app.watch_policy.enabled);
+    assert_eq!(app.watch_policy.poll_interval, Duration::from_millis(125));
+    assert_eq!(app.watch_policy.settle_delay, Duration::from_millis(375));
+}
+
+#[test]
+fn set_watch_overrides_configured_watch_enabled() {
+    let options = AppOptions {
+        watch: WatchOptions {
+            enabled: Some(true),
+            ..WatchOptions::default()
+        },
+        ..AppOptions::default()
+    };
+
+    let mut app = App::new_with_options(PresenterKind::RatatuiImage, options).expect("app init");
+    assert!(app.run_options().watch);
+    assert!(app.watch_policy.enabled);
+
+    app.set_watch(false);
+
+    assert!(!app.run_options().watch);
+    assert!(!app.watch_policy.enabled);
 }

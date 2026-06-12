@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::config::Config;
 use crate::config::{
     AppOptions, AppOptionsResolver, CachePolicy, EventLoopPolicy, InputPolicy, RenderPolicy,
-    ResolvedAppOptions, load_default_app_options,
+    ResolvedAppOptions, ViewPolicy, WatchPolicy, load_default_app_options,
 };
 use crate::error::AppResult;
 use crate::extension::ExtensionHost;
@@ -107,7 +107,9 @@ pub struct App {
     pub render: RenderSubsystem,
     pub interaction: InteractionSubsystem,
     pub(crate) render_policy: RenderPolicy,
+    pub(crate) view_policy: ViewPolicy,
     pub(crate) event_loop_policy: EventLoopPolicy,
+    pub(crate) watch_policy: WatchPolicy,
     run_options: RunOptions,
 }
 
@@ -176,11 +178,20 @@ impl App {
         run_options: RunOptions,
     ) -> AppResult<Self> {
         let cache = options.cache;
+        let view = options.view;
+        let watch = options.watch;
         let presenter = create_presenter_with_cache_limits(
             presenter_kind,
             Some((cache.l2_max_entries, cache.l2_memory_budget_bytes())),
         )?;
-        let mut state = AppState::default();
+        let mut state = AppState {
+            current_page: view.initial_page_index,
+            page_layout_mode: view.initial_layout,
+            spread_direction: view.spread_direction,
+            spread_cover_policy: view.spread_cover,
+            zoom: view.initial_zoom,
+            ..AppState::default()
+        };
         state.caches.l1_rendered_pages = Some(CacheHandle {
             name: "l1-rendered-pages",
         });
@@ -195,13 +206,18 @@ impl App {
             render: RenderSubsystem::new(presenter, render_runtime_from_cache_policy(cache)),
             interaction: InteractionSubsystem::with_input_policy(options.input),
             render_policy: options.render,
+            view_policy: view,
             event_loop_policy: options.event_loop,
-            run_options,
+            watch_policy: watch,
+            run_options: RunOptions {
+                watch: run_options.watch || watch.enabled,
+            },
         })
     }
 
     pub fn set_watch(&mut self, watch: bool) {
         self.run_options.watch = watch;
+        self.watch_policy.enabled = watch;
     }
 
     pub(crate) fn run_options(&self) -> RunOptions {

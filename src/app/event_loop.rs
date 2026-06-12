@@ -55,9 +55,12 @@ impl App {
             .loop_event_runtime
             .start_input(runtime.loop_event_tx.clone());
         if options.watch {
-            runtime
-                .loop_event_runtime
-                .start_file_watch(document.path.clone(), runtime.loop_event_tx.clone());
+            runtime.loop_event_runtime.start_file_watch(
+                document.path.clone(),
+                self.watch_policy.poll_interval,
+                self.watch_policy.settle_delay,
+                runtime.loop_event_tx.clone(),
+            );
         }
         let result = self.run_interactive_loop(&mut runtime, &mut document).await;
         runtime.loop_event_runtime.shutdown();

@@ -4,15 +4,19 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
+use crate::app::scale::{ZOOM_MAX, ZOOM_MIN};
+use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 use crate::error::{AppError, AppResult};
 use crate::input::keymap::build_builtin_sequence_registry;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry};
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
-#[serde(default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Config {
     pub render: RenderConfig,
     pub cache: CacheConfig,
+    pub view: ViewConfig,
+    pub input: InputConfig,
+    pub watch: WatchConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -79,11 +83,65 @@ impl CacheConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewConfig {
+    pub initial_page: usize,
+    pub initial_zoom: f32,
+    pub initial_layout: PageLayoutMode,
+    pub spread_direction: SpreadDirection,
+    pub spread_cover: SpreadCoverPolicy,
+}
+
+impl Default for ViewConfig {
+    fn default() -> Self {
+        Self {
+            initial_page: 1,
+            initial_zoom: 1.0,
+            initial_layout: PageLayoutMode::Single,
+            spread_direction: SpreadDirection::Ltr,
+            spread_cover: SpreadCoverPolicy::Paired,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputConfig {
+    pub sequence_timeout_ms: u64,
+}
+
+impl Default for InputConfig {
+    fn default() -> Self {
+        Self {
+            sequence_timeout_ms: DEFAULT_SEQUENCE_TIMEOUT.as_millis() as u64,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchConfig {
+    pub enabled: bool,
+    pub poll_interval_ms: u64,
+    pub settle_delay_ms: u64,
+}
+
+impl Default for WatchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            poll_interval_ms: 250,
+            settle_delay_ms: 500,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
 #[serde(default)]
 struct RawConfig {
     render: Option<RawRenderConfig>,
     cache: Option<RawCacheConfig>,
+    view: Option<RawViewConfig>,
+    input: Option<RawInputConfig>,
+    watch: Option<RawWatchConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
@@ -108,18 +166,46 @@ struct RawCacheConfig {
     l2_max_entries: Option<usize>,
 }
 
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+#[serde(default)]
+struct RawViewConfig {
+    initial_page: Option<usize>,
+    initial_zoom: Option<f32>,
+    initial_layout: Option<String>,
+    spread_direction: Option<String>,
+    spread_cover: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+struct RawInputConfig {
+    sequence_timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+struct RawWatchConfig {
+    enabled: Option<bool>,
+    poll_interval_ms: Option<u64>,
+    settle_delay_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AppOptions {
     pub render: RenderOptions,
     pub cache: CacheOptions,
+    pub view: ViewOptions,
     pub input: InputOptions,
+    pub watch: WatchOptions,
 }
 
 impl AppOptions {
     pub fn merge(mut self, next: Self) -> Self {
         self.render = self.render.merge(next.render);
         self.cache = self.cache.merge(next.cache);
+        self.view = self.view.merge(next.view);
         self.input = self.input.merge(next.input);
+        self.watch = self.watch.merge(next.watch);
         self
     }
 }
@@ -145,18 +231,68 @@ impl From<Config> for AppOptions {
                 l1_max_entries: Some(config.cache.l1_max_entries),
                 l2_max_entries: Some(config.cache.l2_max_entries),
             },
-            input: InputOptions::default(),
+            view: ViewOptions {
+                initial_page: Some(config.view.initial_page),
+                initial_zoom: Some(config.view.initial_zoom),
+                initial_layout: Some(config.view.initial_layout),
+                spread_direction: Some(config.view.spread_direction),
+                spread_cover: Some(config.view.spread_cover),
+            },
+            input: InputOptions {
+                sequence_timeout_ms: Some(config.input.sequence_timeout_ms),
+            },
+            watch: WatchOptions {
+                enabled: Some(config.watch.enabled),
+                poll_interval_ms: Some(config.watch.poll_interval_ms),
+                settle_delay_ms: Some(config.watch.settle_delay_ms),
+            },
         }
     }
 }
 
-impl From<RawConfig> for AppOptions {
-    fn from(raw: RawConfig) -> Self {
-        Self {
-            render: raw.render.map(RenderOptions::from).unwrap_or_default(),
-            cache: raw.cache.map(CacheOptions::from).unwrap_or_default(),
-            input: InputOptions::default(),
-        }
+impl RawConfig {
+    fn into_options(self) -> AppResult<AppOptions> {
+        Ok(AppOptions {
+            render: self.render.map(RenderOptions::from).unwrap_or_default(),
+            cache: self.cache.map(CacheOptions::from).unwrap_or_default(),
+            view: self
+                .view
+                .map(ViewOptions::try_from)
+                .transpose()?
+                .unwrap_or_default(),
+            input: self.input.map(InputOptions::from).unwrap_or_default(),
+            watch: self.watch.map(WatchOptions::from).unwrap_or_default(),
+        })
+    }
+}
+
+fn parse_page_layout_mode(value: &str) -> AppResult<PageLayoutMode> {
+    match value {
+        "single" => Ok(PageLayoutMode::Single),
+        "spread" => Ok(PageLayoutMode::Spread),
+        _ => Err(AppError::invalid_argument(format!(
+            "unknown view.initial_layout: {value}"
+        ))),
+    }
+}
+
+fn parse_spread_direction(value: &str) -> AppResult<SpreadDirection> {
+    match value {
+        "ltr" => Ok(SpreadDirection::Ltr),
+        "rtl" => Ok(SpreadDirection::Rtl),
+        _ => Err(AppError::invalid_argument(format!(
+            "unknown view.spread_direction: {value}"
+        ))),
+    }
+}
+
+fn parse_spread_cover(value: &str) -> AppResult<SpreadCoverPolicy> {
+    match value {
+        "paired" => Ok(SpreadCoverPolicy::Paired),
+        "cover" => Ok(SpreadCoverPolicy::Cover),
+        _ => Err(AppError::invalid_argument(format!(
+            "unknown view.spread_cover: {value}"
+        ))),
     }
 }
 
@@ -240,6 +376,53 @@ impl From<RawCacheConfig> for CacheOptions {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ViewOptions {
+    pub initial_page: Option<usize>,
+    pub initial_zoom: Option<f32>,
+    pub initial_layout: Option<PageLayoutMode>,
+    pub spread_direction: Option<SpreadDirection>,
+    pub spread_cover: Option<SpreadCoverPolicy>,
+}
+
+impl ViewOptions {
+    fn merge(self, next: Self) -> Self {
+        Self {
+            initial_page: next.initial_page.or(self.initial_page),
+            initial_zoom: next.initial_zoom.or(self.initial_zoom),
+            initial_layout: next.initial_layout.or(self.initial_layout),
+            spread_direction: next.spread_direction.or(self.spread_direction),
+            spread_cover: next.spread_cover.or(self.spread_cover),
+        }
+    }
+}
+
+impl TryFrom<RawViewConfig> for ViewOptions {
+    type Error = AppError;
+
+    fn try_from(raw: RawViewConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            initial_page: raw.initial_page,
+            initial_zoom: raw.initial_zoom,
+            initial_layout: raw
+                .initial_layout
+                .as_deref()
+                .map(parse_page_layout_mode)
+                .transpose()?,
+            spread_direction: raw
+                .spread_direction
+                .as_deref()
+                .map(parse_spread_direction)
+                .transpose()?,
+            spread_cover: raw
+                .spread_cover
+                .as_deref()
+                .map(parse_spread_cover)
+                .transpose()?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InputOptions {
     pub sequence_timeout_ms: Option<u64>,
@@ -249,6 +432,41 @@ impl InputOptions {
     fn merge(self, next: Self) -> Self {
         Self {
             sequence_timeout_ms: next.sequence_timeout_ms.or(self.sequence_timeout_ms),
+        }
+    }
+}
+
+impl From<RawInputConfig> for InputOptions {
+    fn from(raw: RawInputConfig) -> Self {
+        Self {
+            sequence_timeout_ms: raw.sequence_timeout_ms,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WatchOptions {
+    pub enabled: Option<bool>,
+    pub poll_interval_ms: Option<u64>,
+    pub settle_delay_ms: Option<u64>,
+}
+
+impl WatchOptions {
+    fn merge(self, next: Self) -> Self {
+        Self {
+            enabled: next.enabled.or(self.enabled),
+            poll_interval_ms: next.poll_interval_ms.or(self.poll_interval_ms),
+            settle_delay_ms: next.settle_delay_ms.or(self.settle_delay_ms),
+        }
+    }
+}
+
+impl From<RawWatchConfig> for WatchOptions {
+    fn from(raw: RawWatchConfig) -> Self {
+        Self {
+            enabled: raw.enabled,
+            poll_interval_ms: raw.poll_interval_ms,
+            settle_delay_ms: raw.settle_delay_ms,
         }
     }
 }
@@ -284,9 +502,11 @@ pub fn load_options_from_explicit_path(path: impl AsRef<Path>) -> AppResult<AppO
 #[derive(Debug, Clone)]
 pub struct ResolvedAppOptions {
     pub render: RenderPolicy,
+    pub view: ViewPolicy,
     pub event_loop: EventLoopPolicy,
     pub cache: CachePolicy,
     pub input: InputPolicy,
+    pub watch: WatchPolicy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -365,6 +585,28 @@ impl CachePolicy {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ViewPolicy {
+    pub initial_page_index: usize,
+    pub initial_zoom: f32,
+    pub initial_layout: PageLayoutMode,
+    pub spread_direction: SpreadDirection,
+    pub spread_cover: SpreadCoverPolicy,
+}
+
+impl Default for ViewPolicy {
+    fn default() -> Self {
+        let view = ViewConfig::default();
+        Self {
+            initial_page_index: view.initial_page - 1,
+            initial_zoom: view.initial_zoom,
+            initial_layout: view.initial_layout,
+            spread_direction: view.spread_direction,
+            spread_cover: view.spread_cover,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InputPolicy {
     pub sequence_timeout: Duration,
@@ -376,6 +618,24 @@ impl Default for InputPolicy {
         Self {
             sequence_timeout: DEFAULT_SEQUENCE_TIMEOUT,
             sequence_registry: build_builtin_sequence_registry(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WatchPolicy {
+    pub enabled: bool,
+    pub poll_interval: Duration,
+    pub settle_delay: Duration,
+}
+
+impl Default for WatchPolicy {
+    fn default() -> Self {
+        let watch = WatchConfig::default();
+        Self {
+            enabled: watch.enabled,
+            poll_interval: Duration::from_millis(watch.poll_interval_ms),
+            settle_delay: Duration::from_millis(watch.settle_delay_ms),
         }
     }
 }
@@ -430,6 +690,21 @@ impl From<ResolvedAppOptions> for Config {
                 l1_max_entries: options.cache.l1_max_entries,
                 l2_max_entries: options.cache.l2_max_entries,
             },
+            view: ViewConfig {
+                initial_page: options.view.initial_page_index + 1,
+                initial_zoom: options.view.initial_zoom,
+                initial_layout: options.view.initial_layout,
+                spread_direction: options.view.spread_direction,
+                spread_cover: options.view.spread_cover,
+            },
+            input: InputConfig {
+                sequence_timeout_ms: options.input.sequence_timeout.as_millis() as u64,
+            },
+            watch: WatchConfig {
+                enabled: options.watch.enabled,
+                poll_interval_ms: options.watch.poll_interval.as_millis() as u64,
+                settle_delay_ms: options.watch.settle_delay.as_millis() as u64,
+            },
         }
     }
 }
@@ -437,6 +712,8 @@ impl From<ResolvedAppOptions> for Config {
 fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
     let render_defaults = RenderConfig::default();
     let cache_defaults = CacheConfig::default();
+    let view_defaults = ViewConfig::default();
+    let watch_defaults = WatchConfig::default();
 
     let worker_threads = options
         .render
@@ -485,11 +762,51 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
         .sequence_timeout_ms
         .unwrap_or(DEFAULT_SEQUENCE_TIMEOUT.as_millis() as u64)
         .max(1);
+    let initial_page_index = options
+        .view
+        .initial_page
+        .unwrap_or(view_defaults.initial_page)
+        .max(1)
+        - 1;
+    let mut initial_zoom = options
+        .view
+        .initial_zoom
+        .unwrap_or(view_defaults.initial_zoom);
+    if !initial_zoom.is_finite() || initial_zoom <= 0.0 {
+        initial_zoom = view_defaults.initial_zoom;
+    }
+    initial_zoom = initial_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
+    let watch_poll_interval_ms = options
+        .watch
+        .poll_interval_ms
+        .unwrap_or(watch_defaults.poll_interval_ms)
+        .max(1);
+    let watch_settle_delay_ms = options
+        .watch
+        .settle_delay_ms
+        .unwrap_or(watch_defaults.settle_delay_ms)
+        .max(1);
 
     ResolvedAppOptions {
         render: RenderPolicy {
             worker_threads,
             max_render_scale,
+        },
+        view: ViewPolicy {
+            initial_page_index,
+            initial_zoom,
+            initial_layout: options
+                .view
+                .initial_layout
+                .unwrap_or(view_defaults.initial_layout),
+            spread_direction: options
+                .view
+                .spread_direction
+                .unwrap_or(view_defaults.spread_direction),
+            spread_cover: options
+                .view
+                .spread_cover
+                .unwrap_or(view_defaults.spread_cover),
         },
         event_loop: EventLoopPolicy {
             input_poll_timeout_idle: Duration::from_millis(input_poll_timeout_idle_ms),
@@ -520,6 +837,11 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
         input: InputPolicy {
             sequence_timeout: Duration::from_millis(sequence_timeout_ms),
             sequence_registry: build_builtin_sequence_registry(),
+        },
+        watch: WatchPolicy {
+            enabled: options.watch.enabled.unwrap_or(watch_defaults.enabled),
+            poll_interval: Duration::from_millis(watch_poll_interval_ms),
+            settle_delay: Duration::from_millis(watch_settle_delay_ms),
         },
     }
 }
@@ -585,7 +907,7 @@ fn read_options_from_path(path: &Path, missing: MissingConfigPolicy) -> AppResul
             path.display()
         ))
     })?;
-    Ok(AppOptions::from(parsed))
+    parsed.into_options()
 }
 
 pub fn default_config_path() -> Option<PathBuf> {
@@ -627,8 +949,11 @@ mod tests {
 
     use std::time::Duration;
 
+    use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
+
     use super::{
-        AppOptions, AppOptionsResolver, Config, RenderOptions, load_options_from_explicit_path,
+        AppOptions, AppOptionsResolver, Config, RenderOptions, ViewOptions, WatchOptions,
+        load_options_from_explicit_path,
     };
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
@@ -666,6 +991,21 @@ mod tests {
 
             [cache]
             l1_memory_budget_mb = 256
+
+            [view]
+            initial_page = 4
+            initial_zoom = 1.25
+            initial_layout = "spread"
+            spread_direction = "rtl"
+            spread_cover = "cover"
+
+            [input]
+            sequence_timeout_ms = 333
+
+            [watch]
+            enabled = true
+            poll_interval_ms = 125
+            settle_delay_ms = 250
             "#,
         )
         .expect("config file should be written");
@@ -683,6 +1023,15 @@ mod tests {
         assert_eq!(config.cache.l2_memory_budget_mb, 64);
         assert_eq!(config.cache.l1_max_entries, 128);
         assert_eq!(config.cache.l2_max_entries, 96);
+        assert_eq!(config.view.initial_page, 4);
+        assert_eq!(config.view.initial_zoom, 1.25);
+        assert_eq!(config.view.initial_layout, PageLayoutMode::Spread);
+        assert_eq!(config.view.spread_direction, SpreadDirection::Rtl);
+        assert_eq!(config.view.spread_cover, SpreadCoverPolicy::Cover);
+        assert_eq!(config.input.sequence_timeout_ms, 333);
+        assert!(config.watch.enabled);
+        assert_eq!(config.watch.poll_interval_ms, 125);
+        assert_eq!(config.watch.settle_delay_ms, 250);
 
         fs::remove_file(&path).expect("config file should be removed");
     }
@@ -725,6 +1074,68 @@ mod tests {
         assert_eq!(options.cache.l1_memory_budget_mb, None);
         assert_eq!(options.render.worker_threads, None);
         assert_eq!(options.render.max_render_scale, None);
+        assert_eq!(options.view.initial_page, None);
+        assert_eq!(options.input.sequence_timeout_ms, None);
+        assert_eq!(options.watch.enabled, None);
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn load_options_from_explicit_path_reads_view_input_and_watch_sections() {
+        let path = unique_temp_path("view-input-watch-options.toml");
+        fs::write(
+            &path,
+            r#"
+            [view]
+            initial_page = 8
+            initial_zoom = 1.5
+            initial_layout = "spread"
+            spread_direction = "rtl"
+            spread_cover = "cover"
+
+            [input]
+            sequence_timeout_ms = 750
+
+            [watch]
+            enabled = true
+            poll_interval_ms = 100
+            settle_delay_ms = 200
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("options should parse");
+        assert_eq!(options.view.initial_page, Some(8));
+        assert_eq!(options.view.initial_zoom, Some(1.5));
+        assert_eq!(options.view.initial_layout, Some(PageLayoutMode::Spread));
+        assert_eq!(options.view.spread_direction, Some(SpreadDirection::Rtl));
+        assert_eq!(options.view.spread_cover, Some(SpreadCoverPolicy::Cover));
+        assert_eq!(options.input.sequence_timeout_ms, Some(750));
+        assert_eq!(options.watch.enabled, Some(true));
+        assert_eq!(options.watch.poll_interval_ms, Some(100));
+        assert_eq!(options.watch.settle_delay_ms, Some(200));
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn load_options_from_explicit_path_rejects_unknown_view_values() {
+        let path = unique_temp_path("bad-view-options.toml");
+        fs::write(
+            &path,
+            r#"
+            [view]
+            initial_layout = "grid"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
+        assert!(
+            err.to_string().contains("unknown view.initial_layout"),
+            "unexpected error: {err}"
+        );
 
         fs::remove_file(&path).expect("config file should be removed");
     }
@@ -752,6 +1163,18 @@ mod tests {
                 pending_redraw_interval_ms: Some(0),
                 prefetch_dispatch_budget_per_tick: Some(0),
                 max_render_scale: Some(0.5),
+            },
+            view: ViewOptions {
+                initial_page: Some(0),
+                initial_zoom: Some(10.0),
+                initial_layout: Some(PageLayoutMode::Spread),
+                spread_direction: Some(SpreadDirection::Rtl),
+                spread_cover: Some(SpreadCoverPolicy::Cover),
+            },
+            watch: WatchOptions {
+                enabled: Some(true),
+                poll_interval_ms: Some(0),
+                settle_delay_ms: Some(0),
             },
             ..AppOptions::default()
         };
@@ -781,6 +1204,14 @@ mod tests {
         );
         assert_eq!(resolved.event_loop.prefetch_dispatch_budget_per_tick, 1);
         assert_eq!(resolved.render.max_render_scale, 2.5);
+        assert_eq!(resolved.view.initial_page_index, 0);
+        assert_eq!(resolved.view.initial_zoom, 4.0);
+        assert_eq!(resolved.view.initial_layout, PageLayoutMode::Spread);
+        assert_eq!(resolved.view.spread_direction, SpreadDirection::Rtl);
+        assert_eq!(resolved.view.spread_cover, SpreadCoverPolicy::Cover);
+        assert!(resolved.watch.enabled);
+        assert_eq!(resolved.watch.poll_interval, Duration::from_millis(1));
+        assert_eq!(resolved.watch.settle_delay, Duration::from_millis(1));
     }
 
     #[test]
@@ -797,8 +1228,19 @@ mod tests {
                 worker_threads: Some(4),
                 ..RenderOptions::default()
             },
+            watch: WatchOptions {
+                enabled: Some(false),
+                ..WatchOptions::default()
+            },
             ..AppOptions::default()
         };
+        let base = base.merge(AppOptions {
+            watch: WatchOptions {
+                enabled: Some(true),
+                ..WatchOptions::default()
+            },
+            ..AppOptions::default()
+        });
 
         let resolved = AppOptionsResolver::new()
             .apply_options(base)
@@ -806,5 +1248,6 @@ mod tests {
             .resolve();
 
         assert_eq!(resolved.render.worker_threads, 4);
+        assert!(!resolved.watch.enabled);
     }
 }

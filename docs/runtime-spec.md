@@ -19,8 +19,12 @@ Supported invocations:
 ```bash
 pvf <file.pdf>
 pvf --watch <file.pdf>
+pvf --no-watch <file.pdf>
 pvf --config <config.toml> <file.pdf>
 pvf --no-config <file.pdf>
+pvf --page <page-number> <file.pdf>
+pvf --zoom <fit-ratio> <file.pdf>
+pvf --layout <single|spread> <file.pdf>
 ```
 
 Rules:
@@ -29,10 +33,15 @@ Rules:
 - The document is opened through the default backend factory.
 - `--watch` enables automatic reload of the displayed document when the input
   file changes.
+- `--no-watch` disables automatic reload for the current process.
 - `--config <path>` reads app options from a specific TOML file and requires
   that path to exist.
 - `--no-config` skips configuration file loading.
 - `--config` and `--no-config` are mutually exclusive.
+- `--watch` and `--no-watch` are mutually exclusive.
+- `--page <page-number>` sets the initial one-based page.
+- `--zoom <fit-ratio>` sets the initial zoom ratio relative to fit.
+- `--layout <single|spread>` sets the initial layout.
 - Performance diagnostics are developer tooling and are not part of the public
   viewer CLI. See `performance-diagnostics.md`.
 
@@ -122,8 +131,8 @@ Rules:
 
 - Reload
   - `reload-document` reopens the current PDF path
-  - with `--watch`, the runtime polls the current PDF path and reloads after a
-    short debounce when file metadata settles
+  - with watch enabled, the runtime polls the current PDF path and reloads
+    after a settle delay when file metadata stabilizes
   - reload success replaces the active document, clamps the current page to the
     new page count, resets render work, clears presenter output cache, and
     prewarms search text for the new document
@@ -131,10 +140,10 @@ Rules:
     query and matcher; cached outline data is cleared
   - reload failure keeps the previous document visible
   - manual reload failures show an error immediately
-  - `--watch` reload failures retry quietly with short backoff before showing a
+  - watch reload failures retry quietly with short backoff before showing a
     warning, so a save that temporarily leaves a partial PDF on disk can recover
     without user action
-  - acceptance cases for `--watch`:
+  - acceptance cases for watch:
     - replacing a valid PDF with another valid PDF updates the displayed
       document without restarting the viewer
     - replacing a valid PDF with a temporarily invalid file keeps the previous
@@ -174,79 +183,21 @@ key plus modifiers. For example, `?` and `:` are literal bindings.
 
 ## Runtime configuration
 
-Runtime configuration is resolved through a source-independent options pipeline.
-`config.toml`, CLI flags, environment lookup, tests, and future embedding APIs
-are input sources; none of those source formats are runtime state.
-
-Resolution stages:
-
-1. Source adapters read external input into partial app options.
-2. Later option patches override earlier patches.
-3. The resolver applies built-in defaults and validates/sanitizes values.
-4. The app is assembled from feature policies, initial state, and initialized
-   services.
-
-`App` does not retain the file-backed config shape. Values that are only needed
-for construction are consumed during subsystem initialization. Values needed
-during runtime are stored on the feature policy or service that uses them.
-
-Current source precedence:
-
-1. Built-in defaults
-2. `config.toml` if enabled
-3. CLI source selection for enabling, disabling, or choosing the config file
-
-Current CLI configuration source controls:
-
-- `--config <path>`: read app options from a specific TOML file
-- `--no-config`: skip configuration file loading
-
-An explicit `--config <path>` must name an existing regular file. Default
-config lookup may fall back to built-in defaults when the discovered path is
-missing.
-
-The default `config.toml` lookup order is:
-
-1. `PVF_CONFIG_PATH`
-2. `XDG_CONFIG_HOME/pvf/config.toml`
-3. `HOME/.config/pvf/config.toml`
-4. `APPDATA/pvf/config.toml`
-
-If no config path resolves, built-in defaults are used.
-
-Current TOML support remains focused on render and cache tuning.
-
-Supported configuration sections:
-
-- `[render]`
-  - `worker_threads`
-  - `input_poll_timeout_idle_ms`
-  - `input_poll_timeout_busy_ms`
-  - `prefetch_pause_ms`
-  - `prefetch_tick_ms`
-  - `pending_redraw_interval_ms`
-  - `prefetch_dispatch_budget_per_tick`
-  - `max_render_scale`
-
-- `[cache]`
-  - `l1_memory_budget_mb`
-  - `l2_memory_budget_mb`
-  - `l1_max_entries`
-  - `l2_max_entries`
-
-Missing config files fall back to defaults. Invalid numeric render values are
-sanitized to a minimum safe value, and invalid `max_render_scale` falls back to
-the default.
+Configuration fields, lookup order, and precedence are specified in
+`configuration.md`.
 
 Resolved ownership:
 
 - worker count is consumed when render workers are spawned
+- initial page, zoom, and layout are consumed when `AppState` is constructed
+- spread direction and cover defaults live in the view policy
 - input polling and redraw timing live in the event-loop policy
 - prefetch dispatch budget lives in the event-loop policy
 - render scale bounds live in the render policy
 - L1 cache limits are consumed by render runtime construction
 - L2 cache limits are consumed by presenter construction
 - key bindings are resolved into a `SequenceRegistry` before input handling
+- watch enablement and timing live in the watch policy
 
 Programmatic construction uses the same resolver without requiring TOML:
 

@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 
 use crate::app::{AppState, Mode, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
+use crate::config::ViewPolicy;
 use crate::error::AppResult;
 use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
 use crate::extension::ExtensionHost;
@@ -18,6 +19,7 @@ pub struct CommandDispatchResult {
 
 pub(super) struct CommandExecContext<'a> {
     pub app: &'a mut AppState,
+    pub view_policy: ViewPolicy,
     pub pdf: SharedPdfBackend,
     pub extension_host: &'a mut ExtensionHost,
     pub palette_requests: &'a mut VecDeque<PaletteRequest>,
@@ -66,6 +68,26 @@ pub fn dispatch(
     extension_host: &mut ExtensionHost,
     palette_requests: &mut VecDeque<PaletteRequest>,
 ) -> AppResult<CommandDispatchResult> {
+    dispatch_with_view_policy(
+        app,
+        ViewPolicy::default(),
+        cmd,
+        source,
+        pdf,
+        extension_host,
+        palette_requests,
+    )
+}
+
+pub fn dispatch_with_view_policy(
+    app: &mut AppState,
+    view_policy: ViewPolicy,
+    cmd: Command,
+    source: CommandInvocationSource,
+    pdf: SharedPdfBackend,
+    extension_host: &mut ExtensionHost,
+    palette_requests: &mut VecDeque<PaletteRequest>,
+) -> AppResult<CommandDispatchResult> {
     let command_id = cmd.command_id();
     let extensions = extension_host.ui_snapshot();
     let ctx = CommandConditionContext {
@@ -90,6 +112,7 @@ pub fn dispatch(
     let execution = execute_registered_command(
         &mut CommandExecContext {
             app,
+            view_policy,
             pdf,
             extension_host,
             palette_requests,
@@ -205,16 +228,19 @@ mod tests {
     use std::sync::Arc;
 
     use crate::app::scale::zoom_eq;
-    use crate::app::{AppState, Notice, NoticeLevel, PaletteRequest, SpreadCoverPolicy};
+    use crate::app::{
+        AppState, Notice, NoticeLevel, PaletteRequest, SpreadCoverPolicy, SpreadDirection,
+    };
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{
         Command, CommandId, CommandInvocationSource, CommandOutcome, PanAmount, PanDirection,
         SearchMatcherKind, SpreadCoverPolicyArg,
     };
+    use crate::config::ViewPolicy;
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
 
-    use super::{collect_transition_events, dispatch};
+    use super::{collect_transition_events, dispatch, dispatch_with_view_policy};
 
     struct StubPdf {
         path: PathBuf,
@@ -884,6 +910,41 @@ mod tests {
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(app.spread_cover_policy, SpreadCoverPolicy::Cover);
         assert_eq!(app.current_page, 0);
+    }
+
+    #[test]
+    fn dispatch_page_layout_spread_uses_view_policy_for_omitted_spread_args() {
+        let mut app = AppState {
+            spread_direction: SpreadDirection::Ltr,
+            spread_cover_policy: SpreadCoverPolicy::Paired,
+            ..AppState::default()
+        };
+        let view_policy = ViewPolicy {
+            spread_direction: SpreadDirection::Rtl,
+            spread_cover: SpreadCoverPolicy::Cover,
+            ..ViewPolicy::default()
+        };
+        let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch_with_view_policy(
+            &mut app,
+            view_policy,
+            Command::PageLayoutSpread {
+                direction: None,
+                cover_policy: None,
+            },
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(app.spread_direction, SpreadDirection::Rtl);
+        assert_eq!(app.spread_cover_policy, SpreadCoverPolicy::Cover);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::app::PageLayoutMode;
 use crate::backend::PdfBackend;
-use crate::config::Config;
+use crate::config::RenderPolicy;
 use crate::error::AppResult;
 use crate::highlight::HighlightOverlaySnapshot;
 use crate::input::sequence::SequenceRegistrySnapshot;
@@ -217,7 +217,7 @@ pub(super) fn current_viewport_for_session<S: TerminalSurface>(
 pub(super) fn compute_current_scale_for_state(
     state: &AppState,
     render: &RenderSubsystem,
-    config: &Config,
+    render_policy: &RenderPolicy,
     pdf: &dyn PdfBackend,
     page: usize,
     viewport: Option<Viewport>,
@@ -232,7 +232,7 @@ pub(super) fn compute_current_scale_for_state(
     let caps = render.presenter.capabilities();
     let max_scale = caps
         .preferred_max_render_scale
-        .clamp(1.0, config.render.max_render_scale);
+        .clamp(1.0, render_policy.max_render_scale);
     let render_scale = compute_render_scale(
         viewport,
         caps.cell_px,
@@ -260,7 +260,7 @@ impl App {
         compute_current_scale_for_state(
             &self.state,
             &self.render,
-            &self.config,
+            &self.render_policy,
             pdf,
             page,
             viewport,
@@ -431,7 +431,6 @@ impl RenderSubsystem {
     pub(super) fn render_frame(
         &mut self,
         state: &mut AppState,
-        _config: &Config,
         session: &mut impl TerminalSurface,
         pdf: &dyn PdfBackend,
         plan: RenderFramePlan,

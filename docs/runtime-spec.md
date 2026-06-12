@@ -168,9 +168,34 @@ key plus modifiers. For example, `?` and `:` are literal bindings.
 
 ## Runtime configuration
 
-`config.toml` controls render and cache tuning.
+Runtime configuration is resolved through a source-independent options pipeline.
+`config.toml`, CLI flags, environment lookup, tests, and future embedding APIs
+are input sources; none of those source formats are runtime state.
 
-Lookup order:
+Resolution stages:
+
+1. Source adapters read external input into partial app options.
+2. Later option patches override earlier patches.
+3. The resolver applies built-in defaults and validates/sanitizes values.
+4. The app is assembled from feature policies, initial state, and initialized
+   services.
+
+`App` does not retain the file-backed config shape. Values that are only needed
+for construction are consumed during subsystem initialization. Values needed
+during runtime are stored on the feature policy or service that uses them.
+
+Current source precedence:
+
+1. Built-in defaults
+2. `config.toml` if enabled
+3. CLI source selection for enabling, disabling, or choosing the config file
+
+Current CLI configuration source controls:
+
+- `--config <path>`: read app options from a specific TOML file
+- `--no-config`: skip configuration file loading
+
+The default `config.toml` lookup order is:
 
 1. `PVF_CONFIG_PATH`
 2. `XDG_CONFIG_HOME/pvf/config.toml`
@@ -178,6 +203,8 @@ Lookup order:
 4. `APPDATA/pvf/config.toml`
 
 If no config path resolves, built-in defaults are used.
+
+Current TOML support remains focused on render and cache tuning.
 
 Supported configuration sections:
 
@@ -200,6 +227,22 @@ Supported configuration sections:
 Missing config files fall back to defaults. Invalid numeric render values are
 sanitized to a minimum safe value, and invalid `max_render_scale` falls back to
 the default.
+
+Resolved ownership:
+
+- worker count is consumed when render workers are spawned
+- input polling and redraw timing live in the event-loop policy
+- prefetch dispatch budget lives in the event-loop policy
+- render scale bounds live in the render policy
+- L1 cache limits are consumed by render runtime construction
+- L2 cache limits are consumed by presenter construction
+- key bindings are resolved into a `SequenceRegistry` before input handling
+
+Programmatic construction uses the same resolver without requiring TOML:
+
+- create `AppOptions`
+- apply one or more option patches through the resolver or `AppBuilder`
+- build `App` from the resolved feature policies
 
 ## Code references
 

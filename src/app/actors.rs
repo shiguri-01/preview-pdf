@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{Event, KeyEventKind};
 
 use crate::backend::PdfBackend;
-use crate::config::Config;
+use crate::config::RenderPolicy;
 use crate::error::AppResult;
 use crate::perf::{PerfStats, RedrawReason};
 use crate::presenter::PanOffset;
@@ -28,7 +28,7 @@ pub(crate) struct RenderNavSyncParts<'a> {
 }
 
 pub(super) struct RenderCompleteContext<'a, S> {
-    pub(super) config: &'a Config,
+    pub(super) render_policy: &'a RenderPolicy,
     pub(super) session: &'a S,
     pub(super) pdf: &'a dyn PdfBackend,
     pub(super) input_actor: &'a InputActor,
@@ -219,7 +219,7 @@ impl RenderActor {
         let current_scale = compute_current_scale_for_state(
             state,
             render,
-            ctx.config,
+            ctx.render_policy,
             ctx.pdf,
             visible_pages.anchor_page,
             viewport,
@@ -317,7 +317,6 @@ impl UiActor {
         render: &mut RenderSubsystem,
         interaction: &InteractionSubsystem,
         state: &mut AppState,
-        config: &Config,
         session: &mut S,
         pdf: &dyn PdfBackend,
         page_count: usize,
@@ -347,7 +346,6 @@ impl UiActor {
             }
             render.render_frame(
                 state,
-                config,
                 session,
                 pdf,
                 RenderFramePlan {

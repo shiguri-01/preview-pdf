@@ -1,6 +1,10 @@
 use std::collections::VecDeque;
 
 use crate::config::Config;
+use crate::config::{
+    AppOptions, AppOptionsResolver, CachePolicy, EventLoopPolicy, InputPolicy, RenderPolicy,
+    ResolvedAppOptions, load_default_app_options,
+};
 use crate::error::AppResult;
 use crate::extension::ExtensionHost;
 use crate::input::InputHistoryService;
@@ -60,6 +64,17 @@ impl Default for InteractionSubsystem {
 }
 
 impl InteractionSubsystem {
+    pub(crate) fn with_input_policy(policy: InputPolicy) -> Self {
+        Self {
+            extensions: ExtensionSubsystem::default(),
+            palette: PaletteSubsystem::default(),
+            history: InputHistoryService::default(),
+            sequences: SequenceSubsystem {
+                resolver: SequenceResolver::new(policy.sequence_registry, policy.sequence_timeout),
+            },
+        }
+    }
+
     pub(crate) fn with_sequence_registry(registry: SequenceRegistry) -> Self {
         Self {
             extensions: ExtensionSubsystem::default(),
@@ -91,7 +106,8 @@ pub struct App {
     pub state: AppState,
     pub render: RenderSubsystem,
     pub interaction: InteractionSubsystem,
-    pub config: Config,
+    pub(crate) render_policy: RenderPolicy,
+    pub(crate) event_loop_policy: EventLoopPolicy,
     run_options: RunOptions,
 }
 
@@ -100,19 +116,62 @@ pub struct RunOptions {
     pub watch: bool,
 }
 
+pub struct AppBuilder {
+    presenter_kind: PresenterKind,
+    options: AppOptions,
+    run_options: RunOptions,
+}
+
+impl AppBuilder {
+    pub fn new(presenter_kind: PresenterKind) -> Self {
+        Self {
+            presenter_kind,
+            options: AppOptions::default(),
+            run_options: RunOptions::default(),
+        }
+    }
+
+    pub fn options(mut self, options: AppOptions) -> Self {
+        self.options = options;
+        self
+    }
+
+    pub fn run_options(mut self, run_options: RunOptions) -> Self {
+        self.run_options = run_options;
+        self
+    }
+
+    pub fn build(self) -> AppResult<App> {
+        let resolved = AppOptionsResolver::new()
+            .apply_options(self.options)
+            .resolve();
+        App::from_resolved_options(self.presenter_kind, resolved, self.run_options)
+    }
+}
+
 impl App {
     pub fn new(presenter_kind: PresenterKind) -> AppResult<Self> {
-        let config = Config::load()?;
-        Self::new_with_config(presenter_kind, config)
+        let options = load_default_app_options()?;
+        Self::new_with_options(presenter_kind, options)
     }
 
     pub fn new_with_config(presenter_kind: PresenterKind, config: Config) -> AppResult<Self> {
+        Self::new_with_options(presenter_kind, AppOptions::from(config))
+    }
+
+    pub fn new_with_options(presenter_kind: PresenterKind, options: AppOptions) -> AppResult<Self> {
+        AppBuilder::new(presenter_kind).options(options).build()
+    }
+
+    fn from_resolved_options(
+        presenter_kind: PresenterKind,
+        options: ResolvedAppOptions,
+        run_options: RunOptions,
+    ) -> AppResult<Self> {
+        let cache = options.cache;
         let presenter = create_presenter_with_cache_limits(
             presenter_kind,
-            Some((
-                config.cache.l2_max_entries,
-                config.cache.l2_memory_budget_bytes(),
-            )),
+            Some((cache.l2_max_entries, cache.l2_memory_budget_bytes())),
         )?;
         let mut state = AppState::default();
         state.caches.l1_rendered_pages = Some(CacheHandle {
@@ -126,13 +185,11 @@ impl App {
 
         Ok(Self {
             state,
-            render: RenderSubsystem::new(
-                presenter,
-                RenderRuntime::from_cache_config(&config.cache),
-            ),
-            interaction: InteractionSubsystem::default(),
-            config,
-            run_options: RunOptions::default(),
+            render: RenderSubsystem::new(presenter, render_runtime_from_cache_policy(cache)),
+            interaction: InteractionSubsystem::with_input_policy(options.input),
+            render_policy: options.render,
+            event_loop_policy: options.event_loop,
+            run_options,
         })
     }
 
@@ -143,4 +200,8 @@ impl App {
     pub(crate) fn run_options(&self) -> RunOptions {
         self.run_options
     }
+}
+
+fn render_runtime_from_cache_policy(cache: CachePolicy) -> RenderRuntime {
+    RenderRuntime::with_l1_cache_limits(cache.l1_max_entries, cache.l1_memory_budget_bytes())
 }

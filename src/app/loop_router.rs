@@ -125,7 +125,7 @@ impl App {
                     &mut self.state,
                     completed,
                     RenderCompleteContext {
-                        config: &self.config,
+                        render_policy: &self.render_policy,
                         session: &runtime.session,
                         pdf: document.pdf.as_ref(),
                         input_actor: &runtime.input_actor,
@@ -412,7 +412,7 @@ impl App {
         self.render.viewer_has_image = false;
         self.render.image_occluded_last_frame = false;
         runtime.render_worker =
-            RenderWorker::spawn(Arc::clone(&pdf), self.config.render.worker_threads);
+            RenderWorker::spawn(Arc::clone(&pdf), self.render_policy.worker_threads);
 
         let viewport = Self::current_viewport(&runtime.session, self.state.debug_status_visible);
         let visible_pages = self.state.visible_page_slots(runtime.page_count);

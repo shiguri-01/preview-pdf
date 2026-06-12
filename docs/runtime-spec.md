@@ -19,6 +19,8 @@ Supported invocations:
 ```bash
 pvf <file.pdf>
 pvf --watch <file.pdf>
+pvf --config <config.toml> <file.pdf>
+pvf --no-config <file.pdf>
 ```
 
 Rules:
@@ -27,6 +29,10 @@ Rules:
 - The document is opened through the default backend factory.
 - `--watch` enables automatic reload of the displayed document when the input
   file changes.
+- `--config <path>` reads app options from a specific TOML file and requires
+  that path to exist.
+- `--no-config` skips configuration file loading.
+- `--config` and `--no-config` are mutually exclusive.
 - Performance diagnostics are developer tooling and are not part of the public
   viewer CLI. See `performance-diagnostics.md`.
 
@@ -245,7 +251,8 @@ Resolved ownership:
 Programmatic construction uses the same resolver without requiring TOML:
 
 - create `AppOptions`
-- apply one or more option patches through the resolver or `AppBuilder`
+- apply one or more option patches through the resolver or
+  `AppBuilder::merge_options`
 - build `App` from the resolved feature policies
 
 ## Code references

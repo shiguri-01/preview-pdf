@@ -57,8 +57,8 @@ fn app_builder_applies_multiple_option_patches() {
     };
 
     let app = AppBuilder::new(PresenterKind::RatatuiImage)
-        .apply_options(cache_options)
-        .apply_options(render_options)
+        .merge_options(cache_options)
+        .merge_options(render_options)
         .build()
         .expect("app init");
 

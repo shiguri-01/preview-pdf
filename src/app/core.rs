@@ -131,12 +131,12 @@ impl AppBuilder {
         }
     }
 
-    pub fn options(mut self, options: AppOptions) -> Self {
+    pub fn replace_options(mut self, options: AppOptions) -> Self {
         self.options = options;
         self
     }
 
-    pub fn apply_options(mut self, options: AppOptions) -> Self {
+    pub fn merge_options(mut self, options: AppOptions) -> Self {
         self.options = self.options.merge(options);
         self
     }
@@ -165,7 +165,9 @@ impl App {
     }
 
     pub fn new_with_options(presenter_kind: PresenterKind, options: AppOptions) -> AppResult<Self> {
-        AppBuilder::new(presenter_kind).options(options).build()
+        AppBuilder::new(presenter_kind)
+            .replace_options(options)
+            .build()
     }
 
     fn from_resolved_options(

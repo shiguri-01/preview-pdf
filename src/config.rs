@@ -264,7 +264,7 @@ impl ConfigFileSelection {
     pub fn load_options(&self) -> AppResult<AppOptions> {
         match self {
             Self::Default => load_default_app_options(),
-            Self::Path(path) => load_options_from_path(path),
+            Self::Path(path) => load_options_from_explicit_path(path),
             Self::Disabled => Ok(AppOptions::default()),
         }
     }
@@ -277,7 +277,7 @@ pub fn load_default_app_options() -> AppResult<AppOptions> {
     load_options_from_path_allow_missing(path)
 }
 
-pub fn load_options_from_path(path: impl AsRef<Path>) -> AppResult<AppOptions> {
+pub fn load_options_from_explicit_path(path: impl AsRef<Path>) -> AppResult<AppOptions> {
     read_options_from_path(path.as_ref(), MissingConfigPolicy::Error)
 }
 
@@ -525,6 +525,10 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
 }
 
 impl Config {
+    /// Loads the default config shape for compatibility with older call sites.
+    ///
+    /// Missing files fall back to defaults here because this API models optional
+    /// config discovery rather than explicit user selection.
     pub fn load() -> AppResult<Self> {
         let Some(path) = default_config_path() else {
             return Ok(Self::default());
@@ -532,6 +536,10 @@ impl Config {
         Self::load_from_path(path)
     }
 
+    /// Loads the legacy resolved config shape from an optional path.
+    ///
+    /// Use `load_options_from_explicit_path` when a caller supplied a path that
+    /// must exist, such as `--config`.
     pub fn load_from_path(path: impl AsRef<Path>) -> AppResult<Self> {
         let options = read_options_from_path(path.as_ref(), MissingConfigPolicy::Default)?;
         Ok(AppOptionsResolver::new()
@@ -619,7 +627,9 @@ mod tests {
 
     use std::time::Duration;
 
-    use super::{AppOptions, AppOptionsResolver, Config, RenderOptions, load_options_from_path};
+    use super::{
+        AppOptions, AppOptionsResolver, Config, RenderOptions, load_options_from_explicit_path,
+    };
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -699,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn load_options_from_path_preserves_partial_source_absence() {
+    fn load_options_from_explicit_path_preserves_partial_source_absence() {
         let path = unique_temp_path("partial-options.toml");
         fs::write(
             &path,
@@ -710,7 +720,7 @@ mod tests {
         )
         .expect("config file should be written");
 
-        let options = load_options_from_path(&path).expect("options should parse");
+        let options = load_options_from_explicit_path(&path).expect("options should parse");
         assert_eq!(options.cache.l1_max_entries, Some(42));
         assert_eq!(options.cache.l1_memory_budget_mb, None);
         assert_eq!(options.render.worker_threads, None);
@@ -720,10 +730,10 @@ mod tests {
     }
 
     #[test]
-    fn load_options_from_path_rejects_missing_explicit_path() {
+    fn load_options_from_explicit_path_rejects_missing_path() {
         let missing = unique_temp_path("missing-explicit.toml");
-        let err =
-            load_options_from_path(&missing).expect_err("explicit missing config should fail");
+        let err = load_options_from_explicit_path(&missing)
+            .expect_err("explicit missing config should fail");
         assert!(
             err.to_string().contains("config path does not exist"),
             "unexpected error: {err}"

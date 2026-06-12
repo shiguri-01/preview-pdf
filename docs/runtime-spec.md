@@ -18,30 +18,30 @@ Supported invocations:
 
 ```bash
 pvf <file.pdf>
-pvf --watch <file.pdf>
+pvf -w|--watch <file.pdf>
 pvf --no-watch <file.pdf>
-pvf --config <config.toml> <file.pdf>
+pvf -c|--config <config.toml> <file.pdf>
 pvf --no-config <file.pdf>
-pvf --page <page-number> <file.pdf>
-pvf --zoom <fit-ratio> <file.pdf>
-pvf --layout <single|spread> <file.pdf>
+pvf -p|--page <page-number> <file.pdf>
+pvf -z|--zoom <fit-ratio> <file.pdf>
+pvf -l|--layout <single|spread> <file.pdf>
 ```
 
 Rules:
 
 - Exactly one PDF path argument is required.
 - The document is opened through the default backend factory.
-- `--watch` enables automatic reload of the displayed document when the input
-  file changes.
+- `-w`, `--watch` enables automatic reload of the displayed document when the
+  input file changes.
 - `--no-watch` disables automatic reload for the current process.
-- `--config <path>` reads app options from a specific TOML file and requires
-  that path to exist.
+- `-c`, `--config <path>` reads app options from a specific TOML file and
+  requires that path to exist.
 - `--no-config` skips configuration file loading.
 - `--config` and `--no-config` are mutually exclusive.
 - `--watch` and `--no-watch` are mutually exclusive.
-- `--page <page-number>` sets the initial one-based page.
-- `--zoom <fit-ratio>` sets the initial zoom ratio relative to fit.
-- `--layout <single|spread>` sets the initial layout.
+- `-p`, `--page <page-number>` sets the initial one-based page.
+- `-z`, `--zoom <fit-ratio>` sets the initial zoom ratio relative to fit.
+- `-l`, `--layout <single|spread>` sets the initial layout.
 - Performance diagnostics are developer tooling and are not part of the public
   viewer CLI. See `performance-diagnostics.md`.
 

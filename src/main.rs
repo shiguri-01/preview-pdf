@@ -50,6 +50,7 @@ impl From<CliPageLayout> for PageLayoutMode {
 #[command(version, about = "PDF viewer for the terminal")]
 struct Cli {
     #[arg(
+        short,
         long,
         value_name = "PATH",
         conflicts_with = "no_config",
@@ -59,6 +60,7 @@ struct Cli {
     #[arg(long, help = "Do not read a configuration file")]
     no_config: bool,
     #[arg(
+        short,
         long,
         conflicts_with = "no_watch",
         help = "Reload the displayed PDF when the file changes"
@@ -66,15 +68,16 @@ struct Cli {
     watch: bool,
     #[arg(long, help = "Do not watch the input PDF for changes")]
     no_watch: bool,
-    #[arg(long, value_name = "N", help = "Open the PDF at page N")]
+    #[arg(short, long, value_name = "N", help = "Open the PDF at page N")]
     page: Option<usize>,
     #[arg(
+        short,
         long,
         value_name = "RATIO",
         help = "Set the initial zoom ratio relative to fit"
     )]
     zoom: Option<f32>,
-    #[arg(long, value_enum, help = "Set the initial page layout")]
+    #[arg(short, long, value_enum, help = "Set the initial page layout")]
     layout: Option<CliPageLayout>,
     #[arg(value_name = "FILE")]
     pdf_path: PathBuf,
@@ -153,9 +156,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_cli_accepts_short_watch_flag() {
+        let cli = Cli::try_parse_from(["pvf", "-w", "sample.pdf"])
+            .expect("short watch flag should parse");
+        let options = parse_cli(cli);
+        assert_eq!(options.options.watch.enabled, Some(true));
+    }
+
+    #[test]
     fn parse_cli_accepts_explicit_config_path() {
         let cli = Cli::try_parse_from(["pvf", "--config", "pvf.toml", "sample.pdf"])
             .expect("config path should parse");
+        let options = parse_cli(cli);
+        assert_eq!(
+            options.config,
+            ConfigFileSelection::Path(PathBuf::from("pvf.toml"))
+        );
+    }
+
+    #[test]
+    fn parse_cli_accepts_short_config_path() {
+        let cli =
+            Cli::try_parse_from(["pvf", "-c", "pvf.toml", "sample.pdf"]).expect("config path");
         let options = parse_cli(cli);
         assert_eq!(
             options.config,
@@ -192,6 +214,28 @@ mod tests {
             "sample.pdf",
         ])
         .expect("view overrides should parse");
+        let options = parse_cli(cli);
+        assert_eq!(options.options.view.initial_page, Some(10));
+        assert_eq!(options.options.view.initial_zoom, Some(1.25));
+        assert_eq!(
+            options.options.view.initial_layout,
+            Some(PageLayoutMode::Spread)
+        );
+    }
+
+    #[test]
+    fn parse_cli_accepts_short_initial_view_overrides() {
+        let cli = Cli::try_parse_from([
+            "pvf",
+            "-p",
+            "10",
+            "-z",
+            "1.25",
+            "-l",
+            "spread",
+            "sample.pdf",
+        ])
+        .expect("short view overrides should parse");
         let options = parse_cli(cli);
         assert_eq!(options.options.view.initial_page, Some(10));
         assert_eq!(options.options.view.initial_zoom, Some(1.25));

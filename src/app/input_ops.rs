@@ -573,7 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn help_close_requests_redraw_without_terminal_clear() {
+    fn help_close_returns_to_normal_mode_and_requests_redraw() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState {
             mode: Mode::Help,
@@ -600,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_close_redraws_and_restores_normal_mode_without_terminal_clear() {
+    fn palette_close_returns_to_normal_mode_and_requests_redraw() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
         interaction
@@ -633,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_submit_redraws_and_dispatches_without_terminal_clear() {
+    fn palette_submit_returns_to_normal_mode_and_dispatches_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
         interaction

@@ -762,7 +762,7 @@ mod tests {
     }
 
     #[test]
-    fn wake_timeout_queues_sequence_command_without_terminal_clear() {
+    fn wake_timeout_queues_expired_sequence_command() {
         let tokio_runtime = Builder::new_current_thread()
             .enable_all()
             .build()

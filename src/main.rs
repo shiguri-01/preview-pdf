@@ -1,11 +1,16 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+#[cfg(not(test))]
 use pvf::app::App;
+#[cfg(not(test))]
 use pvf::backend::open_default_backend;
+#[cfg(not(test))]
 use pvf::error::AppResult;
+#[cfg(not(test))]
 use pvf::presenter::PresenterKind;
 
+#[cfg(not(test))]
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     if let Err(err) = run().await {
@@ -14,29 +19,38 @@ async fn main() {
     }
 }
 
+#[cfg(test)]
+fn main() {}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CliOptions {
     pdf_path: PathBuf,
+    watch: bool,
 }
 
 #[derive(Debug, Parser)]
 #[command(version, about = "PDF viewer for the terminal")]
 struct Cli {
+    #[arg(long, help = "Reload the displayed PDF when the file changes")]
+    watch: bool,
     #[arg(value_name = "FILE")]
     pdf_path: PathBuf,
 }
 
+#[cfg(not(test))]
 async fn run() -> AppResult<()> {
     let options = parse_cli(Cli::parse());
 
     let pdf = open_default_backend(&options.pdf_path)?;
     let mut app = App::new(PresenterKind::RatatuiImage)?;
+    app.set_watch(options.watch);
     app.run(pdf).await
 }
 
 fn parse_cli(cli: Cli) -> CliOptions {
     CliOptions {
         pdf_path: cli.pdf_path,
+        watch: cli.watch,
     }
 }
 
@@ -53,6 +67,16 @@ mod tests {
         let cli = Cli::try_parse_from(["pvf", "sample.pdf"]).expect("single arg should parse");
         let options = parse_cli(cli);
         assert_eq!(options.pdf_path, PathBuf::from("sample.pdf"));
+        assert!(!options.watch);
+    }
+
+    #[test]
+    fn parse_cli_accepts_watch_flag() {
+        let cli =
+            Cli::try_parse_from(["pvf", "--watch", "sample.pdf"]).expect("watch flag should parse");
+        let options = parse_cli(cli);
+        assert_eq!(options.pdf_path, PathBuf::from("sample.pdf"));
+        assert!(options.watch);
     }
 
     #[test]

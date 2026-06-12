@@ -170,6 +170,10 @@ impl Default for AppState {
 
 impl AppState {
     const RENDER_NOTICE_PREFIX: &str = "Could not render";
+    const RELOAD_NOTICE_PREFIXES: [&str; 2] = [
+        "Could not reload document:",
+        "Could not reload changed document:",
+    ];
 
     pub fn apply_notice_action(&mut self, action: NoticeAction) {
         match action {
@@ -214,6 +218,16 @@ impl AppState {
         if self.notice.as_ref().is_some_and(|notice| {
             notice.level == NoticeLevel::Error
                 && notice.message.starts_with(Self::RENDER_NOTICE_PREFIX)
+        }) {
+            self.notice = None;
+        }
+    }
+
+    pub fn clear_reload_notice(&mut self) {
+        if self.notice.as_ref().is_some_and(|notice| {
+            Self::RELOAD_NOTICE_PREFIXES
+                .iter()
+                .any(|prefix| notice.message.starts_with(prefix))
         }) {
             self.notice = None;
         }

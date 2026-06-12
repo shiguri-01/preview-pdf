@@ -94,6 +94,21 @@ impl ExtensionHost {
         self.search.prewarm(pdf);
     }
 
+    pub fn reset_for_document_reload(&mut self, app: &mut AppState, pdf: SharedPdfBackend) {
+        let active_search = self
+            .search
+            .is_active()
+            .then(|| (self.search.query().to_string(), self.search.matcher()));
+        self.search = SearchExtension::init_state();
+        self.outline = OutlineExtension::init_state();
+        self.search.prewarm(Arc::clone(&pdf));
+        if let Some((query, matcher)) = active_search
+            && let Err(err) = self.search.submit(app, pdf, query, matcher)
+        {
+            app.set_warning_notice(format!("Could not restore search after reload: {err}"));
+        }
+    }
+
     pub fn resolve_search_priority_geometry(
         &mut self,
         pdf: SharedPdfBackend,
@@ -338,5 +353,28 @@ mod tests {
         let canceled = host.cancel_search(pdf).expect("cancel should succeed");
         assert!(canceled);
         assert!(!host.ui_snapshot().search_active);
+    }
+
+    #[test]
+    fn document_reload_preserves_active_search() {
+        let mut host = ExtensionHost::default();
+        let mut app = crate::app::AppState::default();
+        let first = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
+        let second = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
+
+        host.submit_search(
+            &mut app,
+            first,
+            "needle".to_string(),
+            SearchMatcherKind::ContainsSensitive,
+        )
+        .expect("submit-search should succeed");
+
+        host.reset_for_document_reload(&mut app, second);
+
+        assert!(host.ui_snapshot().search_active);
+        assert_eq!(host.search_query(), "needle");
+        assert_eq!(host.search_matcher(), SearchMatcherKind::ContainsSensitive);
+        assert_eq!(host.status_bar_segments(&app), vec!["SEARCH 0 hits"]);
     }
 }

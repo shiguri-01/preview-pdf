@@ -13,6 +13,12 @@ pub(in crate::command) fn cancel_search(
     Ok(CommandExecution::applied())
 }
 
+pub(in crate::command) fn reload_document(
+    _ctx: &mut CommandExecContext<'_>,
+) -> AppResult<CommandExecution> {
+    Ok(CommandExecution::applied())
+}
+
 pub(in crate::command) fn quit(_ctx: &mut CommandExecContext<'_>) -> AppResult<CommandExecution> {
     Ok(CommandExecution {
         outcome: CommandOutcome::QuitRequested,

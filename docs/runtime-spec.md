@@ -18,12 +18,15 @@ Supported invocations:
 
 ```bash
 pvf <file.pdf>
+pvf --watch <file.pdf>
 ```
 
 Rules:
 
 - Exactly one PDF path argument is required.
 - The document is opened through the default backend factory.
+- `--watch` enables automatic reload of the displayed document when the input
+  file changes.
 - Performance diagnostics are developer tooling and are not part of the public
   viewer CLI. See `performance-diagnostics.md`.
 
@@ -110,6 +113,32 @@ Rules:
   - supported output protocols depend on terminal capability negotiation
   - cold start may temporarily show a lower-resolution preview before the
     current full-resolution view is ready
+
+- Reload
+  - `reload-document` reopens the current PDF path
+  - with `--watch`, the runtime polls the current PDF path and reloads after a
+    short debounce when file metadata settles
+  - reload success replaces the active document, clamps the current page to the
+    new page count, resets render work, clears presenter output cache, and
+    prewarms search text for the new document
+  - active search is submitted again against the new document using the same
+    query and matcher; cached outline data is cleared
+  - reload failure keeps the previous document visible
+  - manual reload failures show an error immediately
+  - `--watch` reload failures retry quietly with short backoff before showing a
+    warning, so a save that temporarily leaves a partial PDF on disk can recover
+    without user action
+  - acceptance cases for `--watch`:
+    - replacing a valid PDF with another valid PDF updates the displayed
+      document without restarting the viewer
+    - replacing a valid PDF with a temporarily invalid file keeps the previous
+      document visible while retrying
+    - replacing that temporarily invalid file with a valid PDF during the retry
+      window updates the viewer and clears retry state
+    - repeated reload failures eventually show a warning instead of retrying
+      forever
+    - a newer file-change request takes precedence over an older failed reload
+      result
 
 ## Default key bindings
 

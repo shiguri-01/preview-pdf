@@ -37,23 +37,16 @@ impl InteractiveTerminalSession {
         }
 
         let backend = CrosstermBackend::new(stdout);
-        let mut terminal = match Terminal::new(backend) {
+        let terminal = match Terminal::new(backend) {
             Ok(terminal) => terminal,
             Err(err) => {
-                cleanup_terminal_enter_failure(None);
+                cleanup_terminal_enter_failure();
                 return Err(AppError::io_with_context(
                     err,
                     "initializing terminal backend",
                 ));
             }
         };
-        if let Err(err) = terminal.clear() {
-            cleanup_terminal_enter_failure(Some(&mut terminal));
-            return Err(AppError::io_with_context(
-                err,
-                "clearing terminal during startup",
-            ));
-        }
 
         Ok(Self {
             terminal,
@@ -93,16 +86,8 @@ impl Drop for InteractiveTerminalSession {
     }
 }
 
-fn cleanup_terminal_enter_failure(terminal: Option<&mut Terminal<CrosstermBackend<Stdout>>>) {
-    match terminal {
-        Some(terminal) => {
-            let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
-        }
-        None => {
-            let mut stdout = io::stdout();
-            let _ = execute!(stdout, LeaveAlternateScreen);
-        }
-    }
-
+fn cleanup_terminal_enter_failure() {
+    let mut stdout = io::stdout();
+    let _ = execute!(stdout, LeaveAlternateScreen);
     let _ = disable_raw_mode();
 }

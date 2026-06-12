@@ -2,7 +2,7 @@ pub type AppResult<T> = Result<T, AppError>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum AppError {
-    #[error("I/O error: {context}")]
+    #[error("I/O error while {context}: {source}")]
     Io {
         #[source]
         source: std::io::Error,
@@ -26,7 +26,7 @@ impl From<std::io::Error> for AppError {
     fn from(source: std::io::Error) -> Self {
         Self::Io {
             source,
-            context: "I/O operation failed".to_string(),
+            context: "performing terminal I/O".to_string(),
         }
     }
 }

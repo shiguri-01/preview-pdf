@@ -72,11 +72,9 @@ impl App {
     {
         // Wake events are not guaranteed to arrive before the next input event, so the
         // loop checks for timed-out sequences at the start of every iteration as well.
-        let timeout_effects = runtime.input_actor.handle_timeout(
-            &mut self.interaction,
-            &mut self.state,
-            &mut runtime.session,
-        )?;
+        let timeout_effects = runtime
+            .input_actor
+            .handle_timeout(&mut self.interaction, &mut self.state)?;
         if matches!(
             self.apply_loop_effects(runtime, timeout_effects),
             LoopControl::Break
@@ -90,7 +88,6 @@ impl App {
                     event,
                     &mut self.interaction,
                     &mut self.state,
-                    &mut runtime.session,
                 )?;
                 if matches!(
                     self.apply_loop_effects(runtime, effects),

@@ -8,12 +8,10 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Size;
 use ratatui::{Frame, Terminal};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 pub(crate) trait TerminalSurface {
     fn size(&self) -> io::Result<Size>;
-
-    fn clear(&mut self) -> io::Result<()>;
 
     fn draw<F>(&mut self, render: F) -> io::Result<()>
     where
@@ -27,11 +25,15 @@ pub(crate) struct InteractiveTerminalSession {
 
 impl InteractiveTerminalSession {
     pub(crate) fn enter() -> AppResult<Self> {
-        enable_raw_mode()?;
+        enable_raw_mode()
+            .map_err(|source| AppError::io_with_context(source, "enabling terminal raw mode"))?;
         let mut stdout = io::stdout();
         if let Err(err) = execute!(stdout, EnterAlternateScreen) {
             let _ = disable_raw_mode();
-            return Err(err.into());
+            return Err(AppError::io_with_context(
+                err,
+                "entering terminal alternate screen",
+            ));
         }
 
         let backend = CrosstermBackend::new(stdout);
@@ -39,12 +41,18 @@ impl InteractiveTerminalSession {
             Ok(terminal) => terminal,
             Err(err) => {
                 cleanup_terminal_enter_failure(None);
-                return Err(err.into());
+                return Err(AppError::io_with_context(
+                    err,
+                    "initializing terminal backend",
+                ));
             }
         };
         if let Err(err) = terminal.clear() {
             cleanup_terminal_enter_failure(Some(&mut terminal));
-            return Err(err.into());
+            return Err(AppError::io_with_context(
+                err,
+                "clearing terminal during startup",
+            ));
         }
 
         Ok(Self {
@@ -69,10 +77,6 @@ impl InteractiveTerminalSession {
 impl TerminalSurface for InteractiveTerminalSession {
     fn size(&self) -> io::Result<Size> {
         self.terminal.size()
-    }
-
-    fn clear(&mut self) -> io::Result<()> {
-        self.terminal.clear()
     }
 
     fn draw<F>(&mut self, render: F) -> io::Result<()>

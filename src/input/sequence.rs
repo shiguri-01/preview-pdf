@@ -298,6 +298,10 @@ impl SequenceResolver {
         self.registry.snapshot()
     }
 
+    pub fn timeout(&self) -> Duration {
+        self.state.timeout
+    }
+
     pub fn pending_display(&self) -> Option<String> {
         (!self.state.is_empty()).then(|| format_pending_buffer(self.state.as_slice()))
     }

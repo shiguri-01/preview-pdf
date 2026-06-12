@@ -136,6 +136,11 @@ impl AppBuilder {
         self
     }
 
+    pub fn apply_options(mut self, options: AppOptions) -> Self {
+        self.options = self.options.merge(options);
+        self
+    }
+
     pub fn run_options(mut self, run_options: RunOptions) -> Self {
         self.run_options = run_options;
         self

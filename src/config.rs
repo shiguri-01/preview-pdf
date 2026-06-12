@@ -79,6 +79,35 @@ impl CacheConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+#[serde(default)]
+struct RawConfig {
+    render: Option<RawRenderConfig>,
+    cache: Option<RawCacheConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
+#[serde(default)]
+struct RawRenderConfig {
+    worker_threads: Option<usize>,
+    input_poll_timeout_idle_ms: Option<u64>,
+    input_poll_timeout_busy_ms: Option<u64>,
+    prefetch_pause_ms: Option<u64>,
+    prefetch_tick_ms: Option<u64>,
+    pending_redraw_interval_ms: Option<u64>,
+    prefetch_dispatch_budget_per_tick: Option<usize>,
+    max_render_scale: Option<f32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
+struct RawCacheConfig {
+    l1_memory_budget_mb: Option<usize>,
+    l2_memory_budget_mb: Option<usize>,
+    l1_max_entries: Option<usize>,
+    l2_max_entries: Option<usize>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AppOptions {
     pub render: RenderOptions,
@@ -121,6 +150,16 @@ impl From<Config> for AppOptions {
     }
 }
 
+impl From<RawConfig> for AppOptions {
+    fn from(raw: RawConfig) -> Self {
+        Self {
+            render: raw.render.map(RenderOptions::from).unwrap_or_default(),
+            cache: raw.cache.map(CacheOptions::from).unwrap_or_default(),
+            input: InputOptions::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RenderOptions {
     pub worker_threads: Option<usize>,
@@ -156,6 +195,21 @@ impl RenderOptions {
     }
 }
 
+impl From<RawRenderConfig> for RenderOptions {
+    fn from(raw: RawRenderConfig) -> Self {
+        Self {
+            worker_threads: raw.worker_threads,
+            input_poll_timeout_idle_ms: raw.input_poll_timeout_idle_ms,
+            input_poll_timeout_busy_ms: raw.input_poll_timeout_busy_ms,
+            prefetch_pause_ms: raw.prefetch_pause_ms,
+            prefetch_tick_ms: raw.prefetch_tick_ms,
+            pending_redraw_interval_ms: raw.pending_redraw_interval_ms,
+            prefetch_dispatch_budget_per_tick: raw.prefetch_dispatch_budget_per_tick,
+            max_render_scale: raw.max_render_scale,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CacheOptions {
     pub l1_memory_budget_mb: Option<usize>,
@@ -171,6 +225,17 @@ impl CacheOptions {
             l2_memory_budget_mb: next.l2_memory_budget_mb.or(self.l2_memory_budget_mb),
             l1_max_entries: next.l1_max_entries.or(self.l1_max_entries),
             l2_max_entries: next.l2_max_entries.or(self.l2_max_entries),
+        }
+    }
+}
+
+impl From<RawCacheConfig> for CacheOptions {
+    fn from(raw: RawCacheConfig) -> Self {
+        Self {
+            l1_memory_budget_mb: raw.l1_memory_budget_mb,
+            l2_memory_budget_mb: raw.l2_memory_budget_mb,
+            l1_max_entries: raw.l1_max_entries,
+            l2_max_entries: raw.l2_max_entries,
         }
     }
 }
@@ -209,11 +274,11 @@ pub fn load_default_app_options() -> AppResult<AppOptions> {
     let Some(path) = default_config_path() else {
         return Ok(AppOptions::default());
     };
-    load_options_from_path(path)
+    load_options_from_path_allow_missing(path)
 }
 
 pub fn load_options_from_path(path: impl AsRef<Path>) -> AppResult<AppOptions> {
-    Config::load_from_path(path).map(AppOptions::from)
+    read_options_from_path(path.as_ref(), MissingConfigPolicy::Error)
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +406,34 @@ impl Default for ResolvedAppOptions {
     }
 }
 
+impl From<ResolvedAppOptions> for Config {
+    fn from(options: ResolvedAppOptions) -> Self {
+        Self {
+            render: RenderConfig {
+                worker_threads: options.render.worker_threads,
+                input_poll_timeout_idle_ms: options.event_loop.input_poll_timeout_idle.as_millis()
+                    as u64,
+                input_poll_timeout_busy_ms: options.event_loop.input_poll_timeout_busy.as_millis()
+                    as u64,
+                prefetch_pause_ms: options.event_loop.prefetch_pause_after_input.as_millis() as u64,
+                prefetch_tick_ms: options.event_loop.prefetch_tick_interval.as_millis() as u64,
+                pending_redraw_interval_ms: options.event_loop.pending_redraw_interval.as_millis()
+                    as u64,
+                prefetch_dispatch_budget_per_tick: options
+                    .event_loop
+                    .prefetch_dispatch_budget_per_tick,
+                max_render_scale: options.render.max_render_scale,
+            },
+            cache: CacheConfig {
+                l1_memory_budget_mb: options.cache.l1_memory_budget_mb,
+                l2_memory_budget_mb: options.cache.l2_memory_budget_mb,
+                l1_max_entries: options.cache.l1_max_entries,
+                l2_max_entries: options.cache.l2_max_entries,
+            },
+        }
+    }
+}
+
 fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
     let render_defaults = RenderConfig::default();
     let cache_defaults = CacheConfig::default();
@@ -440,49 +533,51 @@ impl Config {
     }
 
     pub fn load_from_path(path: impl AsRef<Path>) -> AppResult<Self> {
-        let path = path.as_ref();
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        if !path.is_file() {
-            return Err(AppError::invalid_argument(format!(
-                "config path is not a regular file: {}",
-                path.display()
-            )));
-        }
+        let options = read_options_from_path(path.as_ref(), MissingConfigPolicy::Default)?;
+        Ok(AppOptionsResolver::new()
+            .apply_options(options)
+            .resolve()
+            .into())
+    }
+}
 
-        let raw = fs::read_to_string(path).map_err(|source| {
-            AppError::io_with_context(source, format!("failed to read config: {}", path.display()))
-        })?;
-        let parsed = toml::from_str::<Self>(&raw).map_err(|source| {
-            AppError::invalid_argument(format!(
-                "failed to parse config {}: {source}",
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MissingConfigPolicy {
+    Default,
+    Error,
+}
+
+fn load_options_from_path_allow_missing(path: impl AsRef<Path>) -> AppResult<AppOptions> {
+    read_options_from_path(path.as_ref(), MissingConfigPolicy::Default)
+}
+
+fn read_options_from_path(path: &Path, missing: MissingConfigPolicy) -> AppResult<AppOptions> {
+    if !path.exists() {
+        return match missing {
+            MissingConfigPolicy::Default => Ok(AppOptions::default()),
+            MissingConfigPolicy::Error => Err(AppError::invalid_argument(format!(
+                "config path does not exist: {}",
                 path.display()
-            ))
-        })?;
-        Ok(parsed.sanitized())
+            ))),
+        };
+    }
+    if !path.is_file() {
+        return Err(AppError::invalid_argument(format!(
+            "config path is not a regular file: {}",
+            path.display()
+        )));
     }
 
-    fn sanitized(mut self) -> Self {
-        let resolved = AppOptionsResolver::new()
-            .apply_options(AppOptions::from(self.clone()))
-            .resolve();
-        self.render.worker_threads = resolved.render.worker_threads;
-        self.render.input_poll_timeout_idle_ms =
-            resolved.event_loop.input_poll_timeout_idle.as_millis() as u64;
-        self.render.input_poll_timeout_busy_ms =
-            resolved.event_loop.input_poll_timeout_busy.as_millis() as u64;
-        self.render.prefetch_pause_ms =
-            resolved.event_loop.prefetch_pause_after_input.as_millis() as u64;
-        self.render.prefetch_tick_ms =
-            resolved.event_loop.prefetch_tick_interval.as_millis() as u64;
-        self.render.pending_redraw_interval_ms =
-            resolved.event_loop.pending_redraw_interval.as_millis() as u64;
-        self.render.prefetch_dispatch_budget_per_tick =
-            resolved.event_loop.prefetch_dispatch_budget_per_tick;
-        self.render.max_render_scale = resolved.render.max_render_scale;
-        self
-    }
+    let raw = fs::read_to_string(path).map_err(|source| {
+        AppError::io_with_context(source, format!("failed to read config: {}", path.display()))
+    })?;
+    let parsed = toml::from_str::<RawConfig>(&raw).map_err(|source| {
+        AppError::invalid_argument(format!(
+            "failed to parse config {}: {source}",
+            path.display()
+        ))
+    })?;
+    Ok(AppOptions::from(parsed))
 }
 
 pub fn default_config_path() -> Option<PathBuf> {
@@ -524,7 +619,7 @@ mod tests {
 
     use std::time::Duration;
 
-    use super::{AppOptions, AppOptionsResolver, Config, RenderOptions};
+    use super::{AppOptions, AppOptionsResolver, Config, RenderOptions, load_options_from_path};
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -601,6 +696,38 @@ mod tests {
         assert_eq!(config.cache.l1_max_entries, 42);
 
         fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn load_options_from_path_preserves_partial_source_absence() {
+        let path = unique_temp_path("partial-options.toml");
+        fs::write(
+            &path,
+            r#"
+            [cache]
+            l1_max_entries = 42
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_path(&path).expect("options should parse");
+        assert_eq!(options.cache.l1_max_entries, Some(42));
+        assert_eq!(options.cache.l1_memory_budget_mb, None);
+        assert_eq!(options.render.worker_threads, None);
+        assert_eq!(options.render.max_render_scale, None);
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn load_options_from_path_rejects_missing_explicit_path() {
+        let missing = unique_temp_path("missing-explicit.toml");
+        let err =
+            load_options_from_path(&missing).expect_err("explicit missing config should fail");
+        assert!(
+            err.to_string().contains("config path does not exist"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

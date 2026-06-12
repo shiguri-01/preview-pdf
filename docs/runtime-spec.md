@@ -195,6 +195,10 @@ Current CLI configuration source controls:
 - `--config <path>`: read app options from a specific TOML file
 - `--no-config`: skip configuration file loading
 
+An explicit `--config <path>` must name an existing regular file. Default
+config lookup may fall back to built-in defaults when the discovered path is
+missing.
+
 The default `config.toml` lookup order is:
 
 1. `PVF_CONFIG_PATH`

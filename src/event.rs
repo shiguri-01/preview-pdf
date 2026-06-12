@@ -67,6 +67,7 @@ pub(crate) enum DocumentReloadReason {
 pub(crate) struct DocumentReloadRequest {
     pub(crate) reason: DocumentReloadReason,
     pub(crate) retry: bool,
+    pub(crate) generation: u64,
 }
 
 impl DocumentReloadRequest {
@@ -74,19 +75,27 @@ impl DocumentReloadRequest {
         Self {
             reason,
             retry: false,
+            generation: 0,
         }
     }
 
-    pub(crate) fn retry(reason: DocumentReloadReason) -> Self {
+    pub(crate) fn retry(reason: DocumentReloadReason, generation: u64) -> Self {
         Self {
             reason,
             retry: true,
+            generation,
         }
+    }
+
+    pub(crate) fn with_generation(mut self, generation: u64) -> Self {
+        self.generation = generation;
+        self
     }
 }
 
 pub(crate) struct DocumentReloadResult {
     pub(crate) reason: DocumentReloadReason,
+    pub(crate) generation: u64,
     pub(crate) result: Result<SharedPdfBackend, String>,
 }
 
@@ -98,6 +107,7 @@ impl fmt::Debug for DocumentReloadResult {
         };
         f.debug_struct("DocumentReloadResult")
             .field("reason", &self.reason)
+            .field("generation", &self.generation)
             .field("result", &result)
             .finish()
     }

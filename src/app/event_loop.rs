@@ -170,6 +170,7 @@ impl App {
             reload_in_flight: false,
             pending_reload: None,
             reload_retry_attempts: 0,
+            reload_generation: 0,
         })
     }
 
@@ -1024,6 +1025,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::Manual,
+                generation: 0,
                 result: Ok(second),
             })),
             &mut runtime,
@@ -1077,6 +1079,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::Manual,
+                generation: 0,
                 result: Ok(Arc::clone(&second)),
             })),
             &mut runtime,
@@ -1128,6 +1131,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::FileChanged,
+                generation: 0,
                 result: Ok(second),
             })),
             &mut runtime,
@@ -1170,6 +1174,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::Manual,
+                generation: 0,
                 result: Err("still being written".to_string()),
             })),
             &mut runtime,
@@ -1215,6 +1220,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::FileChanged,
+                generation: 0,
                 result: Err("still being written".to_string()),
             })),
             &mut runtime,
@@ -1238,6 +1244,7 @@ mod tests {
             DomainEvent::ReloadDocument(DocumentReloadRequest {
                 reason: DocumentReloadReason::FileChanged,
                 retry: true,
+                ..
             })
         ));
     }
@@ -1274,6 +1281,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::FileChanged,
+                generation: 0,
                 result: Err("still invalid after retries".to_string()),
             })),
             &mut runtime,
@@ -1334,6 +1342,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::FileChanged,
+                generation: 0,
                 result: Ok(second),
             })),
             &mut runtime,
@@ -1385,6 +1394,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::FileChanged,
+                generation: 0,
                 result: Err("stale failure".to_string()),
             })),
             &mut runtime,
@@ -1445,6 +1455,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
                 reason: DocumentReloadReason::FileChanged,
+                generation: 0,
                 result: Ok(stale),
             })),
             &mut runtime,
@@ -1461,6 +1472,52 @@ mod tests {
 
         runtime.loop_event_runtime.shutdown();
         fs::remove_file(&file).expect("test file should be removed");
+    }
+
+    #[test]
+    fn old_delayed_retry_after_newer_reload_is_ignored() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut document = ActiveDocument::new(Arc::clone(&pdf));
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime.reload_generation = 2;
+        runtime.reload_retry_attempts = 3;
+        runtime.ui_actor.clear_redraw();
+
+        app.handle_waited_event(
+            WaitEvent::Event(DomainEvent::ReloadDocument(DocumentReloadRequest::retry(
+                DocumentReloadReason::FileChanged,
+                1,
+            ))),
+            &mut runtime,
+            &mut document,
+        )
+        .expect("stale retry should be handled");
+
+        assert!(!runtime.reload_in_flight);
+        assert!(runtime.pending_reload.is_none());
+        assert_eq!(runtime.reload_generation, 2);
+        assert_eq!(runtime.reload_retry_attempts, 3);
+        assert!(app.state.notice.is_none());
+        assert!(!runtime.ui_actor.needs_redraw());
     }
 
     #[test]

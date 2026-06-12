@@ -149,8 +149,8 @@ impl App {
             WaitEvent::Event(DomainEvent::RedrawTick) => {
                 self.request_redraw(runtime, RedrawReason::Timer);
             }
-            WaitEvent::Event(DomainEvent::ReloadDocument(reason)) => {
-                self.request_document_reload(runtime, document, reason);
+            WaitEvent::Event(DomainEvent::ReloadDocument(request)) => {
+                self.request_document_reload(runtime, document, request);
             }
             WaitEvent::Event(DomainEvent::DocumentReloaded(result)) => {
                 self.handle_document_reload_result(runtime, document, result)?;
@@ -278,10 +278,17 @@ impl App {
         &mut self,
         runtime: &mut LoopRuntime<S>,
         document: &ActiveDocument,
-        request: DocumentReloadRequest,
+        mut request: DocumentReloadRequest,
     ) where
         S: TerminalSurface,
     {
+        if request.retry && request.generation < runtime.reload_generation {
+            return;
+        }
+        if request.generation == 0 {
+            runtime.reload_generation += 1;
+            request = request.with_generation(runtime.reload_generation);
+        }
         if !request.retry || matches!(request.reason, DocumentReloadReason::Manual) {
             runtime.reload_retry_attempts = 0;
         }
@@ -293,7 +300,7 @@ impl App {
         runtime.reload_in_flight = true;
         runtime.loop_event_runtime.start_document_reload(
             document.path.clone(),
-            request.reason,
+            request,
             runtime.loop_event_tx.clone(),
         );
     }
@@ -325,7 +332,7 @@ impl App {
                     self.state
                         .set_error_notice(format!("Could not reload document: {message}"));
                     self.request_redraw(runtime, RedrawReason::AppEvent);
-                } else if self.schedule_file_reload_retry(runtime) {
+                } else if self.schedule_file_reload_retry(runtime, reload.generation) {
                     return Ok(());
                 } else {
                     self.state.set_warning_notice(format!(
@@ -355,17 +362,24 @@ impl App {
         false
     }
 
-    fn schedule_file_reload_retry<S>(&mut self, runtime: &mut LoopRuntime<S>) -> bool
+    fn schedule_file_reload_retry<S>(
+        &mut self,
+        runtime: &mut LoopRuntime<S>,
+        generation: u64,
+    ) -> bool
     where
         S: TerminalSurface,
     {
+        if generation < runtime.reload_generation {
+            return true;
+        }
         let Some(delay) = FILE_RELOAD_RETRY_DELAYS.get(usize::from(runtime.reload_retry_attempts))
         else {
             return false;
         };
         runtime.reload_retry_attempts += 1;
         runtime.loop_event_runtime.start_delayed_document_reload(
-            DocumentReloadRequest::retry(DocumentReloadReason::FileChanged),
+            DocumentReloadRequest::retry(DocumentReloadReason::FileChanged, generation),
             *delay,
             runtime.loop_event_tx.clone(),
         );

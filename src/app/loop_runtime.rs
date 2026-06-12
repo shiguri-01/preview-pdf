@@ -36,6 +36,7 @@ pub(super) struct LoopRuntime<S> {
     pub(super) reload_in_flight: bool,
     pub(super) pending_reload: Option<DocumentReloadRequest>,
     pub(super) reload_retry_attempts: u8,
+    pub(super) reload_generation: u64,
 }
 
 pub(super) struct ActiveDocument {

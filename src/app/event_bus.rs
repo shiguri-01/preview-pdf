@@ -38,21 +38,20 @@ impl EventBusRuntime {
     }
 
     pub(crate) fn start_input(&mut self, tx: UnboundedSender<DomainEvent>) {
-        self.tasks.push(spawn_input_task(tx));
+        self.push_task(spawn_input_task(tx));
     }
 
     pub(crate) fn start_file_watch(&mut self, path: PathBuf, tx: UnboundedSender<DomainEvent>) {
-        self.tasks.push(spawn_file_watch_task(path, tx));
+        self.push_task(spawn_file_watch_task(path, tx));
     }
 
     pub(crate) fn start_document_reload(
         &mut self,
         path: PathBuf,
-        reason: DocumentReloadReason,
+        request: DocumentReloadRequest,
         tx: UnboundedSender<DomainEvent>,
     ) {
-        self.tasks
-            .push(spawn_document_reload_task(path, reason, tx));
+        self.push_task(spawn_document_reload_task(path, request, tx));
     }
 
     pub(crate) fn start_delayed_document_reload(
@@ -61,14 +60,18 @@ impl EventBusRuntime {
         delay: Duration,
         tx: UnboundedSender<DomainEvent>,
     ) {
-        self.tasks
-            .push(spawn_delayed_document_reload_task(request, delay, tx));
+        self.push_task(spawn_delayed_document_reload_task(request, delay, tx));
     }
 
     pub(crate) fn shutdown(&mut self) {
         for task in self.tasks.drain(..) {
             task.abort();
         }
+    }
+
+    fn push_task(&mut self, task: JoinHandle<()>) {
+        self.tasks.retain(|task| !task.is_finished());
+        self.tasks.push(task);
     }
 }
 
@@ -149,13 +152,14 @@ fn spawn_file_watch_task(path: PathBuf, tx: UnboundedSender<DomainEvent>) -> Joi
 
 fn spawn_document_reload_task(
     path: PathBuf,
-    reason: DocumentReloadReason,
+    request: DocumentReloadRequest,
     tx: UnboundedSender<DomainEvent>,
 ) -> JoinHandle<()> {
     tokio::task::spawn_blocking(move || {
         let result = open_default_backend(&path).map_err(|err| err.to_string());
         let _ = tx.send(DomainEvent::DocumentReloaded(DocumentReloadResult {
-            reason,
+            reason: request.reason,
+            generation: request.generation,
             result,
         }));
     })
@@ -180,7 +184,7 @@ mod tests {
     use tokio::time;
 
     use crate::backend::test_support::{build_pdf, unique_temp_path};
-    use crate::event::{DocumentReloadReason, DomainEvent};
+    use crate::event::{DocumentReloadReason, DocumentReloadRequest, DomainEvent};
 
     use super::EventBusRuntime;
 
@@ -201,6 +205,32 @@ mod tests {
             let (tx, _rx, mut runtime) = EventBusRuntime::spawn_interactive();
             runtime.start_input(tx);
             runtime.shutdown();
+        });
+    }
+
+    #[test]
+    fn starting_task_prunes_finished_handles() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should initialize");
+        runtime.block_on(async {
+            let (tx, mut rx, mut event_runtime) = EventBusRuntime::spawn_headless();
+            event_runtime.start_delayed_document_reload(
+                DocumentReloadRequest::retry(DocumentReloadReason::FileChanged, 1),
+                Duration::ZERO,
+                tx.clone(),
+            );
+            let _ = rx.recv().await.expect("first delayed reload should emit");
+
+            event_runtime.start_delayed_document_reload(
+                DocumentReloadRequest::retry(DocumentReloadReason::FileChanged, 1),
+                Duration::from_secs(60),
+                tx,
+            );
+
+            assert_eq!(event_runtime.tasks.len(), 1);
+            event_runtime.shutdown();
         });
     }
 

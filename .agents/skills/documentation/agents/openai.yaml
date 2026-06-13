@@ -1,0 +1,4 @@
+interface:
+  display_name: "Documentation"
+  short_description: "Write maintainable pvf developer docs"
+  default_prompt: "Use $documentation when adding, changing, or reviewing pvf developer docs."

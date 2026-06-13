@@ -149,18 +149,6 @@ Inventory change:
 Treat test code as maintained code. Prefer small fixtures and clear helpers
 over large all-knowing setup.
 
-## Documentation Quality Checklist
-
-- Is this stable enough to document?
-- Is this architecture, reference, or testing guidance rather than copied code?
-- Would an ordinary implementation change make this stale?
-- If this is a complete inventory, should it live in code instead?
-- Does the doc point to the owning code when details are code-owned?
-- Does reference material state rules neutrally instead of explaining a story?
-- Does architecture material explain boundaries and rationale without becoming
-  a module inventory?
-- Is the section short enough to maintain?
-
 ## Validation Commands
 
 Run these before finishing a behavior or docs migration change:

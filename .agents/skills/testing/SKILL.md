@@ -77,7 +77,7 @@ During iteration, run the smallest useful targeted test.
 Before finishing behavior changes, run:
 
 ```bash
-cargo fmt
+cargo fmt --check
 cargo test
 cargo check
 cargo clippy --all-targets --all-features -- -D warnings

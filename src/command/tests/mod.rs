@@ -16,6 +16,15 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
         source: CommandInvocationSource::Keymap,
     };
 
+    assert!(
+        !snapshot.exact_bindings.is_empty(),
+        "builtin keymap must define at least one exact binding"
+    );
+    assert!(
+        !snapshot.numeric_prefix_bindings.is_empty(),
+        "builtin keymap must define at least one numeric prefix binding"
+    );
+
     for binding in snapshot.exact_bindings {
         assert!(
             find_command_spec(binding.command_id).is_some(),
@@ -49,7 +58,13 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
 
 #[test]
 fn command_registry_metadata_has_reviewable_public_surface() {
-    for spec in command_registry() {
+    let specs = command_registry();
+    assert!(
+        !specs.is_empty(),
+        "command registry must define at least one command"
+    );
+
+    for spec in specs {
         assert!(!spec.id.is_empty(), "command id must not be empty");
         assert!(
             !spec.title.is_empty(),

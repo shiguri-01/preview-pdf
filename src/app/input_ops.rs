@@ -18,7 +18,6 @@ use super::state::{AppState, Mode, PaletteRequest, notice_action_for_error};
 #[derive(Debug, Clone, Default)]
 pub(crate) struct KeyEventOutcome {
     pub redraw: bool,
-    pub clear_terminal: bool,
     pub quit_requested: bool,
     pub commands: Vec<CommandRequest>,
 }
@@ -76,7 +75,6 @@ impl InteractionSubsystem {
         let search_active = self.extensions.host.ui_snapshot().search_active;
         KeyEventOutcome {
             redraw: search_active,
-            clear_terminal: false,
             quit_requested: false,
             commands: if search_active {
                 vec![CommandRequest::new(
@@ -106,7 +104,6 @@ impl InteractionSubsystem {
         match result {
             PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
                 redraw,
-                clear_terminal: false,
                 quit_requested: false,
                 commands: Vec::new(),
             }),
@@ -115,7 +112,6 @@ impl InteractionSubsystem {
                     self.handle_palette_submit_effect(state, action.session_id, action.effect)?;
                 Ok(KeyEventOutcome {
                     redraw: changed_by_palette,
-                    clear_terminal: changed_by_palette,
                     quit_requested: false,
                     commands: command.into_iter().collect(),
                 })
@@ -124,7 +120,6 @@ impl InteractionSubsystem {
                 state.apply_notice_action(notice_action_for_error(err));
                 Ok(KeyEventOutcome {
                     redraw: true,
-                    clear_terminal: false,
                     quit_requested: false,
                     commands: Vec::new(),
                 })
@@ -142,7 +137,6 @@ impl InteractionSubsystem {
                 InputHookResult::Consumed => {
                     return KeyEventOutcome {
                         redraw: true,
-                        clear_terminal: false,
                         quit_requested: false,
                         commands: Vec::new(),
                     };
@@ -150,7 +144,6 @@ impl InteractionSubsystem {
                 InputHookResult::EmitCommand(ext_command) => {
                     return KeyEventOutcome {
                         redraw: false,
-                        clear_terminal: false,
                         quit_requested: false,
                         commands: vec![CommandRequest::new(
                             ext_command,
@@ -171,7 +164,6 @@ impl InteractionSubsystem {
                 state.scroll_help_by(delta);
                 KeyEventOutcome {
                     redraw: true,
-                    clear_terminal: false,
                     quit_requested: false,
                     commands: Vec::new(),
                 }
@@ -254,7 +246,6 @@ impl InteractionSubsystem {
         };
         Some(KeyEventOutcome {
             redraw: closed,
-            clear_terminal: closed,
             quit_requested: false,
             commands: Vec::new(),
         })
@@ -363,10 +354,9 @@ impl InteractionSubsystem {
         }
     }
 
-    fn command_effects(command: &Command, redraw_on_dispatch: bool) -> (bool, bool, bool) {
+    fn command_effects(command: &Command, redraw_on_dispatch: bool) -> (bool, bool) {
         (
             redraw_on_dispatch || matches!(command, Command::OpenHelp),
-            matches!(command, Command::OpenHelp),
             matches!(command, Command::Quit),
         )
     }
@@ -379,24 +369,21 @@ impl InteractionSubsystem {
             SequenceResolution::Noop => KeyEventOutcome::default(),
             SequenceResolution::Pending | SequenceResolution::Cleared => KeyEventOutcome {
                 redraw: true,
-                clear_terminal: false,
                 quit_requested: false,
                 commands: Vec::new(),
             },
             SequenceResolution::Dispatch(Command::Quit) => KeyEventOutcome {
                 redraw: false,
-                clear_terminal: false,
                 quit_requested: true,
                 commands: Vec::new(),
             },
             SequenceResolution::DispatchThen { first, next } => {
                 // `DispatchThen` represents "commit the timed-out sequence, then keep
                 // processing the key that arrived after it" without dropping input.
-                let (first_redraw, first_clear_terminal, first_quit_requested) =
+                let (first_redraw, first_quit_requested) =
                     Self::command_effects(&first, redraw_on_dispatch);
                 let mut outcome = Self::sequence_outcome(*next, redraw_on_dispatch);
                 outcome.redraw |= first_redraw;
-                outcome.clear_terminal |= first_clear_terminal;
                 outcome.quit_requested |= first_quit_requested;
                 outcome.commands.insert(
                     0,
@@ -405,11 +392,9 @@ impl InteractionSubsystem {
                 outcome
             }
             SequenceResolution::Dispatch(command) => {
-                let (redraw, clear_terminal, _) =
-                    Self::command_effects(&command, redraw_on_dispatch);
+                let (redraw, _) = Self::command_effects(&command, redraw_on_dispatch);
                 KeyEventOutcome {
                     redraw,
-                    clear_terminal,
                     quit_requested: false,
                     commands: vec![CommandRequest::new(
                         command,
@@ -474,14 +459,11 @@ impl InteractionSubsystem {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::io;
     use std::sync::Arc;
     use std::time::Duration;
 
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use ratatui::layout::Size;
 
-    use crate::app::terminal_session::TerminalSurface;
     use crate::app::{AppState, Mode, PaletteRequest};
     use crate::backend::test_support::{build_pdf, unique_temp_path};
     use crate::backend::{PdfDoc, SharedPdfBackend};
@@ -494,38 +476,6 @@ mod tests {
     use super::super::actors::InputActor;
     use super::super::core::InteractionSubsystem;
     use super::super::state::{NoticeLevel, notice_action_for_error};
-
-    struct MockSession {
-        clear_count: usize,
-        size: Size,
-    }
-
-    impl MockSession {
-        fn new(width: u16, height: u16) -> Self {
-            Self {
-                clear_count: 0,
-                size: Size::new(width, height),
-            }
-        }
-    }
-
-    impl TerminalSurface for MockSession {
-        fn size(&self) -> io::Result<Size> {
-            Ok(self.size)
-        }
-
-        fn clear(&mut self) -> io::Result<()> {
-            self.clear_count += 1;
-            Ok(())
-        }
-
-        fn draw<F>(&mut self, _render: F) -> io::Result<()>
-        where
-            F: FnOnce(&mut ratatui::Frame<'_>),
-        {
-            Ok(())
-        }
-    }
 
     fn test_pdf_backend() -> SharedPdfBackend {
         let file = unique_temp_path(".pdf");
@@ -550,7 +500,6 @@ mod tests {
         assert!(outcome.quit_requested);
         assert!(outcome.commands.is_empty());
         assert!(!outcome.redraw);
-        assert!(!outcome.clear_terminal);
     }
 
     #[test]
@@ -573,7 +522,6 @@ mod tests {
                     && request.source == CommandInvocationSource::Keymap
         ));
         assert!(outcome.redraw);
-        assert!(outcome.clear_terminal);
     }
 
     #[test]
@@ -592,7 +540,6 @@ mod tests {
             .expect("help scroll should be handled");
         assert_eq!(state.help_scroll, 1);
         assert!(down.redraw);
-        assert!(!down.clear_terminal);
         assert!(down.commands.is_empty());
 
         let closed = interaction
@@ -602,7 +549,6 @@ mod tests {
         assert_eq!(state.help_scroll, 0);
         assert!(closed.commands.is_empty());
         assert!(closed.redraw);
-        assert!(closed.clear_terminal);
     }
 
     #[test]
@@ -623,19 +569,17 @@ mod tests {
         assert_eq!(state.mode, crate::app::Mode::Help);
         assert_eq!(state.help_scroll, 0);
         assert!(!outcome.redraw);
-        assert!(!outcome.clear_terminal);
         assert!(outcome.commands.is_empty());
     }
 
     #[test]
-    fn help_close_requests_viewer_area_clear() {
+    fn help_close_returns_to_normal_mode_and_requests_redraw() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState {
             mode: Mode::Help,
             ..AppState::default()
         };
         let mut actor = InputActor::new(std::time::Instant::now());
-        let mut session = MockSession::new(80, 24);
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 
         let effects = actor
@@ -643,12 +587,10 @@ mod tests {
                 crossterm::event::Event::Key(key),
                 &mut interaction,
                 &mut state,
-                &mut session,
             )
             .expect("help close should be handled");
         let (commands, events, redraws, quit_requested) = effects.into_parts();
 
-        assert_eq!(session.clear_count, 1);
         assert_eq!(state.mode, Mode::Normal);
         assert_eq!(state.help_scroll, 0);
         assert!(!redraws.is_empty());
@@ -658,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_close_clears_terminal_and_restores_normal_mode() {
+    fn palette_close_returns_to_normal_mode_and_requests_redraw() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
         interaction
@@ -672,7 +614,6 @@ mod tests {
         assert_eq!(state.mode, Mode::Palette);
 
         let mut actor = InputActor::new(std::time::Instant::now());
-        let mut session = MockSession::new(80, 24);
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 
         let effects = actor
@@ -680,15 +621,51 @@ mod tests {
                 crossterm::event::Event::Key(key),
                 &mut interaction,
                 &mut state,
-                &mut session,
             )
             .expect("palette close should be handled");
         let (commands, events, redraws, quit_requested) = effects.into_parts();
 
-        assert_eq!(session.clear_count, 1);
         assert_eq!(state.mode, Mode::Normal);
         assert!(!redraws.is_empty());
         assert!(commands.is_empty());
+        assert!(events.is_empty());
+        assert!(!quit_requested);
+    }
+
+    #[test]
+    fn palette_submit_returns_to_normal_mode_and_dispatches_command() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState::default();
+        interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Open {
+                kind: PaletteKind::Command,
+                payload: None,
+            });
+        assert!(interaction.apply_palette_requests(&mut state));
+        assert_eq!(state.mode, Mode::Palette);
+
+        let mut actor = InputActor::new(std::time::Instant::now());
+        let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+
+        let effects = actor
+            .handle_terminal_event(
+                crossterm::event::Event::Key(key),
+                &mut interaction,
+                &mut state,
+            )
+            .expect("palette submit should be handled");
+        let (commands, events, redraws, quit_requested) = effects.into_parts();
+
+        assert_eq!(state.mode, Mode::Normal);
+        assert!(!redraws.is_empty());
+        assert!(matches!(
+            commands.as_slice(),
+            [request]
+                if request.command == Command::NextPage
+                    && request.source == CommandInvocationSource::PaletteProvider
+        ));
         assert!(events.is_empty());
         assert!(!quit_requested);
     }
@@ -707,7 +684,6 @@ mod tests {
 
         assert_eq!(state.mode, Mode::Normal);
         assert!(outcome.redraw);
-        assert!(outcome.clear_terminal);
         assert!(outcome.commands.is_empty());
     }
 
@@ -738,7 +714,6 @@ mod tests {
             Some(NoticeLevel::Warning)
         );
         assert!(outcome.redraw);
-        assert!(!outcome.clear_terminal);
         assert!(!outcome.quit_requested);
         assert!(outcome.commands.is_empty());
     }
@@ -877,7 +852,6 @@ mod tests {
         let flushed = interaction.flush_sequence_timeout(state.mode);
 
         assert!(!flushed.redraw);
-        assert!(!flushed.clear_terminal);
         assert!(!flushed.quit_requested);
         assert!(flushed.commands.is_empty());
         assert_eq!(interaction.pending_sequence_status(), None);

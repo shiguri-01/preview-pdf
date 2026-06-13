@@ -911,37 +911,52 @@ fn read_options_from_path(path: &Path, missing: MissingConfigPolicy) -> AppResul
 }
 
 pub fn default_config_path() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os("PVF_CONFIG_PATH")
+    default_config_path_from_env(|key| std::env::var_os(key), Path::is_file)
+}
+
+fn default_config_path_from_env(
+    mut env_var: impl FnMut(&str) -> Option<std::ffi::OsString>,
+    is_file: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    if let Some(explicit) = env_var("PVF_CONFIG_PATH")
         && !explicit.is_empty()
     {
         return Some(PathBuf::from(explicit));
     }
 
-    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME")
+    if let Some(xdg) = env_var("XDG_CONFIG_HOME")
         && !xdg.is_empty()
     {
-        return Some(PathBuf::from(xdg).join("pvf").join("config.toml"));
+        let path = PathBuf::from(xdg).join("pvf").join("config.toml");
+        if is_file(&path) {
+            return Some(path);
+        }
     }
-    if let Some(home) = std::env::var_os("HOME")
+    if let Some(home) = env_var("HOME")
         && !home.is_empty()
     {
-        return Some(
-            PathBuf::from(home)
-                .join(".config")
-                .join("pvf")
-                .join("config.toml"),
-        );
+        let path = PathBuf::from(home)
+            .join(".config")
+            .join("pvf")
+            .join("config.toml");
+        if is_file(&path) {
+            return Some(path);
+        }
     }
-    if let Some(appdata) = std::env::var_os("APPDATA")
+    if let Some(appdata) = env_var("APPDATA")
         && !appdata.is_empty()
     {
-        return Some(PathBuf::from(appdata).join("pvf").join("config.toml"));
+        let path = PathBuf::from(appdata).join("pvf").join("config.toml");
+        if is_file(&path) {
+            return Some(path);
+        }
     }
     None
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::fs;
     use std::path::PathBuf;
     use std::process;
@@ -953,7 +968,7 @@ mod tests {
 
     use super::{
         AppOptions, AppOptionsResolver, Config, RenderOptions, ViewOptions, WatchOptions,
-        load_options_from_explicit_path,
+        default_config_path_from_env, load_options_from_explicit_path,
     };
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
@@ -1149,6 +1164,37 @@ mod tests {
             err.to_string().contains("config path does not exist"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn default_config_path_keeps_explicit_path_even_when_missing() {
+        let explicit = PathBuf::from("/tmp/pvf-explicit-config.toml");
+        let found = default_config_path_from_env(
+            |key| (key == "PVF_CONFIG_PATH").then(|| OsString::from(&explicit)),
+            |_| false,
+        );
+
+        assert_eq!(found, Some(explicit));
+    }
+
+    #[test]
+    fn default_config_path_falls_through_missing_implicit_locations() {
+        let xdg = PathBuf::from("/tmp/pvf-xdg-config");
+        let home = PathBuf::from("/tmp/pvf-home");
+        let appdata = PathBuf::from("/tmp/pvf-appdata");
+        let expected = home.join(".config").join("pvf").join("config.toml");
+
+        let found = default_config_path_from_env(
+            |key| match key {
+                "XDG_CONFIG_HOME" => Some(OsString::from(&xdg)),
+                "HOME" => Some(OsString::from(&home)),
+                "APPDATA" => Some(OsString::from(&appdata)),
+                _ => None,
+            },
+            |path| path == expected,
+        );
+
+        assert_eq!(found, Some(expected));
     }
 
     #[test]

@@ -46,6 +46,27 @@ Before accepting a test, check that it names one behavior, uses the narrowest
 layer, asserts observable results, keeps setup small, and avoids real-time
 flakiness for workers, ordering, cancellation, or background work.
 
+Prefer tests that would fail for the intended bug or contract drift. Test names
+should read like the behavior being protected, not like the function being
+called.
+
+Assert behavior through the boundary under test. Unit tests may inspect private
+helpers, but module contract tests should avoid incidental internal state and
+assert parser output, command outcome, palette effect, emitted event, cache
+identity, accepted or rejected worker result, rendered row, notice, error, or
+other observable results.
+
+Use consistency tests for repo-owned registries and catalogs when drift is the
+risk: command metadata, command parser and dispatch routing, built-in keymaps,
+palette provider registration, extension host composition, config parsing, and
+performance diagnostic report shape. Do not duplicate a full inventory unless
+the assertion protects a meaningful cross-module invariant.
+
+For async, worker, ordering, cancellation, search generation, render stale
+results, and presenter encode results, avoid sleeps and real-time assumptions.
+Prefer explicit identities, generations, queues, drain points, and deterministic
+completion inputs.
+
 Do not add broad tests that only mirror an implementation table. If a compact
 overview is what the reader needs, update docs instead.
 

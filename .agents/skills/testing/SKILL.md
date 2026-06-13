@@ -16,7 +16,7 @@ stable contract.
 Read only the relevant section of `docs/architecture.md` when the test depends
 on subsystem boundaries, runtime flow, workers, or ownership.
 
-## Workflow
+## Change Triage
 
 Classify the change first:
 
@@ -28,6 +28,8 @@ Classify the change first:
   tests only where coverage is weak.
 - Inventory change: update the owning Rust catalog or type, then guard
   meaningful consistency rather than duplicating the inventory in tests.
+
+## Test Placement
 
 Choose the narrowest useful test boundary:
 
@@ -42,10 +44,6 @@ Choose the narrowest useful test boundary:
 
 ## Quality Checks
 
-Before accepting a test, check that it names one behavior, uses the narrowest
-layer, asserts observable results, keeps setup small, and avoids real-time
-flakiness for workers, ordering, cancellation, or background work.
-
 Prefer tests that would fail for the intended bug or contract drift. Test names
 should read like the behavior being protected, not like the function being
 called.
@@ -55,6 +53,8 @@ helpers, but module contract tests should avoid incidental internal state and
 assert parser output, command outcome, palette effect, emitted event, cache
 identity, accepted or rejected worker result, rendered row, notice, error, or
 other observable results.
+
+Keep setup small enough that the behavior under test is easy to see.
 
 Use consistency tests for repo-owned registries and catalogs when drift is the
 risk: command metadata, command parser and dispatch routing, built-in keymaps,
@@ -67,8 +67,8 @@ results, and presenter encode results, avoid sleeps and real-time assumptions.
 Prefer explicit identities, generations, queues, drain points, and deterministic
 completion inputs.
 
-Do not add broad tests that only mirror an implementation table. If a compact
-overview is what the reader needs, update docs instead.
+If a proposed test mostly mirrors an implementation table or provides overview,
+prefer a consistency invariant or a docs update instead.
 
 ## Validation
 

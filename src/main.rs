@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, ValueEnum};
+use clap::{ArgAction, Parser, ValueEnum};
 #[cfg(not(test))]
 use pvf::app::App;
 use pvf::app::PageLayoutMode;
@@ -47,8 +47,14 @@ impl From<CliPageLayout> for PageLayoutMode {
 }
 
 #[derive(Debug, Parser)]
-#[command(version, about = "PDF viewer for the terminal")]
+#[command(
+    version,
+    about = "PDF viewer for the terminal",
+    disable_version_flag = true
+)]
 struct Cli {
+    #[arg(short = 'v', long, action = ArgAction::Version, help = "Print version")]
+    version: Option<bool>,
     #[arg(
         short,
         long,
@@ -130,7 +136,7 @@ fn parse_cli(cli: Cli) -> CliOptions {
 mod tests {
     use std::path::PathBuf;
 
-    use clap::Parser;
+    use clap::{Parser, error::ErrorKind};
     use pvf::app::PageLayoutMode;
     use pvf::config::ConfigFileSelection;
 
@@ -243,6 +249,15 @@ mod tests {
             options.options.view.initial_layout,
             Some(PageLayoutMode::Spread)
         );
+    }
+
+    #[test]
+    fn parse_cli_uses_lowercase_v_for_version() {
+        let err = Cli::try_parse_from(["pvf", "-v"]).expect_err("version should exit early");
+        assert_eq!(err.kind(), ErrorKind::DisplayVersion);
+
+        let err = Cli::try_parse_from(["pvf", "--version"]).expect_err("version should exit early");
+        assert_eq!(err.kind(), ErrorKind::DisplayVersion);
     }
 
     #[test]

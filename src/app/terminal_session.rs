@@ -37,7 +37,7 @@ impl InteractiveTerminalSession {
         }
 
         let backend = CrosstermBackend::new(stdout);
-        let terminal = match Terminal::new(backend) {
+        let mut terminal = match Terminal::new(backend) {
             Ok(terminal) => terminal,
             Err(err) => {
                 cleanup_terminal_enter_failure();
@@ -47,6 +47,13 @@ impl InteractiveTerminalSession {
                 ));
             }
         };
+        if let Err(err) = terminal.clear() {
+            cleanup_terminal_enter_failure();
+            return Err(AppError::io_with_context(
+                err,
+                "clearing terminal alternate screen",
+            ));
+        }
 
         Ok(Self {
             terminal,

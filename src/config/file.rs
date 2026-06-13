@@ -544,6 +544,34 @@ mod tests {
     }
 
     #[test]
+    fn keymap_config_allows_literal_less_than_binding() {
+        let path = unique_temp_path("keymap-less-than.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap]
+            preset = "none"
+
+            [keymap.bindings]
+            "<" = "prev-page"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should parse");
+        let resolved = AppOptionsResolver::new().apply_options(options).resolve();
+        let mut resolver =
+            SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('<'), KeyModifiers::NONE)),
+            SequenceResolution::Dispatch(Command::PrevPage)
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
     fn keymap_config_rejects_unknown_preset() {
         let path = unique_temp_path("bad-keymap-preset.toml");
         fs::write(

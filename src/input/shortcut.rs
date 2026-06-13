@@ -125,6 +125,10 @@ pub fn parse_shortcut_sequence(input: &str) -> Result<Vec<ShortcutKey>, Shortcut
             keys.push(ShortcutKey::char(ch));
             continue;
         }
+        if chars.peek().is_none() {
+            keys.push(ShortcutKey::char('<'));
+            continue;
+        }
 
         let mut token = String::new();
         loop {
@@ -380,6 +384,10 @@ mod tests {
         assert_eq!(
             parse_shortcut_sequence("<s-tab>").expect("sequence should parse"),
             vec![ShortcutKey::key(KeyCode::BackTab)]
+        );
+        assert_eq!(
+            parse_shortcut_sequence("<").expect("literal less-than should parse"),
+            vec![ShortcutKey::char('<')]
         );
     }
 

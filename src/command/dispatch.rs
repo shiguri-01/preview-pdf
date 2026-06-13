@@ -60,25 +60,6 @@ fn rejection_notice(command: &Command, message: String) -> NoticeAction {
     }
 }
 
-pub fn dispatch(
-    app: &mut AppState,
-    cmd: Command,
-    source: CommandInvocationSource,
-    pdf: SharedPdfBackend,
-    extension_host: &mut ExtensionHost,
-    palette_requests: &mut VecDeque<PaletteRequest>,
-) -> AppResult<CommandDispatchResult> {
-    dispatch_with_view_policy(
-        app,
-        ViewPolicy::default(),
-        cmd,
-        source,
-        pdf,
-        extension_host,
-        palette_requests,
-    )
-}
-
 pub fn dispatch_with_view_policy(
     app: &mut AppState,
     view_policy: ViewPolicy,
@@ -240,7 +221,7 @@ mod tests {
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
 
-    use super::{collect_transition_events, dispatch, dispatch_with_view_policy};
+    use super::{CommandDispatchResult, collect_transition_events, dispatch_with_view_policy};
 
     struct StubPdf {
         path: PathBuf,
@@ -299,6 +280,25 @@ mod tests {
         fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {
             Ok(Vec::new())
         }
+    }
+
+    fn dispatch(
+        app: &mut AppState,
+        cmd: Command,
+        source: CommandInvocationSource,
+        pdf: SharedPdfBackend,
+        extension_host: &mut ExtensionHost,
+        palette_requests: &mut VecDeque<PaletteRequest>,
+    ) -> crate::error::AppResult<CommandDispatchResult> {
+        dispatch_with_view_policy(
+            app,
+            ViewPolicy::default(),
+            cmd,
+            source,
+            pdf,
+            extension_host,
+            palette_requests,
+        )
     }
 
     fn new_zoom_test_fixture() -> (SharedPdfBackend, ExtensionHost, VecDeque<PaletteRequest>) {

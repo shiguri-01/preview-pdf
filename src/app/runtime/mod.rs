@@ -1,7 +1,6 @@
 use std::time::{Duration, Instant};
 
 use crate::backend::{PdfBackend, RgbaFrame};
-use crate::config::CacheConfig;
 use crate::error::{AppError, AppResult};
 use crate::perf::PerfStats;
 use crate::presenter::ImagePresenter;
@@ -37,10 +36,6 @@ impl RenderRuntime {
             perf_stats: PerfStats::default(),
             prefetch_policy: PrefetchPolicy::default(),
         }
-    }
-
-    pub fn from_cache_config(cache: &CacheConfig) -> Self {
-        Self::with_l1_cache_limits(cache.l1_max_entries, cache.l1_memory_budget_bytes())
     }
 
     pub fn schedule_navigation(

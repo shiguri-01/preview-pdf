@@ -168,14 +168,12 @@ fn parse_numeric_prefix_command(command_text: &str) -> AppResult<&'static str> {
 }
 
 fn validate_configurable_key(keys: &[ShortcutKey]) -> AppResult<()> {
-    if keys.iter().any(|key| {
-        matches!(
-            key.code(),
-            crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Enter
-        )
-    }) {
+    if keys
+        .iter()
+        .any(|key| matches!(key.code(), crossterm::event::KeyCode::Esc))
+    {
         return Err(AppError::invalid_argument(
-            "keymap bindings cannot use <esc> or <enter>",
+            "keymap bindings cannot use <esc>",
         ));
     }
     Ok(())
@@ -199,7 +197,7 @@ fn key_registration_error(err: SequenceRegistrationError) -> AppError {
     AppError::invalid_argument(match err {
         SequenceRegistrationError::EmptySequence => "key sequence must not be empty",
         SequenceRegistrationError::ReservedKeyInSequence => {
-            "<esc> and <enter> cannot be used inside multi-key bindings"
+            "<esc> cannot be used inside multi-key bindings"
         }
         SequenceRegistrationError::InvalidNumericSuffix => {
             "count key binding suffix must not be a digit"

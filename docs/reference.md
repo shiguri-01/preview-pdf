@@ -163,8 +163,8 @@ Contract:
   from the keymap; runtime availability remains a dispatch-time check.
 - Palette-local key handling is owned by palette behavior, not the normal-mode
   keymap.
-- `<esc>` and `<enter>` are not configurable normal-mode bindings while their
-  global cancellation and sequence-confirmation behavior is being settled.
+- `<esc>` is reserved for global cancellation and is not routed through the
+  normal-mode keymap.
 
 Compatibility:
 - Changing a default key binding affects user muscle memory and help output; do

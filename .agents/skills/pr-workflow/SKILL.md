@@ -13,7 +13,8 @@ description: Create and review GitHub pull requests with a consistent workflow. 
 
 ## Create PR
 
-1. Create a short branch-appropriate PR title.
+1. Create a short branch-appropriate PR title using the same format as the preferred commit message format:
+   - `<type>(<scope>): <summary>` where useful (`feat`, `fix`, `refactor`, `docs`, `test`).
 2. Write a concise PR body tailored to the change's scope:
    - Always include the rationale for the change.
    - Small/obvious changes: verification results + one-line rationale

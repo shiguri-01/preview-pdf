@@ -4,23 +4,23 @@ This directory contains the durable developer-facing docs for `pvf`.
 
 ## Reading Path
 
-1. `architecture.md` for the system map, runtime flow, and subsystem
+1. [architecture.md](architecture.md) for the system map, runtime flow, and subsystem
    boundaries.
-2. `reference.md` for stable contracts that implementation and review should
+2. [reference.md](reference.md) for stable contracts that implementation and review should
    protect.
-3. `testing.md` for test placement, test-first guidance, quality checklists,
+3. [testing.md](testing.md) for test placement, test-first guidance, quality checklists,
    and validation commands.
 
 ## Where Material Belongs
 
-- Put architecture material in `architecture.md` when a change affects runtime
+- Put architecture material in [architecture.md](architecture.md) when a change affects runtime
   flow, subsystem boundaries, ownership, or event routing.
-- Put stable developer-facing behavior in `reference.md` when a change
+- Put stable developer-facing behavior in [reference.md](reference.md) when a change
   intentionally changes CLI behavior, config compatibility, command policy,
   key binding resolution, palette semantics, extension host behavior, render
   stale-result behavior, cache behavior visible outside the implementation, or
   performance diagnostics contracts.
-- Put testing policy in `testing.md` when a change affects how behavior should
+- Put testing policy in [testing.md](testing.md) when a change affects how behavior should
   be protected.
 
 Complete inventories belong in the Rust code that defines them: command
@@ -44,8 +44,8 @@ reading. Prefer both when a topic needs orientation and correctness protection.
 Use this as the first pass before editing docs or tests:
 
 - Stable behavior changed: update focused tests first and update
-  `reference.md` if the contract changes.
-- Subsystem boundary changed: update `architecture.md`.
+  [reference.md](reference.md) if the contract changes.
+- Subsystem boundary changed: update [architecture.md](architecture.md).
 - Bug fixed: add a regression test first, or record why that is not useful.
 - Inventory changed: update owning code and meaningful consistency tests; keep
   docs to orientation and compatibility notes.

@@ -7,7 +7,7 @@ abstraction for PDF data.
 
 ## Runtime Flow
 
-Startup begins in `src/main.rs`.
+Startup begins in [src/main.rs](../src/main.rs).
 
 1. CLI arguments are parsed into `AppOptions` patches.
 2. Configuration is loaded and merged with built-in defaults and CLI options.
@@ -24,26 +24,26 @@ can operate on resolved policies rather than re-reading config or CLI state.
 
 ## Subsystems
 
-- `src/app/` owns interactive runtime state, event-loop orchestration, input
+- [src/app/](../src/app/) owns interactive runtime state, event-loop orchestration, input
   handling, render completion handling, view operations, and terminal session
   coordination.
-- `src/command/` owns command ids, metadata, parsing, source-aware validation,
+- [src/command/](../src/command/) owns command ids, metadata, parsing, source-aware validation,
   dispatch, and typed command outcomes.
-- `src/input/` owns key sequence normalization, built-in key bindings, numeric
+- [src/input/](../src/input/) owns key sequence normalization, built-in key bindings, numeric
   prefixes, and palette input history.
-- `src/palette/` owns palette sessions, input handling, provider lookup,
+- [src/palette/](../src/palette/) owns palette sessions, input handling, provider lookup,
   candidate matching, selection, tab, submit, cancel, and rendered palette
   views.
-- `src/extension/` owns the extension host contract and the composition of
+- [src/extension/](../src/extension/) owns the extension host contract and the composition of
   built-in extension state.
-- `src/search/`, `src/history/`, and `src/outline/` provide current extension
-  and palette-provider behavior.
-- `src/render/` owns L1 rendered-page caching, scheduling, prefetch, render
+- [src/search/](../src/search/), [src/history/](../src/history/), and
+  [src/outline/](../src/outline/) provide current extension and palette-provider behavior.
+- [src/render/](../src/render/) owns L1 rendered-page caching, scheduling, prefetch, render
   worker messages, stale-result acceptance, and cancellation metadata.
-- `src/presenter/` owns terminal image protocol selection, L2 terminal-frame
+- [src/presenter/](../src/presenter/) owns terminal image protocol selection, L2 terminal-frame
   caching, encode workers, slot drawing, and presenter feedback.
-- `src/backend/` owns the PDF backend trait and default backend implementation.
-- `src/ui/` owns layout, chrome, overlays, help, theme, and frame composition.
+- [src/backend/](../src/backend/) owns the PDF backend trait and default backend implementation.
+- [src/ui/](../src/ui/) owns layout, chrome, overlays, help, theme, and frame composition.
 
 ## Dependency Direction
 

@@ -45,7 +45,7 @@ protection: parser behavior, compatibility rules, cross-module consistency,
 stale-result handling, and observable user-facing outcomes.
 
 Use both when a topic needs a mental model and a guardrail. For example,
-`reference.md` explains that key bindings are owned by the input registry and
+[reference.md](reference.md) explains that key bindings are owned by the input registry and
 must resolve to invocable commands; command tests verify that registry
 consistency.
 
@@ -65,26 +65,22 @@ Avoid both extremes:
   explicit test-support fixtures.
 - Do not move a test to a module contract directory only because the behavior
   is important.
-- Add or update module contract tests when stable behavior in `docs/reference.md`
+- Add or update module contract tests when stable behavior in [reference.md](reference.md)
   changes.
 - Keep process-level integration tests minimal because they are slower and more
   brittle than unit or module contract tests.
 
 Existing module contract examples:
 
-```text
-src/app/tests/
-src/presenter/tests/
-```
+- [src/app/tests/](../src/app/tests/)
+- [src/presenter/tests/](../src/presenter/tests/)
 
 Good future locations include:
 
-```text
-src/command/tests/
-src/palette/tests/
-src/extension/tests/
-src/render/tests/
-```
+- [src/command/tests/](../src/command/tests/)
+- `src/palette/tests/`
+- `src/extension/tests/`
+- `src/render/tests/`
 
 Before adding one, check whether the same behavior can be tested cleanly
 through the subsystem boundary. If not, add an in-file unit test near the code.
@@ -116,12 +112,12 @@ Bug fix:
 Stable behavior change:
 
 1. Add or update the relevant unit, module contract, or integration test first.
-2. Update `docs/reference.md` if the documented contract changes.
+2. Update [reference.md](reference.md) if the documented contract changes.
 3. Implement the change.
 
 Architecture boundary change:
 
-1. Update `docs/architecture.md`.
+1. Update [architecture.md](architecture.md).
 2. Add or update tests for behavior that must not regress.
 3. Keep local implementation details out of docs.
 

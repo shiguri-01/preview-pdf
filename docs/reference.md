@@ -55,11 +55,11 @@ Compatibility:
   intentionally.
 
 Owned by:
-- `src/main.rs`
-- `src/config/`
+- [src/main.rs](../src/main.rs)
+- [src/config/](../src/config/)
 
 Test coverage:
-- CLI parser tests in `src/main.rs`.
+- CLI parser tests in [src/main.rs](../src/main.rs).
 - Process-level integration tests if exit codes or stderr/stdout behavior need
   protection.
 
@@ -90,15 +90,15 @@ Compatibility:
   parsing code, and tests.
 
 Owned by:
-- `src/config/types.rs`
-- `src/config/file.rs`
-- `src/config/options.rs`
-- `src/config/policy.rs`
-- `src/main.rs`
+- [src/config/types.rs](../src/config/types.rs)
+- [src/config/file.rs](../src/config/file.rs)
+- [src/config/options.rs](../src/config/options.rs)
+- [src/config/policy.rs](../src/config/policy.rs)
+- [src/main.rs](../src/main.rs)
 
 Test coverage:
-- Config file parser and resolver tests in `src/config/`.
-- CLI config selection tests in `src/main.rs`.
+- Config file parser and resolver tests in [src/config/](../src/config/).
+- CLI config selection tests in [src/main.rs](../src/main.rs).
 
 ## Commands
 
@@ -133,14 +133,14 @@ Compatibility:
   the catalog; use docs for policy, categories, and review cues.
 
 Owned by:
-- `src/command/catalog.rs`
-- `src/command/parse.rs`
-- `src/command/spec.rs`
-- `src/command/dispatch.rs`
-- `src/command/handlers/`
+- [src/command/catalog.rs](../src/command/catalog.rs)
+- [src/command/parse.rs](../src/command/parse.rs)
+- [src/command/spec.rs](../src/command/spec.rs)
+- [src/command/dispatch.rs](../src/command/dispatch.rs)
+- [src/command/handlers/](../src/command/handlers/)
 
 Test coverage:
-- Command registry, parser, validation, and dispatch tests in `src/command/`.
+- Command registry, parser, validation, and dispatch tests in [src/command/](../src/command/).
 - Command-palette provider tests where command metadata affects palette UI.
 
 ## Key Bindings
@@ -167,13 +167,13 @@ Compatibility:
   Docs may summarize categories of bindings, but should not own the table.
 
 Owned by:
-- `src/input/keymap.rs`
-- `src/input/sequence.rs`
-- `src/input/shortcut.rs`
-- `src/ui/help.rs`
+- [src/input/keymap.rs](../src/input/keymap.rs)
+- [src/input/sequence.rs](../src/input/sequence.rs)
+- [src/input/shortcut.rs](../src/input/shortcut.rs)
+- [src/ui/help.rs](../src/ui/help.rs)
 
 Test coverage:
-- Sequence and keymap tests in `src/input/`.
+- Sequence and keymap tests in [src/input/](../src/input/).
 - Command/keymap consistency tests under the command module.
 
 ## Palette
@@ -216,17 +216,18 @@ Compatibility:
   Docs should explain provider responsibilities and notable cross-palette rules.
 
 Owned by:
-- `src/palette/manager.rs`
-- `src/palette/registry.rs`
-- `src/palette/types.rs`
-- `src/palette/providers/`
-- `src/search/palette.rs`
-- `src/history/palette.rs`
-- `src/outline/palette.rs`
+- [src/palette/manager.rs](../src/palette/manager.rs)
+- [src/palette/registry.rs](../src/palette/registry.rs)
+- [src/palette/types.rs](../src/palette/types.rs)
+- [src/palette/providers/](../src/palette/providers/)
+- [src/search/palette.rs](../src/search/palette.rs)
+- [src/history/palette.rs](../src/history/palette.rs)
+- [src/outline/palette.rs](../src/outline/palette.rs)
 
 Test coverage:
-- Palette manager and provider tests in `src/palette/`, `src/search/`,
-  `src/history/`, and `src/outline/`.
+- Palette manager and provider tests in [src/palette/](../src/palette/),
+  [src/search/](../src/search/), [src/history/](../src/history/), and
+  [src/outline/](../src/outline/).
 
 ## Extensions
 
@@ -252,12 +253,12 @@ Compatibility:
 - This is not a dynamic plugin API; do not document it as one.
 
 Owned by:
-- `src/extension/traits.rs`
-- `src/extension/host.rs`
-- `src/search/`
-- `src/history/`
-- `src/outline/`
-- `src/event.rs`
+- [src/extension/traits.rs](../src/extension/traits.rs)
+- [src/extension/host.rs](../src/extension/host.rs)
+- [src/search/](../src/search/)
+- [src/history/](../src/history/)
+- [src/outline/](../src/outline/)
+- [src/event.rs](../src/event.rs)
 
 Test coverage:
 - Extension host tests when adding or changing hook order or event propagation.
@@ -301,20 +302,20 @@ Compatibility:
   not in docs.
 
 Owned by:
-- `src/render/scheduler.rs`
-- `src/render/prefetch.rs`
-- `src/render/worker.rs`
-- `src/presenter/encode.rs`
-- `src/presenter/l2_cache.rs`
-- `src/app/render_ops.rs`
-- `src/search/engine.rs`
-- `src/search/state.rs`
+- [src/render/scheduler.rs](../src/render/scheduler.rs)
+- [src/render/prefetch.rs](../src/render/prefetch.rs)
+- [src/render/worker.rs](../src/render/worker.rs)
+- [src/presenter/encode.rs](../src/presenter/encode.rs)
+- [src/presenter/l2_cache.rs](../src/presenter/l2_cache.rs)
+- [src/app/render_ops.rs](../src/app/render_ops.rs)
+- [src/search/engine.rs](../src/search/engine.rs)
+- [src/search/state.rs](../src/search/state.rs)
 
 Test coverage:
-- Render worker and scheduler tests in `src/render/`.
-- Presenter cache and encode tests in `src/presenter/`.
-- Runtime worker tests in `src/app/tests/`.
-- Search generation tests in `src/search/`.
+- Render worker and scheduler tests in [src/render/](../src/render/).
+- Presenter cache and encode tests in [src/presenter/](../src/presenter/).
+- Runtime worker tests in [src/app/tests/](../src/app/tests/).
+- Search generation tests in [src/search/](../src/search/).
 
 ## Caches
 
@@ -332,10 +333,10 @@ Compatibility:
   such as stale fallback, blank-frame avoidance, or document identity changes.
 
 Owned by:
-- `src/render/cache.rs`
-- `src/presenter/l2_cache.rs`
-- `src/app/runtime/prepare.rs`
-- `src/app/runtime/spread_canvas.rs`
+- [src/render/cache.rs](../src/render/cache.rs)
+- [src/presenter/l2_cache.rs](../src/presenter/l2_cache.rs)
+- [src/app/runtime/prepare.rs](../src/app/runtime/prepare.rs)
+- [src/app/runtime/spread_canvas.rs](../src/app/runtime/spread_canvas.rs)
 
 Test coverage:
 - Cache unit tests and presenter/runtime tests that assert observable fallback
@@ -357,12 +358,12 @@ Compatibility:
   intentionally.
 
 Owned by:
-- `benches/perf.rs`
-- `benches/fixtures/`
-- `src/perf/`
-- `src/app/perf_runner.rs`
+- [benches/perf.rs](../benches/perf.rs)
+- [benches/fixtures/](../benches/fixtures/)
+- [src/perf/](../src/perf/)
+- [src/app/perf_runner.rs](../src/app/perf_runner.rs)
 
 Test coverage:
-- `src/perf/` tests for scenario parsing, validation, summary shape, and report
+- [src/perf/](../src/perf/) tests for scenario parsing, validation, summary shape, and report
   serialization.
 - Bench runs and diagnostics for performance observation.

@@ -58,6 +58,28 @@ pub fn validate_command_for_source(
     validate_command_spec_for_source(spec, ctx)
 }
 
+pub fn validate_command_invocation_for_source(
+    command: &Command,
+    source: CommandInvocationSource,
+) -> AppResult<()> {
+    let Some(spec) = spec_for_command(command) else {
+        return Err(AppError::unsupported(
+            "command spec should exist for typed command",
+        ));
+    };
+    validate_command_spec_invocation_for_source(spec, source)
+}
+
+pub fn validate_command_id_invocation_for_source(
+    id: &str,
+    source: CommandInvocationSource,
+) -> AppResult<()> {
+    let Some(spec) = find_command_spec(id) else {
+        return Err(AppError::invalid_argument("unknown command id"));
+    };
+    validate_command_spec_invocation_for_source(spec, source)
+}
+
 pub fn rejection_message_for_command(
     command: &Command,
     ctx: &CommandConditionContext<'_>,
@@ -71,18 +93,27 @@ fn validate_command_spec_for_source(
     spec: CommandSpec,
     ctx: &CommandConditionContext<'_>,
 ) -> AppResult<()> {
-    if !is_invocation_source_allowed(spec, ctx.source) {
-        return Err(AppError::invalid_argument(format!(
-            "{} is an internal command and cannot be invoked directly",
-            spec.id
-        )));
-    }
+    validate_command_spec_invocation_for_source(spec, ctx.source)?;
 
     if !is_command_available(spec, ctx) {
         return Err(AppError::invalid_argument(unavailable_message(spec, ctx)));
     }
 
     Ok(())
+}
+
+fn validate_command_spec_invocation_for_source(
+    spec: CommandSpec,
+    source: CommandInvocationSource,
+) -> AppResult<()> {
+    if is_invocation_source_allowed(spec, source) {
+        return Ok(());
+    }
+
+    Err(AppError::invalid_argument(format!(
+        "{} is an internal command and cannot be invoked directly",
+        spec.id
+    )))
 }
 
 fn is_command_available(spec: CommandSpec, ctx: &CommandConditionContext<'_>) -> bool {
@@ -145,6 +176,7 @@ mod tests {
     use super::{
         CommandConditionContext, command_registry, find_command_spec,
         is_command_visible_in_palette, validate_command_for_source, validate_command_id_for_source,
+        validate_command_invocation_for_source,
     };
     use crate::command::{Command, CommandInvocationPolicy, CommandInvocationSource};
 
@@ -227,5 +259,14 @@ mod tests {
 
         let spec = find_command_spec("close-help").expect("spec should exist");
         assert!(!is_command_visible_in_palette(spec, &ctx));
+    }
+
+    #[test]
+    fn invocation_validation_ignores_runtime_availability() {
+        validate_command_invocation_for_source(
+            &Command::NextSearchHit,
+            CommandInvocationSource::Keymap,
+        )
+        .expect("keymap config may bind state-dependent commands");
     }
 }

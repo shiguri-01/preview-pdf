@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crossterm::event::{KeyCode, KeyModifiers};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9,6 +11,31 @@ pub struct ShortcutKey {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShortcutKeyError {
     UnsupportedModifiers,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShortcutParseError {
+    Empty,
+    UnterminatedAngle,
+    EmptyAngle,
+    UnknownModifier(String),
+    DuplicateModifier(String),
+    UnknownKey(String),
+    UnsupportedModifiers,
+}
+
+impl fmt::Display for ShortcutParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => write!(f, "key sequence must not be empty"),
+            Self::UnterminatedAngle => write!(f, "unterminated angle key"),
+            Self::EmptyAngle => write!(f, "angle key must not be empty"),
+            Self::UnknownModifier(value) => write!(f, "unknown key modifier: {value}"),
+            Self::DuplicateModifier(value) => write!(f, "duplicate key modifier: {value}"),
+            Self::UnknownKey(value) => write!(f, "unknown key name: {value}"),
+            Self::UnsupportedModifiers => write!(f, "unsupported key modifiers"),
+        }
+    }
 }
 
 impl ShortcutKey {
@@ -86,6 +113,115 @@ pub fn format_shortcut_key(key: ShortcutKey) -> String {
     format!("<{}-{key_text}>", modifiers.join("-"))
 }
 
+pub fn parse_shortcut_sequence(input: &str) -> Result<Vec<ShortcutKey>, ShortcutParseError> {
+    if input.is_empty() {
+        return Err(ShortcutParseError::Empty);
+    }
+
+    let mut keys = Vec::new();
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch != '<' {
+            keys.push(ShortcutKey::char(ch));
+            continue;
+        }
+        if chars.peek().is_none() {
+            keys.push(ShortcutKey::char('<'));
+            continue;
+        }
+
+        let mut token = String::new();
+        loop {
+            let Some(next) = chars.next() else {
+                return Err(ShortcutParseError::UnterminatedAngle);
+            };
+            if next == '>' {
+                break;
+            }
+            token.push(next);
+        }
+        keys.push(parse_angle_key(&token)?);
+    }
+
+    if keys.is_empty() {
+        return Err(ShortcutParseError::Empty);
+    }
+    Ok(keys)
+}
+
+fn parse_angle_key(token: &str) -> Result<ShortcutKey, ShortcutParseError> {
+    if token.is_empty() {
+        return Err(ShortcutParseError::EmptyAngle);
+    }
+
+    let parts = token.split('-').collect::<Vec<_>>();
+    if parts.iter().any(|part| part.is_empty()) {
+        return Err(ShortcutParseError::UnknownKey(token.to_string()));
+    }
+
+    let key_name = parts[parts.len() - 1].to_ascii_lowercase();
+    let mut modifiers = KeyModifiers::NONE;
+    for modifier in &parts[..parts.len() - 1] {
+        let modifier = modifier.to_ascii_lowercase();
+        let bit = match modifier.as_str() {
+            "c" | "ctrl" | "control" => KeyModifiers::CONTROL,
+            "m" | "alt" => KeyModifiers::ALT,
+            "s" | "shift" => KeyModifiers::SHIFT,
+            _ => return Err(ShortcutParseError::UnknownModifier(modifier)),
+        };
+        if modifiers.contains(bit) {
+            return Err(ShortcutParseError::DuplicateModifier(modifier));
+        }
+        modifiers.insert(bit);
+    }
+
+    let mut code = parse_base_key(&key_name)?;
+    if code == KeyCode::Tab && modifiers.contains(KeyModifiers::SHIFT) {
+        code = KeyCode::BackTab;
+        modifiers.remove(KeyModifiers::SHIFT);
+    }
+
+    ShortcutKey::try_new(code, modifiers).map_err(|_| ShortcutParseError::UnsupportedModifiers)
+}
+
+fn parse_base_key(key_name: &str) -> Result<KeyCode, ShortcutParseError> {
+    Ok(match key_name {
+        "backspace" => KeyCode::Backspace,
+        "enter" => KeyCode::Enter,
+        "left" => KeyCode::Left,
+        "right" => KeyCode::Right,
+        "up" => KeyCode::Up,
+        "down" => KeyCode::Down,
+        "home" => KeyCode::Home,
+        "end" => KeyCode::End,
+        "pgup" | "pageup" => KeyCode::PageUp,
+        "pgdn" | "pagedown" => KeyCode::PageDown,
+        "tab" => KeyCode::Tab,
+        "backtab" => KeyCode::BackTab,
+        "del" | "delete" => KeyCode::Delete,
+        "ins" | "insert" => KeyCode::Insert,
+        "esc" | "escape" => KeyCode::Esc,
+        "space" => KeyCode::Char(' '),
+        _ if key_name.len() == 1 => {
+            let ch = key_name
+                .chars()
+                .next()
+                .expect("single-character key name should have one char");
+            KeyCode::Char(ch)
+        }
+        _ if key_name.starts_with('f') => {
+            let number = key_name[1..]
+                .parse::<u8>()
+                .map_err(|_| ShortcutParseError::UnknownKey(key_name.to_string()))?;
+            if number == 0 {
+                return Err(ShortcutParseError::UnknownKey(key_name.to_string()));
+            }
+            KeyCode::F(number)
+        }
+        _ => return Err(ShortcutParseError::UnknownKey(key_name.to_string())),
+    })
+}
+
 fn validate_modifiers(modifiers: KeyModifiers) -> Result<(), ShortcutKeyError> {
     if modifiers.intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META) {
         return Err(ShortcutKeyError::UnsupportedModifiers);
@@ -140,8 +276,9 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::{
-        ShortcutKey, ShortcutKeyError, format_shortcut_alternatives,
+        ShortcutKey, ShortcutKeyError, ShortcutParseError, format_shortcut_alternatives,
         format_shortcut_alternatives_tight, format_shortcut_key, format_shortcut_sequence,
+        parse_shortcut_sequence,
     };
 
     #[test]
@@ -223,6 +360,47 @@ mod tests {
         assert_eq!(
             ShortcutKey::try_new(KeyCode::Char('k'), KeyModifiers::SUPER),
             Err(ShortcutKeyError::UnsupportedModifiers)
+        );
+    }
+
+    #[test]
+    fn parses_printable_and_angle_key_sequences() {
+        assert_eq!(
+            parse_shortcut_sequence("gg").expect("sequence should parse"),
+            vec![ShortcutKey::char('g'), ShortcutKey::char('g')]
+        );
+        assert_eq!(
+            parse_shortcut_sequence("<c-o>").expect("sequence should parse"),
+            vec![ShortcutKey::ctrl('o')]
+        );
+        assert_eq!(
+            parse_shortcut_sequence("<down>").expect("sequence should parse"),
+            vec![ShortcutKey::key(KeyCode::Down)]
+        );
+        assert_eq!(
+            parse_shortcut_sequence("<space>").expect("sequence should parse"),
+            vec![ShortcutKey::char(' ')]
+        );
+        assert_eq!(
+            parse_shortcut_sequence("<s-tab>").expect("sequence should parse"),
+            vec![ShortcutKey::key(KeyCode::BackTab)]
+        );
+        assert_eq!(
+            parse_shortcut_sequence("<").expect("literal less-than should parse"),
+            vec![ShortcutKey::char('<')]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_shortcut_sequence_text() {
+        assert_eq!(parse_shortcut_sequence(""), Err(ShortcutParseError::Empty));
+        assert_eq!(
+            parse_shortcut_sequence("<c-o"),
+            Err(ShortcutParseError::UnterminatedAngle)
+        );
+        assert_eq!(
+            parse_shortcut_sequence("<super-o>"),
+            Err(ShortcutParseError::UnknownModifier("super".to_string()))
         );
     }
 }

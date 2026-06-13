@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,7 @@ use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 use crate::error::{AppError, AppResult};
 
 use super::options::{
-    AppOptions, CacheOptions, InputOptions, RenderOptions, ViewOptions, WatchOptions,
+    AppOptions, CacheOptions, InputOptions, KeymapOptions, RenderOptions, ViewOptions, WatchOptions,
 };
 use super::policy::AppOptionsResolver;
 use super::types::Config;
@@ -65,6 +66,7 @@ struct RawConfig {
     cache: Option<RawCacheConfig>,
     view: Option<RawViewConfig>,
     input: Option<RawInputConfig>,
+    keymap: Option<RawKeymapConfig>,
     watch: Option<RawWatchConfig>,
 }
 
@@ -108,6 +110,14 @@ struct RawInputConfig {
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
 #[serde(default)]
+struct RawKeymapConfig {
+    preset: Option<String>,
+    unbind: Vec<String>,
+    bindings: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
+#[serde(default)]
 struct RawWatchConfig {
     enabled: Option<bool>,
     poll_interval_ms: Option<u64>,
@@ -125,6 +135,11 @@ impl RawConfig {
                 .transpose()?
                 .unwrap_or_default(),
             input: self.input.map(InputOptions::from).unwrap_or_default(),
+            keymap: self
+                .keymap
+                .map(KeymapOptions::try_from)
+                .transpose()?
+                .unwrap_or_default(),
             watch: self.watch.map(WatchOptions::from).unwrap_or_default(),
         })
     }
@@ -187,6 +202,34 @@ impl From<RawInputConfig> for InputOptions {
         Self {
             sequence_timeout_ms: raw.sequence_timeout_ms,
         }
+    }
+}
+
+impl TryFrom<RawKeymapConfig> for KeymapOptions {
+    type Error = AppError;
+
+    fn try_from(raw: RawKeymapConfig) -> Result<Self, Self::Error> {
+        let preset = raw
+            .preset
+            .as_deref()
+            .map(super::keymap::parse_keymap_preset)
+            .transpose()?;
+        let unbind = raw
+            .unbind
+            .iter()
+            .map(|key| super::keymap::parse_keymap_target(key))
+            .collect::<AppResult<Vec<_>>>()?;
+        let bindings = raw
+            .bindings
+            .iter()
+            .map(|(key, command)| super::keymap::parse_keymap_binding(key, command))
+            .collect::<AppResult<Vec<_>>>()?;
+
+        Ok(Self {
+            preset,
+            unbind,
+            bindings,
+        })
     }
 }
 
@@ -322,6 +365,11 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
+    use crate::command::Command;
+    use crate::config::{AppOptionsResolver, KeymapBinding, KeymapPreset, KeymapTarget};
+    use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceResolution, SequenceResolver};
+    use crate::input::shortcut::ShortcutKey;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::{
         Config, ConfigFileSelection, default_config_path_from_env, load_options_from_explicit_path,
@@ -408,22 +456,180 @@ mod tests {
     }
 
     #[test]
-    fn unknown_legacy_keymap_section_is_ignored() {
-        let path = unique_temp_path("legacy-keymap.toml");
+    fn explicit_config_reads_keymap_section() {
+        let path = unique_temp_path("keymap.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap]
+            preset = "none"
+            unbind = ["j", "[count]G"]
+
+            [keymap.bindings]
+            "<down>" = "next-page"
+            "[count]G" = "goto-page"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should parse");
+        assert_eq!(options.keymap.preset, Some(KeymapPreset::None));
+        assert_eq!(
+            options.keymap.unbind,
+            vec![
+                KeymapTarget::Exact(vec![ShortcutKey::char('j')]),
+                KeymapTarget::NumericPrefix(ShortcutKey::char('G')),
+            ]
+        );
+        assert_eq!(
+            options.keymap.bindings,
+            vec![
+                KeymapBinding::Exact {
+                    keys: vec![ShortcutKey::key(KeyCode::Down)],
+                    command: Command::NextPage,
+                },
+                KeymapBinding::NumericPrefix {
+                    suffix: ShortcutKey::char('G'),
+                    command_id: "goto-page",
+                },
+            ]
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_resolves_to_runtime_sequence_registry() {
+        let path = unique_temp_path("keymap-runtime.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap]
+            preset = "none"
+
+            [keymap.bindings]
+            "<down>" = "next-page"
+            "[count]G" = "goto-page"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should parse");
+        let resolved = AppOptionsResolver::new().apply_options(options).resolve();
+        let mut resolver =
+            SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+            SequenceResolution::Noop
+        );
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            SequenceResolution::Dispatch(Command::NextPage)
+        );
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE)),
+            SequenceResolution::Dispatch(Command::GotoPage { page: 42 })
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_allows_literal_less_than_binding() {
+        let path = unique_temp_path("keymap-less-than.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap]
+            preset = "none"
+
+            [keymap.bindings]
+            "<" = "prev-page"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should parse");
+        let resolved = AppOptionsResolver::new().apply_options(options).resolve();
+        let mut resolver =
+            SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('<'), KeyModifiers::NONE)),
+            SequenceResolution::Dispatch(Command::PrevPage)
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_rejects_unknown_preset() {
+        let path = unique_temp_path("bad-keymap-preset.toml");
         fs::write(
             &path,
             r#"
             [keymap]
             preset = "emacs"
-
-            [cache]
-            l1_max_entries = 42
             "#,
         )
         .expect("config file should be written");
 
-        let config = Config::load_from_path(&path).expect("config should parse");
-        assert_eq!(config.cache.l1_max_entries, 42);
+        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
+        assert!(
+            err.to_string().contains("unknown keymap preset"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_rejects_internal_only_commands() {
+        let path = unique_temp_path("bad-keymap-command.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap.bindings]
+            "x" = "submit-search needle"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
+        assert!(
+            err.to_string().contains("internal command"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_rejects_escape_and_enter_bindings() {
+        let path = unique_temp_path("bad-keymap-key.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap.bindings]
+            "<esc>" = "quit"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
+        assert!(
+            err.to_string().contains("<esc> or <enter>"),
+            "unexpected error: {err}"
+        );
 
         fs::remove_file(&path).expect("config file should be removed");
     }
@@ -447,6 +653,9 @@ mod tests {
         assert_eq!(options.render.max_render_scale, None);
         assert_eq!(options.view.initial_page, None);
         assert_eq!(options.input.sequence_timeout_ms, None);
+        assert_eq!(options.keymap.preset, None);
+        assert!(options.keymap.unbind.is_empty());
+        assert!(options.keymap.bindings.is_empty());
         assert_eq!(options.watch.enabled, None);
 
         fs::remove_file(&path).expect("config file should be removed");

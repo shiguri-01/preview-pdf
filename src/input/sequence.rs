@@ -107,6 +107,39 @@ impl SequenceRegistry {
         Ok(())
     }
 
+    pub fn unregister_static(
+        &mut self,
+        keys: &[ShortcutKey],
+    ) -> Result<bool, SequenceRegistrationError> {
+        if keys.is_empty() {
+            return Err(SequenceRegistrationError::EmptySequence);
+        }
+        let keys = keys
+            .iter()
+            .copied()
+            .map(canonicalize_binding_key)
+            .collect::<Result<Vec<_>, _>>()?;
+        let original_len = self.bindings.len();
+        self.bindings
+            .retain(|binding| !matches!(binding, SequenceBinding::Exact { keys: existing, .. } if existing == &keys));
+        Ok(self.bindings.len() != original_len)
+    }
+
+    pub fn unregister_numeric_prefix(
+        &mut self,
+        suffix: ShortcutKey,
+    ) -> Result<bool, SequenceRegistrationError> {
+        let suffix = canonicalize_binding_key(suffix)?;
+        if is_digit_key(suffix) {
+            return Err(SequenceRegistrationError::InvalidNumericSuffix);
+        }
+        let original_len = self.bindings.len();
+        self.bindings.retain(|binding| {
+            !matches!(binding, SequenceBinding::NumericPrefix { suffix: existing, .. } if *existing == suffix)
+        });
+        Ok(self.bindings.len() != original_len)
+    }
+
     pub fn snapshot(&self) -> SequenceRegistrySnapshot {
         let mut snapshot = SequenceRegistrySnapshot::default();
         for binding in &self.bindings {
@@ -629,6 +662,46 @@ mod tests {
         let reset = resolver.handle_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE));
         assert_eq!(reset, SequenceResolution::Dispatch(Command::ZoomReset));
         assert_eq!(resolver.pending_display(), None);
+    }
+
+    #[test]
+    fn unregister_static_removes_exact_binding() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .expect("binding should register");
+
+        assert!(
+            registry
+                .unregister_static(&[ShortcutKey::char('j')])
+                .expect("binding should unregister")
+        );
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+            SequenceResolution::Noop
+        );
+    }
+
+    #[test]
+    fn unregister_numeric_prefix_removes_count_binding() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_numeric_prefix("goto-page", ShortcutKey::char('G'), |page| {
+                Command::GotoPage { page }
+            })
+            .expect("binding should register");
+
+        assert!(
+            registry
+                .unregister_numeric_prefix(ShortcutKey::char('G'))
+                .expect("binding should unregister")
+        );
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)),
+            SequenceResolution::Noop
+        );
     }
 
     #[test]

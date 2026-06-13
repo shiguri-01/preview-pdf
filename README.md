@@ -34,6 +34,30 @@ cargo install preview-pdf
 | `<esc>` | Cancel current interactive state |
 | `q` | Quit |
 
+## Configuration
+
+`pvf` reads TOML configuration from `PVF_CONFIG_PATH`,
+`$XDG_CONFIG_HOME/pvf/config.toml`, `$HOME/.config/pvf/config.toml`, or
+`%APPDATA%/pvf/config.toml`.
+
+Normal-mode key bindings can be patched with `[keymap]`:
+
+```toml
+[keymap]
+preset = "default" # or "none"
+unbind = ["j"]
+
+[keymap.bindings]
+"<down>" = "next-page"
+"gg" = "first-page"
+"[count]G" = "goto-page"
+":" = "open-palette command"
+```
+
+Use the key labels shown in help, such as `G`, `<c-o>`, `<down>`, and
+`[count]G`. Palette-local keys are not part of the normal-mode keymap.
+`<esc>` and `<enter>` are reserved for now.
+
 ## Note
 
 Image quality and compatibility depend on terminal image protocol support such as Kitty, Sixel, or iTerm2.

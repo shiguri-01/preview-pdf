@@ -15,6 +15,7 @@ pub use parse::{parse_command_text, parse_invocable_command_text};
 pub use spec::{
     CommandConditionContext, all_command_specs, command_registry, find_command_spec,
     is_command_visible_in_palette, rejection_message_for_command, validate_command_for_source,
+    validate_command_id_invocation_for_source, validate_command_invocation_for_source,
 };
 pub use types::{
     ArgHint, ArgKind, ArgSpec, CommandAvailability, CommandCondition, CommandExposure,

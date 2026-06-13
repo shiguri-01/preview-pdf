@@ -79,13 +79,13 @@ Contract:
 - `--config` and `--no-config` are mutually exclusive.
 - Partial config files leave unspecified options absent so later sources and
   defaults can still apply.
+- Top-level `[keymap]` config patches the normal-mode key sequence registry.
 - Validation and sanitization that users can observe, such as enum rejection,
-  safe duration minimums, and zoom bounds, are part of the config contract.
+  keymap preset and command validation, safe duration minimums, and zoom bounds,
+  are part of the config contract.
 
 Compatibility:
 - Supported config fields and enum values are compatibility-sensitive.
-- Unknown legacy sections may be tolerated intentionally, but new compatibility
-  behavior should be covered by tests.
 - Do not document the complete TOML inventory here; keep it in config types,
   parsing code, and tests.
 
@@ -152,13 +152,19 @@ Orientation:
 
 Contract:
 - Printable bindings are defined by resulting characters, not by physical keys.
+- Configured key bindings use the same key labels shown in help, such as
+  `gg`, `<c-o>`, `<down>`, and `[count]G`.
 - Multi-key sequences can remain pending until resolved or timed out.
 - Numeric prefixes are parsed by the input sequence layer and dispatch typed
   commands.
 - Built-in key bindings must reference known command ids and satisfy command
   invocation policy.
+- Configured key bindings must reference known commands that can be invoked
+  from the keymap; runtime availability remains a dispatch-time check.
 - Palette-local key handling is owned by palette behavior, not the normal-mode
   keymap.
+- `<esc>` and `<enter>` are not configurable normal-mode bindings while their
+  global cancellation and sequence-confirmation behavior is being settled.
 
 Compatibility:
 - Changing a default key binding affects user muscle memory and help output; do

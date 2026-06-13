@@ -345,7 +345,7 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
         },
         input: InputPolicy {
             sequence_timeout: Duration::from_millis(sequence_timeout_ms),
-            sequence_registry: build_builtin_sequence_registry(),
+            sequence_registry: super::keymap::resolve_sequence_registry(&options.keymap),
         },
         watch: WatchPolicy {
             enabled: options.watch.enabled.unwrap_or(watch_defaults.enabled),

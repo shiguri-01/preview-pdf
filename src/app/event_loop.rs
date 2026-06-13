@@ -55,9 +55,12 @@ impl App {
             .loop_event_runtime
             .start_input(runtime.loop_event_tx.clone());
         if options.watch {
-            runtime
-                .loop_event_runtime
-                .start_file_watch(document.path.clone(), runtime.loop_event_tx.clone());
+            runtime.loop_event_runtime.start_file_watch(
+                document.path.clone(),
+                self.watch_policy.poll_interval,
+                self.watch_policy.settle_delay,
+                runtime.loop_event_tx.clone(),
+            );
         }
         let result = self.run_interactive_loop(&mut runtime, &mut document).await;
         runtime.loop_event_runtime.shutdown();
@@ -121,25 +124,21 @@ impl App {
         self.state.normalize_current_page(page_count);
 
         let loop_started_at = Instant::now();
-        let pending_redraw_interval =
-            Duration::from_millis(self.config.render.pending_redraw_interval_ms);
+        let pending_redraw_interval = self.event_loop_policy.pending_redraw_interval;
         let input_actor = InputActor::new(loop_started_at);
         let ui_actor = UiActor::new(loop_started_at, pending_redraw_interval);
         self.render.presenter.initialize_terminal()?;
 
-        let prefetch_pause_after_input =
-            Duration::from_millis(self.config.render.prefetch_pause_ms);
-        let prefetch_tick_interval = Duration::from_millis(self.config.render.prefetch_tick_ms);
-        let input_poll_timeout_idle =
-            Duration::from_millis(self.config.render.input_poll_timeout_idle_ms);
-        let input_poll_timeout_busy =
-            Duration::from_millis(self.config.render.input_poll_timeout_busy_ms);
+        let prefetch_pause_after_input = self.event_loop_policy.prefetch_pause_after_input;
+        let prefetch_tick_interval = self.event_loop_policy.prefetch_tick_interval;
+        let input_poll_timeout_idle = self.event_loop_policy.input_poll_timeout_idle;
+        let input_poll_timeout_busy = self.event_loop_policy.input_poll_timeout_busy;
         let mut prefetch_tick = time::interval(prefetch_tick_interval);
         prefetch_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut redraw_tick = time::interval(pending_redraw_interval);
         redraw_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let render_worker =
-            RenderWorker::spawn(Arc::clone(&pdf), self.config.render.worker_threads);
+            RenderWorker::spawn(Arc::clone(&pdf), self.render_policy.worker_threads);
         let viewport = Self::current_viewport(&session, self.state.debug_status_visible);
         let visible_pages = self.state.visible_page_slots(page_count);
         let tracked_scale =
@@ -254,7 +253,7 @@ impl App {
             &runtime.input_actor,
             runtime.render_actor.generation(),
             runtime.prefetch_pause_after_input,
-            self.config.render.prefetch_dispatch_budget_per_tick,
+            self.event_loop_policy.prefetch_dispatch_budget_per_tick,
         );
         let changed = runtime.render_actor.drain_background_and_sync_navigation(
             &mut self.render,
@@ -270,7 +269,7 @@ impl App {
                 &runtime.input_actor,
                 runtime.render_actor.generation(),
                 runtime.prefetch_pause_after_input,
-                self.config.render.prefetch_dispatch_budget_per_tick,
+                self.event_loop_policy.prefetch_dispatch_budget_per_tick,
             )
         } else {
             pre_sync_step
@@ -391,7 +390,6 @@ impl App {
             &mut self.render,
             &self.interaction,
             &mut self.state,
-            &self.config,
             &mut runtime.session,
             pdf,
             runtime.page_count,

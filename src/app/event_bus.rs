@@ -41,8 +41,14 @@ impl EventBusRuntime {
         self.push_task(spawn_input_task(tx));
     }
 
-    pub(crate) fn start_file_watch(&mut self, path: PathBuf, tx: UnboundedSender<DomainEvent>) {
-        self.push_task(spawn_file_watch_task(path, tx));
+    pub(crate) fn start_file_watch(
+        &mut self,
+        path: PathBuf,
+        poll_interval: Duration,
+        settle_delay: Duration,
+        tx: UnboundedSender<DomainEvent>,
+    ) {
+        self.push_task(spawn_file_watch_task(path, poll_interval, settle_delay, tx));
     }
 
     pub(crate) fn start_document_reload(
@@ -112,14 +118,16 @@ fn file_signature(path: &Path) -> FileSignature {
     }
 }
 
-fn spawn_file_watch_task(path: PathBuf, tx: UnboundedSender<DomainEvent>) -> JoinHandle<()> {
+fn spawn_file_watch_task(
+    path: PathBuf,
+    poll_interval: Duration,
+    settle_delay: Duration,
+    tx: UnboundedSender<DomainEvent>,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
-        const POLL_INTERVAL: Duration = Duration::from_millis(250);
-        const DEBOUNCE: Duration = Duration::from_millis(500);
-
         let mut last_seen = file_signature(&path);
         let mut pending_since: Option<Instant> = None;
-        let mut interval = time::interval(POLL_INTERVAL);
+        let mut interval = time::interval(poll_interval);
         interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
         loop {
@@ -134,7 +142,7 @@ fn spawn_file_watch_task(path: PathBuf, tx: UnboundedSender<DomainEvent>) -> Joi
             let Some(started_at) = pending_since else {
                 continue;
             };
-            if started_at.elapsed() < DEBOUNCE {
+            if started_at.elapsed() < settle_delay {
                 continue;
             }
             pending_since = None;
@@ -245,11 +253,16 @@ mod tests {
 
         runtime.block_on(async {
             let (tx, mut rx, mut event_runtime) = EventBusRuntime::spawn_headless();
-            event_runtime.start_file_watch(file.clone(), tx);
-            time::sleep(Duration::from_millis(300)).await;
+            event_runtime.start_file_watch(
+                file.clone(),
+                Duration::from_millis(20),
+                Duration::from_millis(40),
+                tx,
+            );
+            time::sleep(Duration::from_millis(30)).await;
             fs::write(&file, build_pdf(&["after"])).expect("test pdf should change");
 
-            let event = time::timeout(Duration::from_secs(2), rx.recv())
+            let event = time::timeout(Duration::from_secs(1), rx.recv())
                 .await
                 .expect("watcher should emit before timeout")
                 .expect("watcher channel should stay open");

@@ -684,6 +684,7 @@ mod tests {
             let mut palette_requests = VecDeque::<PaletteRequest>::new();
             let mut ctx = CommandExecContext {
                 app: &mut app,
+                view_policy: crate::config::ViewPolicy::default(),
                 pdf: test_pdf(),
                 extension_host: &mut extension_host,
                 palette_requests: &mut palette_requests,

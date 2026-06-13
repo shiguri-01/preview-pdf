@@ -18,7 +18,7 @@ pub enum SequenceRegistrationError {
 
 type NumericCommandFactory = fn(usize) -> Command;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 enum SequenceBinding {
     Exact {
         keys: Vec<ShortcutKey>,
@@ -49,7 +49,7 @@ pub struct SequenceRegistrySnapshot {
     pub numeric_prefix_bindings: Vec<NumericSequenceBinding>,
 }
 
-#[derive(Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct SequenceRegistry {
     bindings: Vec<SequenceBinding>,
 }
@@ -296,6 +296,10 @@ impl SequenceResolver {
 
     pub fn snapshot(&self) -> SequenceRegistrySnapshot {
         self.registry.snapshot()
+    }
+
+    pub fn timeout(&self) -> Duration {
+        self.state.timeout
     }
 
     pub fn pending_display(&self) -> Option<String> {

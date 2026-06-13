@@ -7,7 +7,7 @@ mod spec;
 mod types;
 
 pub use catalog::{Command, CommandId, CommandRequest};
-pub use dispatch::{CommandDispatchResult, dispatch, drain_background_events};
+pub use dispatch::{CommandDispatchResult, dispatch_with_view_policy, drain_background_events};
 pub(crate) use parse::first_token;
 pub use parse::{parse_command_text, parse_invocable_command_text};
 pub use spec::{

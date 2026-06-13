@@ -18,15 +18,30 @@ Supported invocations:
 
 ```bash
 pvf <file.pdf>
-pvf --watch <file.pdf>
+pvf -w|--watch <file.pdf>
+pvf --no-watch <file.pdf>
+pvf -c|--config <config.toml> <file.pdf>
+pvf --no-config <file.pdf>
+pvf -p|--page <page-number> <file.pdf>
+pvf -z|--zoom <fit-ratio> <file.pdf>
+pvf -l|--layout <single|spread> <file.pdf>
 ```
 
 Rules:
 
 - Exactly one PDF path argument is required.
 - The document is opened through the default backend factory.
-- `--watch` enables automatic reload of the displayed document when the input
-  file changes.
+- `-w`, `--watch` enables automatic reload of the displayed document when the
+  input file changes.
+- `--no-watch` disables automatic reload for the current process.
+- `-c`, `--config <path>` reads app options from a specific TOML file and
+  requires that path to exist.
+- `--no-config` skips configuration file loading.
+- `--config` and `--no-config` are mutually exclusive.
+- `--watch` and `--no-watch` are mutually exclusive.
+- `-p`, `--page <page-number>` sets the initial one-based page.
+- `-z`, `--zoom <fit-ratio>` sets the initial zoom ratio relative to fit.
+- `-l`, `--layout <single|spread>` sets the initial layout.
 - Performance diagnostics are developer tooling and are not part of the public
   viewer CLI. See `performance-diagnostics.md`.
 
@@ -116,8 +131,8 @@ Rules:
 
 - Reload
   - `reload-document` reopens the current PDF path
-  - with `--watch`, the runtime polls the current PDF path and reloads after a
-    short debounce when file metadata settles
+  - with watch enabled, the runtime polls the current PDF path and reloads
+    after a settle delay when file metadata stabilizes
   - reload success replaces the active document, clamps the current page to the
     new page count, resets render work, clears presenter output cache, and
     prewarms search text for the new document
@@ -125,10 +140,10 @@ Rules:
     query and matcher; cached outline data is cleared
   - reload failure keeps the previous document visible
   - manual reload failures show an error immediately
-  - `--watch` reload failures retry quietly with short backoff before showing a
+  - watch reload failures retry quietly with short backoff before showing a
     warning, so a save that temporarily leaves a partial PDF on disk can recover
     without user action
-  - acceptance cases for `--watch`:
+  - acceptance cases for watch:
     - replacing a valid PDF with another valid PDF updates the displayed
       document without restarting the viewer
     - replacing a valid PDF with a temporarily invalid file keeps the previous
@@ -168,38 +183,28 @@ key plus modifiers. For example, `?` and `:` are literal bindings.
 
 ## Runtime configuration
 
-`config.toml` controls render and cache tuning.
+Configuration fields, lookup order, and precedence are specified in
+`configuration.md`.
 
-Lookup order:
+Resolved ownership:
 
-1. `PVF_CONFIG_PATH`
-2. `XDG_CONFIG_HOME/pvf/config.toml`
-3. `HOME/.config/pvf/config.toml`
-4. `APPDATA/pvf/config.toml`
+- worker count is consumed when render workers are spawned
+- initial page, zoom, and layout are consumed when `AppState` is constructed
+- spread direction and cover defaults live in the view policy
+- input polling and redraw timing live in the event-loop policy
+- prefetch dispatch budget lives in the event-loop policy
+- render scale bounds live in the render policy
+- L1 cache limits are consumed by render runtime construction
+- L2 cache limits are consumed by presenter construction
+- key bindings are resolved into a `SequenceRegistry` before input handling
+- watch enablement and timing live in the watch policy
 
-If no config path resolves, built-in defaults are used.
+Programmatic construction uses the same resolver without requiring TOML:
 
-Supported configuration sections:
-
-- `[render]`
-  - `worker_threads`
-  - `input_poll_timeout_idle_ms`
-  - `input_poll_timeout_busy_ms`
-  - `prefetch_pause_ms`
-  - `prefetch_tick_ms`
-  - `pending_redraw_interval_ms`
-  - `prefetch_dispatch_budget_per_tick`
-  - `max_render_scale`
-
-- `[cache]`
-  - `l1_memory_budget_mb`
-  - `l2_memory_budget_mb`
-  - `l1_max_entries`
-  - `l2_max_entries`
-
-Missing config files fall back to defaults. Invalid numeric render values are
-sanitized to a minimum safe value, and invalid `max_render_scale` falls back to
-the default.
+- create `AppOptions`
+- apply one or more option patches through the resolver or
+  `AppBuilder::merge_options`
+- build `App` from the resolved feature policies
 
 ## Code references
 

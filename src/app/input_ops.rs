@@ -2,9 +2,10 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
-    Command, CommandDispatchResult, CommandInvocationSource, CommandRequest, dispatch,
-    drain_background_events,
+    Command, CommandDispatchResult, CommandInvocationSource, CommandRequest,
+    dispatch_with_view_policy, drain_background_events,
 };
+use crate::config::ViewPolicy;
 use crate::error::AppResult;
 use crate::event::AppEvent;
 use crate::input::sequence::SequenceResolution;
@@ -325,11 +326,13 @@ impl InteractionSubsystem {
     pub(crate) fn dispatch_command(
         &mut self,
         state: &mut AppState,
+        view_policy: ViewPolicy,
         request: CommandRequest,
         pdf: SharedPdfBackend,
     ) -> AppResult<CommandDispatchResult> {
-        let result = dispatch(
+        let result = dispatch_with_view_policy(
             state,
+            view_policy,
             request.command,
             request.source,
             pdf,
@@ -468,6 +471,7 @@ mod tests {
     use crate::backend::test_support::{build_pdf, unique_temp_path};
     use crate::backend::{PdfDoc, SharedPdfBackend};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
+    use crate::config::ViewPolicy;
     use crate::error::AppError;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
@@ -1047,6 +1051,7 @@ mod tests {
         interaction
             .dispatch_command(
                 &mut state,
+                ViewPolicy::default(),
                 CommandRequest::new(Command::OpenHelp, CommandInvocationSource::Keymap),
                 pdf,
             )

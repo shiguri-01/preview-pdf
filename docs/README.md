@@ -11,6 +11,12 @@ This directory contains the durable developer-facing docs for `pvf`.
 3. [testing.md](testing.md) for test placement, test-first guidance, quality checklists,
    and validation commands.
 
+Agents should also use the repo-local
+[testing skill](../.agents/skills/testing/SKILL.md) for test placement,
+regression-test, and validation workflow decisions. The skill points back to
+these docs for durable policy; this directory remains the developer-readable
+source for architecture, reference contracts, and testing guidance.
+
 ## Where Material Belongs
 
 - Put architecture material in [architecture.md](architecture.md) when a change affects runtime

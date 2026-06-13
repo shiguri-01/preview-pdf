@@ -157,7 +157,7 @@ pub(super) fn parse_zoom(args_text: &str) -> AppResult<Command> {
     let mut parts = args_text.split_whitespace();
     let Some(value_text) = parts.next() else {
         return Err(AppError::invalid_argument(
-            "zoom requires 1 argument: value",
+            "zoom requires 1 argument: ratio",
         ));
     };
     if parts.next().is_some() {
@@ -168,7 +168,7 @@ pub(super) fn parse_zoom(args_text: &str) -> AppResult<Command> {
 
     let value = value_text
         .parse::<f32>()
-        .map_err(|_| AppError::invalid_argument("zoom value must be f32"))?;
+        .map_err(|_| AppError::invalid_argument("zoom ratio must be f32"))?;
 
     Ok(Command::SetZoom { value })
 }

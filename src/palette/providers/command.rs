@@ -1071,7 +1071,7 @@ mod tests {
     fn assistive_text_uses_number_label_for_float_arguments() {
         assert_eq!(
             assistive_text_for_input("zoom ", false),
-            Some("zoom <value> | value: number".to_string())
+            Some("zoom <ratio> | ratio: number".to_string())
         );
     }
 

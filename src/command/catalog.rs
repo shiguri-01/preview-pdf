@@ -17,7 +17,7 @@ const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     hint: ArgHint::None,
 }];
 const ARGS_ZOOM: [ArgSpec; 1] = [ArgSpec {
-    name: "value",
+    name: "ratio",
     kind: ArgKind::F32,
     required: true,
     hint: ArgHint::None,

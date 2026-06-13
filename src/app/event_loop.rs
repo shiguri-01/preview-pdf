@@ -822,7 +822,7 @@ mod tests {
     }
 
     #[test]
-    fn input_outcome_queues_commands_before_quit_event() {
+    fn input_outcome_queues_expired_command_before_quit_command() {
         let tokio_runtime = Builder::new_current_thread()
             .enable_all()
             .build()
@@ -889,7 +889,8 @@ mod tests {
         ));
         assert!(matches!(
             runtime.loop_event_rx.try_recv(),
-            Ok(DomainEvent::Quit)
+            Ok(DomainEvent::Command(request))
+                if request == CommandRequest::new(Command::Quit, CommandInvocationSource::Keymap)
         ));
     }
 

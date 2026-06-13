@@ -1,0 +1,4 @@
+interface:
+  display_name: "Testing"
+  short_description: "Place and validate pvf tests"
+  default_prompt: "Use $testing when adding, changing, or reviewing pvf tests."

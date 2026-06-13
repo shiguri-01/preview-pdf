@@ -1,33 +1,61 @@
 # Developer Docs
 
-This directory contains the canonical developer-facing documentation.
+This directory contains the durable developer-facing docs for `pvf`.
 
-## Reading order
+## Reading Path
 
-1. `runtime-spec.md`
-2. `command-system.md`
-3. `architecture.md`
-4. `rendering-pipeline.md`
-5. `performance-diagnostics.md`
-6. `palette-provider.md`
-7. `extension-system.md`
+1. [architecture.md](architecture.md) for the system map, runtime flow, and subsystem
+   boundaries.
+2. [reference.md](reference.md) for stable contracts that implementation and review should
+   protect.
+3. [testing.md](testing.md) for test placement, test-first guidance, quality checklists,
+   and validation commands.
 
-## Writing rules
+Agents should also use repo-local skills for workflow decisions:
+[documentation](../.agents/skills/documentation/SKILL.md) for docs placement
+and quality, and [testing](../.agents/skills/testing/SKILL.md) for test
+placement, regression-test, and validation workflow decisions. These skills
+point back to the durable docs; this directory remains the developer-readable
+source for architecture, reference contracts, and testing guidance.
 
-- Describe current behavior only.
-- Keep one normative home for each topic.
-- Put stable contracts before implementation references.
-- Use `Code references` only as navigation aids.
-- Link to the owning document instead of repeating rules.
+## Where Material Belongs
 
-## Document map
+- Put architecture material in [architecture.md](architecture.md) when a change affects runtime
+  flow, subsystem boundaries, ownership, or event routing.
+- Put stable developer-facing behavior in [reference.md](reference.md) when a change
+  intentionally changes CLI behavior, config compatibility, command policy,
+  key binding resolution, palette semantics, extension host behavior, render
+  stale-result behavior, cache behavior visible outside the implementation, or
+  performance diagnostics contracts.
+- Put testing policy in [testing.md](testing.md) when a change affects how behavior should
+  be protected.
 
-| Document | Owns |
-|---|---|
-| `runtime-spec.md` | CLI contract, key bindings, config lookup, and user-visible runtime behavior |
-| `command-system.md` | Command ids, parsing, invocation policy, and dispatch |
-| `architecture.md` | Runtime/module map, subsystem ownership, and event-loop structure |
-| `rendering-pipeline.md` | L1/L2 cache semantics, worker lanes, encode flow, and redraw timing |
-| `performance-diagnostics.md` | Developer scenario benchmark command, scenarios, and JSON report shape |
-| `palette-provider.md` | `PaletteProvider`, `PaletteKind`, palette keyboard behavior, and built-in palettes |
-| `extension-system.md` | `Extension`, `ExtensionHost`, extension flows, and built-in extensions |
+Complete inventories belong in the Rust code that defines them: command
+catalogs, keymaps, palette registries, extension hosts, config types, and
+backend or render types. Docs may include a short orientation map or a few
+representative examples when that helps readers understand the whole system,
+but they should not become the source of truth for every item.
+
+Implementation detail belongs in code, focused tests, or local comments near
+the implementation. If a doc section would become stale after an ordinary
+implementation change, move the detail closer to the code or protect the
+behavior with tests.
+
+Use judgment before replacing docs with tests. Tests are good at preventing
+drift in stable behavior and cross-module consistency. Docs are better for
+explaining the shape of the system, why a boundary exists, and where to start
+reading. Prefer both when a topic needs orientation and correctness protection.
+
+## Change Triage
+
+Use this as the first pass before editing docs or tests:
+
+- Stable behavior changed: update focused tests first and update
+  [reference.md](reference.md) if the contract changes.
+- Subsystem boundary changed: update [architecture.md](architecture.md).
+- Bug fixed: add a regression test first, or record why that is not useful.
+- Inventory changed: update owning code and meaningful consistency tests; keep
+  docs to orientation and compatibility notes.
+- Internal refactor only: preserve contract tests; add characterization tests
+  only when coverage is weak.
+- Doc detail would stale quickly: move it to code, tests, or a local comment.

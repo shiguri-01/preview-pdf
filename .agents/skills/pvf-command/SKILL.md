@@ -1,17 +1,23 @@
 ---
-name: command
+name: pvf-command
 description: Add, edit, rename, or review pvf command behavior. Use when changing command ids, arguments, parsing, invocation policy, command palette visibility, key bindings, help text, or command dispatch.
 ---
 
-# Command
+# PVF Command
 
 Use this skill for changes centered on pvf runtime commands.
 
 ## Start
 
-Read `docs/command-system.md` before changing command internals.
-Read `docs/runtime-spec.md` when the command is user-visible.
-Read `docs/palette-provider.md` when command palette behavior, completion, or visibility changes.
+Read only the relevant `docs/reference.md` sections for Commands and Key
+Bindings before changing command internals, command ids, invocation policy, key
+bindings, or help surfaces.
+Read only the relevant `docs/reference.md` Palette section when command palette
+behavior, completion, visibility, or submission changes.
+Read the relevant part of `docs/architecture.md` when command routing or
+subsystem boundaries change.
+Read the relevant section of `docs/testing.md` before placing new command or
+keymap tests.
 
 ## User-Facing Design First
 
@@ -41,5 +47,7 @@ Do not start implementation until the external behavior is clear enough to test.
 
 - Add or update focused parser and dispatch tests for new argument shapes, validation, and source restrictions.
 - Add palette-provider tests when metadata, hints, visibility, or completion behavior changes.
-- Update `docs/command-system.md` for command model or command-set changes.
-- Update `docs/runtime-spec.md` only for user-visible behavior, CLI, key binding, or runtime contract changes.
+- Update `docs/reference.md` when command, key binding, palette visibility, or
+  user-visible runtime contracts change.
+- Update `docs/architecture.md` only when command routing or ownership
+  boundaries change.

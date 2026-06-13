@@ -1,17 +1,24 @@
 ---
-name: palette
+name: pvf-palette
 description: Add, edit, rename, or review pvf palette behavior. Use when changing PaletteKind, PaletteProvider implementations, palette payloads, palette candidate rows, input modes, selection behavior, tab or submit behavior, or palette rendering contracts.
 ---
 
-# Palette
+# PVF Palette
 
 Use this skill for changes centered on pvf palette UI and interaction behavior.
 
 ## Start
 
-Read `docs/palette-provider.md` before changing palette contracts or built-in palette behavior.
-Read `docs/command-system.md` when palette submission dispatches commands or changes command palette behavior.
-Read `docs/extension-system.md` only when palette data comes from extension-owned state.
+Read only the relevant `docs/reference.md` Palette section before changing
+palette contracts or built-in palette behavior.
+Read only the relevant `docs/reference.md` Commands section when palette
+submission dispatches commands or changes command palette behavior.
+Read only the relevant `docs/reference.md` Extensions section when palette data
+comes from extension-owned state.
+Read the relevant part of `docs/architecture.md` when palette ownership,
+snapshots, or subsystem boundaries change.
+Read the relevant section of `docs/testing.md` before placing new palette
+tests.
 
 ## User-Facing Design First
 
@@ -41,5 +48,8 @@ Do not start implementation until the interaction is clear enough to test.
 
 - Add or update provider tests for candidates, matching, selected item, assistive text, initial input, tab, and submit behavior.
 - Add manager or rendering tests when palette session, input history, cursor, or row layout behavior changes.
-- Update `docs/palette-provider.md` for palette contract or built-in palette behavior changes.
-- Update command or extension docs only when those contracts change too.
+- Update `docs/reference.md` for palette contract or built-in palette behavior
+  changes.
+- Update command or extension sections only when those contracts change too.
+- Update `docs/architecture.md` only when ownership or boundary rationale
+  changes.

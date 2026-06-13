@@ -3,7 +3,9 @@
 `pvf` is a Rust CLI/TUI PDF viewer.
 
 ## Docs
-- `docs/`: specifications and plans. Read relevant docs before implementing features. Keep in sync with code changes.
+- `docs/README.md`: developer docs entry point. Read only relevant sections.
+- Keep docs in sync with code and test changes.
+- Repo-local skills provide task-specific workflow guidance; use them when they apply.
 
 ## Commands
 - `nix develop`: enter the flake-provided development shell; direnv can load it via `.envrc`.

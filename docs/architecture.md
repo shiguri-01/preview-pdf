@@ -1,110 +1,137 @@
 # Architecture
 
-This document describes the current implementation structure.
+`pvf` is a Rust CLI/TUI PDF viewer. The runtime is organized around one
+interactive `App`, a typed event loop, static command and palette registries,
+internal extensions, asynchronous render and encode workers, and a backend
+abstraction for PDF data.
 
-## Scope
+## Runtime Flow
 
-This document owns:
+Startup begins in [src/main.rs](../src/main.rs).
 
-- top-level runtime structure
-- subsystem ownership
-- loop-level event routing
-- module navigation guidance
+1. CLI arguments are parsed into `AppOptions` patches.
+2. Configuration is loaded and merged with built-in defaults and CLI options.
+3. The default backend opens the requested PDF.
+4. `App` is built with resolved view, input, render, cache, watch, and
+   extension policies.
+5. The terminal session starts the event loop.
+6. The loop receives typed `DomainEvent` values, routes input and worker
+   completions, dispatches commands, drains extension background work, schedules
+   render and presenter work, and asks the UI to draw frames.
 
-Feature behavior lives in `runtime-spec.md` and the subsystem specs rather than
-here. Worker ownership and cancellation details live in `async-workers.md`.
+Rationale: startup keeps option resolution outside the event loop so the loop
+can operate on resolved policies rather than re-reading config or CLI state.
 
-## Top-level runtime model
+## Subsystems
 
-- `App` owns the interactive runtime state and the major subsystems.
-- The main event loop waits for typed `DomainEvent` values and delegates
-  routing to the loop router.
-- Commands are parsed and dispatched into typed outcomes and `AppEvent` values.
-- Rendering and presenter work are performed asynchronously and fed back into
-  the event loop.
-- Extensions and palette providers are wired statically at construction time.
+- [src/app/](../src/app/) owns interactive runtime state, event-loop orchestration, input
+  handling, render completion handling, view operations, and terminal session
+  coordination.
+- [src/command/](../src/command/) owns command ids, metadata, parsing, source-aware validation,
+  dispatch, and typed command outcomes.
+- [src/input/](../src/input/) owns key sequence normalization, built-in key bindings, numeric
+  prefixes, and palette input history.
+- [src/palette/](../src/palette/) owns palette sessions, input handling, provider lookup,
+  candidate matching, selection, tab, submit, cancel, and rendered palette
+  views.
+- [src/extension/](../src/extension/) owns the extension host contract and the composition of
+  built-in extension state.
+- [src/search/](../src/search/), [src/history/](../src/history/), and
+  [src/outline/](../src/outline/) provide current extension and palette-provider behavior.
+- [src/render/](../src/render/) owns L1 rendered-page caching, scheduling, prefetch, render
+  worker messages, stale-result acceptance, and cancellation metadata.
+- [src/presenter/](../src/presenter/) owns terminal image protocol selection, L2 terminal-frame
+  caching, encode workers, slot drawing, and presenter feedback.
+- [src/backend/](../src/backend/) owns the PDF backend trait and default backend implementation.
+- [src/ui/](../src/ui/) owns layout, chrome, overlays, help, theme, and frame composition.
 
-## Main subsystems
+## Dependency Direction
 
-- `src/app/`
-  - app construction, event loop orchestration, loop event routing, input
-    handling, render completion handling, and view operations
-  - `event_loop.rs` owns loop setup and wait/select orchestration
-  - `loop_runtime.rs` owns loop-local runtime state shared by the loop shell
-    and router
-  - `loop_router.rs` routes `DomainEvent` values and applies loop-level
-    effects such as command enqueueing, redraw requests, and quit requests
-  - `actors.rs` owns loop-adjacent input, render, and UI actors
+`app` coordinates other subsystems and is allowed to depend on command, input,
+palette, extension, render, presenter, backend, and UI types.
 
-- `src/command/`
-  - command catalog, parser, dispatch, invocation checks, and command outcomes
+Commands do not own feature state. Command dispatch receives an execution
+context from `app`, mutates app-owned state through that context, and emits
+typed `AppEvent` values for cross-subsystem observation.
 
-- `src/event.rs`
-  - loop-level event types, including `DomainEvent`, `AppEvent`, and
-    navigation reasons
+Palette providers receive read-only app and extension snapshots. They should
+request behavior by returning typed effects or commands instead of taking
+`AppState` directly.
 
-- `src/render/`
-  - L1 rendered-page cache, render scheduling, prefetch queue, and render
-    workers
+Extensions own extension-local state and observe `AppEvent` values. Shared UI
+data crosses from extensions to palettes through `ExtensionUiSnapshot`.
 
-- `src/presenter/`
-  - protocol picker, terminal-frame L2 cache, encode workers, and draw path
+Render workers and presenter encode workers communicate with the loop through
+typed request and completion values. They do not mutate app state directly.
 
-- `src/extension/`
-  - extension contract, extension host, and shared extension-facing types
+Rationale: the central `App` boundary keeps mutable runtime state in one place,
+while commands, palettes, extensions, and workers remain testable through typed
+contracts.
 
-- `src/palette/`
-  - palette session management, provider contract, shared palette types, and
-    provider registry
+## Mutable State Ownership
 
-- `src/search/`, `src/history/`, `src/outline/`
-  - current extension and palette-provider implementations
+`AppState` is the primary owner of viewer state: current page, mode, zoom, pan,
+notices, debug status, and view policy. `App` owns `AppState` plus the runtime
+objects that act on it: command execution context, palette manager, extension
+host, render runtime, presenter, input sequence resolver, and watch state.
 
-- `src/backend/`
-  - PDF backend abstraction and the default backend implementation
+Subsystem-local mutable state stays with the subsystem that owns its invariants:
 
-- `src/input/`
-  - keymap definitions, sequence resolution, and palette input history
+- search, history, and outline state live in `ExtensionHost`
+- active palette session state lives in `PaletteManager`
+- L1 rendered-page cache state lives in `render`
+- L2 terminal-frame cache and encode generation state live in `presenter`
+- input sequence buffers live in `input`
 
-- `src/ui/`
-  - layout, chrome, overlays, and help rendering
+Rationale: state is separated by the boundary that can validate it. Cross-boundary
+communication uses snapshots, command requests, events, or worker completions.
 
-## Event flow
+## Event Flow
 
-- terminal input enters the runtime as `DomainEvent::Input`
-- `loop_router.rs` handles `DomainEvent` dispatch and keeps the main loop
-  focused on orchestration
-- key handling either mutates state directly, dispatches a command, or forwards
-  work to a palette or extension path
-- input, render, and UI actors own the loop-level decisions for their areas:
-  sequence timeouts and input effects, render/navigation synchronization and
-  work enqueueing, and redraw/frame rendering respectively
-- command dispatch emits typed `AppEvent` values when state changes need to be
-  observed by the rest of the runtime
-- render workers report finished raster work through `DomainEvent::RenderComplete`
-- presenter encode workers report background completion through
-  `DomainEvent::EncodeComplete`
-- timer- and wake-based events drive redraw and prefetch progress when needed
+Terminal input enters as `DomainEvent::Input`.
 
-## Structural constraints
+1. The loop router delegates input to app input handling.
+2. Pending palette input is offered to `PaletteManager` first.
+3. Extension input hooks may intercept extension-local inputs.
+4. The input sequence resolver maps normal-mode key sequences to typed
+   commands.
+5. Command dispatch validates the invocation source, applies behavior, and
+   emits `AppEvent` values.
+6. The loop re-routes emitted app events to extensions and other loop effects.
+7. Render workers return `DomainEvent::RenderComplete`; presenter encode
+   workers return `DomainEvent::EncodeComplete`.
+8. UI redraws happen when input, command effects, extension background work, or
+   worker completions make visible state change.
 
-- command dispatch is statically typed
-- palette provider resolution is a static match on `PaletteKind`
-- current extension ownership is explicit in `ExtensionHost`
-- extension UI data is exposed to palettes through `ExtensionUiSnapshot`
-- app data exposed to palettes is limited to a read-only palette snapshot
-- render and presenter scheduling share `WorkClass` to classify priority and
-  stale-generation handling
+Search worker events are drained by the search extension during background
+handling rather than entering the loop as `DomainEvent` values.
 
-## Code references
+Rationale: the loop uses typed event values instead of ad hoc callbacks so
+worker results, command outcomes, extension reactions, and UI redraw decisions
+can be reasoned about separately.
 
-- `src/app/core.rs`
-- `src/app/event_loop.rs`
-- `src/app/loop_router.rs`
-- `src/app/loop_runtime.rs`
-- `src/app/actors.rs`
-- `src/event.rs`
-- `src/command/`
-- `src/extension/host.rs`
-- `src/palette/registry.rs`
-- `docs/async-workers.md`
+## Boundary Rationale
+
+Command catalog:
+The command catalog is the owning inventory for command ids, metadata, parser
+routing, and dispatch routing. Docs describe stability and invocation policy;
+tests guard registry consistency.
+
+Palette providers:
+Providers own candidate generation and submit semantics for their palette kind,
+while `PaletteManager` owns common session mechanics. This keeps keyboard and
+selection behavior consistent without forcing every provider into filter-mode
+semantics.
+
+Extensions:
+Built-in features that need background state, event observation, or status-bar
+segments live behind `ExtensionHost`. They are internal modules, not a dynamic
+plugin system.
+
+Render and presenter:
+Raw page rasterization and terminal protocol encoding are separated because
+their cache identities, stale-result rules, and performance costs differ.
+
+Backend:
+The backend trait isolates PDF opening, rasterization, text extraction, and
+outline extraction from the interactive runtime.

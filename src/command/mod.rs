@@ -4,6 +4,8 @@ mod dispatch;
 mod handlers;
 mod parse;
 mod spec;
+#[cfg(test)]
+mod tests;
 mod types;
 
 pub use catalog::{Command, CommandId, CommandRequest};

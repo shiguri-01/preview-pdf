@@ -1,9 +1,9 @@
 ---
-name: palette
+name: pvf-palette
 description: Add, edit, rename, or review pvf palette behavior. Use when changing PaletteKind, PaletteProvider implementations, palette payloads, palette candidate rows, input modes, selection behavior, tab or submit behavior, or palette rendering contracts.
 ---
 
-# Palette
+# PVF Palette
 
 Use this skill for changes centered on pvf palette UI and interaction behavior.
 

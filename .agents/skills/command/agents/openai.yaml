@@ -1,4 +1,0 @@
-interface:
-  display_name: "Command"
-  short_description: "Add or edit pvf commands safely"
-  default_prompt: "Use $command when adding, changing, or reviewing a pvf command."

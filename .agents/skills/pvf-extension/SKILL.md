@@ -1,9 +1,9 @@
 ---
-name: extension
+name: pvf-extension
 description: Add, edit, rename, or review pvf extension behavior. Use when changing Extension implementations, ExtensionHost composition, extension-owned state, input hooks, AppEvent handling, background drain, status bar segments, extension UI snapshots, or reload/reset behavior.
 ---
 
-# Extension
+# PVF Extension
 
 Use this skill for changes centered on pvf feature extensions and their runtime state.
 

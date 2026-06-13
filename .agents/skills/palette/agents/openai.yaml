@@ -1,0 +1,4 @@
+interface:
+  display_name: "Palette"
+  short_description: "Add or edit pvf palettes safely"
+  default_prompt: "Use $palette when adding, changing, or reviewing a pvf palette."

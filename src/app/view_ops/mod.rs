@@ -1,7 +1,7 @@
 use crate::app::PageLayoutMode;
 use crate::backend::PdfBackend;
 use crate::config::RenderPolicy;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::highlight::HighlightOverlaySnapshot;
 use crate::input::sequence::SequenceRegistrySnapshot;
 use crate::palette::PaletteView;
@@ -464,7 +464,7 @@ impl RenderSubsystem {
         let mut render_failed = false;
         let mut render_feedback = PresenterFeedback::None;
         let mut viewer_has_image = self.viewer_has_image;
-        session.draw(|frame| {
+        let draw_result = session.draw(|frame| {
             let layout = ui::split_layout(frame.area(), draw_plan.debug_status_visible);
             ui::draw_chrome(
                 frame,
@@ -641,7 +641,9 @@ impl RenderSubsystem {
                     &draw_plan.help_keymap,
                 );
             }
-        })?;
+        });
+        draw_result
+            .map_err(|source| AppError::io_with_context(source, "drawing terminal frame"))?;
 
         Ok(RenderFrameFeedback {
             pan: requested_pan,

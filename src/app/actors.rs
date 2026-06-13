@@ -53,12 +53,8 @@ impl InputActor {
         &mut self,
         interaction: &mut InteractionSubsystem,
         state: &mut AppState,
-        session: &mut impl TerminalSurface,
     ) -> AppResult<LoopEffects> {
         let timeout_outcome = interaction.flush_sequence_timeout(state.mode);
-        if timeout_outcome.clear_terminal {
-            session.clear()?;
-        }
         let mut effects =
             LoopEffects::from_commands(timeout_outcome.commands, timeout_outcome.quit_requested);
         if timeout_outcome.redraw {
@@ -72,15 +68,11 @@ impl InputActor {
         event: Event,
         interaction: &mut InteractionSubsystem,
         state: &mut AppState,
-        session: &mut impl TerminalSurface,
     ) -> AppResult<LoopEffects> {
         match event {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                 self.last_input_at = Instant::now();
                 let outcome = interaction.handle_key_event(state, key)?;
-                if outcome.clear_terminal {
-                    session.clear()?;
-                }
                 let mut effects =
                     LoopEffects::from_commands(outcome.commands, outcome.quit_requested);
                 if outcome.redraw {

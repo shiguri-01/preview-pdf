@@ -66,7 +66,8 @@ impl App {
         runtime.loop_event_runtime.shutdown();
         let restore_result = runtime.session.restore();
         result?;
-        restore_result?;
+        restore_result
+            .map_err(|source| AppError::io_with_context(source, "restoring terminal session"))?;
         Ok(())
     }
 
@@ -102,7 +103,8 @@ impl App {
         runtime.loop_event_runtime.shutdown();
         let restore_result = runtime.session.restore();
         let snapshot = result?;
-        restore_result?;
+        restore_result
+            .map_err(|source| AppError::io_with_context(source, "restoring terminal session"))?;
         Ok(snapshot)
     }
 
@@ -568,14 +570,12 @@ mod tests {
 
     struct StubSession {
         size: Size,
-        clear_count: usize,
     }
 
     impl StubSession {
         fn new(width: u16, height: u16) -> Self {
             Self {
                 size: Size::new(width, height),
-                clear_count: 0,
             }
         }
     }
@@ -583,11 +583,6 @@ mod tests {
     impl TerminalSurface for StubSession {
         fn size(&self) -> io::Result<Size> {
             Ok(self.size)
-        }
-
-        fn clear(&mut self) -> io::Result<()> {
-            self.clear_count += 1;
-            Ok(())
         }
 
         fn draw<F>(&mut self, _render: F) -> io::Result<()>
@@ -765,7 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn wake_timeout_clears_terminal_when_sequence_dispatch_requests_it() {
+    fn wake_timeout_queues_expired_sequence_command() {
         let tokio_runtime = Builder::new_current_thread()
             .enable_all()
             .build()
@@ -818,7 +813,6 @@ mod tests {
             .expect("wake should be handled");
 
         assert!(matches!(control, super::LoopControl::Continue));
-        assert_eq!(runtime.session.clear_count, 1);
         assert!(matches!(
             runtime.loop_event_rx.try_recv(),
             Ok(DomainEvent::Command(request))

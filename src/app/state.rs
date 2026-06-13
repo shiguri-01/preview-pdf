@@ -426,7 +426,7 @@ mod tests {
             notice_action_for_error(err),
             NoticeAction::Show {
                 level: NoticeLevel::Error,
-                message: "I/O error: disk failed".to_string(),
+                message: "I/O error while disk failed: boom".to_string(),
             }
         );
     }

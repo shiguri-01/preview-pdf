@@ -37,10 +37,6 @@ impl TerminalSurface for HeadlessTerminalSession {
         infallible_to_io(self.terminal.size())
     }
 
-    fn clear(&mut self) -> io::Result<()> {
-        infallible_to_io(self.terminal.clear())
-    }
-
     fn draw<F>(&mut self, render: F) -> io::Result<()>
     where
         F: FnOnce(&mut Frame<'_>),
@@ -237,7 +233,6 @@ mod tests {
         let size = session.size().expect("size should resolve");
         assert_eq!(size, Size::new(80, 24));
 
-        session.clear().expect("clear should succeed");
         session
             .draw(|frame| {
                 frame.render_widget(Paragraph::new("ok"), Rect::new(0, 0, 2, 1));

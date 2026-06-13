@@ -3,7 +3,7 @@
 `pvf` is a keyboard-first PDF viewer for the terminal.
 
 ```bash
-pvf <file.pdf>
+pvf <FILE>
 ```
 
 ## Install

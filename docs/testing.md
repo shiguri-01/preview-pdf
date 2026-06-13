@@ -40,16 +40,14 @@ benches or diagnostics for timing, throughput, and regression observation.
 ## Docs Versus Tests
 
 Use docs when the reader needs orientation, rationale, ownership, or a compact
-map of related concepts. These sections should stay short and point to owning
-code when details are code-owned.
+map of related concepts. Use tests when the project needs executable
+protection: parser behavior, compatibility rules, cross-module consistency,
+stale-result handling, and observable user-facing outcomes.
 
-Use tests when the project needs executable protection: parser behavior,
-compatibility rules, cross-module consistency, stale-result handling, and
-observable user-facing outcomes.
-
-Use both when a topic needs a mental model and a guardrail. For example, docs
-can explain that key bindings are owned by the input registry and must resolve
-to invocable commands, while tests verify the registry actually does that.
+Use both when a topic needs a mental model and a guardrail. For example,
+`reference.md` explains that key bindings are owned by the input registry and
+must resolve to invocable commands; command tests verify that registry
+consistency.
 
 Avoid both extremes:
 
@@ -166,19 +164,6 @@ over large all-knowing setup.
 - Does architecture material explain boundaries and rationale without becoming
   a module inventory?
 - Is the section short enough to maintain?
-
-## Docs And Tests
-
-Docs should help contributors decide where to look, what must stay stable, and
-why major boundaries exist. They should not mirror code.
-
-When docs remove a detailed behavior description, either the detail should be
-owned by code, covered by a focused test, summarized as orientation, or
-obsolete. If an inventory can drift between code paths, protect the meaningful
-drift with tests rather than copying the list into docs.
-
-Reviewers should use `docs/reference.md` as a stable-contract index. If a
-change alters a documented contract, it needs a docs update and focused tests.
 
 ## Validation Commands
 

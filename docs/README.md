@@ -40,38 +40,16 @@ drift in stable behavior and cross-module consistency. Docs are better for
 explaining the shape of the system, why a boundary exists, and where to start
 reading. Prefer both when a topic needs orientation and correctness protection.
 
-## Review Checklist
+## Change Triage
 
-Does this change alter stable developer-facing behavior?
+Use this as the first pass before editing docs or tests:
 
-- Yes: add or update tests first; update `docs/reference.md` if the contract
-  changes.
-- No: no reference docs update is required.
-
-Does this change affect subsystem boundaries or code-reading entry points?
-
-- Yes: update `docs/architecture.md`.
-- No: no architecture docs update is required.
-
-Is this a bug fix?
-
-- Yes: add a regression test first, or explain why that is not useful.
-
-Is this only internal refactoring?
-
-- Preserve contract tests. Add characterization tests only when important
-  behavior has weak coverage.
-
-Does this change a complete inventory?
-
-- Update the owning code and consistency tests. Keep docs to orientation,
-  ownership, and compatibility notes unless a compact summary is needed for
-  readers.
-
-Is the test focused on one behavior at the narrowest useful layer?
-
-- If not, split it, move it, or simplify setup before relying on it.
-
-Could this doc section become stale after an ordinary implementation change?
-
-- If yes, move the detail to code, tests, or a local comment.
+- Stable behavior changed: update focused tests first and update
+  `reference.md` if the contract changes.
+- Subsystem boundary changed: update `architecture.md`.
+- Bug fixed: add a regression test first, or record why that is not useful.
+- Inventory changed: update owning code and meaningful consistency tests; keep
+  docs to orientation and compatibility notes.
+- Internal refactor only: preserve contract tests; add characterization tests
+  only when coverage is weak.
+- Doc detail would stale quickly: move it to code, tests, or a local comment.

@@ -26,13 +26,19 @@ This directory contains the durable developer-facing docs for `pvf`.
 
 Complete inventories belong in the Rust code that defines them: command
 catalogs, keymaps, palette registries, extension hosts, config types, and
-backend or render types. Docs should name the policy, ownership boundary, and
-code entry point, not copy every item.
+backend or render types. Docs may include a short orientation map or a few
+representative examples when that helps readers understand the whole system,
+but they should not become the source of truth for every item.
 
 Implementation detail belongs in code, focused tests, or local comments near
 the implementation. If a doc section would become stale after an ordinary
 implementation change, move the detail closer to the code or protect the
 behavior with tests.
+
+Use judgment before replacing docs with tests. Tests are good at preventing
+drift in stable behavior and cross-module consistency. Docs are better for
+explaining the shape of the system, why a boundary exists, and where to start
+reading. Prefer both when a topic needs orientation and correctness protection.
 
 ## Review Checklist
 
@@ -58,8 +64,9 @@ Is this only internal refactoring?
 
 Does this change a complete inventory?
 
-- Update the owning code and consistency tests. Do not copy the inventory into
-  docs.
+- Update the owning code and consistency tests. Keep docs to orientation,
+  ownership, and compatibility notes unless a compact summary is needed for
+  readers.
 
 Is the test focused on one behavior at the narrowest useful layer?
 

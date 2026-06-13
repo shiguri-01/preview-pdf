@@ -1,7 +1,9 @@
 # Testing
 
 Tests should protect behavior at the narrowest useful boundary. Prefer tests
-over detailed docs when a stable behavior was removed from old documentation.
+over detailed docs when a stable behavior was removed from old documentation,
+but do not turn every piece of orientation into a test. Use docs for the shape
+of the system and tests for behavior or consistency that can regress.
 
 ## Test Layers
 
@@ -34,6 +36,27 @@ user-visible error output, or headless runtime behavior.
 Performance diagnostics are separate from correctness tests. Use tests for JSON
 shape, diagnostic output parsing, and scenario metadata compatibility. Use
 benches or diagnostics for timing, throughput, and regression observation.
+
+## Docs Versus Tests
+
+Use docs when the reader needs orientation, rationale, ownership, or a compact
+map of related concepts. These sections should stay short and point to owning
+code when details are code-owned.
+
+Use tests when the project needs executable protection: parser behavior,
+compatibility rules, cross-module consistency, stale-result handling, and
+observable user-facing outcomes.
+
+Use both when a topic needs a mental model and a guardrail. For example, docs
+can explain that key bindings are owned by the input registry and must resolve
+to invocable commands, while tests verify the registry actually does that.
+
+Avoid both extremes:
+
+- Do not keep a complete hand-written inventory in docs when ordinary code
+  changes can make it stale.
+- Do not add broad tests that only duplicate an implementation table without
+  protecting a meaningful contract.
 
 ## Placement Rules
 
@@ -113,8 +136,9 @@ Internal refactor:
 Inventory change:
 
 1. Update the owning Rust catalog, registry, or type definition.
-2. Update tests that guard cross-module consistency.
-3. Do not copy the complete inventory into docs.
+2. Update tests that guard meaningful cross-module consistency.
+3. Update docs only when the inventory change alters a category, ownership
+   boundary, compatibility policy, or reader-facing orientation.
 
 ## Test Quality Checklist
 
@@ -149,9 +173,9 @@ Docs should help contributors decide where to look, what must stay stable, and
 why major boundaries exist. They should not mirror code.
 
 When docs remove a detailed behavior description, either the detail should be
-owned by code, covered by a focused test, or obsolete. If an inventory can drift
-between code paths, protect that drift with tests rather than copying the list
-into docs.
+owned by code, covered by a focused test, summarized as orientation, or
+obsolete. If an inventory can drift between code paths, protect the meaningful
+drift with tests rather than copying the list into docs.
 
 Reviewers should use `docs/reference.md` as a stable-contract index. If a
 change alters a documented contract, it needs a docs update and focused tests.

@@ -5,6 +5,13 @@ specification and does not own complete inventories. Each section names what
 must remain true, what needs compatibility care, where the full detail lives in
 code, and what test areas should protect it.
 
+Reference material should preserve useful overview without pretending to be the
+implementation. A compact category list, lifecycle sketch, or representative
+example is fine when it helps contributors reason about a change. A complete
+command list, keymap table, provider list, config field list, or cache algorithm
+belongs in the owning code unless generated docs or explicit drift tests keep it
+current.
+
 Use this section shape for new stable-contract sections:
 
 ```text
@@ -25,6 +32,9 @@ Test coverage:
 
 Use `Observable behavior:` only when user-visible or cross-subsystem effects
 need to be separated from private implementation detail.
+
+Use `Orientation:` sparingly when a short map makes the contract easier to use
+in review. Keep it descriptive rather than exhaustive.
 
 ## CLI
 
@@ -92,6 +102,11 @@ Test coverage:
 
 ## Commands
 
+Orientation:
+- Commands have three review-relevant concerns: stable ids and argument parsing,
+  source-aware invocation policy, and dispatch effects. The command catalog ties
+  those concerns together; feature behavior stays in handlers and app state.
+
 Contract:
 - Command ids are canonical kebab-case strings and are compatibility-sensitive
   when public.
@@ -114,8 +129,8 @@ Compatibility:
   require migration care.
 - Internal command ids can change more freely, but cross-module callers and
   palette providers must be updated together.
-- Do not copy the command inventory into docs; update the catalog and
-  consistency tests.
+- Do not copy the full command inventory into docs. Keep the complete list in
+  the catalog; use docs for policy, categories, and review cues.
 
 Owned by:
 - `src/command/catalog.rs`
@@ -130,6 +145,11 @@ Test coverage:
 
 ## Key Bindings
 
+Orientation:
+- Normal-mode key bindings turn terminal key events into typed commands through
+  the sequence registry. Palette-local keys are handled by palette session
+  logic instead.
+
 Contract:
 - Printable bindings are defined by resulting characters, not by physical keys.
 - Multi-key sequences can remain pending until resolved or timed out.
@@ -143,8 +163,8 @@ Contract:
 Compatibility:
 - Changing a default key binding affects user muscle memory and help output; do
   it intentionally with tests.
-- Complete key inventories belong in `src/input/keymap.rs` and rendered help,
-  not in docs.
+- Complete key inventories belong in `src/input/keymap.rs` and rendered help.
+  Docs may summarize categories of bindings, but should not own the table.
 
 Owned by:
 - `src/input/keymap.rs`
@@ -157,6 +177,12 @@ Test coverage:
 - Command/keymap consistency tests under the command module.
 
 ## Palette
+
+Orientation:
+- Palette behavior splits into common session mechanics and provider-owned
+  semantics. The common path owns opening, input routing, selection, tab,
+  submit, and closing. Providers own candidate meaning and the effects returned
+  for tab and submit.
 
 Contract:
 - A palette session has a kind, session id, input state, candidate list,
@@ -187,6 +213,7 @@ Compatibility:
 - Palette input, tab, submit, cancel, and selection behavior is user-visible
   and should change only with focused tests.
 - Complete provider inventories belong in the registry and provider modules.
+  Docs should explain provider responsibilities and notable cross-palette rules.
 
 Owned by:
 - `src/palette/manager.rs`
@@ -202,6 +229,11 @@ Test coverage:
   `src/history/`, and `src/outline/`.
 
 ## Extensions
+
+Orientation:
+- Built-in extensions are internal runtime features that need their own state,
+  event observation, background progress, status-bar output, or palette-facing
+  snapshots.
 
 Contract:
 - Extensions are internal modules composed statically by `ExtensionHost`.
@@ -233,6 +265,11 @@ Test coverage:
   behavior.
 
 ## Rendering And Workers
+
+Orientation:
+- Rendering correctness depends on two receiver boundaries: render results must
+  still match current app state, and presenter encode results must still match
+  current terminal-frame identity.
 
 Contract:
 - Render work returns typed completion results that are accepted or dropped at

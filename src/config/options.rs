@@ -1,5 +1,6 @@
 use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 
+pub use super::keymap::{KeymapBinding, KeymapOptions, KeymapPreset, KeymapTarget};
 use super::types::Config;
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -8,6 +9,7 @@ pub struct AppOptions {
     pub cache: CacheOptions,
     pub view: ViewOptions,
     pub input: InputOptions,
+    pub keymap: KeymapOptions,
     pub watch: WatchOptions,
 }
 
@@ -17,6 +19,7 @@ impl AppOptions {
         self.cache = self.cache.merge(next.cache);
         self.view = self.view.merge(next.view);
         self.input = self.input.merge(next.input);
+        self.keymap = self.keymap.merge(next.keymap);
         self.watch = self.watch.merge(next.watch);
         self
     }
@@ -53,6 +56,7 @@ impl From<Config> for AppOptions {
             input: InputOptions {
                 sequence_timeout_ms: Some(config.input.sequence_timeout_ms),
             },
+            keymap: KeymapOptions::default(),
             watch: WatchOptions {
                 enabled: Some(config.watch.enabled),
                 poll_interval_ms: Some(config.watch.poll_interval_ms),

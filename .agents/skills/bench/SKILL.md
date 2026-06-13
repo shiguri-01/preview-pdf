@@ -7,7 +7,9 @@ description: Run and interpret pvf headless performance diagnostics. Use for gen
 
 Use this skill to run, compare, or explain repo-local performance diagnostics.
 
-Before running or changing benchmarks, read `docs/performance-diagnostics.md`.
+Before running or changing benchmarks, read `docs/reference.md` sections for
+Performance Diagnostics and `docs/testing.md` guidance on performance
+diagnostics versus correctness tests.
 Use `benches/perf.rs` as the bench entry point, `benches/fixtures/` as the fixture source, and `target/bench/` for generated fixtures and reports.
 
 ## Agent Workflow

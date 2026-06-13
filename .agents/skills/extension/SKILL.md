@@ -9,9 +9,15 @@ Use this skill for changes centered on pvf feature extensions and their runtime 
 
 ## Start
 
-Read `docs/extension-system.md` before changing extension contracts or host composition.
-Read `docs/palette-provider.md` when an extension exposes data to a palette or opens a palette.
-Read `docs/async-workers.md` when extension work can outlive one event-loop iteration.
+Read `docs/reference.md` sections for Extensions before changing extension
+contracts or host composition.
+Read `docs/reference.md` sections for Palette when an extension exposes data to
+a palette or opens a palette.
+Read `docs/reference.md` sections for Rendering And Workers when extension work
+can outlive one event-loop iteration.
+Read `docs/architecture.md` when extension ownership, event flow, worker flow,
+or subsystem boundaries change.
+Read `docs/testing.md` before placing new extension tests.
 
 ## Implementation Checks
 
@@ -28,5 +34,7 @@ Read `docs/async-workers.md` when extension work can outlive one event-loop iter
 
 - Add or update state tests for event handling, input hooks, background drain, status output, and reload/reset behavior.
 - Add host tests when composition, ordering, snapshot data, or cross-extension interactions change.
-- Update `docs/extension-system.md` for extension contract, host composition, or built-in extension behavior changes.
-- Update `docs/async-workers.md` when spawn points, owners, shutdown, cancellation, or stale-result handling changes.
+- Update `docs/reference.md` for extension contract, host composition, built-in
+  extension behavior, worker, cancellation, or stale-result contract changes.
+- Update `docs/architecture.md` only when ownership, event flow, worker flow, or
+  boundary rationale changes.

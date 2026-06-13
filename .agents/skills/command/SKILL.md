@@ -9,14 +9,15 @@ Use this skill for changes centered on pvf runtime commands.
 
 ## Start
 
-Read `docs/reference.md` sections for Commands and Key Bindings before changing
-command internals, command ids, invocation policy, key bindings, or help
-surfaces.
-Read `docs/reference.md` sections for Palette when command palette behavior,
-completion, visibility, or submission changes.
-Read `docs/architecture.md` when command routing or subsystem boundaries
-change.
-Read `docs/testing.md` before placing new command or keymap tests.
+Read only the relevant `docs/reference.md` sections for Commands and Key
+Bindings before changing command internals, command ids, invocation policy, key
+bindings, or help surfaces.
+Read only the relevant `docs/reference.md` Palette section when command palette
+behavior, completion, visibility, or submission changes.
+Read the relevant part of `docs/architecture.md` when command routing or
+subsystem boundaries change.
+Read the relevant section of `docs/testing.md` before placing new command or
+keymap tests.
 
 ## User-Facing Design First
 

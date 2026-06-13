@@ -9,15 +9,16 @@ Use this skill for changes centered on pvf feature extensions and their runtime 
 
 ## Start
 
-Read `docs/reference.md` sections for Extensions before changing extension
-contracts or host composition.
-Read `docs/reference.md` sections for Palette when an extension exposes data to
-a palette or opens a palette.
-Read `docs/reference.md` sections for Rendering And Workers when extension work
-can outlive one event-loop iteration.
-Read `docs/architecture.md` when extension ownership, event flow, worker flow,
-or subsystem boundaries change.
-Read `docs/testing.md` before placing new extension tests.
+Read only the relevant `docs/reference.md` Extensions section before changing
+extension contracts or host composition.
+Read only the relevant `docs/reference.md` Palette section when an extension
+exposes data to a palette or opens a palette.
+Read only the relevant `docs/reference.md` Rendering And Workers section when
+extension work can outlive one event-loop iteration.
+Read the relevant part of `docs/architecture.md` when extension ownership,
+event flow, worker flow, or subsystem boundaries change.
+Read the relevant section of `docs/testing.md` before placing new extension
+tests.
 
 ## Implementation Checks
 

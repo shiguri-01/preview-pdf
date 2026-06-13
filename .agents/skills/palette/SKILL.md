@@ -9,15 +9,16 @@ Use this skill for changes centered on pvf palette UI and interaction behavior.
 
 ## Start
 
-Read `docs/reference.md` sections for Palette before changing palette contracts
-or built-in palette behavior.
-Read `docs/reference.md` sections for Commands when palette submission
-dispatches commands or changes command palette behavior.
-Read `docs/reference.md` sections for Extensions when palette data comes from
-extension-owned state.
-Read `docs/architecture.md` when palette ownership, snapshots, or subsystem
-boundaries change.
-Read `docs/testing.md` before placing new palette tests.
+Read only the relevant `docs/reference.md` Palette section before changing
+palette contracts or built-in palette behavior.
+Read only the relevant `docs/reference.md` Commands section when palette
+submission dispatches commands or changes command palette behavior.
+Read only the relevant `docs/reference.md` Extensions section when palette data
+comes from extension-owned state.
+Read the relevant part of `docs/architecture.md` when palette ownership,
+snapshots, or subsystem boundaries change.
+Read the relevant section of `docs/testing.md` before placing new palette
+tests.
 
 ## User-Facing Design First
 

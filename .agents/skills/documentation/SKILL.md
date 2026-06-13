@@ -9,12 +9,15 @@ Use this skill for developer-doc changes in pvf.
 
 ## Start
 
-Read `docs/README.md` first to understand where material belongs.
-Read `docs/architecture.md` when documenting runtime flow, subsystem
-boundaries, ownership, or event routing.
-Read `docs/reference.md` when documenting stable developer-facing contracts.
-Read `docs/testing.md` when documentation changes affect how behavior should be
-protected.
+For small local edits, read only the file or section being changed.
+Read `docs/README.md` when deciding where material belongs, doing a docs
+migration, or changing more than one docs file.
+Read the relevant section of `docs/architecture.md` when documenting runtime
+flow, subsystem boundaries, ownership, or event routing.
+Read the relevant section of `docs/reference.md` when documenting stable
+developer-facing contracts.
+Read the relevant section of `docs/testing.md` when documentation changes
+affect how behavior should be protected.
 
 ## Placement
 

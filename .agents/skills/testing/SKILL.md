@@ -9,11 +9,12 @@ Use this skill for test-related work in pvf.
 
 ## Start
 
-Read `docs/testing.md` before non-trivial test changes, moving tests, adding a
-new test layer, or changing test policy.
-Read `docs/reference.md` when the test protects a stable contract.
-Read `docs/architecture.md` when the test depends on subsystem boundaries,
-runtime flow, workers, or ownership.
+Read the relevant section of `docs/testing.md` before non-trivial test changes,
+moving tests, adding a new test layer, or changing test policy.
+Read only the relevant section of `docs/reference.md` when the test protects a
+stable contract.
+Read only the relevant section of `docs/architecture.md` when the test depends
+on subsystem boundaries, runtime flow, workers, or ownership.
 
 ## Workflow
 

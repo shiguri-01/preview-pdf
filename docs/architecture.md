@@ -135,25 +135,3 @@ their cache identities, stale-result rules, and performance costs differ.
 Backend:
 The backend trait isolates PDF opening, rasterization, text extraction, and
 outline extraction from the interactive runtime.
-
-## Code-Reading Entry Points
-
-- Add or change a CLI option: `src/main.rs`, `src/config/`, then
-  `docs/reference.md`.
-- Change config compatibility: `src/config/types.rs`, `src/config/file.rs`,
-  `src/config/options.rs`, and config tests.
-- Add or change a command: `src/command/catalog.rs`,
-  `src/command/parse.rs`, `src/command/handlers/`, and command tests.
-- Change key bindings: `src/input/keymap.rs`, `src/input/sequence.rs`, and
-  keymap or command contract tests.
-- Change palette behavior: `src/palette/manager.rs`, `src/palette/types.rs`,
-  the relevant provider, and palette tests.
-- Change extension behavior: `src/extension/host.rs`,
-  `src/extension/traits.rs`, the feature module, and extension tests.
-- Change render scheduling or stale-result handling: `src/render/scheduler.rs`,
-  `src/render/prefetch.rs`, `src/render/worker.rs`, and render tests.
-- Change terminal image output or L2 cache behavior:
-  `src/presenter/encode.rs`, `src/presenter/l2_cache.rs`,
-  `src/presenter/ratatui/`, and presenter tests.
-- Change performance diagnostics: `benches/perf.rs`, `src/perf/`,
-  `src/app/perf_runner.rs`, and diagnostics tests.

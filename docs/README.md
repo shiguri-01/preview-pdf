@@ -4,8 +4,8 @@ This directory contains the durable developer-facing docs for `pvf`.
 
 ## Reading Path
 
-1. `architecture.md` for the system map, runtime flow, subsystem boundaries,
-   and code-reading entry points.
+1. `architecture.md` for the system map, runtime flow, and subsystem
+   boundaries.
 2. `reference.md` for stable contracts that implementation and review should
    protect.
 3. `testing.md` for test placement, test-first guidance, quality checklists,
@@ -14,8 +14,7 @@ This directory contains the durable developer-facing docs for `pvf`.
 ## Where Material Belongs
 
 - Put architecture material in `architecture.md` when a change affects runtime
-  flow, subsystem boundaries, ownership, event routing, or code-reading entry
-  points.
+  flow, subsystem boundaries, ownership, or event routing.
 - Put stable developer-facing behavior in `reference.md` when a change
   intentionally changes CLI behavior, config compatibility, command policy,
   key binding resolution, palette semantics, extension host behavior, render

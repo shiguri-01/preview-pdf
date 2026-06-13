@@ -375,14 +375,16 @@ impl SequenceResolver {
                     return SequenceResolution::Noop;
                 }
 
-                let next = Box::new(self.handle_normalized_key(latest_key));
                 if let Some(command) = pending_exact {
                     SequenceResolution::DispatchThen {
                         first: command,
-                        next,
+                        next: Box::new(self.handle_normalized_key(latest_key)),
                     }
                 } else {
-                    *next
+                    match self.handle_normalized_key(latest_key) {
+                        SequenceResolution::Noop => SequenceResolution::Cleared,
+                        next => next,
+                    }
                 }
             }
         }
@@ -709,6 +711,27 @@ mod tests {
 
         let mismatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
         assert_eq!(mismatch, SequenceResolution::Dispatch(Command::NextPage));
+        assert_eq!(resolver.pending_display(), None);
+    }
+
+    #[test]
+    fn mismatch_after_pending_prefix_reports_clear_when_latest_key_is_unbound() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
+            .expect("multi-key binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+
+        let mismatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert_eq!(mismatch, SequenceResolution::Cleared);
         assert_eq!(resolver.pending_display(), None);
     }
 

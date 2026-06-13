@@ -809,6 +809,41 @@ mod tests {
     }
 
     #[test]
+    fn pending_sequence_requests_redraw_when_unbound_followup_clears_it() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+        assert_eq!(
+            interaction.pending_sequence_status().as_deref(),
+            Some("keys g")
+        );
+
+        let mismatch = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            )
+            .expect("mismatched key should clear the sequence");
+
+        assert!(mismatch.redraw);
+        assert!(mismatch.commands.is_empty());
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
     fn wake_flushes_timed_out_sequence() {
         let mut registry = SequenceRegistry::new();
         registry

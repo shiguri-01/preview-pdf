@@ -24,7 +24,8 @@ keymap tests.
 Before editing implementation code for a user-visible command, write a short working contract:
 
 - What is the user trying to accomplish?
-- What would the user intuitively try first: a key, command palette search, typed command, or existing workflow?
+- What would the user intuitively try first: a key, command palette search,
+  typed command, focused interaction, or existing workflow?
 - What exact command id, arguments, key binding, title, help text, notice, or error will the user see?
 - What is the shortest successful path?
 - What happens for empty input, invalid input, unavailable state, repeated use, cancellation, and recovery?
@@ -34,11 +35,24 @@ Do not start implementation until the external behavior is clear enough to test.
 
 ## Implementation Checks
 
-- Treat the command catalog as the source for the typed command, command id, metadata, parser routing, and execution routing.
+- Treat the command catalog as the source for the typed command, command id,
+  role, exposure, invocation policy, target requirement, availability,
+  metadata, parser routing, and execution routing.
 - Keep parser behavior, metadata args, and dispatch behavior aligned.
-- Choose exposure, invocation policy, and availability deliberately.
+- Choose role, exposure, invocation policy, target requirement, and
+  availability deliberately. Visibility, source policy, target resolution, and
+  runtime availability are separate concerns.
 - Choose public command names and arguments for user understanding, not internal convenience.
+- Preserve existing user-facing command names and argument contracts unless an
+  explicit migration is being designed. Do not add fallback aliases or parallel
+  old/new dispatch paths for internal redesign work.
 - Put command execution in the feature handler that owns the behavior.
+- Focused operations such as palette submit, palette selection, text editing,
+  text history recall, help close, and help scroll should enter as command
+  requests and resolve their active target through dispatch.
+- When a command completes another command, return a follow-up command request
+  with an intentional invocation source instead of directly bypassing command
+  validation.
 - If a command affects navigation, ensure emitted app events and navigation reasons still match the feature behavior.
 - If a public command should be reachable by a key, update the keymap and help surface together.
 - If command palette behavior changes, verify listing, argument hints, completion, and runtime gating.

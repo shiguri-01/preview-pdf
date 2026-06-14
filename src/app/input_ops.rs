@@ -380,13 +380,17 @@ impl InteractionSubsystem {
                 quit_requested: true,
                 commands: Vec::new(),
             },
-            SequenceResolution::DispatchThen { first, next } => {
+            SequenceResolution::DispatchThen {
+                first,
+                next,
+                redraw,
+            } => {
                 // `DispatchThen` represents "commit the pending sequence, then keep
                 // processing the latest key" without dropping input.
                 let (first_redraw, first_quit_requested) =
                     Self::command_effects(&first, redraw_on_dispatch);
                 let mut outcome = Self::sequence_outcome(*next, redraw_on_dispatch);
-                outcome.redraw |= first_redraw;
+                outcome.redraw |= redraw || first_redraw;
                 outcome.quit_requested |= first_quit_requested;
                 outcome.commands.insert(
                     0,
@@ -766,6 +770,50 @@ mod tests {
                 CommandRequest::new(Command::NextPage, CommandInvocationSource::Keymap),
             ]
         );
+        assert!(mismatch.redraw);
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn pending_exact_mismatch_requests_redraw_even_when_commands_do_not() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('x')], Command::DebugStatusHide)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('x'), ShortcutKey::char('x')],
+                Command::NextPage,
+            )
+            .expect("multi-key binding should register");
+        let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+        assert_eq!(
+            interaction.pending_sequence_status().as_deref(),
+            Some("keys x")
+        );
+
+        let mismatch = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
+            )
+            .expect("mismatched key should commit the pending sequence");
+        assert_eq!(
+            mismatch.commands,
+            vec![CommandRequest::new(
+                Command::DebugStatusHide,
+                CommandInvocationSource::Keymap,
+            )]
+        );
+        assert!(mismatch.redraw);
         assert_eq!(interaction.pending_sequence_status(), None);
     }
 

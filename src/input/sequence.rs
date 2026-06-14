@@ -201,6 +201,7 @@ pub enum SequenceResolution {
     DispatchThen {
         first: Command,
         next: Box<SequenceResolution>,
+        redraw: bool,
     },
 }
 
@@ -286,6 +287,7 @@ impl SequenceResolver {
                     SequenceResolution::Dispatch(command) => SequenceResolution::DispatchThen {
                         first: command,
                         next: Box::new(self.handle_normalized_key(key)),
+                        redraw: true,
                     },
                     SequenceResolution::Cleared | SequenceResolution::Noop => {
                         self.handle_normalized_key(key)
@@ -379,6 +381,7 @@ impl SequenceResolver {
                     SequenceResolution::DispatchThen {
                         first: command,
                         next: Box::new(self.handle_normalized_key(latest_key)),
+                        redraw: true,
                     }
                 } else {
                     match self.handle_normalized_key(latest_key) {
@@ -600,6 +603,7 @@ mod tests {
             SequenceResolution::DispatchThen {
                 first: Command::FirstPage,
                 next: Box::new(SequenceResolution::Dispatch(Command::NextPage)),
+                redraw: true,
             }
         );
     }
@@ -632,6 +636,7 @@ mod tests {
             SequenceResolution::DispatchThen {
                 first: Command::FirstPage,
                 next: Box::new(SequenceResolution::Dispatch(Command::NextPage)),
+                redraw: true,
             }
         );
     }
@@ -685,6 +690,7 @@ mod tests {
             SequenceResolution::DispatchThen {
                 first: Command::FirstPage,
                 next: Box::new(SequenceResolution::Dispatch(Command::NextPage)),
+                redraw: true,
             }
         );
         assert_eq!(resolver.pending_display(), None);

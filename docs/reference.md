@@ -167,8 +167,8 @@ Contract:
   keymap.
 - Help-mode-local keys are handled by the help input route when the help overlay
   is active; they may dispatch commands without being normal-mode bindings.
-- `<esc>` and `<enter>` are not configurable normal-mode bindings while their
-  global cancellation and sequence-confirmation behavior is being settled.
+- `<esc>` is reserved for global cancellation and is not routed through the
+  normal-mode keymap.
 
 Compatibility:
 - Changing a default key binding affects user muscle memory and help output; do

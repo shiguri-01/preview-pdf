@@ -614,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn keymap_config_rejects_escape_and_enter_bindings() {
+    fn keymap_config_rejects_escape_bindings() {
         let path = unique_temp_path("bad-keymap-key.toml");
         fs::write(
             &path,
@@ -626,9 +626,30 @@ mod tests {
         .expect("config file should be written");
 
         let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
-        assert!(
-            err.to_string().contains("<esc> or <enter>"),
-            "unexpected error: {err}"
+        assert!(err.to_string().contains("<esc>"), "unexpected error: {err}");
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_accepts_enter_bindings() {
+        let path = unique_temp_path("enter-keymap-key.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap.bindings]
+            "<enter>" = "next-page"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should load");
+        assert_eq!(
+            options.keymap.bindings,
+            vec![KeymapBinding::Exact {
+                keys: vec![ShortcutKey::key(KeyCode::Enter)],
+                command: Command::NextPage,
+            }]
         );
 
         fs::remove_file(&path).expect("config file should be removed");

@@ -196,11 +196,13 @@ pub enum SequenceResolution {
     Pending,
     Cleared,
     Dispatch(Command),
-    // When a timed-out prefix is confirmed by the next key press, the old command
-    // must be emitted first and the new key must still be processed immediately.
+    DispatchWithRedraw(Command),
+    // When a pending sequence is committed before processing the latest key, the
+    // old command must be emitted first and the new key must still be processed.
     DispatchThen {
         first: Command,
         next: Box<SequenceResolution>,
+        redraw: bool,
     },
 }
 
@@ -273,6 +275,9 @@ impl SequenceResolver {
     }
 
     fn handle_normalized_key(&mut self, key: ShortcutKey) -> SequenceResolution {
+        let pending_exact = (!self.state.is_empty())
+            .then(|| self.registry.match_buffer(self.state.as_slice()).exact)
+            .flatten();
         let had_pending = !self.state.is_empty();
 
         if had_pending {
@@ -283,12 +288,17 @@ impl SequenceResolver {
                     SequenceResolution::Dispatch(command) => SequenceResolution::DispatchThen {
                         first: command,
                         next: Box::new(self.handle_normalized_key(key)),
+                        redraw: true,
                     },
                     SequenceResolution::Cleared | SequenceResolution::Noop => {
                         self.handle_normalized_key(key)
                     }
-                    SequenceResolution::Pending | SequenceResolution::DispatchThen { .. } => {
-                        unreachable!("confirming a timed out sequence cannot remain pending")
+                    SequenceResolution::Pending
+                    | SequenceResolution::DispatchWithRedraw(_)
+                    | SequenceResolution::DispatchThen { .. } => {
+                        unreachable!(
+                            "confirming a timed out sequence cannot return a derived resolution"
+                        )
                     }
                 };
             }
@@ -297,13 +307,10 @@ impl SequenceResolver {
                 self.state.clear();
                 return SequenceResolution::Cleared;
             }
-            if key.code() == KeyCode::Enter {
-                return self.confirm_pending();
-            }
         }
 
         self.state.push(key);
-        self.resolve_pending_after_input(had_pending)
+        self.resolve_pending_after_input(key, pending_exact)
     }
 
     pub fn flush_timeout(&mut self) -> SequenceResolution {
@@ -356,7 +363,11 @@ impl SequenceResolver {
         }
     }
 
-    fn resolve_pending_after_input(&mut self, had_pending: bool) -> SequenceResolution {
+    fn resolve_pending_after_input(
+        &mut self,
+        latest_key: ShortcutKey,
+        pending_exact: Option<Command>,
+    ) -> SequenceResolution {
         let matched = self.registry.match_buffer(self.state.as_slice());
         match (matched.exact, matched.has_prefix) {
             (Some(command), false) => {
@@ -365,15 +376,48 @@ impl SequenceResolver {
             }
             (Some(_), true) | (None, true) => SequenceResolution::Pending,
             (None, false) => {
+                let had_pending = self.state.as_slice().len() > 1;
                 self.state.clear();
-                if had_pending {
-                    SequenceResolution::Cleared
+                if !had_pending {
+                    return SequenceResolution::Noop;
+                }
+
+                if let Some(command) = pending_exact {
+                    if command_stops_followup_reprocessing(&command) {
+                        return SequenceResolution::Dispatch(command);
+                    }
+
+                    SequenceResolution::DispatchThen {
+                        first: command,
+                        next: Box::new(self.handle_normalized_key(latest_key)),
+                        redraw: true,
+                    }
                 } else {
-                    SequenceResolution::Noop
+                    match self.handle_normalized_key(latest_key) {
+                        SequenceResolution::Noop => SequenceResolution::Cleared,
+                        SequenceResolution::Dispatch(command) => {
+                            SequenceResolution::DispatchWithRedraw(command)
+                        }
+                        next => next,
+                    }
                 }
             }
         }
     }
+}
+
+fn command_stops_followup_reprocessing(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::OpenHelp
+            | Command::CloseHelp
+            | Command::OpenPalette { .. }
+            | Command::ClosePalette
+            | Command::OpenSearch
+            | Command::OpenSearchResults
+            | Command::OpenHistory
+            | Command::OpenOutline
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -469,7 +513,7 @@ fn normalize_shortcut_key(key: ShortcutKey) -> ShortcutKey {
 }
 
 fn is_reserved_sequence_key(key: ShortcutKey) -> bool {
-    matches!(key.code(), KeyCode::Enter | KeyCode::Esc)
+    matches!(key.code(), KeyCode::Esc)
 }
 
 fn is_digit_key(key: ShortcutKey) -> bool {
@@ -521,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_exact_waits_for_timeout_or_confirmation() {
+    fn ambiguous_exact_waits_for_timeout() {
         let mut registry = SequenceRegistry::new();
         registry
             .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
@@ -544,7 +588,21 @@ mod tests {
     }
 
     #[test]
-    fn enter_confirms_pending_exact_match() {
+    fn enter_dispatches_as_a_regular_exact_binding() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::key(KeyCode::Enter)], Command::NextPage)
+            .expect("enter binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert_eq!(resolution, SequenceResolution::Dispatch(Command::NextPage));
+        assert_eq!(resolver.pending_display(), None);
+    }
+
+    #[test]
+    fn enter_after_pending_exact_match_reprocesses_as_next_key() {
         let mut registry = SequenceRegistry::new();
         registry
             .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
@@ -555,6 +613,9 @@ mod tests {
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::key(KeyCode::Enter)], Command::NextPage)
+            .expect("enter binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
@@ -562,8 +623,15 @@ mod tests {
             SequenceResolution::Pending
         );
 
-        let confirm = resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
-        assert_eq!(confirm, SequenceResolution::Dispatch(Command::FirstPage));
+        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            resolution,
+            SequenceResolution::DispatchThen {
+                first: Command::FirstPage,
+                next: Box::new(SequenceResolution::Dispatch(Command::NextPage)),
+                redraw: true,
+            }
+        );
     }
 
     #[test]
@@ -594,12 +662,95 @@ mod tests {
             SequenceResolution::DispatchThen {
                 first: Command::FirstPage,
                 next: Box::new(SequenceResolution::Dispatch(Command::NextPage)),
+                redraw: true,
             }
         );
     }
 
     #[test]
-    fn mismatch_clears_pending_buffer_without_retrying_latest_key() {
+    fn enter_can_be_part_of_a_multi_key_binding() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::key(KeyCode::Enter)],
+                Command::FirstPage,
+            )
+            .expect("enter should be usable in multi-key bindings");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+
+        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(resolution, SequenceResolution::Dispatch(Command::FirstPage));
+        assert_eq!(resolver.pending_display(), None);
+    }
+
+    #[test]
+    fn mismatch_after_pending_exact_match_reprocesses_latest_key() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('x')], Command::NextPage)
+            .expect("single-key binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+
+        let mismatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert_eq!(
+            mismatch,
+            SequenceResolution::DispatchThen {
+                first: Command::FirstPage,
+                next: Box::new(SequenceResolution::Dispatch(Command::NextPage)),
+                redraw: true,
+            }
+        );
+        assert_eq!(resolver.pending_display(), None);
+    }
+
+    #[test]
+    fn mismatch_after_pending_prefix_reprocesses_latest_key() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('x')], Command::NextPage)
+            .expect("single-key binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+
+        let mismatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        assert_eq!(
+            mismatch,
+            SequenceResolution::DispatchWithRedraw(Command::NextPage)
+        );
+        assert_eq!(resolver.pending_display(), None);
+    }
+
+    #[test]
+    fn mismatch_after_pending_prefix_reports_clear_when_latest_key_is_unbound() {
         let mut registry = SequenceRegistry::new();
         registry
             .register_static(
@@ -705,15 +856,15 @@ mod tests {
     }
 
     #[test]
-    fn registry_rejects_reserved_keys_in_multikey_sequences() {
+    fn registry_rejects_escape_in_multikey_sequences() {
         let mut registry = SequenceRegistry::new();
 
         let error = registry
             .register_static(
-                &[ShortcutKey::char('g'), ShortcutKey::key(KeyCode::Enter)],
+                &[ShortcutKey::char('g'), ShortcutKey::key(KeyCode::Esc)],
                 Command::FirstPage,
             )
-            .expect_err("Enter should be reserved in multi-key bindings");
+            .expect_err("Esc should be reserved in multi-key bindings");
         assert_eq!(error, SequenceRegistrationError::ReservedKeyInSequence);
     }
 

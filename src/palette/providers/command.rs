@@ -217,7 +217,7 @@ impl PaletteProvider for CommandPaletteProvider {
 fn command_policy_context<'a>(ctx: &'a PaletteContext<'a>) -> CommandPolicyContext<'a> {
     CommandPolicyContext {
         source: CommandInvocationSource::CommandPaletteInput,
-        runtime: RuntimeConditionContext::new(ctx.app.mode, Some(ctx.kind), true, ctx.extensions),
+        runtime: RuntimeConditionContext::new(ctx.app.mode, Some(ctx.kind), ctx.extensions),
     }
 }
 

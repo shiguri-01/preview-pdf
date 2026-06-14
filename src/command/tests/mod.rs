@@ -87,7 +87,6 @@ fn key_binding_command_context<'a>(
                 KeyBindingScope::Help => Mode::Help,
             },
             matches!(scope, KeyBindingScope::Palette).then_some(PaletteKind::Command),
-            matches!(scope, KeyBindingScope::Palette),
             extensions,
         ),
     }

@@ -203,7 +203,6 @@ pub enum CommandInvocationPolicy {
 pub enum CommandTargetRequirement {
     App,
     ActivePalette,
-    FocusedTextInput,
     ActiveHelp,
 }
 

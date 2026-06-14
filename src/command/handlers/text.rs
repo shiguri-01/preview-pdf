@@ -61,7 +61,7 @@ pub(in crate::command) fn text_move_right(
     )?)
 }
 
-pub(in crate::command) fn text_history_older(
+pub(in crate::command) fn palette_input_history_older(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
     let extensions = ctx.extension_host.ui_snapshot();
@@ -73,7 +73,7 @@ pub(in crate::command) fn text_history_older(
     )?)
 }
 
-pub(in crate::command) fn text_history_newer(
+pub(in crate::command) fn palette_input_history_newer(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
     let extensions = ctx.extension_host.ui_snapshot();

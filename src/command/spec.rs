@@ -145,7 +145,6 @@ fn is_target_available(target: CommandTargetRequirement, ctx: &CommandPolicyCont
     match target {
         CommandTargetRequirement::App => true,
         CommandTargetRequirement::ActivePalette => ctx.runtime.active_palette.is_some(),
-        CommandTargetRequirement::FocusedTextInput => ctx.runtime.focused_text_input,
         CommandTargetRequirement::ActiveHelp => ctx.runtime.mode == Mode::Help,
     }
 }
@@ -193,17 +192,11 @@ fn condition_unavailable_message(id: &str, condition: RuntimeCondition) -> Strin
         RuntimeCondition::PaletteKindIs(kind) => {
             format!("{id} is unavailable outside the {} palette", kind.id())
         }
-        RuntimeCondition::TextInputIsFocused => {
-            format!("{id} is unavailable without a focused text input")
+        RuntimeCondition::PaletteInputHistoryIsAvailable => {
+            format!("{id} is unavailable without palette input history")
         }
-        RuntimeCondition::TextInputIsNotFocused => {
-            format!("{id} is unavailable while a text input is focused")
-        }
-        RuntimeCondition::TextHistoryIsAvailable => {
-            format!("{id} is unavailable without text input history")
-        }
-        RuntimeCondition::TextHistoryIsUnavailable => {
-            format!("{id} is unavailable while text input history is available")
+        RuntimeCondition::PaletteInputHistoryIsUnavailable => {
+            format!("{id} is unavailable while palette input history is available")
         }
     }
 }
@@ -213,9 +206,6 @@ fn target_unavailable_message(spec: CommandSpec) -> String {
         CommandTargetRequirement::App => format!("{} has no target", spec.id),
         CommandTargetRequirement::ActivePalette => {
             format!("{} is unavailable without an active palette", spec.id)
-        }
-        CommandTargetRequirement::FocusedTextInput => {
-            format!("{} is unavailable without a focused text input", spec.id)
         }
         CommandTargetRequirement::ActiveHelp => {
             format!("{} is unavailable outside help", spec.id)
@@ -270,7 +260,6 @@ mod tests {
             CommandInvocationSource::CommandPaletteInput,
             Mode::Normal,
             Some(PaletteKind::Command),
-            true,
             &extensions,
         );
 
@@ -285,7 +274,6 @@ mod tests {
             CommandInvocationSource::Keymap,
             Mode::Normal,
             None,
-            false,
             &extensions,
         );
 
@@ -305,7 +293,6 @@ mod tests {
             CommandInvocationSource::Keymap,
             Mode::Normal,
             None,
-            false,
             &extensions,
         );
         validate_command_for_policy(
@@ -321,7 +308,6 @@ mod tests {
             CommandInvocationSource::CommandPaletteInput,
             Mode::Normal,
             Some(PaletteKind::Command),
-            true,
             &extensions,
         );
         let err = validate_command_id_for_policy("open-palette", &palette_input_ctx)
@@ -336,7 +322,6 @@ mod tests {
             CommandInvocationSource::CommandPaletteInput,
             Mode::Normal,
             Some(PaletteKind::Command),
-            true,
             &extensions,
         );
 
@@ -351,7 +336,6 @@ mod tests {
             CommandInvocationSource::Keymap,
             Mode::Normal,
             None,
-            false,
             &extensions,
         );
         let err = validate_command_id_for_policy("help-scroll-down", &normal_ctx)
@@ -362,13 +346,36 @@ mod tests {
             CommandInvocationSource::Keymap,
             Mode::Help,
             None,
-            false,
             &extensions,
         );
         validate_command_id_for_policy("help-scroll-down", &help_ctx)
             .expect("help scroll down should be available in help");
         validate_command_id_for_policy("help-scroll-up", &help_ctx)
             .expect("help scroll up should be available in help");
+    }
+
+    #[test]
+    fn palette_input_history_commands_require_history_capable_palette() {
+        let extensions = ExtensionUiSnapshot::default();
+        let command_palette_ctx = policy_context(
+            CommandInvocationSource::Keymap,
+            Mode::Palette,
+            Some(PaletteKind::Command),
+            &extensions,
+        );
+        validate_command_for_policy(&Command::PaletteInputHistoryOlder, &command_palette_ctx)
+            .expect("command palette should support input history");
+
+        let outline_palette_ctx = policy_context(
+            CommandInvocationSource::Keymap,
+            Mode::Palette,
+            Some(PaletteKind::Outline),
+            &extensions,
+        );
+        let err =
+            validate_command_for_policy(&Command::PaletteInputHistoryOlder, &outline_palette_ctx)
+                .expect_err("outline palette should not support input history");
+        assert!(err.to_string().contains("palette input history"));
     }
 
     #[test]
@@ -384,17 +391,11 @@ mod tests {
         source: CommandInvocationSource,
         mode: Mode,
         active_palette: Option<PaletteKind>,
-        focused_text_input: bool,
         extensions: &'a ExtensionUiSnapshot,
     ) -> CommandPolicyContext<'a> {
         CommandPolicyContext {
             source,
-            runtime: RuntimeConditionContext::new(
-                mode,
-                active_palette,
-                focused_text_input,
-                extensions,
-            ),
+            runtime: RuntimeConditionContext::new(mode, active_palette, extensions),
         }
     }
 }

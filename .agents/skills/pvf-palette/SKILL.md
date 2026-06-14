@@ -1,6 +1,6 @@
 ---
 name: pvf-palette
-description: Add, edit, rename, or review pvf palette behavior. Use when changing PaletteKind, PaletteProvider implementations, palette payloads, palette candidate rows, command-palette visibility, input modes, selection behavior, tab or submit behavior, palette-focused key behavior, or palette rendering contracts.
+description: Add, edit, rename, or review pvf palette behavior. Use when changing PaletteKind, PaletteProvider implementations, palette payloads, palette candidate rows, command-palette visibility, input modes, selection behavior, tab or submit behavior, palette-scoped key behavior, or palette rendering contracts.
 ---
 
 # PVF Palette
@@ -29,7 +29,7 @@ Before editing implementation code, write a short working contract:
 - What exact title, input seed, selected row, row text, assistive text, notice, or empty-state text will the user see?
 - What is the shortest successful keyboard path?
 - What command requests are produced by tab, enter, escape, selection movement,
-  text editing, and history navigation?
+  palette input editing, and history navigation?
 - What happens for empty input, no matches, unavailable state, repeated use,
   completion, submit, close, and history navigation?
 - Which existing palette should this feel consistent with?
@@ -43,12 +43,12 @@ Do not start implementation until the interaction is clear enough to test.
 - Keep rendered row text separate from searchable text.
 - Make row labels and assistive text scannable for users; avoid exposing internal ids unless the user intentionally types them.
 - Preserve session and selection behavior when changing open, reopen,
-  completion, submit, text editing, or input-change flows.
-- Do not make palette providers own raw key events. Palette-focused keys should
+  completion, submit, palette input editing, or input-change flows.
+- Do not make palette providers own raw key events. Palette-scoped keys should
   resolve through the scoped input sequence registry and produce command
-  requests such as palette submit, palette completion, palette selection, text
-  editing, text history recall, or close.
-- Treat input history as a focused text input capability, not as a
+  requests such as palette submit, palette completion, palette selection,
+  palette input editing, palette input history recall, or close.
+- Treat input history as a palette input capability, not as a
   provider-specific palette action.
 - If a palette needs app data, add read-only snapshot data instead of passing mutable app state into a provider.
 - If a palette reads extension data, expose only the needed UI snapshot fields.
@@ -61,7 +61,7 @@ Do not start implementation until the interaction is clear enough to test.
 
 - Add or update provider tests for candidates, matching, selected item,
   assistive text, initial input, completion, and submit behavior.
-- Add manager, focused input, command-dispatch, or rendering tests when palette
+- Add manager, palette input, command-dispatch, or rendering tests when palette
   session, input history, cursor, selection, submit, or row layout behavior
   changes.
 - Update `docs/reference.md` for palette contract or built-in palette behavior

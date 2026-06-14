@@ -25,7 +25,7 @@ Before editing implementation code for a user-visible command, write a short wor
 
 - What is the user trying to accomplish?
 - What would the user intuitively try first: a key, command palette search,
-  typed command, focused interaction, or existing workflow?
+  typed command, scoped interaction, or existing workflow?
 - What exact command id, arguments, key binding, title, help text, notice, or error will the user see?
 - What is the shortest successful path?
 - What happens for empty input, invalid input, unavailable state, repeated use, cancellation, and recovery?
@@ -50,10 +50,10 @@ Do not start implementation until the external behavior is clear enough to test.
   explicit migration is being designed. Do not add fallback aliases or parallel
   old/new dispatch paths for internal redesign work.
 - Put command execution in the feature handler that owns the behavior.
-- Focused operations such as palette submit, palette selection, text editing,
-  text history recall, help close, and help scroll should be represented as
-  scoped key bindings or interaction command requests, then resolve their active
-  target through dispatch.
+- Surface-local operations such as palette submit, palette selection, palette
+  input editing, palette input history recall, help close, and help scroll
+  should be represented as scoped key bindings or interaction command requests,
+  then resolve their active target through dispatch.
 - Keep key binding resolution in the input sequence registry. Normal, palette,
   and help keys should share the scoped key binding path instead of adding
   surface-local key matching.

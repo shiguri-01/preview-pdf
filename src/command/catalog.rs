@@ -11,6 +11,8 @@ use super::types::{
 
 const NO_ARGS: [ArgSpec; 0] = [];
 const REQUIRES_SEARCH_ACTIVE: [RuntimeCondition; 1] = [RuntimeCondition::SearchIsActive];
+const REQUIRES_PALETTE_INPUT_HISTORY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputHistoryIsAvailable];
 const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     name: "page",
     kind: ArgKind::I32,
@@ -232,8 +234,8 @@ macro_rules! define_commands {
     (@role TextDeleteForward) => { CommandRole::InteractionControl };
     (@role TextMoveLeft) => { CommandRole::InteractionControl };
     (@role TextMoveRight) => { CommandRole::InteractionControl };
-    (@role TextHistoryOlder) => { CommandRole::InteractionControl };
-    (@role TextHistoryNewer) => { CommandRole::InteractionControl };
+    (@role PaletteInputHistoryOlder) => { CommandRole::InteractionControl };
+    (@role PaletteInputHistoryNewer) => { CommandRole::InteractionControl };
     (@role CloseHelp) => { CommandRole::InteractionControl };
     (@role HelpScrollDown) => { CommandRole::InteractionControl };
     (@role HelpScrollUp) => { CommandRole::InteractionControl };
@@ -248,13 +250,13 @@ macro_rules! define_commands {
     (@target PaletteComplete) => { CommandTargetRequirement::ActivePalette };
     (@target PaletteSelectNext) => { CommandTargetRequirement::ActivePalette };
     (@target PaletteSelectPrev) => { CommandTargetRequirement::ActivePalette };
-    (@target TextInsert) => { CommandTargetRequirement::FocusedTextInput };
-    (@target TextDeleteBackward) => { CommandTargetRequirement::FocusedTextInput };
-    (@target TextDeleteForward) => { CommandTargetRequirement::FocusedTextInput };
-    (@target TextMoveLeft) => { CommandTargetRequirement::FocusedTextInput };
-    (@target TextMoveRight) => { CommandTargetRequirement::FocusedTextInput };
-    (@target TextHistoryOlder) => { CommandTargetRequirement::FocusedTextInput };
-    (@target TextHistoryNewer) => { CommandTargetRequirement::FocusedTextInput };
+    (@target TextInsert) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteBackward) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteForward) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveLeft) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveRight) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteInputHistoryOlder) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteInputHistoryNewer) => { CommandTargetRequirement::ActivePalette };
     (@target CloseHelp) => { CommandTargetRequirement::ActiveHelp };
     (@target HelpScrollDown) => { CommandTargetRequirement::ActiveHelp };
     (@target HelpScrollUp) => { CommandTargetRequirement::ActiveHelp };
@@ -528,25 +530,25 @@ define_commands! {
         parse: no_args,
         exec: super::handlers::text_move_right,
     }
-    TextHistoryOlder {
-        id: "text.history-older",
-        title: "Recall Older Text Input",
+    PaletteInputHistoryOlder {
+        id: "palette.input-history-older",
+        title: "Recall Older Palette Input",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        enabled_when: ConditionExpr::Always,
+        enabled_when: ConditionExpr::All(&REQUIRES_PALETTE_INPUT_HISTORY),
         parse: no_args,
-        exec: super::handlers::text_history_older,
+        exec: super::handlers::palette_input_history_older,
     }
-    TextHistoryNewer {
-        id: "text.history-newer",
-        title: "Recall Newer Text Input",
+    PaletteInputHistoryNewer {
+        id: "palette.input-history-newer",
+        title: "Recall Newer Palette Input",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        enabled_when: ConditionExpr::Always,
+        enabled_when: ConditionExpr::All(&REQUIRES_PALETTE_INPUT_HISTORY),
         parse: no_args,
-        exec: super::handlers::text_history_newer,
+        exec: super::handlers::palette_input_history_newer,
     }
     OpenHelp {
         id: "help",

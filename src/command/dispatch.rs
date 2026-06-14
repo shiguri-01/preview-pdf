@@ -107,12 +107,7 @@ pub fn dispatch_with_view_policy(
     let active_palette = palette_manager.active_kind();
     let ctx = CommandPolicyContext {
         source,
-        runtime: RuntimeConditionContext::new(
-            app.mode,
-            active_palette,
-            palette_manager.focused_text_input_available(),
-            &extensions,
-        ),
+        runtime: RuntimeConditionContext::new(app.mode, active_palette, &extensions),
     };
     if let Some(message) = rejection_message_for_command(&cmd, &ctx) {
         apply_notice(app, rejection_notice(&cmd, message));
@@ -242,8 +237,8 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::TextDeleteForward
         | Command::TextMoveLeft
         | Command::TextMoveRight
-        | Command::TextHistoryOlder
-        | Command::TextHistoryNewer
+        | Command::PaletteInputHistoryOlder
+        | Command::PaletteInputHistoryNewer
         | Command::OpenHelp
         | Command::CloseHelp
         | Command::HelpScrollDown

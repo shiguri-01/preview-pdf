@@ -155,10 +155,6 @@ impl PaletteManager {
         self.active.as_ref().map(|session| session.kind)
     }
 
-    pub fn focused_text_input_available(&self) -> bool {
-        self.active.is_some()
-    }
-
     pub fn close(&mut self) -> bool {
         self.active.take().is_some()
     }
@@ -256,7 +252,7 @@ impl PaletteManager {
         let Some(session) = self.active.as_ref() else {
             return Ok(false);
         };
-        if !session.kind.supports_text_history() {
+        if !session.kind.supports_input_history() {
             return Ok(false);
         }
         let previous_input = session.input.value().to_string();

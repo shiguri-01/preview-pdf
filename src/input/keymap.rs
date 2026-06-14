@@ -6,11 +6,10 @@ use super::sequence::{GeneratedCommand, GeneratedKeyMatcher, KeyBindingScope, Se
 use super::shortcut::ShortcutKey;
 
 const WHEN_SEARCH_ACTIVE: [RuntimeCondition; 1] = [RuntimeCondition::SearchIsActive];
-const WHEN_TEXT_INPUT_FOCUSED: [RuntimeCondition; 1] = [RuntimeCondition::TextInputIsFocused];
-const WHEN_TEXT_HISTORY_AVAILABLE: [RuntimeCondition; 1] =
-    [RuntimeCondition::TextHistoryIsAvailable];
-const WHEN_TEXT_HISTORY_UNAVAILABLE: [RuntimeCondition; 1] =
-    [RuntimeCondition::TextHistoryIsUnavailable];
+const WHEN_PALETTE_INPUT_HISTORY_AVAILABLE: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputHistoryIsAvailable];
+const WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputHistoryIsUnavailable];
 
 pub fn build_builtin_sequence_registry() -> SequenceRegistry {
     let mut registry = SequenceRegistry::new();
@@ -181,62 +180,62 @@ pub(crate) fn register_builtin_focused_bindings(registry: &mut SequenceRegistry)
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_HISTORY_AVAILABLE),
+        ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_AVAILABLE),
         &[ShortcutKey::key(KeyCode::Up)],
-        Command::TextHistoryOlder,
+        Command::PaletteInputHistoryOlder,
     );
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_HISTORY_AVAILABLE),
+        ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_AVAILABLE),
         &[ShortcutKey::key(KeyCode::Down)],
-        Command::TextHistoryNewer,
+        Command::PaletteInputHistoryNewer,
     );
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_HISTORY_UNAVAILABLE),
+        ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE),
         &[ShortcutKey::key(KeyCode::Up)],
         Command::PaletteSelectPrev,
     );
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_HISTORY_UNAVAILABLE),
+        ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE),
         &[ShortcutKey::key(KeyCode::Down)],
         Command::PaletteSelectNext,
     );
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_INPUT_FOCUSED),
+        ConditionExpr::Always,
         &[ShortcutKey::key(KeyCode::Backspace)],
         Command::TextDeleteBackward,
     );
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_INPUT_FOCUSED),
+        ConditionExpr::Always,
         &[ShortcutKey::key(KeyCode::Delete)],
         Command::TextDeleteForward,
     );
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_INPUT_FOCUSED),
+        ConditionExpr::Always,
         &[ShortcutKey::key(KeyCode::Left)],
         Command::TextMoveLeft,
     );
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_INPUT_FOCUSED),
+        ConditionExpr::Always,
         &[ShortcutKey::key(KeyCode::Right)],
         Command::TextMoveRight,
     );
     registry.register_generated(
         KeyBindingScope::Palette,
-        ConditionExpr::All(&WHEN_TEXT_INPUT_FOCUSED),
+        ConditionExpr::Always,
         GeneratedKeyMatcher::PrintableCharacter,
         GeneratedCommand::TextInsert,
     );

@@ -838,7 +838,7 @@ mod tests {
     };
     use crate::app::Mode;
     use crate::command::Command;
-    use crate::condition::{ConditionExpr, RuntimeCondition, RuntimeConditionContext};
+    use crate::condition::{ConditionExpr, RuntimeConditionContext};
     use crate::extension::ExtensionUiSnapshot;
     use crate::input::shortcut::ShortcutKey;
     use crate::palette::PaletteKind;
@@ -928,7 +928,7 @@ mod tests {
         let mut registry = SequenceRegistry::new();
         registry.register_generated(
             KeyBindingScope::Palette,
-            ConditionExpr::All(&[RuntimeCondition::TextInputIsFocused]),
+            ConditionExpr::Always,
             GeneratedKeyMatcher::PrintableCharacter,
             GeneratedCommand::TextInsert,
         );
@@ -952,7 +952,6 @@ mod tests {
             runtime: RuntimeConditionContext::new(
                 Mode::Palette,
                 Some(PaletteKind::Command),
-                true,
                 extensions,
             ),
         }

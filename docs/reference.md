@@ -106,7 +106,7 @@ Orientation:
 - Commands have five review-relevant concerns: stable ids and argument parsing,
   role, source-aware invocation policy, target requirement, and dispatch
   effects. The command catalog ties those concerns together; feature behavior
-  stays in handlers, focused UI targets, and app state.
+  stays in handlers, active targets, and app state.
 
 Contract:
 - Command ids are canonical kebab-case strings and are compatibility-sensitive
@@ -114,7 +114,7 @@ Contract:
 - The command catalog owns command ids, metadata, parser routing, and dispatch
   routing.
 - Typed commands must have matching registry metadata.
-- Command roles distinguish user intent commands, focused interaction controls,
+- Command roles distinguish user intent commands, surface interaction controls,
   and internal effects.
 - Public commands may appear in user-facing command surfaces when their
   invocation policy and `enabled_when` runtime condition allow it.
@@ -128,13 +128,13 @@ Contract:
   another user action.
 - `enabled_when` checks are separate from invocation policy.
 - Target resolution is separate from invocation policy and `enabled_when`.
-  Palette commands require an active palette, text commands require a focused
-  text input, and help interaction commands require active help.
+  Palette interaction commands, including palette input editing, require an
+  active palette. Help interaction commands require active help.
 - `enabled_when` may depend on runtime app state such as active search, help
-  mode, palette kind, focused text input, or text history availability. Target
+  mode, palette kind, or palette input history availability. Target
   requirements are not duplicated in `enabled_when`.
-- Text history availability means a focused text input whose active palette
-  supports text history; palette kind alone is not enough.
+- Palette input history availability means an active palette whose kind supports
+  input history; the owning predicate lives with `PaletteKind`.
 - Command-palette listing, help display, typed command submission, and dispatch
   use command policy functions to decide how exposure, invocation policy,
   target, and `enabled_when` apply to that surface.
@@ -179,7 +179,7 @@ Test coverage:
 
 Orientation:
 - Terminal key events are converted to typed command requests before behavior is
-  applied. Normal-mode keys and focused surface keys are resolved by the same
+  applied. Normal-mode keys and scoped surface keys are resolved by the same
   scoped sequence registry.
 
 Contract:
@@ -199,8 +199,9 @@ Contract:
 - Configured key bindings currently target the normal scope and must reference
   known commands that can be invoked from the keymap; runtime `enabled_when`
   remains a dispatch-time check.
-- Palette-scoped keys dispatch hidden palette or text interaction commands such
-  as submit, complete, selection movement, text editing, and text history.
+- Palette-scoped keys dispatch hidden palette interaction commands such as
+  submit, complete, selection movement, input editing, and palette input
+  history recall.
 - Help-scoped keys dispatch hidden help interaction commands such as close and
   scroll.
 - `<esc>` is a scoped built-in binding for cancellation or close behavior. When
@@ -227,7 +228,7 @@ Test coverage:
 
 Orientation:
 - Palette behavior splits into common session mechanics and provider-owned
-  semantics. The common path owns opening, text input state, selection,
+  semantics. The common path owns opening, palette input state, selection,
   completion, submit, and closing. Palette-scoped key bindings turn terminal
   keys into commands; providers own candidate meaning and the effects returned
   for completion and submit.
@@ -239,21 +240,21 @@ Contract:
 - Palette providers own candidate generation, input mode, initial input,
   completion effects, submit effects, assistive text, and provider-specific
   selection defaults.
-- `PaletteManager` owns common open, cancel, text input operations, text history
-  recall for focused inputs that support it, selection, completion, submit, and
-  session-id validation behavior.
+- `PaletteManager` owns common open, cancel, palette input operations, palette
+  input history recall for palettes that support it, selection, completion,
+  submit, and session-id validation behavior.
 - Candidate search text is independent from rendered row text.
 - Submit effects may close, reopen, or dispatch a typed command with optional
   history recording and a post action.
 - Command-palette visibility derives from command metadata, invocation policy,
   and `enabled_when`, not from a hand-written UI list.
-- Input history is a focused text input capability used by command and search
-  palettes; it is not a provider-specific palette action.
+- Input history is an opt-in palette input capability; it is not a
+  provider-specific palette action.
 
 Observable behavior:
 - Escape dispatches the palette close command when a palette is active.
 - Control-p/control-n dispatch palette selection commands.
-- Up/down dispatch text history commands for focused inputs that support
+- Up/down dispatch palette input history commands for palettes that support
   history; otherwise they dispatch palette selection commands.
 - Tab dispatches palette completion.
 - Enter dispatches palette submit.

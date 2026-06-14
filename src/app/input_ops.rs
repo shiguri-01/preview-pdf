@@ -105,12 +105,7 @@ impl InteractionSubsystem {
 
         KeyBindingContext {
             scope,
-            runtime: RuntimeConditionContext::new(
-                state.mode,
-                active_palette,
-                self.palette.manager.focused_text_input_available(),
-                extensions,
-            ),
+            runtime: RuntimeConditionContext::new(state.mode, active_palette, extensions),
         }
     }
 
@@ -573,7 +568,7 @@ mod tests {
     }
 
     #[test]
-    fn command_palette_up_requests_text_history_command() {
+    fn command_palette_up_requests_palette_input_history_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
         interaction
@@ -592,7 +587,7 @@ mod tests {
         assert_eq!(
             outcome.commands,
             vec![CommandRequest::new(
-                Command::TextHistoryOlder,
+                Command::PaletteInputHistoryOlder,
                 CommandInvocationSource::Keymap
             )]
         );

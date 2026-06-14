@@ -26,7 +26,7 @@ pub(super) use search::{
     submit_search,
 };
 pub(super) use text::{
-    text_delete_backward, text_delete_forward, text_history_newer, text_history_older, text_insert,
-    text_move_left, text_move_right,
+    palette_input_history_newer, palette_input_history_older, text_delete_backward,
+    text_delete_forward, text_insert, text_move_left, text_move_right,
 };
 pub(super) use viewport::{pan, set_zoom, zoom_in, zoom_out, zoom_reset};

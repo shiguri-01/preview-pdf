@@ -30,9 +30,9 @@ can operate on resolved policies rather than re-reading config or CLI state.
 - [src/command/](../src/command/) owns command ids, metadata, parsing, source-aware validation,
   dispatch, and typed command outcomes.
 - [src/input/](../src/input/) owns key sequence normalization, built-in key bindings, numeric
-  prefixes, and input history used by focused text inputs.
+  prefixes, and input history used by palette inputs.
 - [src/palette/](../src/palette/) owns palette sessions, provider lookup, candidate matching,
-  selection state, completion, submit, cancel, text input state, and rendered
+  selection state, completion, submit, cancel, palette input state, and rendered
   palette views. It does not own raw terminal key routing.
 - [src/extension/](../src/extension/) owns the extension host contract and the composition of
   built-in extension state.
@@ -56,9 +56,9 @@ typed `AppEvent` values for cross-subsystem observation.
 
 Palette providers receive read-only app and extension snapshots. They should
 request behavior by returning typed effects or commands instead of taking
-`AppState` directly. Focused UI operations such as palette submit, palette
-selection, text editing, text history recall, and help scrolling enter the same
-command dispatch path as normal-mode key bindings.
+`AppState` directly. Surface-local operations such as palette submit, palette
+selection, palette input editing, palette input history recall, and help
+scrolling enter the same command dispatch path as normal-mode key bindings.
 
 Extensions own extension-local state and observe `AppEvent` values. Shared UI
 data crosses from extensions to palettes through `ExtensionUiSnapshot`.
@@ -94,15 +94,15 @@ Terminal input enters as `DomainEvent::Input`.
 
 1. The loop router delegates input to app input handling.
 2. App input handling builds a key binding context from the active surface and
-   shared runtime condition state, such as palette kind, focused text input,
-   text history availability, and active search.
+   shared runtime condition state, such as palette kind, palette input history
+   availability, and active search.
 3. Extension input hooks may intercept extension-local inputs in normal mode
    when no pending key sequence owns the input.
 4. The scoped input sequence resolver maps matching normal, palette, or help
-   key bindings to typed commands. Palette keys become palette/text interaction
+   key bindings to typed commands. Palette keys become palette interaction
    commands, and help keys become help interaction commands.
 5. Command dispatch validates invocation source, resolves the required target
-   such as app, active palette, focused text input, or active help, checks the
+   such as app, active palette, or active help, checks the
    command `enabled_when` runtime condition, applies behavior, and emits
    `AppEvent` values.
 6. The loop re-routes emitted app events and any follow-up command requests to

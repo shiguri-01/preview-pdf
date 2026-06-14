@@ -47,41 +47,6 @@ pub enum PageLayoutModeArg {
     Spread,
 }
 
-impl PageLayoutModeArg {
-    const VARIANTS: [Self; 2] = [Self::Single, Self::Spread];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Single => "single",
-            Self::Spread => "spread",
-        }
-    }
-
-    pub fn id(self) -> &'static str {
-        self.as_str()
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        Self::VARIANTS
-            .iter()
-            .copied()
-            .find(|candidate| candidate.as_str() == value)
-    }
-
-    pub fn values() -> &'static [&'static str] {
-        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
-
-        VALUES
-            .get_or_init(|| {
-                PageLayoutModeArg::VARIANTS
-                    .iter()
-                    .map(|candidate| candidate.as_str())
-                    .collect()
-            })
-            .as_ref()
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpreadDirectionArg {
     Ltr,
@@ -245,10 +210,7 @@ pub enum CommandInvocationSource {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        PageLayoutModeArg, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
-        SpreadDirectionArg,
-    };
+    use super::{PanDirection, SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg};
 
     #[test]
     fn enum_command_arguments_round_trip_through_strings() {
@@ -273,10 +235,6 @@ mod tests {
             SearchMatcherKind::ContainsSensitive,
         ] {
             assert_eq!(SearchMatcherKind::parse(matcher.as_str()), Some(matcher));
-        }
-
-        for mode in [PageLayoutModeArg::Single, PageLayoutModeArg::Spread] {
-            assert_eq!(PageLayoutModeArg::parse(mode.as_str()), Some(mode));
         }
 
         for policy in [SpreadCoverPolicyArg::Paired, SpreadCoverPolicyArg::Cover] {
@@ -314,13 +272,6 @@ mod tests {
             &[
                 SearchMatcherKind::ContainsInsensitive.as_str(),
                 SearchMatcherKind::ContainsSensitive.as_str(),
-            ]
-        );
-        assert_eq!(
-            PageLayoutModeArg::values(),
-            &[
-                PageLayoutModeArg::Single.as_str(),
-                PageLayoutModeArg::Spread.as_str(),
             ]
         );
     }

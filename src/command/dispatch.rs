@@ -4,7 +4,7 @@ use crate::app::{AppState, Mode, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::config::ViewPolicy;
 use crate::error::AppResult;
-use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
+use crate::event::{AppEvent, HistoryOp, NavReason, PageGotoKind};
 use crate::extension::ExtensionHost;
 
 use super::catalog::{Command, execute_registered_command};
@@ -163,9 +163,9 @@ fn collect_transition_events(
 fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Option<NavReason> {
     match command {
         Command::NextPage | Command::PrevPage => Some(NavReason::Step),
-        Command::FirstPage => Some(NavReason::Goto(GotoKind::FirstPage)),
-        Command::LastPage => Some(NavReason::Goto(GotoKind::LastPage)),
-        Command::GotoPage { .. } => Some(NavReason::Goto(GotoKind::SpecificPage)),
+        Command::FirstPage => Some(NavReason::PageGoto(PageGotoKind::First)),
+        Command::LastPage => Some(NavReason::PageGoto(PageGotoKind::Last)),
+        Command::GotoPage { .. } => Some(NavReason::PageGoto(PageGotoKind::Specific)),
         Command::PageLayoutSingle | Command::PageLayoutSpread { .. } => {
             Some(NavReason::LayoutNormalize)
         }

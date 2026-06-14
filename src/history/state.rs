@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::command::CommandOutcome;
 use crate::error::{AppError, AppResult};
-use crate::event::{AppEvent, GotoKind, HistoryOp, NavReason};
+use crate::event::{AppEvent, HistoryOp, NavReason, PageGotoKind};
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 const HISTORY_CAPACITY: usize = 64;
@@ -225,10 +225,10 @@ impl HistoryState {
 fn format_reason(reason: &NavReason) -> String {
     match reason {
         NavReason::Step => "Step".to_string(),
-        NavReason::Goto(kind) => match kind {
-            GotoKind::FirstPage => "Goto:first-page".to_string(),
-            GotoKind::LastPage => "Goto:last-page".to_string(),
-            GotoKind::SpecificPage => "Goto:goto-page".to_string(),
+        NavReason::PageGoto(kind) => match kind {
+            PageGotoKind::First => "Goto:first-page".to_string(),
+            PageGotoKind::Last => "Goto:last-page".to_string(),
+            PageGotoKind::Specific => "Goto:goto-page".to_string(),
         },
         NavReason::Search { query } if query.is_empty() => "Search".to_string(),
         NavReason::Search { query } => format!("Search:~{}", encode_seed_component(query)),
@@ -265,7 +265,7 @@ enum RecordPolicy {
 
 fn record_policy(reason: &NavReason) -> RecordPolicy {
     match reason {
-        NavReason::Goto(_) | NavReason::Search { .. } | NavReason::Outline { .. } => {
+        NavReason::PageGoto(_) | NavReason::Search { .. } | NavReason::Outline { .. } => {
             RecordPolicy::Record
         }
         NavReason::Step | NavReason::LayoutNormalize => RecordPolicy::SkipAndClearForward,
@@ -277,7 +277,7 @@ fn record_policy(reason: &NavReason) -> RecordPolicy {
 mod tests {
     use super::{HistoryEntry, HistoryState};
     use crate::app::{AppState, PageLayoutMode};
-    use crate::event::{AppEvent, GotoKind, NavReason};
+    use crate::event::{AppEvent, NavReason, PageGotoKind};
     use crate::extension::ExtensionUiSnapshot;
     use crate::history::palette::HistoryPaletteProvider;
     use crate::palette::{PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteProvider};
@@ -301,7 +301,7 @@ mod tests {
         state.on_event(&AppEvent::PageChanged {
             from: 5,
             to: 7,
-            reason: NavReason::Goto(GotoKind::SpecificPage),
+            reason: NavReason::PageGoto(PageGotoKind::Specific),
         });
 
         let last = state
@@ -326,7 +326,7 @@ mod tests {
         state.on_event(&AppEvent::PageChanged {
             from: 3,
             to: 4,
-            reason: NavReason::Goto(GotoKind::SpecificPage),
+            reason: NavReason::PageGoto(PageGotoKind::Specific),
         });
 
         assert_eq!(state.back_stack.len(), 1);
@@ -366,7 +366,7 @@ mod tests {
         state.on_event(&AppEvent::PageChanged {
             from: 1,
             to: 3,
-            reason: NavReason::Goto(GotoKind::SpecificPage),
+            reason: NavReason::PageGoto(PageGotoKind::Specific),
         });
         state.on_event(&AppEvent::PageChanged {
             from: 3,
@@ -378,7 +378,7 @@ mod tests {
         state.on_event(&AppEvent::PageChanged {
             from: 3,
             to: 8,
-            reason: NavReason::Goto(GotoKind::SpecificPage),
+            reason: NavReason::PageGoto(PageGotoKind::Specific),
         });
 
         let last = state.back_stack.back().expect("deduped page should exist");
@@ -467,7 +467,7 @@ mod tests {
         state.on_event(&AppEvent::PageChanged {
             from: 2,
             to: 4,
-            reason: NavReason::Goto(GotoKind::SpecificPage),
+            reason: NavReason::PageGoto(PageGotoKind::Specific),
         });
 
         assert!(state.forward_stack.is_empty());
@@ -480,7 +480,7 @@ mod tests {
     #[test]
     fn back_and_forward_preserve_destination_reasons() {
         let mut state = HistoryState {
-            current_reason: Some(NavReason::Goto(GotoKind::SpecificPage)),
+            current_reason: Some(NavReason::PageGoto(PageGotoKind::Specific)),
             ..HistoryState::default()
         };
         state.back_stack.push_back(HistoryEntry {
@@ -511,7 +511,7 @@ mod tests {
         assert_eq!(app.current_page, 7);
         assert!(matches!(
             state.current_reason.as_ref(),
-            Some(NavReason::Goto(GotoKind::SpecificPage))
+            Some(NavReason::PageGoto(PageGotoKind::Specific))
         ));
     }
 }

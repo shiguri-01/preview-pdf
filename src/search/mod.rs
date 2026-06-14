@@ -9,7 +9,7 @@ use crate::event::AppEvent;
 use crate::extension::Extension;
 pub use palette::SearchPaletteProvider;
 pub use palette::SearchResultsPaletteProvider;
-pub use state::{SearchPaletteEntry, SearchRuntime, SearchState};
+pub use state::{SearchPaletteEntry, SearchRuntime};
 
 pub struct SearchExtension;
 

@@ -14,8 +14,8 @@ use crate::render::worker::RenderWorkerResult;
 pub enum NavReason {
     /// Incremental movement (next-page, prev-page).
     Step,
-    /// Direct goto-style movement (first-page, last-page, goto-page).
-    Goto(GotoKind),
+    /// Direct page goto-style movement (first-page, last-page, goto-page).
+    PageGoto(PageGotoKind),
     /// Search-driven navigation. Carries the query string.
     Search { query: String },
     /// History traversal (history-back, history-forward, history-goto).
@@ -27,10 +27,10 @@ pub enum NavReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GotoKind {
-    FirstPage,
-    LastPage,
-    SpecificPage,
+pub enum PageGotoKind {
+    First,
+    Last,
+    Specific,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

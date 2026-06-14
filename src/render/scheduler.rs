@@ -117,21 +117,6 @@ impl RenderScheduler {
     }
 }
 
-pub fn build_prefetch_plan(
-    cursor: usize,
-    nav_intent: NavIntent,
-    page_count: usize,
-) -> Vec<RenderTask> {
-    build_prefetch_plan_with_policy(
-        cursor,
-        nav_intent,
-        page_count,
-        0,
-        1.0,
-        PrefetchPolicy::default(),
-    )
-}
-
 pub fn build_prefetch_plan_with_policy(
     cursor: usize,
     nav_intent: NavIntent,
@@ -333,10 +318,25 @@ fn push_relative(
 #[cfg(test)]
 mod tests {
     use super::{
-        NavDirection, NavIntent, PrefetchPolicy, RenderScheduler, RenderTask, build_prefetch_plan,
+        NavDirection, NavIntent, PrefetchPolicy, RenderScheduler, RenderTask,
         build_prefetch_plan_with_policy, should_cancel,
     };
     use crate::work::WorkClass;
+
+    fn build_prefetch_plan(
+        cursor: usize,
+        nav_intent: NavIntent,
+        page_count: usize,
+    ) -> Vec<RenderTask> {
+        build_prefetch_plan_with_policy(
+            cursor,
+            nav_intent,
+            page_count,
+            0,
+            1.0,
+            PrefetchPolicy::default(),
+        )
+    }
 
     #[test]
     fn prefetch_forward_order_matches_rule() {

@@ -233,10 +233,6 @@ pub fn format_shortcut_sequence(keys: &[ShortcutKey]) -> String {
     format_shortcut_keys(keys, "")
 }
 
-pub fn format_shortcut_alternatives(keys: &[ShortcutKey]) -> String {
-    format_shortcut_keys(keys, " / ")
-}
-
 pub fn format_shortcut_alternatives_tight(keys: &[ShortcutKey]) -> String {
     format_shortcut_keys(keys, "/")
 }
@@ -276,8 +272,8 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::{
-        ShortcutKey, ShortcutKeyError, ShortcutParseError, format_shortcut_alternatives,
-        format_shortcut_alternatives_tight, format_shortcut_key, format_shortcut_sequence,
+        ShortcutKey, ShortcutKeyError, ShortcutParseError, format_shortcut_alternatives_tight,
+        format_shortcut_key, format_shortcut_keys, format_shortcut_sequence,
         parse_shortcut_sequence,
     };
 
@@ -344,7 +340,7 @@ mod tests {
 
     #[test]
     fn formats_shortcut_alternatives() {
-        let text = format_shortcut_alternatives(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')]);
+        let text = format_shortcut_keys(&[ShortcutKey::ctrl('p'), ShortcutKey::ctrl('n')], " / ");
         assert_eq!(text, "<c-p> / <c-n>");
     }
 

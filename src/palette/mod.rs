@@ -7,11 +7,11 @@ mod types;
 
 pub use kind::PaletteKind;
 pub use manager::PaletteManager;
-pub use matcher::{CandidateMatcher, ContainsMatcher};
 pub use registry::PaletteRegistry;
+#[cfg(test)]
+pub use types::PaletteAppSnapshot;
 pub use types::{
-    PaletteAppSnapshot, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView,
-    PaletteKeyResult, PaletteOpenPayload, PalettePayload, PalettePostAction, PaletteProvider,
-    PaletteSearchText, PaletteSubmitAction, PaletteSubmitEffect, PaletteTabEffect, PaletteTextPart,
-    PaletteTextTone, PaletteView,
+    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView, PaletteKeyResult,
+    PaletteOpenPayload, PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText,
+    PaletteSubmitEffect, PaletteTabEffect, PaletteTextPart, PaletteTextTone, PaletteView,
 };

@@ -151,13 +151,6 @@ where
         self.tasks.is_empty()
     }
 
-    pub fn contains_key(&self, key: &K) -> bool {
-        if self.config.dedupe_by_key {
-            return self.queued_keys.contains(key);
-        }
-        self.tasks.iter().any(|item| &item.meta.key == key)
-    }
-
     pub fn retain<F>(&mut self, mut keep: F) -> usize
     where
         F: FnMut(&T, &QueueTaskMeta<K>) -> bool,
@@ -190,6 +183,13 @@ mod tests {
             class,
             generation,
         }
+    }
+
+    fn contains_key(queue: &PrefetchQueue<u8, i32>, key: u8) -> bool {
+        if queue.config.dedupe_by_key {
+            return queue.queued_keys.contains(&key);
+        }
+        queue.tasks.iter().any(|item| item.meta.key == key)
     }
 
     #[test]
@@ -227,7 +227,7 @@ mod tests {
         assert!(queue.push(1, meta(42, WorkClass::Background, 1)));
         assert!(!queue.push(2, meta(42, WorkClass::CriticalCurrent, 2)));
         assert_eq!(queue.len(), 1);
-        assert!(queue.contains_key(&42));
+        assert!(contains_key(&queue, 42));
     }
 
     #[test]
@@ -273,8 +273,8 @@ mod tests {
         let removed = queue.retain(|task, _| *task != 1);
 
         assert_eq!(removed, 1);
-        assert!(!queue.contains_key(&1));
-        assert!(queue.contains_key(&2));
+        assert!(!contains_key(&queue, 1));
+        assert!(contains_key(&queue, 2));
         assert!(queue.push(3, meta(1, WorkClass::CriticalCurrent, 2)));
     }
 }

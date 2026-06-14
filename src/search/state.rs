@@ -18,13 +18,6 @@ pub struct SearchRuntime {
 }
 
 impl SearchRuntime {
-    pub fn with_engine(engine: SearchEngine) -> Self {
-        Self {
-            state: SearchState::default(),
-            engine,
-        }
-    }
-
     pub fn open_palette(
         &mut self,
         app: &mut AppState,
@@ -412,14 +405,6 @@ impl SearchState {
         !self.query.is_empty()
     }
 
-    pub fn in_progress(&self) -> bool {
-        self.in_progress
-    }
-
-    pub fn total_pages(&self) -> usize {
-        self.total_pages
-    }
-
     pub fn status_bar_segment(&self) -> Option<String> {
         if self.query.is_empty() {
             return None;
@@ -725,8 +710,8 @@ mod tests {
 
         assert_eq!(outcome, CommandOutcome::Applied);
         assert!(state.is_active());
-        assert!(state.in_progress());
-        assert_eq!(state.total_pages(), 5);
+        assert!(state.in_progress);
+        assert_eq!(state.total_pages, 5);
         assert_eq!(
             state.status_bar_segment(),
             Some("SEARCH 0 hits".to_string())
@@ -824,7 +809,7 @@ mod tests {
 
         assert_eq!(outcome, CommandOutcome::Noop);
         assert!(!state.is_active());
-        assert!(!state.in_progress());
+        assert!(!state.in_progress);
         assert_eq!(state.status_bar_segment(), None);
     }
 
@@ -966,13 +951,13 @@ mod tests {
 
         let timeout = std::time::Duration::from_secs(3);
         let start = std::time::Instant::now();
-        while state.in_progress() {
+        while state.in_progress {
             let _ = state.on_background(&mut app, &mut engine);
             assert!(
                 start.elapsed() <= timeout,
                 "timed out waiting for search completion"
             );
-            if state.in_progress() {
+            if state.in_progress {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
         }

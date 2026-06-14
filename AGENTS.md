@@ -20,6 +20,11 @@
 - Default: in-file `#[cfg(test)]` modules
 - `<module>/tests`: only for testing public-facing specs/interfaces of that module
 
+## Simplicity
+- Prefer one clear implementation path over compatibility branches.
+- Do not add fallbacks, aliases, or legacy shims unless the task specifically calls for them.
+- When behavior changes, update the affected code and tests directly instead of keeping both old and new paths.
+
 ## Commit & Pull Request Guidelines
 - Preferred commit format: `<type>(<scope>): <summary>` where useful (`feat`, `fix`, `refactor`, `docs`, `test`).
 - For GitHub PR creation/view/update tasks, use `pr-workflow` skill.

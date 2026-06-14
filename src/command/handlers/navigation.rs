@@ -4,7 +4,8 @@ use super::super::core::{
     first_page as first_page_core, goto_page as goto_page_core, last_page as last_page_core,
     next_page as next_page_core, prev_page as prev_page_core,
 };
-use super::super::dispatch::{CommandExecContext, CommandExecution};
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::CommandExecution;
 
 pub(in crate::command) fn next_page(
     ctx: &mut CommandExecContext<'_>,

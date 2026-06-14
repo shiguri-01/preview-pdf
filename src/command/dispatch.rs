@@ -12,6 +12,7 @@ use crate::palette::{PaletteManager, PaletteRegistry};
 use super::catalog::{Command, CommandRequest, execute_registered_command};
 use crate::condition::RuntimeConditionContext;
 
+use super::effects::{CommandExecution, CommandLifecycleEffect};
 use super::spec::{CommandPolicyContext, rejection_message_for_command};
 use super::types::{CommandInvocationSource, CommandOutcome};
 
@@ -20,6 +21,7 @@ pub struct CommandDispatchResult {
     pub outcome: CommandOutcome,
     pub emitted_events: Vec<AppEvent>,
     pub follow_up_commands: Vec<CommandRequest>,
+    pub lifecycle: CommandLifecycleEffect,
 }
 
 pub struct CommandDispatchContext<'a> {
@@ -38,39 +40,11 @@ pub(super) struct CommandExecContext<'a> {
     pub extension_host: &'a mut ExtensionHost,
     pub palette_registry: &'a PaletteRegistry,
     pub palette_manager: &'a mut PaletteManager,
-    pub palette_requests: &'a mut VecDeque<PaletteRequest>,
-    pub input_history: &'a mut InputHistoryService,
 }
 
 impl CommandExecContext<'_> {
     pub(super) fn page_count(&self) -> usize {
         self.pdf.page_count()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct CommandExecution {
-    pub outcome: CommandOutcome,
-    pub notice: NoticeAction,
-    pub follow_up_commands: Vec<CommandRequest>,
-}
-
-impl CommandExecution {
-    pub(super) fn from_notice_result((outcome, notice): (CommandOutcome, NoticeAction)) -> Self {
-        Self {
-            outcome,
-            notice,
-            follow_up_commands: Vec::new(),
-        }
-    }
-
-    pub(super) fn applied() -> Self {
-        Self::from_notice_result((CommandOutcome::Applied, NoticeAction::Clear))
-    }
-
-    pub(super) fn with_follow_up(mut self, request: CommandRequest) -> Self {
-        self.follow_up_commands.push(request);
-        self
     }
 }
 
@@ -119,6 +93,7 @@ pub fn dispatch_with_view_policy(
                 outcome,
             }],
             follow_up_commands: Vec::new(),
+            lifecycle: CommandLifecycleEffect::None,
         });
     }
 
@@ -133,12 +108,15 @@ pub fn dispatch_with_view_policy(
             extension_host: &mut *extension_host,
             palette_registry,
             palette_manager: &mut *palette_manager,
-            palette_requests,
-            input_history,
         },
         cmd,
     )?;
-    apply_notice(app, execution.notice);
+    let CommandExecution { outcome, effects } = execution;
+    apply_notice(app, effects.notice);
+    for record in effects.input_history_records {
+        input_history.record(record);
+    }
+    palette_requests.extend(effects.palette_requests);
 
     let mut emitted_events = collect_transition_events(
         app,
@@ -146,17 +124,19 @@ pub fn dispatch_with_view_policy(
         previous_page,
         prev_mode,
         &dispatched_command,
-        execution.outcome,
+        outcome,
     );
+    emitted_events.extend(effects.events);
     emitted_events.push(AppEvent::CommandExecuted {
         id: command_id,
-        outcome: execution.outcome,
+        outcome,
     });
 
     Ok(CommandDispatchResult {
-        outcome: execution.outcome,
+        outcome,
         emitted_events,
-        follow_up_commands: execution.follow_up_commands,
+        follow_up_commands: effects.follow_up_commands,
+        lifecycle: effects.lifecycle,
     })
 }
 
@@ -266,8 +246,8 @@ mod tests {
     };
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{
-        Command, CommandId, CommandInvocationSource, CommandOutcome, PanAmount, PanDirection,
-        SearchMatcherKind, SpreadCoverPolicyArg,
+        Command, CommandId, CommandInvocationSource, CommandLifecycleEffect, CommandOutcome,
+        PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
     };
     use crate::config::ViewPolicy;
     use crate::event::{AppEvent, NavReason};
@@ -391,12 +371,13 @@ mod tests {
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(result.outcome, CommandOutcome::QuitRequested);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(result.lifecycle, CommandLifecycleEffect::Quit);
         assert_eq!(
             result.emitted_events,
             vec![AppEvent::CommandExecuted {
                 id: CommandId::Quit,
-                outcome: CommandOutcome::QuitRequested,
+                outcome: CommandOutcome::Applied,
             }]
         );
     }

@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::app::{AppState, NoticeAction, PaletteRequest};
@@ -18,12 +17,8 @@ pub struct SearchRuntime {
 }
 
 impl SearchRuntime {
-    pub fn open_palette(
-        &mut self,
-        app: &mut AppState,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> (CommandOutcome, NoticeAction) {
-        self.state.open_palette(app, palette_requests)
+    pub fn open_palette(&mut self) -> PaletteRequest {
+        self.state.open_palette()
     }
 
     pub fn submit(
@@ -37,12 +32,8 @@ impl SearchRuntime {
             .submit(app, pdf, &mut self.engine, query, matcher)
     }
 
-    pub fn open_results_palette(
-        &mut self,
-        app: &mut AppState,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> (CommandOutcome, NoticeAction) {
-        self.state.open_results_palette(app, palette_requests)
+    pub fn open_results_palette(&mut self) -> Option<PaletteRequest> {
+        self.state.open_results_palette()
     }
 
     pub fn goto_result(
@@ -176,11 +167,7 @@ impl Default for SearchState {
 impl SearchState {
     const HIGHLIGHT_UNAVAILABLE_NOTICE: &str = "some search highlights are unavailable";
 
-    pub fn open_palette(
-        &mut self,
-        _app: &mut AppState,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> (CommandOutcome, NoticeAction) {
+    pub fn open_palette(&mut self) -> PaletteRequest {
         let payload = if self.query.is_empty() {
             None
         } else {
@@ -189,26 +176,20 @@ impl SearchState {
                 matcher: self.matcher,
             })
         };
-        palette_requests.push_back(PaletteRequest::Open {
+        PaletteRequest::Open {
             kind: PaletteKind::Search,
             payload,
-        });
-        (CommandOutcome::Applied, NoticeAction::Clear)
+        }
     }
 
-    pub fn open_results_palette(
-        &mut self,
-        _app: &mut AppState,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> (CommandOutcome, NoticeAction) {
+    pub fn open_results_palette(&mut self) -> Option<PaletteRequest> {
         if self.query.is_empty() {
-            return (CommandOutcome::Noop, NoticeAction::Clear);
+            return None;
         }
-        palette_requests.push_back(PaletteRequest::Open {
+        Some(PaletteRequest::Open {
             kind: PaletteKind::SearchResults,
             payload: None,
-        });
-        (CommandOutcome::Applied, NoticeAction::Clear)
+        })
     }
 
     pub fn submit(
@@ -569,7 +550,6 @@ fn build_palette_entries(hits: &[SearchPageHit]) -> Arc<[SearchPaletteEntry]> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
@@ -725,36 +705,23 @@ mod tests {
             matcher: SearchMatcherKind::ContainsSensitive,
             ..SearchState::default()
         };
-        let mut app = AppState::default();
-        let mut requests = VecDeque::new();
-
-        let (outcome, notice) = state.open_palette(&mut app, &mut requests);
-
-        assert_eq!(outcome, CommandOutcome::Applied);
-        assert_eq!(notice, NoticeAction::Clear);
         assert_eq!(
-            requests.pop_front(),
-            Some(PaletteRequest::Open {
+            state.open_palette(),
+            PaletteRequest::Open {
                 kind: PaletteKind::Search,
                 payload: Some(PaletteOpenPayload::Search {
                     query: "needle".to_string(),
                     matcher: SearchMatcherKind::ContainsSensitive,
                 }),
-            })
+            }
         );
     }
 
     #[test]
     fn open_results_palette_requires_active_search() {
         let mut state = SearchState::default();
-        let mut app = AppState::default();
-        let mut requests = VecDeque::new();
 
-        let (outcome, notice) = state.open_results_palette(&mut app, &mut requests);
-
-        assert_eq!(outcome, CommandOutcome::Noop);
-        assert_eq!(notice, NoticeAction::Clear);
-        assert!(requests.is_empty());
+        assert_eq!(state.open_results_palette(), None);
     }
 
     #[test]
@@ -763,15 +730,9 @@ mod tests {
             query: "needle".to_string(),
             ..SearchState::default()
         };
-        let mut app = AppState::default();
-        let mut requests = VecDeque::new();
 
-        let (outcome, notice) = state.open_results_palette(&mut app, &mut requests);
-
-        assert_eq!(outcome, CommandOutcome::Applied);
-        assert_eq!(notice, NoticeAction::Clear);
         assert_eq!(
-            requests.pop_front(),
+            state.open_results_palette(),
             Some(PaletteRequest::Open {
                 kind: PaletteKind::SearchResults,
                 payload: None,

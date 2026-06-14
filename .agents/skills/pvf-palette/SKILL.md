@@ -53,6 +53,10 @@ Do not start implementation until the interaction is clear enough to test.
 - If a palette needs app data, add read-only snapshot data instead of passing mutable app state into a provider.
 - If a palette reads extension data, expose only the needed UI snapshot fields.
 - If submit dispatches a command, ensure the command source, invocation policy, and history recording are intentional.
+- Keep provider submit effects palette-local. `PaletteSubmitEffect` may describe
+  close, reopen, or command dispatch intent, but the palette submit command
+  handler converts it into command runtime effects; providers should not write
+  command follow-up queues or input history directly.
 - For command-palette candidate visibility, use command policy metadata and the
   shared runtime condition context. Do not maintain a provider-local command
   visibility list or a separate enabled-state vocabulary.

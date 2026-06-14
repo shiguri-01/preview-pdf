@@ -2,7 +2,8 @@ use crate::condition::{ConditionExpr, RuntimeCondition};
 use crate::error::{AppError, AppResult};
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
-use super::dispatch::{CommandExecContext, CommandExecution};
+use super::dispatch::CommandExecContext;
+use super::effects::CommandExecution;
 use super::types::{
     ArgHint, ArgKind, ArgSpec, CommandExposure, CommandInvocationPolicy, CommandInvocationSource,
     CommandRole, CommandSpec, CommandTargetRequirement, PanAmount, PanDirection, SearchMatcherKind,
@@ -744,14 +745,12 @@ define_commands! {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::{AppState, PaletteRequest};
+    use crate::app::AppState;
     use crate::backend::{OutlineNode, PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::extension::ExtensionHost;
-    use crate::input::InputHistoryService;
     use crate::palette::{PaletteManager, PaletteRegistry};
 
     use super::{
@@ -865,8 +864,6 @@ mod tests {
             let mut extension_host = ExtensionHost::default();
             let palette_registry = PaletteRegistry::default();
             let mut palette_manager = PaletteManager::default();
-            let mut palette_requests = VecDeque::<PaletteRequest>::new();
-            let mut input_history = InputHistoryService::default();
             let mut ctx = CommandExecContext {
                 app: &mut app,
                 view_policy: crate::config::ViewPolicy::default(),
@@ -874,8 +871,6 @@ mod tests {
                 extension_host: &mut extension_host,
                 palette_registry: &palette_registry,
                 palette_manager: &mut palette_manager,
-                palette_requests: &mut palette_requests,
-                input_history: &mut input_history,
             };
 
             execute_registered_command(&mut ctx, command)

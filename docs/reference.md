@@ -105,8 +105,8 @@ Test coverage:
 Orientation:
 - Commands have five review-relevant concerns: stable ids and argument parsing,
   role, source-aware invocation policy, target requirement, and dispatch
-  effects. The command catalog ties those concerns together; feature behavior
-  stays in handlers, active targets, and app state.
+  effects. The command catalog ties identity and routing concerns together;
+  feature behavior stays in handlers, active targets, and app state.
 
 Contract:
 - Command ids are canonical kebab-case strings and are compatibility-sensitive
@@ -150,6 +150,16 @@ Contract:
 - Runtime condition vocabulary is shared by commands and key bindings. A
   palette-kind condition is true only when a palette is open and its active
   kind matches; a closed palette does not match any kind.
+- Command handlers return `CommandExecution`: an `Applied` or `Noop` outcome
+  plus `CommandEffects` for notice changes, explicit app events, palette
+  requests, input-history records, follow-up command requests, and lifecycle
+  requests. Handlers may mutate their owned feature state through the execution
+  context, but they must not directly push runtime queues or record input
+  history.
+- Process lifecycle requests are command effects, not command outcomes. For
+  example, quit is an applied command with a quit lifecycle effect.
+- Dispatch applies command effects in one place, then emits transition events
+  and the final command execution event.
 - Command dispatch emits command execution events after validation and dispatch
   complete, including rejected commands.
 - Command dispatch may return follow-up command requests, for example when a
@@ -244,8 +254,11 @@ Contract:
   input history recall for palettes that support it, selection, completion,
   submit, and session-id validation behavior.
 - Candidate search text is independent from rendered row text.
-- Submit effects may close, reopen, or dispatch a typed command with optional
-  history recording and a post action.
+- Provider submit effects describe palette-local meaning: close, reopen, or
+  dispatch a typed command with optional history recording and a post action.
+  The palette submit command handler converts those provider effects into
+  command runtime effects; providers do not write command follow-up queues or
+  input history directly.
 - Command-palette visibility derives from command metadata, invocation policy,
   and `enabled_when`, not from a hand-written UI list.
 - Input history is an opt-in palette input capability; it is not a

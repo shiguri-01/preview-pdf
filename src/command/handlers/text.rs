@@ -2,7 +2,8 @@ use crate::app::NoticeAction;
 use crate::command::CommandOutcome;
 use crate::error::AppResult;
 
-use super::super::dispatch::{CommandExecContext, CommandExecution};
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::CommandExecution;
 
 pub(in crate::command) fn text_insert(
     ctx: &mut CommandExecContext<'_>,

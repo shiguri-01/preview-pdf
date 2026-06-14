@@ -331,5 +331,4 @@ pub struct CommandSpec {
 pub enum CommandOutcome {
     Applied,
     Noop,
-    QuitRequested,
 }

@@ -1,52 +1,41 @@
 use crate::app::Mode;
 use crate::app::PaletteRequest;
-use crate::command::{CommandInvocationSource, CommandRequest};
+use crate::command::{CommandInvocationSource, CommandOutcome, CommandRequest};
 use crate::error::AppResult;
 use crate::palette::{PaletteKind, PaletteOpenPayload, PalettePostAction, PaletteSubmitEffect};
 
-use super::super::dispatch::{CommandExecContext, CommandExecution};
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::CommandExecution;
 
 pub(in crate::command) fn open_palette(
-    ctx: &mut CommandExecContext<'_>,
+    _ctx: &mut CommandExecContext<'_>,
     kind: PaletteKind,
     payload: Option<PaletteOpenPayload>,
 ) -> AppResult<CommandExecution> {
-    ctx.palette_requests
-        .push_back(PaletteRequest::Open { kind, payload });
-    Ok(CommandExecution::applied())
+    Ok(CommandExecution::applied().with_palette_request(PaletteRequest::Open { kind, payload }))
 }
 
 pub(in crate::command) fn close_palette(
-    ctx: &mut CommandExecContext<'_>,
+    _ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    ctx.palette_requests.push_back(PaletteRequest::Close);
-    Ok(CommandExecution::applied())
+    Ok(CommandExecution::applied().with_palette_request(PaletteRequest::Close))
 }
 
 pub(in crate::command) fn palette_submit(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
     let Some(kind) = ctx.palette_manager.active_kind() else {
-        return Ok(CommandExecution::from_notice_result((
-            crate::command::CommandOutcome::Noop,
-            crate::app::NoticeAction::Clear,
-        )));
+        return Ok(CommandExecution::noop());
     };
     let extensions = ctx.extension_host.ui_snapshot();
     let Some(action) = ctx
         .palette_manager
         .submit(ctx.palette_registry, ctx.app, &extensions)?
     else {
-        return Ok(CommandExecution::from_notice_result((
-            crate::command::CommandOutcome::Noop,
-            crate::app::NoticeAction::Clear,
-        )));
+        return Ok(CommandExecution::noop());
     };
     if !ctx.palette_manager.close_if_matches(action.session_id) {
-        return Ok(CommandExecution::from_notice_result((
-            crate::command::CommandOutcome::Noop,
-            crate::app::NoticeAction::Clear,
-        )));
+        return Ok(CommandExecution::noop());
     }
     ctx.app.mode = Mode::Normal;
 
@@ -54,8 +43,7 @@ pub(in crate::command) fn palette_submit(
     match action.effect {
         PaletteSubmitEffect::Close => {}
         PaletteSubmitEffect::Reopen { kind, payload } => {
-            ctx.palette_requests
-                .push_back(PaletteRequest::Open { kind, payload });
+            execution = execution.with_palette_request(PaletteRequest::Open { kind, payload });
         }
         PaletteSubmitEffect::Dispatch {
             command,
@@ -63,7 +51,7 @@ pub(in crate::command) fn palette_submit(
             next,
         } => {
             if let Some(record) = history_record {
-                ctx.input_history.record(record);
+                execution = execution.with_input_history_record(record);
             }
             let source = match kind {
                 PaletteKind::Command => CommandInvocationSource::CommandPaletteInput,
@@ -76,8 +64,8 @@ pub(in crate::command) fn palette_submit(
             match next {
                 PalettePostAction::Close => {}
                 PalettePostAction::Reopen { kind, payload } => {
-                    ctx.palette_requests
-                        .push_back(PaletteRequest::Open { kind, payload });
+                    execution =
+                        execution.with_palette_request(PaletteRequest::Open { kind, payload });
                 }
             }
         }
@@ -94,9 +82,9 @@ pub(in crate::command) fn palette_complete(
         .complete(ctx.palette_registry, ctx.app, &extensions)?;
     Ok(CommandExecution::from_notice_result((
         if changed {
-            crate::command::CommandOutcome::Applied
+            CommandOutcome::Applied
         } else {
-            crate::command::CommandOutcome::Noop
+            CommandOutcome::Noop
         },
         crate::app::NoticeAction::Clear,
     )))
@@ -108,9 +96,9 @@ pub(in crate::command) fn palette_select_next(
     let changed = ctx.palette_manager.select_next_item();
     Ok(CommandExecution::from_notice_result((
         if changed {
-            crate::command::CommandOutcome::Applied
+            CommandOutcome::Applied
         } else {
-            crate::command::CommandOutcome::Noop
+            CommandOutcome::Noop
         },
         crate::app::NoticeAction::Clear,
     )))
@@ -122,9 +110,9 @@ pub(in crate::command) fn palette_select_prev(
     let changed = ctx.palette_manager.select_previous();
     Ok(CommandExecution::from_notice_result((
         if changed {
-            crate::command::CommandOutcome::Applied
+            CommandOutcome::Applied
         } else {
-            crate::command::CommandOutcome::Noop
+            CommandOutcome::Noop
         },
         crate::app::NoticeAction::Clear,
     )))

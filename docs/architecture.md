@@ -28,7 +28,7 @@ can operate on resolved policies rather than re-reading config or CLI state.
   handling, render completion handling, view operations, and terminal session
   coordination.
 - [src/command/](../src/command/) owns command ids, metadata, parsing, source-aware validation,
-  dispatch, and typed command outcomes.
+  dispatch, typed command outcomes, and command effects.
 - [src/input/](../src/input/) owns key sequence normalization, built-in key bindings, numeric
   prefixes, and input history used by palette inputs.
 - [src/palette/](../src/palette/) owns palette sessions, provider lookup, candidate matching,
@@ -51,8 +51,9 @@ can operate on resolved policies rather than re-reading config or CLI state.
 palette, extension, render, presenter, backend, and UI types.
 
 Commands do not own feature state. Command dispatch receives an execution
-context from `app`, mutates app-owned state through that context, and emits
-typed `AppEvent` values for cross-subsystem observation.
+context from `app`, mutates app-owned state through that context, and applies
+typed command effects for notices, app events, palette requests, input history,
+follow-up commands, and lifecycle requests.
 
 Palette providers receive read-only app and extension snapshots. They should
 request behavior by returning typed effects or commands instead of taking
@@ -103,10 +104,10 @@ Terminal input enters as `DomainEvent::Input`.
    commands, and help keys become help interaction commands.
 5. Command dispatch validates invocation source, resolves the required target
    such as app, active palette, or active help, checks the
-   command `enabled_when` runtime condition, applies behavior, and emits
-   `AppEvent` values.
-6. The loop re-routes emitted app events and any follow-up command requests to
-   extensions and other loop effects.
+   command `enabled_when` runtime condition, applies behavior, and applies
+   typed command effects.
+6. The loop re-routes emitted app events, follow-up command requests, palette
+   requests, and lifecycle requests to extensions and other loop effects.
 7. Render workers return `DomainEvent::RenderComplete`; presenter encode
    workers return `DomainEvent::EncodeComplete`.
 8. UI redraws happen when input, command effects, extension background work, or

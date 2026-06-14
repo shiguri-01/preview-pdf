@@ -2,25 +2,23 @@ use std::sync::Arc;
 
 use crate::error::AppResult;
 
-use super::super::dispatch::{CommandExecContext, CommandExecution};
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::CommandExecution;
 use super::super::types::SearchMatcherKind;
 
 pub(in crate::command) fn open_search(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let result = ctx
-        .extension_host
-        .open_search_palette(ctx.app, ctx.palette_requests);
-    Ok(CommandExecution::from_notice_result(result))
+    Ok(CommandExecution::applied().with_palette_request(ctx.extension_host.open_search_palette()))
 }
 
 pub(in crate::command) fn open_search_results(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let result = ctx
-        .extension_host
-        .open_search_results_palette(ctx.app, ctx.palette_requests);
-    Ok(CommandExecution::from_notice_result(result))
+    let Some(request) = ctx.extension_host.open_search_results_palette() else {
+        return Ok(CommandExecution::noop());
+    };
+    Ok(CommandExecution::applied().with_palette_request(request))
 }
 
 pub(in crate::command) fn submit_search(

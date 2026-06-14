@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::backend::SharedPdfBackend;
-use crate::command::{Command, CommandOutcome, CommandRequest, PanAmount};
+use crate::command::{Command, CommandLifecycleEffect, CommandOutcome, CommandRequest, PanAmount};
 use crate::error::{AppError, AppResult};
 use crate::event::{
     AppEvent, DocumentReloadReason, DocumentReloadRequest, DocumentReloadResult, DomainEvent,
@@ -253,10 +253,10 @@ impl App {
             self.interaction
                 .sync_search_after_page_change(Arc::clone(&document.pdf), self.state.current_page);
         }
+        if dispatch.lifecycle == CommandLifecycleEffect::Quit {
+            terminate_process_now(runtime);
+        }
         match dispatch.outcome {
-            CommandOutcome::QuitRequested => {
-                terminate_process_now(runtime);
-            }
             CommandOutcome::Applied => self.request_redraw(runtime, RedrawReason::Command),
             CommandOutcome::Noop => {
                 if !palette_changed && self.state != state_before_command {

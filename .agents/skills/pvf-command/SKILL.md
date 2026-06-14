@@ -57,9 +57,18 @@ Do not start implementation until the external behavior is clear enough to test.
 - Keep key binding resolution in the input sequence registry. Normal, palette,
   and help keys should share the scoped key binding path instead of adding
   surface-local key matching.
-- When a command completes another command, return a follow-up command request
-  with an intentional invocation source instead of directly bypassing command
+- Command handlers return `CommandExecution`: an `Applied` or `Noop` outcome
+  plus `CommandEffects`. Use command effects for notices, explicit app events,
+  palette requests, input-history records, follow-up command requests, and
+  lifecycle requests.
+- Do not make handlers write pending palette queues, input history, or loop
+  lifecycle state directly. Dispatch owns applying command effects after
   validation.
+- When a command completes another command, return a follow-up command request
+  in `CommandEffects` with an intentional invocation source instead of directly
+  bypassing command validation.
+- Represent process termination as a lifecycle effect, not as a command
+  outcome.
 - If a command affects navigation, ensure emitted app events and navigation reasons still match the feature behavior.
 - If a public command should be reachable by a key, update the keymap and help surface together.
 - If command palette behavior changes, verify listing, argument hints, completion, and runtime gating.

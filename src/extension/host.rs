@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::app::{AppState, NoticeAction, PaletteRequest};
@@ -72,12 +71,8 @@ impl ExtensionHost {
         search_changed || history_changed
     }
 
-    pub fn open_search_palette(
-        &mut self,
-        app: &mut AppState,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> (CommandOutcome, NoticeAction) {
-        self.search.open_palette(app, palette_requests)
+    pub fn open_search_palette(&mut self) -> PaletteRequest {
+        self.search.open_palette()
     }
 
     pub fn submit_search(
@@ -117,12 +112,8 @@ impl ExtensionHost {
         self.search.resolve_priority_geometry(pdf, visible_pages);
     }
 
-    pub fn open_search_results_palette(
-        &mut self,
-        app: &mut AppState,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> (CommandOutcome, NoticeAction) {
-        self.search.open_results_palette(app, palette_requests)
+    pub fn open_search_results_palette(&mut self) -> Option<PaletteRequest> {
+        self.search.open_results_palette()
     }
 
     pub fn search_result_goto(
@@ -171,20 +162,12 @@ impl ExtensionHost {
         self.history.goto(app, page_count, page)
     }
 
-    pub fn open_history_palette(
-        &self,
-        app: &mut AppState,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> (CommandOutcome, NoticeAction) {
-        self.history.open_palette(app, palette_requests)
+    pub fn open_history_palette(&self, app: &AppState) -> PaletteRequest {
+        self.history.open_palette(app)
     }
 
-    pub fn open_outline_palette(
-        &mut self,
-        pdf: SharedPdfBackend,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.outline.open_palette(pdf, palette_requests)
+    pub fn open_outline_palette(&mut self, pdf: SharedPdfBackend) -> AppResult<PaletteRequest> {
+        self.outline.open_palette(pdf)
     }
 
     pub fn outline_goto(

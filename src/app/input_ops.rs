@@ -19,7 +19,6 @@ use super::state::{AppState, Mode, PaletteRequest, notice_action_for_error};
 #[derive(Debug, Clone, Default)]
 pub(crate) struct KeyEventOutcome {
     pub redraw: bool,
-    pub quit_requested: bool,
     pub commands: Vec<CommandRequest>,
 }
 
@@ -70,7 +69,6 @@ impl InteractionSubsystem {
         let search_active = self.extensions.host.ui_snapshot().search_active;
         KeyEventOutcome {
             redraw: search_active,
-            quit_requested: false,
             commands: if search_active {
                 vec![CommandRequest::new(
                     Command::CancelSearch,
@@ -99,7 +97,6 @@ impl InteractionSubsystem {
         match result {
             PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
                 redraw,
-                quit_requested: false,
                 commands: Vec::new(),
             }),
             PaletteKeyResult::Submit(action) => {
@@ -107,7 +104,6 @@ impl InteractionSubsystem {
                     self.handle_palette_submit_effect(state, action.session_id, action.effect)?;
                 Ok(KeyEventOutcome {
                     redraw: changed_by_palette,
-                    quit_requested: false,
                     commands: command.into_iter().collect(),
                 })
             }
@@ -115,7 +111,6 @@ impl InteractionSubsystem {
                 state.apply_notice_action(notice_action_for_error(err));
                 Ok(KeyEventOutcome {
                     redraw: true,
-                    quit_requested: false,
                     commands: Vec::new(),
                 })
             }
@@ -132,14 +127,12 @@ impl InteractionSubsystem {
                 InputHookResult::Consumed => {
                     return KeyEventOutcome {
                         redraw: true,
-                        quit_requested: false,
                         commands: Vec::new(),
                     };
                 }
                 InputHookResult::EmitCommand(ext_command) => {
                     return KeyEventOutcome {
                         redraw: false,
-                        quit_requested: false,
                         commands: vec![CommandRequest::new(
                             ext_command,
                             CommandInvocationSource::Keymap,
@@ -160,7 +153,6 @@ impl InteractionSubsystem {
 
         KeyEventOutcome {
             redraw: false,
-            quit_requested: false,
             commands: vec![CommandRequest::new(
                 command,
                 CommandInvocationSource::Keymap,
@@ -242,7 +234,6 @@ impl InteractionSubsystem {
         };
         Some(KeyEventOutcome {
             redraw: closed,
-            quit_requested: false,
             commands: Vec::new(),
         })
     }
@@ -352,11 +343,8 @@ impl InteractionSubsystem {
         }
     }
 
-    fn command_effects(command: &Command, redraw_on_dispatch: bool) -> (bool, bool) {
-        (
-            redraw_on_dispatch || matches!(command, Command::OpenHelp),
-            matches!(command, Command::Quit),
-        )
+    fn command_redraw(command: &Command, redraw_on_dispatch: bool) -> bool {
+        redraw_on_dispatch || matches!(command, Command::OpenHelp)
     }
 
     fn sequence_outcome(
@@ -367,22 +355,14 @@ impl InteractionSubsystem {
             SequenceResolution::Noop => KeyEventOutcome::default(),
             SequenceResolution::Pending | SequenceResolution::Cleared => KeyEventOutcome {
                 redraw: true,
-                quit_requested: false,
-                commands: Vec::new(),
-            },
-            SequenceResolution::Dispatch(Command::Quit) => KeyEventOutcome {
-                redraw: false,
-                quit_requested: true,
                 commands: Vec::new(),
             },
             SequenceResolution::DispatchThen { first, next } => {
                 // `DispatchThen` represents "commit the timed-out sequence, then keep
                 // processing the key that arrived after it" without dropping input.
-                let (first_redraw, first_quit_requested) =
-                    Self::command_effects(&first, redraw_on_dispatch);
+                let first_redraw = Self::command_redraw(&first, redraw_on_dispatch);
                 let mut outcome = Self::sequence_outcome(*next, redraw_on_dispatch);
                 outcome.redraw |= first_redraw;
-                outcome.quit_requested |= first_quit_requested;
                 outcome.commands.insert(
                     0,
                     CommandRequest::new(first, CommandInvocationSource::Keymap),
@@ -390,10 +370,9 @@ impl InteractionSubsystem {
                 outcome
             }
             SequenceResolution::Dispatch(command) => {
-                let (redraw, _) = Self::command_effects(&command, redraw_on_dispatch);
+                let redraw = Self::command_redraw(&command, redraw_on_dispatch);
                 KeyEventOutcome {
                     redraw,
-                    quit_requested: false,
                     commands: vec![CommandRequest::new(
                         command,
                         CommandInvocationSource::Keymap,
@@ -485,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn quit_key_requests_immediate_quit_without_command_requeue() {
+    fn quit_key_dispatches_quit_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
 
@@ -496,8 +475,13 @@ mod tests {
             )
             .expect("quit key should be handled");
 
-        assert!(outcome.quit_requested);
-        assert!(outcome.commands.is_empty());
+        assert_eq!(
+            outcome.commands,
+            vec![CommandRequest::new(
+                Command::Quit,
+                CommandInvocationSource::Keymap,
+            )]
+        );
         assert!(!outcome.redraw);
     }
 
@@ -608,14 +592,13 @@ mod tests {
                 &mut state,
             )
             .expect("help close should be handled");
-        let (commands, events, redraws, quit_requested) = effects.into_parts();
+        let (commands, events, redraws) = effects.into_parts();
 
         assert_eq!(state.mode, Mode::Normal);
         assert_eq!(state.help_scroll, 0);
         assert!(!redraws.is_empty());
         assert!(commands.is_empty());
         assert!(events.is_empty());
-        assert!(!quit_requested);
     }
 
     #[test]
@@ -642,13 +625,12 @@ mod tests {
                 &mut state,
             )
             .expect("palette close should be handled");
-        let (commands, events, redraws, quit_requested) = effects.into_parts();
+        let (commands, events, redraws) = effects.into_parts();
 
         assert_eq!(state.mode, Mode::Normal);
         assert!(!redraws.is_empty());
         assert!(commands.is_empty());
         assert!(events.is_empty());
-        assert!(!quit_requested);
     }
 
     #[test]
@@ -675,7 +657,7 @@ mod tests {
                 &mut state,
             )
             .expect("palette submit should be handled");
-        let (commands, events, redraws, quit_requested) = effects.into_parts();
+        let (commands, events, redraws) = effects.into_parts();
 
         assert_eq!(state.mode, Mode::Normal);
         assert!(!redraws.is_empty());
@@ -686,7 +668,6 @@ mod tests {
                     && request.source == CommandInvocationSource::PaletteProvider
         ));
         assert!(events.is_empty());
-        assert!(!quit_requested);
     }
 
     #[test]
@@ -733,7 +714,6 @@ mod tests {
             Some(NoticeLevel::Warning)
         );
         assert!(outcome.redraw);
-        assert!(!outcome.quit_requested);
         assert!(outcome.commands.is_empty());
     }
 
@@ -871,7 +851,6 @@ mod tests {
         let flushed = interaction.flush_sequence_timeout(state.mode);
 
         assert!(!flushed.redraw);
-        assert!(!flushed.quit_requested);
         assert!(flushed.commands.is_empty());
         assert_eq!(interaction.pending_sequence_status(), None);
     }
@@ -994,7 +973,7 @@ mod tests {
     }
 
     #[test]
-    fn timed_out_sequence_followed_by_quit_sets_quit_requested() {
+    fn timed_out_sequence_followed_by_quit_dispatches_expired_command_then_quit() {
         let mut registry = SequenceRegistry::new();
         registry
             .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
@@ -1024,15 +1003,14 @@ mod tests {
                 &mut state,
                 KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
             )
-            .expect("next key should queue the expired command and request quit");
+            .expect("next key should queue the expired command and quit command");
 
-        assert!(next.quit_requested);
         assert_eq!(
             next.commands,
-            vec![CommandRequest::new(
-                Command::FirstPage,
-                CommandInvocationSource::Keymap,
-            )]
+            vec![
+                CommandRequest::new(Command::FirstPage, CommandInvocationSource::Keymap,),
+                CommandRequest::new(Command::Quit, CommandInvocationSource::Keymap,)
+            ]
         );
     }
 

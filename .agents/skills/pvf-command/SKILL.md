@@ -48,8 +48,12 @@ Do not start implementation until the external behavior is clear enough to test.
   old/new dispatch paths for internal redesign work.
 - Put command execution in the feature handler that owns the behavior.
 - Focused operations such as palette submit, palette selection, text editing,
-  text history recall, help close, and help scroll should enter as command
-  requests and resolve their active target through dispatch.
+  text history recall, help close, and help scroll should be represented as
+  scoped key bindings or interaction command requests, then resolve their active
+  target through dispatch.
+- Keep key binding resolution in the input sequence registry. Normal, palette,
+  and help keys should share the scoped key binding path instead of adding
+  surface-local key matching.
 - When a command completes another command, return a follow-up command request
   with an intentional invocation source instead of directly bypassing command
   validation.

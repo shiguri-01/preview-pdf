@@ -160,26 +160,30 @@ Test coverage:
 
 Orientation:
 - Terminal key events are converted to typed command requests before behavior is
-  applied. Normal-mode key bindings use the sequence registry; focused surfaces
-  such as palette and help use focused key routing that also returns commands.
+  applied. Normal-mode keys and focused surface keys are resolved by the same
+  scoped sequence registry.
 
 Contract:
 - Printable bindings are defined by resulting characters, not by physical keys.
 - Configured key bindings use the same key labels shown in help, such as
   `gg`, `<c-o>`, `<down>`, and `[count]G`.
+- Key bindings have a scope, currently normal, palette, or help. A binding only
+  resolves when the active key binding context matches its scope and condition.
 - Multi-key sequences can remain pending until resolved or timed out.
 - Numeric prefixes are parsed by the input sequence layer and dispatch typed
   commands.
 - Built-in key bindings must reference known command ids and satisfy command
   invocation policy.
-- Configured key bindings must reference known commands that can be invoked
-  from the keymap; runtime availability remains a dispatch-time check.
-- Palette-focused keys dispatch hidden palette or text interaction commands
-  such as submit, complete, selection movement, text editing, and text history.
-- Help-focused keys dispatch hidden help interaction commands such as close and
+- Configured key bindings currently target the normal scope and must reference
+  known commands that can be invoked from the keymap; runtime availability
+  remains a dispatch-time check.
+- Palette-scoped keys dispatch hidden palette or text interaction commands such
+  as submit, complete, selection movement, text editing, and text history.
+- Help-scoped keys dispatch hidden help interaction commands such as close and
   scroll.
-- `<esc>` is reserved for focused cancellation and is not routed through the
-  normal-mode keymap.
+- `<esc>` is a scoped built-in binding for cancellation or close behavior. When
+  a multi-key sequence is already pending, `<esc>` clears the pending sequence
+  instead of dispatching another command.
 
 Compatibility:
 - Changing a default key binding affects user muscle memory and help output; do
@@ -202,9 +206,9 @@ Test coverage:
 Orientation:
 - Palette behavior splits into common session mechanics and provider-owned
   semantics. The common path owns opening, text input state, selection,
-  completion, submit, and closing. Focused key routing turns terminal keys into
-  commands; providers own candidate meaning and the effects returned for
-  completion and submit.
+  completion, submit, and closing. Palette-scoped key bindings turn terminal
+  keys into commands; providers own candidate meaning and the effects returned
+  for completion and submit.
 
 Contract:
 - A palette session has a kind, session id, input state, candidate list,

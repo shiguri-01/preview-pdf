@@ -93,13 +93,13 @@ communication uses snapshots, command requests, events, or worker completions.
 Terminal input enters as `DomainEvent::Input`.
 
 1. The loop router delegates input to app input handling.
-2. Focused routes convert active overlay keys into `CommandRequest` values:
-   palette keys become palette/text interaction commands, and help keys become
-   help interaction commands.
-3. Extension input hooks may intercept extension-local inputs when no focused
-   route or pending key sequence owns the input.
-4. The input sequence resolver maps normal-mode key sequences to typed
-   commands.
+2. App input handling builds a key binding context from the active surface and
+   runtime state, such as palette kind, focused text input, and active search.
+3. Extension input hooks may intercept extension-local inputs in normal mode
+   when no pending key sequence owns the input.
+4. The scoped input sequence resolver maps matching normal, palette, or help
+   key bindings to typed commands. Palette keys become palette/text interaction
+   commands, and help keys become help interaction commands.
 5. Command dispatch validates invocation source, resolves the required target
    such as app, active palette, focused text input, or active help, applies
    behavior, and emits `AppEvent` values.

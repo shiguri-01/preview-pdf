@@ -18,28 +18,103 @@ pub enum SequenceRegistrationError {
 
 type NumericCommandFactory = fn(usize) -> Command;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyBindingScope {
+    Normal,
+    Palette,
+    Help,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyBindingCondition {
+    Always,
+    SearchActive,
+    FocusedTextInput,
+    TextHistoryAvailable,
+    TextHistoryUnavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyBindingContext {
+    pub scope: KeyBindingScope,
+    pub search_active: bool,
+    pub focused_text_input: bool,
+    pub text_history_available: bool,
+}
+
+impl KeyBindingContext {
+    pub fn normal() -> Self {
+        Self {
+            scope: KeyBindingScope::Normal,
+            search_active: false,
+            focused_text_input: false,
+            text_history_available: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedKeyMatcher {
+    PrintableCharacter,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedCommand {
+    TextInsert,
+}
+
+impl GeneratedCommand {
+    fn command_id(self) -> &'static str {
+        match self {
+            Self::TextInsert => "text.insert",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 enum SequenceBinding {
     Exact {
+        scope: KeyBindingScope,
+        condition: KeyBindingCondition,
         keys: Vec<ShortcutKey>,
         command: Command,
     },
     NumericPrefix {
+        scope: KeyBindingScope,
+        condition: KeyBindingCondition,
         suffix: ShortcutKey,
         command_id: &'static str,
         factory: NumericCommandFactory,
+    },
+    Generated {
+        scope: KeyBindingScope,
+        condition: KeyBindingCondition,
+        matcher: GeneratedKeyMatcher,
+        command: GeneratedCommand,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExactSequenceBinding {
+    pub scope: KeyBindingScope,
+    pub condition: KeyBindingCondition,
     pub keys: Vec<ShortcutKey>,
     pub command_id: &'static str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NumericSequenceBinding {
+    pub scope: KeyBindingScope,
+    pub condition: KeyBindingCondition,
     pub suffix: ShortcutKey,
+    pub command_id: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GeneratedSequenceBinding {
+    pub scope: KeyBindingScope,
+    pub condition: KeyBindingCondition,
+    pub matcher: GeneratedKeyMatcher,
     pub command_id: &'static str,
 }
 
@@ -47,6 +122,7 @@ pub struct NumericSequenceBinding {
 pub struct SequenceRegistrySnapshot {
     pub exact_bindings: Vec<ExactSequenceBinding>,
     pub numeric_prefix_bindings: Vec<NumericSequenceBinding>,
+    pub generated_bindings: Vec<GeneratedSequenceBinding>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -64,6 +140,21 @@ impl SequenceRegistry {
         keys: &[ShortcutKey],
         command: Command,
     ) -> Result<(), SequenceRegistrationError> {
+        self.register_static_in_scope(
+            KeyBindingScope::Normal,
+            KeyBindingCondition::Always,
+            keys,
+            command,
+        )
+    }
+
+    pub fn register_static_in_scope(
+        &mut self,
+        scope: KeyBindingScope,
+        condition: KeyBindingCondition,
+        keys: &[ShortcutKey],
+        command: Command,
+    ) -> Result<(), SequenceRegistrationError> {
         if keys.is_empty() {
             return Err(SequenceRegistrationError::EmptySequence);
         }
@@ -76,14 +167,45 @@ impl SequenceRegistry {
             .map(canonicalize_binding_key)
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.bindings
-            .retain(|binding| !matches!(binding, SequenceBinding::Exact { keys: existing, .. } if existing == &keys));
-        self.bindings.push(SequenceBinding::Exact { keys, command });
+        self.bindings.retain(|binding| {
+            !matches!(
+                binding,
+                SequenceBinding::Exact {
+                    scope: existing_scope,
+                    condition: existing_condition,
+                    keys: existing,
+                    ..
+                } if *existing_scope == scope && *existing_condition == condition && existing == &keys
+            )
+        });
+        self.bindings.push(SequenceBinding::Exact {
+            scope,
+            condition,
+            keys,
+            command,
+        });
         Ok(())
     }
 
     pub fn register_numeric_prefix(
         &mut self,
+        command_id: &'static str,
+        suffix: ShortcutKey,
+        factory: NumericCommandFactory,
+    ) -> Result<(), SequenceRegistrationError> {
+        self.register_numeric_prefix_in_scope(
+            KeyBindingScope::Normal,
+            KeyBindingCondition::Always,
+            command_id,
+            suffix,
+            factory,
+        )
+    }
+
+    pub fn register_numeric_prefix_in_scope(
+        &mut self,
+        scope: KeyBindingScope,
+        condition: KeyBindingCondition,
         command_id: &'static str,
         suffix: ShortcutKey,
         factory: NumericCommandFactory,
@@ -97,14 +219,52 @@ impl SequenceRegistry {
         }
 
         self.bindings.retain(|binding| {
-            !matches!(binding, SequenceBinding::NumericPrefix { suffix: existing, .. } if *existing == suffix)
+            !matches!(
+                binding,
+                SequenceBinding::NumericPrefix {
+                    scope: existing_scope,
+                    condition: existing_condition,
+                    suffix: existing,
+                    ..
+                } if *existing_scope == scope && *existing_condition == condition && *existing == suffix
+            )
         });
         self.bindings.push(SequenceBinding::NumericPrefix {
+            scope,
+            condition,
             suffix,
             command_id,
             factory,
         });
         Ok(())
+    }
+
+    pub fn register_generated(
+        &mut self,
+        scope: KeyBindingScope,
+        condition: KeyBindingCondition,
+        matcher: GeneratedKeyMatcher,
+        command: GeneratedCommand,
+    ) {
+        self.bindings.retain(|binding| {
+            !matches!(
+                binding,
+                SequenceBinding::Generated {
+                    scope: existing_scope,
+                    condition: existing_condition,
+                    matcher: existing_matcher,
+                    ..
+                } if *existing_scope == scope
+                    && *existing_condition == condition
+                    && *existing_matcher == matcher
+            )
+        });
+        self.bindings.push(SequenceBinding::Generated {
+            scope,
+            condition,
+            matcher,
+            command,
+        });
     }
 
     pub fn unregister_static(
@@ -120,8 +280,16 @@ impl SequenceRegistry {
             .map(canonicalize_binding_key)
             .collect::<Result<Vec<_>, _>>()?;
         let original_len = self.bindings.len();
-        self.bindings
-            .retain(|binding| !matches!(binding, SequenceBinding::Exact { keys: existing, .. } if existing == &keys));
+        self.bindings.retain(|binding| {
+            !matches!(
+                binding,
+                SequenceBinding::Exact {
+                    scope: KeyBindingScope::Normal,
+                    keys: existing,
+                    ..
+                } if existing == &keys
+            )
+        });
         Ok(self.bindings.len() != original_len)
     }
 
@@ -135,7 +303,14 @@ impl SequenceRegistry {
         }
         let original_len = self.bindings.len();
         self.bindings.retain(|binding| {
-            !matches!(binding, SequenceBinding::NumericPrefix { suffix: existing, .. } if *existing == suffix)
+            !matches!(
+                binding,
+                SequenceBinding::NumericPrefix {
+                    scope: KeyBindingScope::Normal,
+                    suffix: existing,
+                    ..
+                } if *existing == suffix
+            )
         });
         Ok(self.bindings.len() != original_len)
     }
@@ -144,32 +319,60 @@ impl SequenceRegistry {
         let mut snapshot = SequenceRegistrySnapshot::default();
         for binding in &self.bindings {
             match binding {
-                SequenceBinding::Exact { keys, command } => {
+                SequenceBinding::Exact {
+                    scope,
+                    condition,
+                    keys,
+                    command,
+                } => {
                     snapshot.exact_bindings.push(ExactSequenceBinding {
+                        scope: *scope,
+                        condition: *condition,
                         keys: keys.clone(),
                         command_id: command.id(),
                     });
                 }
                 SequenceBinding::NumericPrefix {
-                    suffix, command_id, ..
+                    scope,
+                    condition,
+                    suffix,
+                    command_id,
+                    ..
                 } => snapshot
                     .numeric_prefix_bindings
                     .push(NumericSequenceBinding {
+                        scope: *scope,
+                        condition: *condition,
                         suffix: *suffix,
                         command_id,
                     }),
+                SequenceBinding::Generated {
+                    scope,
+                    condition,
+                    matcher,
+                    command,
+                } => snapshot.generated_bindings.push(GeneratedSequenceBinding {
+                    scope: *scope,
+                    condition: *condition,
+                    matcher: *matcher,
+                    command_id: command.command_id(),
+                }),
             }
         }
         snapshot
     }
 
-    fn match_buffer(&self, buffer: &[ShortcutKey]) -> RegistryMatch {
+    fn match_buffer(&self, buffer: &[ShortcutKey], ctx: KeyBindingContext) -> RegistryMatch {
         let mut exact = None;
         let mut has_prefix = false;
 
         for binding in &self.bindings {
+            if !binding_matches_context(binding, ctx) {
+                continue;
+            }
+
             match binding {
-                SequenceBinding::Exact { keys, command } => {
+                SequenceBinding::Exact { keys, command, .. } => {
                     if keys.as_slice() == buffer {
                         exact = Some(command.clone());
                     } else if keys.starts_with(buffer) {
@@ -183,6 +386,16 @@ impl SequenceRegistry {
                     NumericMatch::Prefix => has_prefix = true,
                     NumericMatch::Exact(command) => exact = Some(command),
                 },
+                SequenceBinding::Generated {
+                    matcher, command, ..
+                } => {
+                    if buffer.len() == 1
+                        && let Some(command) =
+                            generated_command_for_key(*matcher, *command, buffer[0], ctx)
+                    {
+                        exact = Some(command);
+                    }
+                }
             }
         }
 
@@ -209,6 +422,7 @@ pub enum SequenceResolution {
 #[derive(Debug, Clone)]
 struct SequenceState {
     buffer: Vec<ShortcutKey>,
+    scope: Option<KeyBindingScope>,
     last_update: Option<Instant>,
     timeout: Duration,
 }
@@ -217,6 +431,7 @@ impl SequenceState {
     fn new(timeout: Duration) -> Self {
         Self {
             buffer: Vec::new(),
+            scope: None,
             last_update: None,
             timeout,
         }
@@ -230,16 +445,23 @@ impl SequenceState {
         &self.buffer
     }
 
-    fn push(&mut self, key: ShortcutKey) {
+    fn push(&mut self, key: ShortcutKey, scope: KeyBindingScope) {
         self.buffer.push(key);
+        self.scope = Some(scope);
         self.last_update = Some(Instant::now());
     }
 
     fn clear(&mut self) -> bool {
         let had_buffer = !self.buffer.is_empty();
         self.buffer.clear();
+        self.scope = None;
         self.last_update = None;
         had_buffer
+    }
+
+    fn is_in_scope(&self, scope: KeyBindingScope) -> bool {
+        self.scope
+            .is_none_or(|pending_scope| pending_scope == scope)
     }
 
     fn is_timed_out(&self) -> bool {
@@ -263,8 +485,20 @@ impl SequenceResolver {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> SequenceResolution {
+        self.handle_key_in_context(KeyBindingContext::normal(), key)
+    }
+
+    pub fn handle_key_in_context(
+        &mut self,
+        ctx: KeyBindingContext,
+        key: KeyEvent,
+    ) -> SequenceResolution {
+        if !self.state.is_empty() && !self.state.is_in_scope(ctx.scope) {
+            self.state.clear();
+        }
+
         match normalize_key(key) {
-            Some(key) => self.handle_normalized_key(key),
+            Some(key) => self.handle_normalized_key(ctx, key),
             None if self.state.is_empty() => SequenceResolution::Noop,
             None if self.state.is_timed_out() => self.confirm_pending(),
             None => {
@@ -274,9 +508,13 @@ impl SequenceResolver {
         }
     }
 
-    fn handle_normalized_key(&mut self, key: ShortcutKey) -> SequenceResolution {
+    fn handle_normalized_key(
+        &mut self,
+        ctx: KeyBindingContext,
+        key: ShortcutKey,
+    ) -> SequenceResolution {
         let pending_exact = (!self.state.is_empty())
-            .then(|| self.registry.match_buffer(self.state.as_slice()).exact)
+            .then(|| self.registry.match_buffer(self.state.as_slice(), ctx).exact)
             .flatten();
         let had_pending = !self.state.is_empty();
 
@@ -287,11 +525,11 @@ impl SequenceResolver {
                 return match self.confirm_pending() {
                     SequenceResolution::Dispatch(command) => SequenceResolution::DispatchThen {
                         first: command,
-                        next: Box::new(self.handle_normalized_key(key)),
+                        next: Box::new(self.handle_normalized_key(ctx, key)),
                         redraw: true,
                     },
                     SequenceResolution::Cleared | SequenceResolution::Noop => {
-                        self.handle_normalized_key(key)
+                        self.handle_normalized_key(ctx, key)
                     }
                     SequenceResolution::Pending
                     | SequenceResolution::DispatchWithRedraw(_)
@@ -309,8 +547,8 @@ impl SequenceResolver {
             }
         }
 
-        self.state.push(key);
-        self.resolve_pending_after_input(key, pending_exact)
+        self.state.push(key, ctx.scope);
+        self.resolve_pending_after_input(ctx, key, pending_exact)
     }
 
     pub fn flush_timeout(&mut self) -> SequenceResolution {
@@ -318,7 +556,11 @@ impl SequenceResolver {
             return SequenceResolution::Noop;
         }
 
-        match self.registry.match_buffer(self.state.as_slice()).exact {
+        let ctx = KeyBindingContext {
+            scope: self.state.scope.unwrap_or(KeyBindingScope::Normal),
+            ..KeyBindingContext::normal()
+        };
+        match self.registry.match_buffer(self.state.as_slice(), ctx).exact {
             Some(command) => {
                 self.state.clear();
                 SequenceResolution::Dispatch(command)
@@ -351,7 +593,11 @@ impl SequenceResolver {
     }
 
     fn confirm_pending(&mut self) -> SequenceResolution {
-        match self.registry.match_buffer(self.state.as_slice()).exact {
+        let ctx = KeyBindingContext {
+            scope: self.state.scope.unwrap_or(KeyBindingScope::Normal),
+            ..KeyBindingContext::normal()
+        };
+        match self.registry.match_buffer(self.state.as_slice(), ctx).exact {
             Some(command) => {
                 self.state.clear();
                 SequenceResolution::Dispatch(command)
@@ -365,10 +611,11 @@ impl SequenceResolver {
 
     fn resolve_pending_after_input(
         &mut self,
+        ctx: KeyBindingContext,
         latest_key: ShortcutKey,
         pending_exact: Option<Command>,
     ) -> SequenceResolution {
-        let matched = self.registry.match_buffer(self.state.as_slice());
+        let matched = self.registry.match_buffer(self.state.as_slice(), ctx);
         match (matched.exact, matched.has_prefix) {
             (Some(command), false) => {
                 self.state.clear();
@@ -389,11 +636,11 @@ impl SequenceResolver {
 
                     SequenceResolution::DispatchThen {
                         first: command,
-                        next: Box::new(self.handle_normalized_key(latest_key)),
+                        next: Box::new(self.handle_normalized_key(ctx, latest_key)),
                         redraw: true,
                     }
                 } else {
-                    match self.handle_normalized_key(latest_key) {
+                    match self.handle_normalized_key(ctx, latest_key) {
                         SequenceResolution::Noop => SequenceResolution::Cleared,
                         SequenceResolution::Dispatch(command) => {
                             SequenceResolution::DispatchWithRedraw(command)
@@ -418,6 +665,57 @@ fn command_stops_followup_reprocessing(command: &Command) -> bool {
             | Command::OpenHistory
             | Command::OpenOutline
     )
+}
+
+fn binding_matches_context(binding: &SequenceBinding, ctx: KeyBindingContext) -> bool {
+    let (scope, condition) = match binding {
+        SequenceBinding::Exact {
+            scope, condition, ..
+        }
+        | SequenceBinding::NumericPrefix {
+            scope, condition, ..
+        }
+        | SequenceBinding::Generated {
+            scope, condition, ..
+        } => (*scope, *condition),
+    };
+
+    scope == ctx.scope && condition_matches_context(condition, ctx)
+}
+
+fn condition_matches_context(condition: KeyBindingCondition, ctx: KeyBindingContext) -> bool {
+    match condition {
+        KeyBindingCondition::Always => true,
+        KeyBindingCondition::SearchActive => ctx.search_active,
+        KeyBindingCondition::FocusedTextInput => ctx.focused_text_input,
+        KeyBindingCondition::TextHistoryAvailable => ctx.text_history_available,
+        KeyBindingCondition::TextHistoryUnavailable => !ctx.text_history_available,
+    }
+}
+
+fn generated_command_for_key(
+    matcher: GeneratedKeyMatcher,
+    command: GeneratedCommand,
+    key: ShortcutKey,
+    _ctx: KeyBindingContext,
+) -> Option<Command> {
+    match (matcher, command) {
+        (GeneratedKeyMatcher::PrintableCharacter, GeneratedCommand::TextInsert) => {
+            if key
+                .modifiers()
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            {
+                return None;
+            }
+
+            match key.code() {
+                KeyCode::Char(ch) => Some(Command::TextInsert {
+                    text: ch.to_string(),
+                }),
+                _ => None,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -542,8 +840,9 @@ fn format_pending_buffer(buffer: &[ShortcutKey]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistrationError, SequenceRegistry, SequenceResolution,
-        SequenceResolver,
+        DEFAULT_SEQUENCE_TIMEOUT, GeneratedCommand, GeneratedKeyMatcher, KeyBindingCondition,
+        KeyBindingContext, KeyBindingScope, SequenceRegistrationError, SequenceRegistry,
+        SequenceResolution, SequenceResolver,
     };
     use crate::command::Command;
     use crate::input::shortcut::ShortcutKey;
@@ -599,6 +898,61 @@ mod tests {
 
         assert_eq!(resolution, SequenceResolution::Dispatch(Command::NextPage));
         assert_eq!(resolver.pending_display(), None);
+    }
+
+    #[test]
+    fn scoped_bindings_resolve_only_in_matching_scope() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static_in_scope(
+                KeyBindingScope::Palette,
+                KeyBindingCondition::Always,
+                &[ShortcutKey::key(KeyCode::Enter)],
+                Command::PaletteSubmit,
+            )
+            .expect("palette binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            SequenceResolution::Noop
+        );
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    scope: KeyBindingScope::Palette,
+                    ..KeyBindingContext::normal()
+                },
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::PaletteSubmit)
+        );
+    }
+
+    #[test]
+    fn generated_printable_binding_builds_text_insert_command() {
+        let mut registry = SequenceRegistry::new();
+        registry.register_generated(
+            KeyBindingScope::Palette,
+            KeyBindingCondition::FocusedTextInput,
+            GeneratedKeyMatcher::PrintableCharacter,
+            GeneratedCommand::TextInsert,
+        );
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    scope: KeyBindingScope::Palette,
+                    focused_text_input: true,
+                    ..KeyBindingContext::normal()
+                },
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::TextInsert {
+                text: "x".to_string(),
+            })
+        );
     }
 
     #[test]

@@ -1,7 +1,9 @@
 use crate::command::{Command, PanAmount, PanDirection};
 use crate::palette::PaletteKind;
 
-use super::sequence::SequenceRegistry;
+use super::sequence::{
+    GeneratedCommand, GeneratedKeyMatcher, KeyBindingCondition, KeyBindingScope, SequenceRegistry,
+};
 use super::shortcut::ShortcutKey;
 
 pub fn build_builtin_sequence_registry() -> SequenceRegistry {
@@ -88,12 +90,36 @@ pub fn build_builtin_sequence_registry() -> SequenceRegistry {
         Command::PrevSearchHit,
     );
     register_static(&mut registry, &[ShortcutKey::char('q')], Command::Quit);
+    register_static_with_condition(
+        &mut registry,
+        KeyBindingScope::Normal,
+        KeyBindingCondition::SearchActive,
+        &[ShortcutKey::key(crossterm::event::KeyCode::Esc)],
+        Command::CancelSearch,
+    );
+    register_builtin_focused_bindings(&mut registry);
     registry
 }
 
 fn register_static(registry: &mut SequenceRegistry, keys: &[ShortcutKey], command: Command) {
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Normal,
+        KeyBindingCondition::Always,
+        keys,
+        command,
+    );
+}
+
+fn register_static_with_condition(
+    registry: &mut SequenceRegistry,
+    scope: KeyBindingScope,
+    condition: KeyBindingCondition,
+    keys: &[ShortcutKey],
+    command: Command,
+) {
     registry
-        .register_static(keys, command)
+        .register_static_in_scope(scope, condition, keys, command)
         .expect("built-in key binding should register");
 }
 
@@ -106,6 +132,143 @@ fn register_numeric_prefix(
     registry
         .register_numeric_prefix(command_id, suffix, factory)
         .expect("built-in numeric key binding should register");
+}
+
+pub(crate) fn register_builtin_focused_bindings(registry: &mut SequenceRegistry) {
+    use crossterm::event::KeyCode;
+
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::key(KeyCode::Esc)],
+        Command::ClosePalette,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::key(KeyCode::Enter)],
+        Command::PaletteSubmit,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::key(KeyCode::Tab)],
+        Command::PaletteComplete,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::ctrl('p')],
+        Command::PaletteSelectPrev,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::ctrl('n')],
+        Command::PaletteSelectNext,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::TextHistoryAvailable,
+        &[ShortcutKey::key(KeyCode::Up)],
+        Command::TextHistoryOlder,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::TextHistoryAvailable,
+        &[ShortcutKey::key(KeyCode::Down)],
+        Command::TextHistoryNewer,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::TextHistoryUnavailable,
+        &[ShortcutKey::key(KeyCode::Up)],
+        Command::PaletteSelectPrev,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::TextHistoryUnavailable,
+        &[ShortcutKey::key(KeyCode::Down)],
+        Command::PaletteSelectNext,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::FocusedTextInput,
+        &[ShortcutKey::key(KeyCode::Backspace)],
+        Command::TextDeleteBackward,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::FocusedTextInput,
+        &[ShortcutKey::key(KeyCode::Delete)],
+        Command::TextDeleteForward,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::FocusedTextInput,
+        &[ShortcutKey::key(KeyCode::Left)],
+        Command::TextMoveLeft,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        KeyBindingCondition::FocusedTextInput,
+        &[ShortcutKey::key(KeyCode::Right)],
+        Command::TextMoveRight,
+    );
+    registry.register_generated(
+        KeyBindingScope::Palette,
+        KeyBindingCondition::FocusedTextInput,
+        GeneratedKeyMatcher::PrintableCharacter,
+        GeneratedCommand::TextInsert,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Help,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::key(KeyCode::Esc)],
+        Command::CloseHelp,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Help,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::char('j')],
+        Command::HelpScrollDown,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Help,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::key(KeyCode::Down)],
+        Command::HelpScrollDown,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Help,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::char('k')],
+        Command::HelpScrollUp,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Help,
+        KeyBindingCondition::Always,
+        &[ShortcutKey::key(KeyCode::Up)],
+        Command::HelpScrollUp,
+    );
 }
 
 #[cfg(test)]

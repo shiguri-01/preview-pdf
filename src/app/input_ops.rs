@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
@@ -8,7 +8,7 @@ use crate::command::{
 use crate::config::ViewPolicy;
 use crate::error::AppResult;
 use crate::event::AppEvent;
-use crate::input::sequence::SequenceResolution;
+use crate::input::sequence::{KeyBindingContext, KeyBindingScope, SequenceResolution};
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::{PaletteKind, PaletteView};
 
@@ -23,7 +23,6 @@ pub(crate) struct KeyEventOutcome {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum KeyEventRoute {
-    Escape,
     Palette,
     Help,
     Normal,
@@ -35,79 +34,20 @@ impl InteractionSubsystem {
         state: &mut AppState,
         key: KeyEvent,
     ) -> AppResult<KeyEventOutcome> {
-        self.sync_sequences_with_mode(state);
         match Self::route_key_event(state, key) {
-            KeyEventRoute::Escape => return Ok(self.handle_escape_key_event(state, key)),
-            KeyEventRoute::Palette => return Ok(self.handle_palette_key_event(key)),
-            KeyEventRoute::Help => return Ok(self.handle_help_key_event(state, key)),
+            KeyEventRoute::Palette => return Ok(self.handle_scoped_key_event(state, key)),
+            KeyEventRoute::Help => return Ok(self.handle_scoped_key_event(state, key)),
             KeyEventRoute::Normal => {}
         }
 
         Ok(self.handle_normal_key_event(state, key))
     }
 
-    fn route_key_event(state: &AppState, key: KeyEvent) -> KeyEventRoute {
-        if key.code == KeyCode::Esc {
-            return KeyEventRoute::Escape;
-        }
+    fn route_key_event(state: &AppState, _key: KeyEvent) -> KeyEventRoute {
         match state.mode {
             Mode::Palette => KeyEventRoute::Palette,
             Mode::Help => KeyEventRoute::Help,
             Mode::Normal => KeyEventRoute::Normal,
-        }
-    }
-
-    fn handle_escape_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
-        match state.mode {
-            Mode::Palette => {
-                return KeyEventOutcome {
-                    redraw: false,
-                    commands: vec![CommandRequest::new(
-                        Command::ClosePalette,
-                        CommandInvocationSource::Keymap,
-                    )],
-                };
-            }
-            Mode::Help => {
-                return KeyEventOutcome {
-                    redraw: false,
-                    commands: vec![CommandRequest::new(
-                        Command::CloseHelp,
-                        CommandInvocationSource::Keymap,
-                    )],
-                };
-            }
-            Mode::Normal => {}
-        }
-        if self.sequences.resolver.has_pending() {
-            let resolution = self.sequences.resolver.handle_key(key);
-            return Self::sequence_outcome(resolution, false);
-        }
-        let search_active = self.extensions.host.ui_snapshot().search_active;
-        KeyEventOutcome {
-            redraw: search_active,
-            commands: if search_active {
-                vec![CommandRequest::new(
-                    Command::CancelSearch,
-                    CommandInvocationSource::Keymap,
-                )]
-            } else {
-                Vec::new()
-            },
-        }
-    }
-
-    fn handle_palette_key_event(&mut self, key: KeyEvent) -> KeyEventOutcome {
-        let Some(command) = self.palette_command_for_key(key) else {
-            return KeyEventOutcome::default();
-        };
-
-        KeyEventOutcome {
-            redraw: false,
-            commands: vec![CommandRequest::new(
-                command,
-                CommandInvocationSource::Keymap,
-            )],
         }
     }
 
@@ -136,85 +76,35 @@ impl InteractionSubsystem {
             }
         }
 
-        let resolution = self.sequences.resolver.handle_key(key);
+        let ctx = self.key_binding_context(state);
+        let resolution = self.sequences.resolver.handle_key_in_context(ctx, key);
         Self::sequence_outcome(resolution, false)
     }
 
-    fn handle_help_key_event(&mut self, _state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
-        let Some(command) = Self::help_command_for_key(key) else {
-            return KeyEventOutcome::default();
+    fn handle_scoped_key_event(&mut self, state: &AppState, key: KeyEvent) -> KeyEventOutcome {
+        let ctx = self.key_binding_context(state);
+        let resolution = self.sequences.resolver.handle_key_in_context(ctx, key);
+        Self::sequence_outcome(resolution, false)
+    }
+
+    fn key_binding_context(&self, state: &AppState) -> KeyBindingContext {
+        let extensions = self.extensions.host.ui_snapshot();
+        let scope = match state.mode {
+            Mode::Normal => KeyBindingScope::Normal,
+            Mode::Palette => KeyBindingScope::Palette,
+            Mode::Help => KeyBindingScope::Help,
         };
+        let active_palette = self.palette.manager.active_kind();
 
-        KeyEventOutcome {
-            redraw: false,
-            commands: vec![CommandRequest::new(
-                command,
-                CommandInvocationSource::Keymap,
-            )],
+        KeyBindingContext {
+            scope,
+            search_active: extensions.search_active,
+            focused_text_input: self.palette.manager.focused_text_input_available(),
+            text_history_available: matches!(
+                active_palette,
+                Some(PaletteKind::Command | PaletteKind::Search)
+            ),
         }
-    }
-
-    fn help_command_for_key(key: KeyEvent) -> Option<Command> {
-        if key.modifiers != KeyModifiers::NONE {
-            return None;
-        }
-
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => Some(Command::HelpScrollDown),
-            KeyCode::Char('k') | KeyCode::Up => Some(Command::HelpScrollUp),
-            _ => None,
-        }
-    }
-
-    fn palette_command_for_key(&self, key: KeyEvent) -> Option<Command> {
-        match key.code {
-            KeyCode::Enter if key.modifiers == KeyModifiers::NONE => Some(Command::PaletteSubmit),
-            KeyCode::Tab if key.modifiers == KeyModifiers::NONE => Some(Command::PaletteComplete),
-            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                Some(Command::PaletteSelectPrev)
-            }
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                Some(Command::PaletteSelectNext)
-            }
-            KeyCode::Up if key.modifiers == KeyModifiers::NONE => {
-                if self.active_palette_uses_text_history() {
-                    Some(Command::TextHistoryOlder)
-                } else {
-                    Some(Command::PaletteSelectPrev)
-                }
-            }
-            KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
-                if self.active_palette_uses_text_history() {
-                    Some(Command::TextHistoryNewer)
-                } else {
-                    Some(Command::PaletteSelectNext)
-                }
-            }
-            KeyCode::Backspace if key.modifiers == KeyModifiers::NONE => {
-                Some(Command::TextDeleteBackward)
-            }
-            KeyCode::Delete if key.modifiers == KeyModifiers::NONE => {
-                Some(Command::TextDeleteForward)
-            }
-            KeyCode::Left if key.modifiers == KeyModifiers::NONE => Some(Command::TextMoveLeft),
-            KeyCode::Right if key.modifiers == KeyModifiers::NONE => Some(Command::TextMoveRight),
-            KeyCode::Char(ch)
-                if !key.modifiers.contains(KeyModifiers::CONTROL)
-                    && !key.modifiers.contains(KeyModifiers::ALT) =>
-            {
-                Some(Command::TextInsert {
-                    text: ch.to_string(),
-                })
-            }
-            _ => None,
-        }
-    }
-
-    fn active_palette_uses_text_history(&self) -> bool {
-        matches!(
-            self.palette.manager.active_kind(),
-            Some(PaletteKind::Command | PaletteKind::Search)
-        )
     }
 
     pub(crate) fn drain_background_events(&mut self, state: &mut AppState) -> bool {

@@ -3,7 +3,7 @@ use crate::command::{
     validate_command_id_invocation_for_source, validate_command_invocation_for_source,
 };
 use crate::error::{AppError, AppResult};
-use crate::input::keymap::build_builtin_sequence_registry;
+use crate::input::keymap::{build_builtin_sequence_registry, register_builtin_focused_bindings};
 use crate::input::sequence::{SequenceRegistrationError, SequenceRegistry};
 use crate::input::shortcut::{ShortcutKey, parse_shortcut_sequence};
 
@@ -60,7 +60,17 @@ impl KeymapOptions {
 pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegistry {
     let mut registry = match options.preset.unwrap_or(KeymapPreset::Default) {
         KeymapPreset::Default => build_builtin_sequence_registry(),
-        KeymapPreset::None => SequenceRegistry::new(),
+        KeymapPreset::None => {
+            let mut registry = SequenceRegistry::new();
+            // TODO: Revisit this when config supports scoped key bindings.
+            // `preset = "none"` currently disables only configurable normal-mode
+            // bindings; palette/help bindings are still installed as internal UI
+            // controls. Decide whether future scoped config should expose separate
+            // normal/palette/help presets or an explicit "disable all built-ins"
+            // switch instead of preserving this implicit split.
+            register_builtin_focused_bindings(&mut registry);
+            registry
+        }
     };
 
     for target in &options.unbind {

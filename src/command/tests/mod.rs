@@ -4,6 +4,7 @@ use crate::command::{
 };
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::keymap::build_builtin_sequence_registry;
+use crate::input::sequence::KeyBindingScope;
 
 use super::spec::validate_command_id_for_source;
 
@@ -12,13 +13,6 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
     let registry = build_builtin_sequence_registry();
     let snapshot = registry.snapshot();
     let extensions = ExtensionUiSnapshot::with_search_active(true);
-    let ctx = CommandConditionContext {
-        extensions: &extensions,
-        mode: Mode::Normal,
-        source: CommandInvocationSource::Keymap,
-        active_palette: true,
-        focused_text_input: true,
-    };
 
     assert!(
         !snapshot.exact_bindings.is_empty(),
@@ -30,6 +24,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
     );
 
     for binding in snapshot.exact_bindings {
+        let ctx = key_binding_command_context(binding.scope, &extensions);
         assert!(
             find_command_spec(binding.command_id).is_some(),
             "key binding {:?} references unknown command {}",
@@ -45,6 +40,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
     }
 
     for binding in snapshot.numeric_prefix_bindings {
+        let ctx = key_binding_command_context(binding.scope, &extensions);
         assert!(
             find_command_spec(binding.command_id).is_some(),
             "numeric key binding {:?} references unknown command {}",
@@ -57,6 +53,39 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
                 binding.suffix, binding.command_id, err
             )
         });
+    }
+
+    for binding in snapshot.generated_bindings {
+        let ctx = key_binding_command_context(binding.scope, &extensions);
+        assert!(
+            find_command_spec(binding.command_id).is_some(),
+            "generated key binding {:?} references unknown command {}",
+            binding.matcher,
+            binding.command_id
+        );
+        validate_command_id_for_source(binding.command_id, &ctx).unwrap_or_else(|err| {
+            panic!(
+                "generated key binding {:?} references command {} that keymap cannot invoke: {}",
+                binding.matcher, binding.command_id, err
+            )
+        });
+    }
+}
+
+fn key_binding_command_context<'a>(
+    scope: KeyBindingScope,
+    extensions: &'a ExtensionUiSnapshot,
+) -> CommandConditionContext<'a> {
+    CommandConditionContext {
+        extensions,
+        mode: match scope {
+            KeyBindingScope::Normal => Mode::Normal,
+            KeyBindingScope::Palette => Mode::Palette,
+            KeyBindingScope::Help => Mode::Help,
+        },
+        source: CommandInvocationSource::Keymap,
+        active_palette: matches!(scope, KeyBindingScope::Palette),
+        focused_text_input: matches!(scope, KeyBindingScope::Palette),
     }
 }
 

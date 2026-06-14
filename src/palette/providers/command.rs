@@ -54,6 +54,7 @@ impl PaletteProvider for CommandPaletteProvider {
                     .filter(|spec| {
                         let command_ctx = CommandConditionContext {
                             extensions: ctx.extensions,
+                            mode: ctx.app.mode,
                             source: CommandInvocationSource::CommandPaletteInput,
                         };
                         is_command_visible_in_palette(*spec, &command_ctx)
@@ -89,6 +90,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 input,
                 CommandInvocationSource::CommandPaletteInput,
                 ctx.extensions,
+                ctx.app.mode,
             ) {
                 Ok(command) => {
                     return Ok(PaletteSubmitEffect::Dispatch {
@@ -409,6 +411,7 @@ fn submit_selected_enum_candidate(
         synthesized_trimmed,
         CommandInvocationSource::CommandPaletteInput,
         ctx.extensions,
+        ctx.app.mode,
     ) {
         Ok(command) => Ok(Some(PaletteSubmitEffect::Dispatch {
             command,

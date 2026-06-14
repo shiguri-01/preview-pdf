@@ -207,6 +207,26 @@ pub(crate) fn close_help(app: &mut AppState) -> AppResult<CommandNoticeResult> {
     Ok(applied())
 }
 
+pub(crate) fn scroll_help_down(app: &mut AppState) -> AppResult<CommandNoticeResult> {
+    let previous = app.help_scroll;
+    app.scroll_help_by(1);
+    if app.help_scroll == previous {
+        return Ok(noop());
+    }
+
+    Ok(applied())
+}
+
+pub(crate) fn scroll_help_up(app: &mut AppState) -> AppResult<CommandNoticeResult> {
+    let previous = app.help_scroll;
+    app.scroll_help_by(-1);
+    if app.help_scroll == previous {
+        return Ok(noop());
+    }
+
+    Ok(applied())
+}
+
 fn resolve_page_count(page_count: usize) -> AppResult<usize> {
     if page_count > 0 {
         return Ok(page_count);

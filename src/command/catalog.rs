@@ -10,6 +10,7 @@ use super::types::{
 
 const NO_ARGS: [ArgSpec; 0] = [];
 const REQUIRES_SEARCH_ACTIVE: [CommandCondition; 1] = [CommandCondition::SearchActive];
+const REQUIRES_HELP_MODE: [CommandCondition; 1] = [CommandCondition::HelpMode];
 const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     name: "page",
     kind: ArgKind::I32,
@@ -409,6 +410,26 @@ define_commands! {
         availability: CommandAvailability::Always,
         parse: no_args,
         exec: super::handlers::close_help,
+    }
+    HelpScrollDown {
+        id: "help-scroll-down",
+        title: "Scroll Help Down",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
+        parse: no_args,
+        exec: super::handlers::help_scroll_down,
+    }
+    HelpScrollUp {
+        id: "help-scroll-up",
+        title: "Scroll Help Up",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
+        parse: no_args,
+        exec: super::handlers::help_scroll_up,
     }
     OpenSearch {
         id: "search",

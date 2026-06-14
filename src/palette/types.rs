@@ -1,5 +1,5 @@
 use super::kind::PaletteKind;
-use crate::app::{AppState, PageLayoutMode, SpreadCoverPolicy};
+use crate::app::{AppState, Mode, PageLayoutMode, SpreadCoverPolicy};
 use crate::command::{Command, SearchMatcherKind};
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
@@ -161,17 +161,30 @@ pub enum PaletteTabEffect {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PaletteAppSnapshot {
     pub current_page: usize,
+    pub mode: Mode,
     pub page_layout_mode: PageLayoutMode,
     pub spread_cover_policy: SpreadCoverPolicy,
+}
+
+impl Default for PaletteAppSnapshot {
+    fn default() -> Self {
+        Self {
+            current_page: 0,
+            mode: Mode::Normal,
+            page_layout_mode: PageLayoutMode::default(),
+            spread_cover_policy: SpreadCoverPolicy::default(),
+        }
+    }
 }
 
 impl From<&AppState> for PaletteAppSnapshot {
     fn from(app: &AppState) -> Self {
         Self {
             current_page: app.current_page,
+            mode: app.mode,
             page_layout_mode: app.page_layout_mode,
             spread_cover_policy: app.spread_cover_policy,
         }

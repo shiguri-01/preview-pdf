@@ -427,6 +427,7 @@ mod tests {
             current_page: 4,
             page_layout_mode: PageLayoutMode::Spread,
             spread_cover_policy: SpreadCoverPolicy::Paired,
+            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot {
             search_results_entries: vec![
@@ -470,6 +471,7 @@ mod tests {
             current_page: 0,
             page_layout_mode: PageLayoutMode::Spread,
             spread_cover_policy: SpreadCoverPolicy::Cover,
+            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot {
             search_results_entries: vec![

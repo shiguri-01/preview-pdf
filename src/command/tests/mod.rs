@@ -16,6 +16,8 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
         extensions: &extensions,
         mode: Mode::Normal,
         source: CommandInvocationSource::Keymap,
+        active_palette: true,
+        focused_text_input: true,
     };
 
     assert!(

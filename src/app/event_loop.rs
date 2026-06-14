@@ -966,7 +966,7 @@ mod tests {
             .handle_waited_event(
                 WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                     Command::ReloadDocument,
-                    CommandInvocationSource::PaletteProvider,
+                    CommandInvocationSource::CommandPaletteInput,
                 ))),
                 &mut runtime,
                 &mut document,

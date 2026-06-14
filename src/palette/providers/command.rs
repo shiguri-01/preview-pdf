@@ -56,6 +56,8 @@ impl PaletteProvider for CommandPaletteProvider {
                             extensions: ctx.extensions,
                             mode: ctx.app.mode,
                             source: CommandInvocationSource::CommandPaletteInput,
+                            active_palette: true,
+                            focused_text_input: true,
                         };
                         is_command_visible_in_palette(*spec, &command_ctx)
                     })

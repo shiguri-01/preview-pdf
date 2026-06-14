@@ -30,10 +30,10 @@ can operate on resolved policies rather than re-reading config or CLI state.
 - [src/command/](../src/command/) owns command ids, metadata, parsing, source-aware validation,
   dispatch, and typed command outcomes.
 - [src/input/](../src/input/) owns key sequence normalization, built-in key bindings, numeric
-  prefixes, and palette input history.
-- [src/palette/](../src/palette/) owns palette sessions, input handling, provider lookup,
-  candidate matching, selection, tab, submit, cancel, and rendered palette
-  views.
+  prefixes, and input history used by focused text inputs.
+- [src/palette/](../src/palette/) owns palette sessions, provider lookup, candidate matching,
+  selection state, completion, submit, cancel, text input state, and rendered
+  palette views. It does not own raw terminal key routing.
 - [src/extension/](../src/extension/) owns the extension host contract and the composition of
   built-in extension state.
 - [src/search/](../src/search/), [src/history/](../src/history/), and
@@ -56,7 +56,9 @@ typed `AppEvent` values for cross-subsystem observation.
 
 Palette providers receive read-only app and extension snapshots. They should
 request behavior by returning typed effects or commands instead of taking
-`AppState` directly.
+`AppState` directly. Focused UI operations such as palette submit, palette
+selection, text editing, text history recall, and help scrolling enter the same
+command dispatch path as normal-mode key bindings.
 
 Extensions own extension-local state and observe `AppEvent` values. Shared UI
 data crosses from extensions to palettes through `ExtensionUiSnapshot`.
@@ -91,13 +93,18 @@ communication uses snapshots, command requests, events, or worker completions.
 Terminal input enters as `DomainEvent::Input`.
 
 1. The loop router delegates input to app input handling.
-2. Pending palette input is offered to `PaletteManager` first.
-3. Extension input hooks may intercept extension-local inputs.
+2. Focused routes convert active overlay keys into `CommandRequest` values:
+   palette keys become palette/text interaction commands, and help keys become
+   help interaction commands.
+3. Extension input hooks may intercept extension-local inputs when no focused
+   route or pending key sequence owns the input.
 4. The input sequence resolver maps normal-mode key sequences to typed
    commands.
-5. Command dispatch validates the invocation source, applies behavior, and
-   emits `AppEvent` values.
-6. The loop re-routes emitted app events to extensions and other loop effects.
+5. Command dispatch validates invocation source, resolves the required target
+   such as app, active palette, focused text input, or active help, applies
+   behavior, and emits `AppEvent` values.
+6. The loop re-routes emitted app events and any follow-up command requests to
+   extensions and other loop effects.
 7. Render workers return `DomainEvent::RenderComplete`; presenter encode
    workers return `DomainEvent::EncodeComplete`.
 8. UI redraws happen when input, command effects, extension background work, or
@@ -118,10 +125,10 @@ routing, and dispatch routing. Docs describe stability and invocation policy;
 tests guard registry consistency.
 
 Palette providers:
-Providers own candidate generation and submit semantics for their palette kind,
-while `PaletteManager` owns common session mechanics. This keeps keyboard and
-selection behavior consistent without forcing every provider into filter-mode
-semantics.
+Providers own candidate generation, completion semantics, and submit semantics
+for their palette kind, while `PaletteManager` owns common session state and
+operation methods. Key routing remains outside providers and produces commands;
+the active palette is the command target for palette operations.
 
 Extensions:
 Built-in features that need background state, event observation, or status-bar

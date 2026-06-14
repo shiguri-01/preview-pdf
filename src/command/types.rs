@@ -183,9 +183,17 @@ pub enum CommandExposure {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandRole {
+    UserIntent,
+    InteractionControl,
+    InternalEffect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandInvocationPolicy {
     User,
     KeymapOnly,
+    Interaction,
     InternalOnly,
 }
 
@@ -202,10 +210,18 @@ pub enum CommandAvailability {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandTargetRequirement {
+    App,
+    ActivePalette,
+    FocusedTextInput,
+    ActiveHelp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandInvocationSource {
     Keymap,
     CommandPaletteInput,
-    PaletteProvider,
+    Interaction,
 }
 
 #[cfg(test)]
@@ -315,8 +331,10 @@ pub struct CommandSpec {
     pub id: &'static str,
     pub title: &'static str,
     pub args: &'static [ArgSpec],
+    pub role: CommandRole,
     pub exposure: CommandExposure,
     pub invocation: CommandInvocationPolicy,
+    pub target: CommandTargetRequirement,
     pub availability: CommandAvailability,
 }
 

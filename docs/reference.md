@@ -103,9 +103,10 @@ Test coverage:
 ## Commands
 
 Orientation:
-- Commands have three review-relevant concerns: stable ids and argument parsing,
-  source-aware invocation policy, and dispatch effects. The command catalog ties
-  those concerns together; feature behavior stays in handlers and app state.
+- Commands have five review-relevant concerns: stable ids and argument parsing,
+  role, source-aware invocation policy, target requirement, and dispatch
+  effects. The command catalog ties those concerns together; feature behavior
+  stays in handlers, focused UI targets, and app state.
 
 Contract:
 - Command ids are canonical kebab-case strings and are compatibility-sensitive
@@ -113,18 +114,28 @@ Contract:
 - The command catalog owns command ids, metadata, parser routing, and dispatch
   routing.
 - Typed commands must have matching registry metadata.
+- Command roles distinguish user intent commands, focused interaction controls,
+  and internal effects.
 - Public commands may appear in user-facing command surfaces when their
   invocation and availability policies allow it.
 - Internal commands are runtime plumbing and must not appear in the command
   palette.
 - Keymap-only commands can be invoked from key bindings but not from direct
   command palette input.
-- Internal-only commands can be invoked only by provider-driven internal flows.
+- Interaction commands can be invoked by key bindings or interaction flows but
+  are hidden from user-facing command surfaces.
+- Internal-only commands can be invoked only by interaction flows that complete
+  another user action.
 - Availability checks are separate from invocation policy.
+- Target resolution is separate from invocation policy and availability.
+  Palette commands require an active palette, text commands require a focused
+  text input, and help interaction commands require active help.
 - Availability may depend on runtime app state such as active mode, not only on
   invocation source.
 - Command dispatch emits command execution events after validation and dispatch
   complete, including rejected commands.
+- Command dispatch may return follow-up command requests, for example when a
+  palette submit completes a user intent or internal effect command.
 
 Compatibility:
 - Public command ids, argument compatibility, and user-facing parser behavior
@@ -148,9 +159,9 @@ Test coverage:
 ## Key Bindings
 
 Orientation:
-- Normal-mode key bindings turn terminal key events into typed commands through
-  the sequence registry. Palette-local keys are handled by palette session
-  logic instead.
+- Terminal key events are converted to typed command requests before behavior is
+  applied. Normal-mode key bindings use the sequence registry; focused surfaces
+  such as palette and help use focused key routing that also returns commands.
 
 Contract:
 - Printable bindings are defined by resulting characters, not by physical keys.
@@ -163,11 +174,11 @@ Contract:
   invocation policy.
 - Configured key bindings must reference known commands that can be invoked
   from the keymap; runtime availability remains a dispatch-time check.
-- Palette-local key handling is owned by palette behavior, not the normal-mode
-  keymap.
-- Help-mode-local keys are handled by the help input route when the help overlay
-  is active; they may dispatch commands without being normal-mode bindings.
-- `<esc>` is reserved for global cancellation and is not routed through the
+- Palette-focused keys dispatch hidden palette or text interaction commands
+  such as submit, complete, selection movement, text editing, and text history.
+- Help-focused keys dispatch hidden help interaction commands such as close and
+  scroll.
+- `<esc>` is reserved for focused cancellation and is not routed through the
   normal-mode keymap.
 
 Compatibility:
@@ -190,32 +201,36 @@ Test coverage:
 
 Orientation:
 - Palette behavior splits into common session mechanics and provider-owned
-  semantics. The common path owns opening, input routing, selection, tab,
-  submit, and closing. Providers own candidate meaning and the effects returned
-  for tab and submit.
+  semantics. The common path owns opening, text input state, selection,
+  completion, submit, and closing. Focused key routing turns terminal keys into
+  commands; providers own candidate meaning and the effects returned for
+  completion and submit.
 
 Contract:
 - A palette session has a kind, session id, input state, candidate list,
   visible candidate indexes, selection, optional open payload, and optional
   assistive text.
-- Palette providers own candidate generation, input mode, initial input, tab
-  effects, submit effects, assistive text, and provider-specific selection
-  defaults.
-- `PaletteManager` owns common open, cancel, input, history recall, selection,
-  tab, submit, and session-id validation behavior.
+- Palette providers own candidate generation, input mode, initial input,
+  completion effects, submit effects, assistive text, and provider-specific
+  selection defaults.
+- `PaletteManager` owns common open, cancel, text input operations, text history
+  recall for focused inputs that support it, selection, completion, submit, and
+  session-id validation behavior.
 - Candidate search text is independent from rendered row text.
 - Submit effects may close, reopen, or dispatch a typed command with optional
   history recording and a post action.
 - Command-palette visibility derives from command metadata and availability,
   not from a hand-written UI list.
+- Input history is a focused text input capability used by command and search
+  palettes; it is not a provider-specific palette action.
 
 Observable behavior:
-- Escape closes the active palette.
-- Control-p/control-n move selection.
-- Up/down recall input history only for palettes that support it; otherwise
-  they move selection.
-- Tab applies provider tab behavior.
-- Enter applies provider submit behavior.
+- Escape dispatches the palette close command when a palette is active.
+- Control-p/control-n dispatch palette selection commands.
+- Up/down dispatch text history commands for focused inputs that support
+  history; otherwise they dispatch palette selection commands.
+- Tab dispatches palette completion.
+- Enter dispatches palette submit.
 - Empty candidate lists can still represent valid interactive states when the
   provider supports that behavior.
 

@@ -4,8 +4,9 @@ use crate::palette::{PaletteKind, PaletteOpenPayload};
 use super::dispatch::{CommandExecContext, CommandExecution};
 use super::types::{
     ArgHint, ArgKind, ArgSpec, CommandAvailability, CommandCondition, CommandExposure,
-    CommandInvocationPolicy, CommandInvocationSource, CommandSpec, PanAmount, PanDirection,
-    SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
+    CommandInvocationPolicy, CommandInvocationSource, CommandRole, CommandSpec,
+    CommandTargetRequirement, PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
+    SpreadDirectionArg,
 };
 
 const NO_ARGS: [ArgSpec; 0] = [];
@@ -79,6 +80,12 @@ const ARGS_SUBMIT_SEARCH: [ArgSpec; 2] = [
         hint: ArgHint::None,
     },
 ];
+const ARGS_TEXT_INSERT: [ArgSpec; 1] = [ArgSpec {
+    name: "text",
+    kind: ArgKind::String,
+    required: true,
+    hint: ArgHint::None,
+}];
 const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
     ArgSpec {
         name: "page",
@@ -165,8 +172,10 @@ macro_rules! define_commands {
                     id: $id,
                     title: $title,
                     args: $args,
+                    role: define_commands!(@role $variant),
                     exposure: $exposure,
                     invocation: $invocation,
+                    target: define_commands!(@target $variant),
                     availability: $availability,
                 },
             )+
@@ -212,6 +221,45 @@ macro_rules! define_commands {
     (@exec $exec:path, $ctx:expr $(, $arg:expr)*) => {
         $exec($ctx $(, $arg)*)
     };
+
+    (@role OpenPalette) => { CommandRole::InteractionControl };
+    (@role ClosePalette) => { CommandRole::InteractionControl };
+    (@role PaletteSubmit) => { CommandRole::InteractionControl };
+    (@role PaletteComplete) => { CommandRole::InteractionControl };
+    (@role PaletteSelectNext) => { CommandRole::InteractionControl };
+    (@role PaletteSelectPrev) => { CommandRole::InteractionControl };
+    (@role TextInsert) => { CommandRole::InteractionControl };
+    (@role TextDeleteBackward) => { CommandRole::InteractionControl };
+    (@role TextDeleteForward) => { CommandRole::InteractionControl };
+    (@role TextMoveLeft) => { CommandRole::InteractionControl };
+    (@role TextMoveRight) => { CommandRole::InteractionControl };
+    (@role TextHistoryOlder) => { CommandRole::InteractionControl };
+    (@role TextHistoryNewer) => { CommandRole::InteractionControl };
+    (@role CloseHelp) => { CommandRole::InteractionControl };
+    (@role HelpScrollDown) => { CommandRole::InteractionControl };
+    (@role HelpScrollUp) => { CommandRole::InteractionControl };
+    (@role SubmitSearch) => { CommandRole::InternalEffect };
+    (@role SearchResultGoto) => { CommandRole::InternalEffect };
+    (@role HistoryGoto) => { CommandRole::InternalEffect };
+    (@role OutlineGoto) => { CommandRole::InternalEffect };
+    (@role $variant:ident) => { CommandRole::UserIntent };
+
+    (@target ClosePalette) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteSubmit) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteComplete) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteSelectNext) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteSelectPrev) => { CommandTargetRequirement::ActivePalette };
+    (@target TextInsert) => { CommandTargetRequirement::FocusedTextInput };
+    (@target TextDeleteBackward) => { CommandTargetRequirement::FocusedTextInput };
+    (@target TextDeleteForward) => { CommandTargetRequirement::FocusedTextInput };
+    (@target TextMoveLeft) => { CommandTargetRequirement::FocusedTextInput };
+    (@target TextMoveRight) => { CommandTargetRequirement::FocusedTextInput };
+    (@target TextHistoryOlder) => { CommandTargetRequirement::FocusedTextInput };
+    (@target TextHistoryNewer) => { CommandTargetRequirement::FocusedTextInput };
+    (@target CloseHelp) => { CommandTargetRequirement::ActiveHelp };
+    (@target HelpScrollDown) => { CommandTargetRequirement::ActiveHelp };
+    (@target HelpScrollUp) => { CommandTargetRequirement::ActiveHelp };
+    (@target $variant:ident) => { CommandTargetRequirement::App };
 }
 
 define_commands! {
@@ -386,10 +434,120 @@ define_commands! {
         title: "Close Palette",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::InternalOnly,
+        invocation: CommandInvocationPolicy::Interaction,
         availability: CommandAvailability::Always,
         parse: no_args,
         exec: super::handlers::close_palette,
+    }
+    PaletteSubmit {
+        id: "palette.submit",
+        title: "Submit Palette",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::palette_submit,
+    }
+    PaletteComplete {
+        id: "palette.complete",
+        title: "Complete Palette Input",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::palette_complete,
+    }
+    PaletteSelectNext {
+        id: "palette.select-next",
+        title: "Select Next Palette Item",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::palette_select_next,
+    }
+    PaletteSelectPrev {
+        id: "palette.select-prev",
+        title: "Select Previous Palette Item",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::palette_select_prev,
+    }
+    TextInsert(text: String) {
+        id: "text.insert",
+        title: "Insert Text",
+        args: &ARGS_TEXT_INSERT,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: (super::parse::parse_text_insert),
+        exec: super::handlers::text_insert,
+    }
+    TextDeleteBackward {
+        id: "text.delete-backward",
+        title: "Delete Previous Text Character",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_backward,
+    }
+    TextDeleteForward {
+        id: "text.delete-forward",
+        title: "Delete Next Text Character",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_forward,
+    }
+    TextMoveLeft {
+        id: "text.move-left",
+        title: "Move Text Cursor Left",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_left,
+    }
+    TextMoveRight {
+        id: "text.move-right",
+        title: "Move Text Cursor Right",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_right,
+    }
+    TextHistoryOlder {
+        id: "text.history-older",
+        title: "Recall Older Text Input",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::text_history_older,
+    }
+    TextHistoryNewer {
+        id: "text.history-newer",
+        title: "Recall Newer Text Input",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        availability: CommandAvailability::Always,
+        parse: no_args,
+        exec: super::handlers::text_history_newer,
     }
     OpenHelp {
         id: "help",
@@ -406,7 +564,7 @@ define_commands! {
         title: "Close Help",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::KeymapOnly,
+        invocation: CommandInvocationPolicy::Interaction,
         availability: CommandAvailability::Always,
         parse: no_args,
         exec: super::handlers::close_help,
@@ -415,8 +573,8 @@ define_commands! {
         id: "help-scroll-down",
         title: "Scroll Help Down",
         args: &NO_ARGS,
-        exposure: CommandExposure::Public,
-        invocation: CommandInvocationPolicy::User,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
         availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
         parse: no_args,
         exec: super::handlers::help_scroll_down,
@@ -425,8 +583,8 @@ define_commands! {
         id: "help-scroll-up",
         title: "Scroll Help Up",
         args: &NO_ARGS,
-        exposure: CommandExposure::Public,
-        invocation: CommandInvocationPolicy::User,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
         availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
         parse: no_args,
         exec: super::handlers::help_scroll_up,
@@ -592,6 +750,8 @@ mod tests {
     use crate::app::{AppState, PaletteRequest};
     use crate::backend::{OutlineNode, PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::extension::ExtensionHost;
+    use crate::input::InputHistoryService;
+    use crate::palette::{PaletteManager, PaletteRegistry};
 
     use super::{
         CommandExecContext, CommandId, command_registry, execute_registered_command,
@@ -702,13 +862,19 @@ mod tests {
 
             let mut app = AppState::default();
             let mut extension_host = ExtensionHost::default();
+            let palette_registry = PaletteRegistry::default();
+            let mut palette_manager = PaletteManager::default();
             let mut palette_requests = VecDeque::<PaletteRequest>::new();
+            let mut input_history = InputHistoryService::default();
             let mut ctx = CommandExecContext {
                 app: &mut app,
                 view_policy: crate::config::ViewPolicy::default(),
                 pdf: test_pdf(),
                 extension_host: &mut extension_host,
+                palette_registry: &palette_registry,
+                palette_manager: &mut palette_manager,
                 palette_requests: &mut palette_requests,
+                input_history: &mut input_history,
             };
 
             execute_registered_command(&mut ctx, command)

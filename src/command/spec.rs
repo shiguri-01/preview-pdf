@@ -5,7 +5,7 @@ use crate::extension::ExtensionUiSnapshot;
 use super::catalog::{self, Command};
 use super::types::{
     CommandAvailability, CommandCondition, CommandExposure, CommandInvocationPolicy,
-    CommandInvocationSource, CommandSpec,
+    CommandInvocationSource, CommandRole, CommandSpec, CommandTargetRequirement,
 };
 
 const NO_CONDITIONS: [CommandCondition; 0] = [];
@@ -22,6 +22,8 @@ pub struct CommandConditionContext<'a> {
     pub extensions: &'a ExtensionUiSnapshot,
     pub mode: Mode,
     pub source: CommandInvocationSource,
+    pub active_palette: bool,
+    pub focused_text_input: bool,
 }
 
 pub fn find_command_spec(id: &str) -> Option<CommandSpec> {
@@ -33,8 +35,9 @@ pub fn spec_for_command(command: &Command) -> Option<CommandSpec> {
 }
 
 pub fn is_command_visible_in_palette(spec: CommandSpec, ctx: &CommandConditionContext<'_>) -> bool {
-    spec.exposure == CommandExposure::Public
-        && spec.invocation == CommandInvocationPolicy::User
+    spec.role == CommandRole::UserIntent
+        && spec.exposure == CommandExposure::Public
+        && is_invocation_source_allowed(spec, ctx.source)
         && is_command_available(spec, ctx)
 }
 
@@ -97,6 +100,10 @@ fn validate_command_spec_for_source(
 ) -> AppResult<()> {
     validate_command_spec_invocation_for_source(spec, ctx.source)?;
 
+    if !is_target_available(spec.target, ctx) {
+        return Err(AppError::invalid_argument(target_unavailable_message(spec)));
+    }
+
     if !is_command_available(spec, ctx) {
         return Err(AppError::invalid_argument(unavailable_message(spec, ctx)));
     }
@@ -130,9 +137,30 @@ fn is_command_available(spec: CommandSpec, ctx: &CommandConditionContext<'_>) ->
 
 fn is_invocation_source_allowed(spec: CommandSpec, source: CommandInvocationSource) -> bool {
     match spec.invocation {
-        CommandInvocationPolicy::User => true,
+        CommandInvocationPolicy::User => {
+            matches!(
+                source,
+                CommandInvocationSource::Keymap | CommandInvocationSource::CommandPaletteInput
+            )
+        }
         CommandInvocationPolicy::KeymapOnly => source == CommandInvocationSource::Keymap,
-        CommandInvocationPolicy::InternalOnly => source == CommandInvocationSource::PaletteProvider,
+        CommandInvocationPolicy::Interaction => matches!(
+            source,
+            CommandInvocationSource::Keymap | CommandInvocationSource::Interaction
+        ),
+        CommandInvocationPolicy::InternalOnly => source == CommandInvocationSource::Interaction,
+    }
+}
+
+fn is_target_available(
+    target: CommandTargetRequirement,
+    ctx: &CommandConditionContext<'_>,
+) -> bool {
+    match target {
+        CommandTargetRequirement::App => true,
+        CommandTargetRequirement::ActivePalette => ctx.active_palette,
+        CommandTargetRequirement::FocusedTextInput => ctx.focused_text_input,
+        CommandTargetRequirement::ActiveHelp => ctx.mode == Mode::Help,
     }
 }
 
@@ -163,6 +191,21 @@ fn unavailable_message(spec: CommandSpec, ctx: &CommandConditionContext<'_>) -> 
     }
 
     format!("{} is unavailable", spec.id)
+}
+
+fn target_unavailable_message(spec: CommandSpec) -> String {
+    match spec.target {
+        CommandTargetRequirement::App => format!("{} has no target", spec.id),
+        CommandTargetRequirement::ActivePalette => {
+            format!("{} is unavailable without an active palette", spec.id)
+        }
+        CommandTargetRequirement::FocusedTextInput => {
+            format!("{} is unavailable without a focused text input", spec.id)
+        }
+        CommandTargetRequirement::ActiveHelp => {
+            format!("{} is unavailable outside help", spec.id)
+        }
+    }
 }
 
 fn app_error_message(err: AppError) -> String {
@@ -210,6 +253,8 @@ mod tests {
             extensions: &extensions,
             mode: Mode::Normal,
             source: CommandInvocationSource::CommandPaletteInput,
+            active_palette: true,
+            focused_text_input: true,
         };
 
         let spec = find_command_spec("open-palette").expect("spec should exist");
@@ -223,6 +268,8 @@ mod tests {
             extensions: &extensions,
             mode: Mode::Normal,
             source: CommandInvocationSource::Keymap,
+            active_palette: false,
+            focused_text_input: false,
         };
 
         let err = validate_command_id_for_source("next-search-hit", &ctx)
@@ -241,6 +288,8 @@ mod tests {
             extensions: &extensions,
             mode: Mode::Normal,
             source: CommandInvocationSource::Keymap,
+            active_palette: false,
+            focused_text_input: false,
         };
         validate_command_for_source(
             &Command::OpenPalette {
@@ -255,6 +304,8 @@ mod tests {
             extensions: &extensions,
             mode: Mode::Normal,
             source: CommandInvocationSource::CommandPaletteInput,
+            active_palette: true,
+            focused_text_input: true,
         };
         let err = validate_command_id_for_source("open-palette", &palette_input_ctx)
             .expect_err("command palette input should be rejected");
@@ -268,6 +319,8 @@ mod tests {
             extensions: &extensions,
             mode: Mode::Normal,
             source: CommandInvocationSource::CommandPaletteInput,
+            active_palette: true,
+            focused_text_input: true,
         };
 
         let spec = find_command_spec("close-help").expect("spec should exist");
@@ -281,6 +334,8 @@ mod tests {
             extensions: &extensions,
             mode: Mode::Normal,
             source: CommandInvocationSource::Keymap,
+            active_palette: false,
+            focused_text_input: false,
         };
         let err = validate_command_id_for_source("help-scroll-down", &normal_ctx)
             .expect_err("help scroll should be unavailable outside help");
@@ -290,6 +345,8 @@ mod tests {
             extensions: &extensions,
             mode: Mode::Help,
             source: CommandInvocationSource::Keymap,
+            active_palette: false,
+            focused_text_input: false,
         };
         validate_command_id_for_source("help-scroll-down", &help_ctx)
             .expect("help scroll down should be available in help");

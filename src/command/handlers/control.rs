@@ -23,5 +23,6 @@ pub(in crate::command) fn quit(_ctx: &mut CommandExecContext<'_>) -> AppResult<C
     Ok(CommandExecution {
         outcome: CommandOutcome::QuitRequested,
         notice: NoticeAction::Keep,
+        follow_up_commands: Vec::new(),
     })
 }

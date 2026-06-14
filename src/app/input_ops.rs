@@ -2,19 +2,18 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
-    Command, CommandDispatchResult, CommandInvocationSource, CommandRequest,
-    dispatch_with_view_policy, drain_background_events,
+    Command, CommandDispatchContext, CommandDispatchResult, CommandInvocationSource,
+    CommandRequest, dispatch_with_view_policy, drain_background_events,
 };
 use crate::config::ViewPolicy;
 use crate::error::AppResult;
 use crate::event::AppEvent;
 use crate::input::sequence::SequenceResolution;
 use crate::input::{AppInputEvent, InputHookResult};
-use crate::palette::PaletteKeyResult;
-use crate::palette::{PalettePostAction, PaletteSubmitEffect, PaletteView};
+use crate::palette::{PaletteKind, PaletteView};
 
 use super::core::InteractionSubsystem;
-use super::state::{AppState, Mode, PaletteRequest, notice_action_for_error};
+use super::state::{AppState, Mode, PaletteRequest};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct KeyEventOutcome {
@@ -39,7 +38,7 @@ impl InteractionSubsystem {
         self.sync_sequences_with_mode(state);
         match Self::route_key_event(state, key) {
             KeyEventRoute::Escape => return Ok(self.handle_escape_key_event(state, key)),
-            KeyEventRoute::Palette => return self.handle_palette_key_event(state, key),
+            KeyEventRoute::Palette => return Ok(self.handle_palette_key_event(key)),
             KeyEventRoute::Help => return Ok(self.handle_help_key_event(state, key)),
             KeyEventRoute::Normal => {}
         }
@@ -59,8 +58,26 @@ impl InteractionSubsystem {
     }
 
     fn handle_escape_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
-        if let Some(outcome) = self.close_active_overlay(state) {
-            return outcome;
+        match state.mode {
+            Mode::Palette => {
+                return KeyEventOutcome {
+                    redraw: false,
+                    commands: vec![CommandRequest::new(
+                        Command::ClosePalette,
+                        CommandInvocationSource::Keymap,
+                    )],
+                };
+            }
+            Mode::Help => {
+                return KeyEventOutcome {
+                    redraw: false,
+                    commands: vec![CommandRequest::new(
+                        Command::CloseHelp,
+                        CommandInvocationSource::Keymap,
+                    )],
+                };
+            }
+            Mode::Normal => {}
         }
         if self.sequences.resolver.has_pending() {
             let resolution = self.sequences.resolver.handle_key(key);
@@ -80,40 +97,17 @@ impl InteractionSubsystem {
         }
     }
 
-    fn handle_palette_key_event(
-        &mut self,
-        state: &mut AppState,
-        key: KeyEvent,
-    ) -> AppResult<KeyEventOutcome> {
-        let result = self.handle_palette_key(state, key)?;
-        self.handle_palette_key_result(state, result)
-    }
+    fn handle_palette_key_event(&mut self, key: KeyEvent) -> KeyEventOutcome {
+        let Some(command) = self.palette_command_for_key(key) else {
+            return KeyEventOutcome::default();
+        };
 
-    fn handle_palette_key_result(
-        &mut self,
-        state: &mut AppState,
-        result: PaletteKeyResult,
-    ) -> AppResult<KeyEventOutcome> {
-        match result {
-            PaletteKeyResult::Consumed { redraw } => Ok(KeyEventOutcome {
-                redraw,
-                commands: Vec::new(),
-            }),
-            PaletteKeyResult::Submit(action) => {
-                let (changed_by_palette, command) =
-                    self.handle_palette_submit_effect(state, action.session_id, action.effect)?;
-                Ok(KeyEventOutcome {
-                    redraw: changed_by_palette,
-                    commands: command.into_iter().collect(),
-                })
-            }
-            PaletteKeyResult::SubmitError(err) => {
-                state.apply_notice_action(notice_action_for_error(err));
-                Ok(KeyEventOutcome {
-                    redraw: true,
-                    commands: Vec::new(),
-                })
-            }
+        KeyEventOutcome {
+            redraw: false,
+            commands: vec![CommandRequest::new(
+                command,
+                CommandInvocationSource::Keymap,
+            )],
         }
     }
 
@@ -166,10 +160,61 @@ impl InteractionSubsystem {
         }
 
         match key.code {
-            KeyCode::Char('j') => Some(Command::HelpScrollDown),
-            KeyCode::Char('k') => Some(Command::HelpScrollUp),
+            KeyCode::Char('j') | KeyCode::Down => Some(Command::HelpScrollDown),
+            KeyCode::Char('k') | KeyCode::Up => Some(Command::HelpScrollUp),
             _ => None,
         }
+    }
+
+    fn palette_command_for_key(&self, key: KeyEvent) -> Option<Command> {
+        match key.code {
+            KeyCode::Enter if key.modifiers == KeyModifiers::NONE => Some(Command::PaletteSubmit),
+            KeyCode::Tab if key.modifiers == KeyModifiers::NONE => Some(Command::PaletteComplete),
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Command::PaletteSelectPrev)
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(Command::PaletteSelectNext)
+            }
+            KeyCode::Up if key.modifiers == KeyModifiers::NONE => {
+                if self.active_palette_uses_text_history() {
+                    Some(Command::TextHistoryOlder)
+                } else {
+                    Some(Command::PaletteSelectPrev)
+                }
+            }
+            KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
+                if self.active_palette_uses_text_history() {
+                    Some(Command::TextHistoryNewer)
+                } else {
+                    Some(Command::PaletteSelectNext)
+                }
+            }
+            KeyCode::Backspace if key.modifiers == KeyModifiers::NONE => {
+                Some(Command::TextDeleteBackward)
+            }
+            KeyCode::Delete if key.modifiers == KeyModifiers::NONE => {
+                Some(Command::TextDeleteForward)
+            }
+            KeyCode::Left if key.modifiers == KeyModifiers::NONE => Some(Command::TextMoveLeft),
+            KeyCode::Right if key.modifiers == KeyModifiers::NONE => Some(Command::TextMoveRight),
+            KeyCode::Char(ch)
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT) =>
+            {
+                Some(Command::TextInsert {
+                    text: ch.to_string(),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn active_palette_uses_text_history(&self) -> bool {
+        matches!(
+            self.palette.manager.active_kind(),
+            Some(PaletteKind::Command | PaletteKind::Search)
+        )
     }
 
     pub(crate) fn drain_background_events(&mut self, state: &mut AppState) -> bool {
@@ -217,50 +262,6 @@ impl InteractionSubsystem {
         }
         let resolution = self.sequences.resolver.flush_timeout();
         Self::sequence_outcome(resolution, true)
-    }
-
-    pub(crate) fn handle_palette_key(
-        &mut self,
-        state: &mut AppState,
-        key: KeyEvent,
-    ) -> AppResult<PaletteKeyResult> {
-        let extensions = self.extensions.host.ui_snapshot();
-        self.palette
-            .manager
-            .handle_key(&self.palette.registry, state, &extensions, key)
-    }
-
-    fn close_active_overlay(&mut self, state: &mut AppState) -> Option<KeyEventOutcome> {
-        let closed = match state.mode {
-            Mode::Palette => self.close_palette_overlay(state),
-            Mode::Help => self.close_help_overlay(state),
-            Mode::Normal => return None,
-        };
-        Some(KeyEventOutcome {
-            redraw: closed,
-            commands: Vec::new(),
-        })
-    }
-
-    fn close_palette_overlay(&mut self, state: &mut AppState) -> bool {
-        let changed = state.mode != Mode::Normal;
-        let _ = self.palette.manager.close();
-        if changed {
-            state.mode = Mode::Normal;
-            self.sync_sequences_with_mode(state);
-        }
-        changed
-    }
-
-    fn close_help_overlay(&mut self, state: &mut AppState) -> bool {
-        if state.mode != Mode::Help {
-            return false;
-        }
-
-        state.mode = Mode::Normal;
-        state.reset_help_scroll();
-        self.sync_sequences_with_mode(state);
-        true
     }
 
     pub(crate) fn handle_extension_input(
@@ -325,9 +326,14 @@ impl InteractionSubsystem {
             view_policy,
             request.command,
             request.source,
-            pdf,
-            &mut self.extensions.host,
-            &mut self.palette.pending_requests,
+            CommandDispatchContext {
+                pdf,
+                extension_host: &mut self.extensions.host,
+                palette_registry: &self.palette.registry,
+                palette_manager: &mut self.palette.manager,
+                palette_requests: &mut self.palette.pending_requests,
+                input_history: &mut self.history,
+            },
         );
         self.sync_sequences_with_mode(state);
         result
@@ -396,56 +402,6 @@ impl InteractionSubsystem {
             },
         }
     }
-
-    pub(crate) fn handle_palette_submit_effect(
-        &mut self,
-        state: &mut AppState,
-        session_id: u64,
-        effect: PaletteSubmitEffect,
-    ) -> AppResult<(bool, Option<CommandRequest>)> {
-        if !self.palette.manager.close_if_matches(session_id) {
-            return Ok((false, None));
-        }
-        state.mode = Mode::Normal;
-        self.sync_sequences_with_mode(state);
-        let mut changed = true;
-        let mut pending_command = None;
-
-        match effect {
-            PaletteSubmitEffect::Close => {}
-            PaletteSubmitEffect::Reopen { kind, payload } => {
-                self.palette
-                    .pending_requests
-                    .push_back(PaletteRequest::Open { kind, payload });
-            }
-            PaletteSubmitEffect::Dispatch {
-                command,
-                history_record,
-                next,
-            } => {
-                if let Some(record) = history_record {
-                    self.history.record(record);
-                }
-                pending_command = Some(CommandRequest::new(
-                    command,
-                    CommandInvocationSource::PaletteProvider,
-                ));
-                match next {
-                    PalettePostAction::Close => {}
-                    PalettePostAction::Reopen { kind, payload } => {
-                        self.palette
-                            .pending_requests
-                            .push_back(PaletteRequest::Open { kind, payload });
-                    }
-                }
-            }
-        }
-
-        if self.apply_palette_requests(state) {
-            changed = true;
-        }
-        Ok((changed, pending_command))
-    }
 }
 
 #[cfg(test)]
@@ -461,14 +417,12 @@ mod tests {
     use crate::backend::{PdfDoc, SharedPdfBackend};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
     use crate::config::ViewPolicy;
-    use crate::error::AppError;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
-    use crate::palette::{PaletteKeyResult, PaletteKind};
+    use crate::palette::PaletteKind;
 
     use super::super::actors::InputActor;
     use super::super::core::InteractionSubsystem;
-    use super::super::state::{NoticeLevel, notice_action_for_error};
 
     fn test_pdf_backend() -> SharedPdfBackend {
         let file = unique_temp_path(".pdf");
@@ -563,10 +517,15 @@ mod tests {
         let closed = interaction
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("help close should be handled");
-        assert_eq!(state.mode, crate::app::Mode::Normal);
-        assert_eq!(state.help_scroll, 0);
-        assert!(closed.commands.is_empty());
-        assert!(closed.redraw);
+        assert_eq!(state.mode, crate::app::Mode::Help);
+        assert_eq!(
+            closed.commands,
+            vec![CommandRequest::new(
+                Command::CloseHelp,
+                CommandInvocationSource::Keymap
+            )]
+        );
+        assert!(!closed.redraw);
     }
 
     #[test]
@@ -610,7 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn help_close_returns_to_normal_mode_and_requests_redraw() {
+    fn help_escape_requests_close_help_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState {
             mode: Mode::Help,
@@ -628,15 +587,20 @@ mod tests {
             .expect("help close should be handled");
         let (commands, events, redraws) = effects.into_parts();
 
-        assert_eq!(state.mode, Mode::Normal);
-        assert_eq!(state.help_scroll, 0);
-        assert!(!redraws.is_empty());
-        assert!(commands.is_empty());
+        assert_eq!(state.mode, Mode::Help);
+        assert!(redraws.is_empty());
+        assert_eq!(
+            commands,
+            vec![CommandRequest::new(
+                Command::CloseHelp,
+                CommandInvocationSource::Keymap
+            )]
+        );
         assert!(events.is_empty());
     }
 
     #[test]
-    fn palette_close_returns_to_normal_mode_and_requests_redraw() {
+    fn palette_escape_requests_close_palette_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
         interaction
@@ -661,14 +625,20 @@ mod tests {
             .expect("palette close should be handled");
         let (commands, events, redraws) = effects.into_parts();
 
-        assert_eq!(state.mode, Mode::Normal);
-        assert!(!redraws.is_empty());
-        assert!(commands.is_empty());
+        assert_eq!(state.mode, Mode::Palette);
+        assert!(redraws.is_empty());
+        assert_eq!(
+            commands,
+            vec![CommandRequest::new(
+                Command::ClosePalette,
+                CommandInvocationSource::Keymap
+            )]
+        );
         assert!(events.is_empty());
     }
 
     #[test]
-    fn palette_submit_returns_to_normal_mode_and_dispatches_command() {
+    fn palette_enter_requests_palette_submit_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState::default();
         interaction
@@ -693,19 +663,72 @@ mod tests {
             .expect("palette submit should be handled");
         let (commands, events, redraws) = effects.into_parts();
 
-        assert_eq!(state.mode, Mode::Normal);
-        assert!(!redraws.is_empty());
-        assert!(matches!(
-            commands.as_slice(),
-            [request]
-                if request.command == Command::NextPage
-                    && request.source == CommandInvocationSource::PaletteProvider
-        ));
+        assert_eq!(state.mode, Mode::Palette);
+        assert!(redraws.is_empty());
+        assert_eq!(
+            commands,
+            vec![CommandRequest::new(
+                Command::PaletteSubmit,
+                CommandInvocationSource::Keymap
+            )]
+        );
         assert!(events.is_empty());
     }
 
     #[test]
-    fn palette_close_repairs_stale_palette_mode_even_without_active_session() {
+    fn command_palette_up_requests_text_history_command() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState::default();
+        interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Open {
+                kind: PaletteKind::Command,
+                payload: None,
+            });
+        assert!(interaction.apply_palette_requests(&mut state));
+
+        let outcome = interaction
+            .handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+            .expect("palette key should be handled");
+
+        assert_eq!(
+            outcome.commands,
+            vec![CommandRequest::new(
+                Command::TextHistoryOlder,
+                CommandInvocationSource::Keymap
+            )]
+        );
+    }
+
+    #[test]
+    fn non_history_palette_up_requests_selection_command() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState::default();
+        interaction
+            .palette
+            .pending_requests
+            .push_back(PaletteRequest::Open {
+                kind: PaletteKind::Outline,
+                payload: None,
+            });
+        assert!(interaction.apply_palette_requests(&mut state));
+
+        let outcome = interaction
+            .handle_key_event(&mut state, KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+            .expect("palette key should be handled");
+
+        assert_eq!(
+            outcome.commands,
+            vec![CommandRequest::new(
+                Command::PaletteSelectPrev,
+                CommandInvocationSource::Keymap
+            )]
+        );
+    }
+
+    #[test]
+    fn stale_palette_mode_escape_still_requests_close_palette_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState {
             mode: Mode::Palette,
@@ -716,39 +739,15 @@ mod tests {
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("stale palette close should be handled");
 
-        assert_eq!(state.mode, Mode::Normal);
-        assert!(outcome.redraw);
-        assert!(outcome.commands.is_empty());
-    }
-
-    #[test]
-    fn palette_submit_error_applies_notice_without_dispatching_command() {
-        let mut interaction = InteractionSubsystem::default();
-        let mut state = AppState::default();
-        let expected = notice_action_for_error(AppError::invalid_argument("bad palette input"));
-
-        let outcome = interaction
-            .handle_palette_key_result(
-                &mut state,
-                PaletteKeyResult::SubmitError(AppError::invalid_argument("bad palette input")),
-            )
-            .expect("palette error should be converted to a notice");
-
+        assert_eq!(state.mode, Mode::Palette);
+        assert!(!outcome.redraw);
         assert_eq!(
-            state.notice,
-            match expected {
-                super::super::state::NoticeAction::Show { level, message } =>
-                    Some(super::super::state::Notice { level, message }),
-                super::super::state::NoticeAction::Keep
-                | super::super::state::NoticeAction::Clear => None,
-            }
+            outcome.commands,
+            vec![CommandRequest::new(
+                Command::ClosePalette,
+                CommandInvocationSource::Keymap
+            )]
         );
-        assert_eq!(
-            state.notice.as_ref().map(|notice| notice.level),
-            Some(NoticeLevel::Warning)
-        );
-        assert!(outcome.redraw);
-        assert!(outcome.commands.is_empty());
     }
 
     #[test]

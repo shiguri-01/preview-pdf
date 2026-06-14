@@ -235,7 +235,7 @@ impl App {
                 return Ok(LoopControl::Continue);
             }
         };
-        let mut effects = LoopEffects::none();
+        let mut effects = LoopEffects::from_commands(dispatch.follow_up_commands.clone());
         for event in dispatch.emitted_events {
             effects.push_event(DomainEvent::App(event));
         }

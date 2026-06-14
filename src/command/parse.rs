@@ -46,6 +46,8 @@ pub fn parse_invocable_command_text(
         extensions,
         mode,
         source,
+        active_palette: mode == Mode::Palette,
+        focused_text_input: mode == Mode::Palette,
     };
     validate_command_id_for_source(id, &ctx)?;
     parse_command_text(trimmed)
@@ -77,6 +79,16 @@ pub(super) fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResul
         "debug-hide" => "debug-hide does not accept arguments",
         "debug-toggle" => "debug-toggle does not accept arguments",
         "close-palette" => "close-palette does not accept arguments",
+        "palette.submit" => "palette.submit does not accept arguments",
+        "palette.complete" => "palette.complete does not accept arguments",
+        "palette.select-next" => "palette.select-next does not accept arguments",
+        "palette.select-prev" => "palette.select-prev does not accept arguments",
+        "text.delete-backward" => "text.delete-backward does not accept arguments",
+        "text.delete-forward" => "text.delete-forward does not accept arguments",
+        "text.move-left" => "text.move-left does not accept arguments",
+        "text.move-right" => "text.move-right does not accept arguments",
+        "text.history-older" => "text.history-older does not accept arguments",
+        "text.history-newer" => "text.history-newer does not accept arguments",
         "help" => "help does not accept arguments",
         "close-help" => "close-help does not accept arguments",
         "help-scroll-down" => "help-scroll-down does not accept arguments",
@@ -134,6 +146,17 @@ fn parse_open_palette_payload(kind: PaletteKind, input: &str) -> Option<PaletteO
         PaletteKind::History => PaletteOpenPayload::HistorySeed(input.to_string()),
         PaletteKind::Outline => PaletteOpenPayload::OutlineQuery(input.to_string()),
     })
+}
+
+pub(super) fn parse_text_insert(args_text: &str) -> AppResult<Command> {
+    let text = args_text.to_string();
+    if text.is_empty() {
+        return Err(AppError::invalid_argument(
+            "text.insert requires 1 argument: text",
+        ));
+    }
+
+    Ok(Command::TextInsert { text })
 }
 
 pub(super) fn parse_goto_page(args_text: &str) -> AppResult<Command> {

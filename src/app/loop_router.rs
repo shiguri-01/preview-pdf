@@ -7,6 +7,7 @@ use crate::error::{AppError, AppResult};
 use crate::event::{
     AppEvent, DocumentReloadReason, DocumentReloadRequest, DocumentReloadResult, DomainEvent,
 };
+use crate::palette::PaletteKind;
 use crate::perf::RedrawReason;
 use crate::presenter::PresenterBackgroundEvent;
 use crate::render::worker::RenderWorker;
@@ -17,7 +18,7 @@ use super::loop_effects::LoopEffects;
 use super::loop_runtime::{
     ActiveDocument, LoopControl, LoopRuntime, SessionRestore, WaitEvent, terminate_process_now,
 };
-use super::state::notice_action_for_error;
+use super::state::{Mode, notice_action_for_error};
 use super::terminal_session::TerminalSurface;
 
 const FILE_RELOAD_RETRY_DELAYS: [Duration; 5] = [
@@ -69,14 +70,20 @@ impl App {
     {
         // Wake events are not guaranteed to arrive before the next input event, so the
         // loop checks for timed-out sequences at the start of every iteration as well.
+        let focus_before_timeout = self.input_focus();
         let timeout_effects = runtime
             .input_actor
             .handle_timeout(&mut self.interaction, &mut self.state)?;
         if matches!(
-            self.apply_loop_effects(runtime, timeout_effects),
+            self.apply_input_effects(runtime, document, timeout_effects)?,
             LoopControl::Break
         ) {
             return Ok(LoopControl::Break);
+        }
+        if matches!(waited, WaitEvent::Event(DomainEvent::Input(_)))
+            && self.input_focus() != focus_before_timeout
+        {
+            return Ok(LoopControl::Continue);
         }
 
         match waited {
@@ -87,7 +94,7 @@ impl App {
                     &mut self.state,
                 )?;
                 if matches!(
-                    self.apply_loop_effects(runtime, effects),
+                    self.apply_input_effects(runtime, document, effects)?,
                     LoopControl::Break
                 ) {
                     return Ok(LoopControl::Break);
@@ -151,6 +158,42 @@ impl App {
             }
             WaitEvent::Event(DomainEvent::Wake) => {}
             WaitEvent::Closed => return Ok(LoopControl::Break),
+        }
+        Ok(LoopControl::Continue)
+    }
+
+    fn input_focus(&self) -> (Mode, Option<PaletteKind>) {
+        (
+            self.state.mode,
+            self.interaction.palette.manager.active_kind(),
+        )
+    }
+
+    fn apply_input_effects<S>(
+        &mut self,
+        runtime: &mut LoopRuntime<S>,
+        document: &mut ActiveDocument,
+        effects: LoopEffects,
+    ) -> AppResult<LoopControl>
+    where
+        S: TerminalSurface + SessionRestore,
+    {
+        let (commands, events, redraws) = effects.into_parts();
+        for reason in redraws {
+            self.request_redraw(runtime, reason);
+        }
+        for request in commands {
+            if matches!(
+                self.handle_command_event(request, runtime, document)?,
+                LoopControl::Break
+            ) {
+                return Ok(LoopControl::Break);
+            }
+        }
+        for event in events {
+            if runtime.loop_event_tx.send(event).is_err() {
+                return Ok(LoopControl::Break);
+            }
         }
         Ok(LoopControl::Continue)
     }
@@ -235,7 +278,7 @@ impl App {
                 return Ok(LoopControl::Continue);
             }
         };
-        let mut effects = LoopEffects::from_commands(dispatch.follow_up_commands.clone());
+        let mut effects = LoopEffects::from_commands(dispatch.follow_up_commands);
         for event in dispatch.emitted_events {
             effects.push_event(DomainEvent::App(event));
         }

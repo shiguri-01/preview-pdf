@@ -36,6 +36,7 @@ pub fn is_command_visible_in_palette(spec: CommandSpec, ctx: &CommandPolicyConte
     spec.role == CommandRole::UserIntent
         && spec.exposure == CommandExposure::Public
         && is_invocation_source_allowed(spec, ctx.source)
+        && is_target_available(spec.target, ctx)
         && is_command_enabled(spec, ctx)
 }
 
@@ -236,7 +237,11 @@ mod tests {
         validate_command_for_policy, validate_command_id_for_policy,
         validate_command_invocation_for_source,
     };
-    use crate::command::{Command, CommandInvocationPolicy, CommandInvocationSource};
+    use crate::command::types::{CommandRole, CommandTargetRequirement};
+    use crate::command::{
+        Command, CommandExposure, CommandInvocationPolicy, CommandInvocationSource, CommandSpec,
+    };
+    use crate::condition::ConditionExpr;
 
     #[test]
     fn command_specs_have_unique_ids() {
@@ -326,6 +331,29 @@ mod tests {
         );
 
         let spec = find_command_spec("close-help").expect("spec should exist");
+        assert!(!is_command_visible_in_palette(spec, &ctx));
+    }
+
+    #[test]
+    fn palette_visibility_requires_command_target() {
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = policy_context(
+            CommandInvocationSource::CommandPaletteInput,
+            Mode::Normal,
+            None,
+            &extensions,
+        );
+
+        let spec = CommandSpec {
+            id: "test-palette-target",
+            title: "Test Palette Target",
+            args: &[],
+            role: CommandRole::UserIntent,
+            exposure: CommandExposure::Public,
+            invocation: CommandInvocationPolicy::User,
+            target: CommandTargetRequirement::ActivePalette,
+            enabled_when: ConditionExpr::Always,
+        };
         assert!(!is_command_visible_in_palette(spec, &ctx));
     }
 

@@ -139,8 +139,8 @@ Contract:
   use command policy functions to decide how exposure, invocation policy,
   target, and `enabled_when` apply to that surface.
 - Command-palette listing shows public user-intent commands only when the
-  command-palette input source is allowed and `enabled_when` is currently
-  satisfied.
+  command-palette input source is allowed, target requirements are satisfied,
+  and `enabled_when` is currently satisfied.
 - Typed command submission is separate from listing: a known typed command is
   parsed and then validated by dispatch policy, so "not listed" does not mean
   "unknown".
@@ -215,8 +215,9 @@ Contract:
 - Built-in key bindings must reference known command ids and satisfy command
   invocation policy.
 - Configured key bindings currently target the normal scope and must reference
-  known commands that can be invoked from the keymap; runtime `enabled_when`
-  remains a dispatch-time check.
+  known commands that can be invoked from the keymap. Like built-in bindings,
+  they resolve only when their scope and runtime `enabled_when` match; dispatch
+  still validates the resolved command before applying behavior.
 - Palette-scoped keys dispatch hidden palette interaction commands such as
   submit, complete, selection movement, input editing, and palette input
   history recall.
@@ -268,7 +269,7 @@ Contract:
   command runtime effects; providers do not write command follow-up queues or
   input history directly.
 - Command-palette visibility derives from command metadata, invocation policy,
-  and `enabled_when`, not from a hand-written UI list.
+  target availability, and `enabled_when`, not from a hand-written UI list.
 - Input history is an opt-in palette input capability; it is not a
   provider-specific palette action.
 

@@ -2,9 +2,11 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::app::Mode;
 use crate::command::Command;
 use crate::condition::{ConditionExpr, RuntimeConditionContext, evaluate_condition};
 use crate::extension::ExtensionUiSnapshot;
+use crate::palette::PaletteKind;
 
 use super::shortcut::{ShortcutKey, format_shortcut_key};
 
@@ -38,6 +40,32 @@ impl<'a> KeyBindingContext<'a> {
         Self {
             scope: KeyBindingScope::Normal,
             runtime: RuntimeConditionContext::normal(extensions),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingKeyBindingContext {
+    scope: KeyBindingScope,
+    mode: Mode,
+    active_palette: Option<PaletteKind>,
+    extensions: ExtensionUiSnapshot,
+}
+
+impl PendingKeyBindingContext {
+    fn capture(ctx: KeyBindingContext<'_>) -> Self {
+        Self {
+            scope: ctx.scope,
+            mode: ctx.runtime.mode,
+            active_palette: ctx.runtime.active_palette,
+            extensions: ctx.runtime.extensions.clone(),
+        }
+    }
+
+    fn as_context(&self) -> KeyBindingContext<'_> {
+        KeyBindingContext {
+            scope: self.scope,
+            runtime: RuntimeConditionContext::new(self.mode, self.active_palette, &self.extensions),
         }
     }
 }
@@ -382,7 +410,8 @@ impl SequenceRegistry {
                 SequenceBinding::Generated {
                     matcher, command, ..
                 } => {
-                    if buffer.len() == 1
+                    if exact.is_none()
+                        && buffer.len() == 1
                         && let Some(command) =
                             generated_command_for_key(*matcher, *command, buffer[0], ctx)
                     {
@@ -416,6 +445,7 @@ pub enum SequenceResolution {
 struct SequenceState {
     buffer: Vec<ShortcutKey>,
     scope: Option<KeyBindingScope>,
+    context: Option<PendingKeyBindingContext>,
     last_update: Option<Instant>,
     timeout: Duration,
 }
@@ -425,6 +455,7 @@ impl SequenceState {
         Self {
             buffer: Vec::new(),
             scope: None,
+            context: None,
             last_update: None,
             timeout,
         }
@@ -438,9 +469,12 @@ impl SequenceState {
         &self.buffer
     }
 
-    fn push(&mut self, key: ShortcutKey, scope: KeyBindingScope) {
+    fn push(&mut self, key: ShortcutKey, ctx: KeyBindingContext<'_>) {
+        if self.buffer.is_empty() {
+            self.context = Some(PendingKeyBindingContext::capture(ctx));
+        }
         self.buffer.push(key);
-        self.scope = Some(scope);
+        self.scope = Some(ctx.scope);
         self.last_update = Some(Instant::now());
     }
 
@@ -448,6 +482,7 @@ impl SequenceState {
         let had_buffer = !self.buffer.is_empty();
         self.buffer.clear();
         self.scope = None;
+        self.context = None;
         self.last_update = None;
         had_buffer
     }
@@ -517,11 +552,17 @@ impl SequenceResolver {
                 // Timeout is checked again on the next key so a sequence still commits even
                 // if no wake event arrived before the user continued typing.
                 return match self.confirm_pending() {
-                    SequenceResolution::Dispatch(command) => SequenceResolution::DispatchThen {
-                        first: command,
-                        next: Box::new(self.handle_normalized_key(ctx, key)),
-                        redraw: true,
-                    },
+                    SequenceResolution::Dispatch(command) => {
+                        if command_stops_followup_reprocessing(&command) {
+                            SequenceResolution::Dispatch(command)
+                        } else {
+                            SequenceResolution::DispatchThen {
+                                first: command,
+                                next: Box::new(self.handle_normalized_key(ctx, key)),
+                                redraw: true,
+                            }
+                        }
+                    }
                     SequenceResolution::Cleared | SequenceResolution::Noop => {
                         self.handle_normalized_key(ctx, key)
                     }
@@ -541,7 +582,7 @@ impl SequenceResolver {
             }
         }
 
-        self.state.push(key, ctx.scope);
+        self.state.push(key, ctx);
         self.resolve_pending_after_input(ctx, key, pending_exact)
     }
 
@@ -550,12 +591,15 @@ impl SequenceResolver {
             return SequenceResolution::Noop;
         }
 
-        let extensions = ExtensionUiSnapshot::default();
-        let ctx = KeyBindingContext {
-            scope: self.state.scope.unwrap_or(KeyBindingScope::Normal),
-            ..KeyBindingContext::normal(&extensions)
+        let Some(context) = self.state.context.as_ref() else {
+            self.state.clear();
+            return SequenceResolution::Cleared;
         };
-        match self.registry.match_buffer(self.state.as_slice(), ctx).exact {
+        let command = self
+            .registry
+            .match_buffer(self.state.as_slice(), context.as_context())
+            .exact;
+        match command {
             Some(command) => {
                 self.state.clear();
                 SequenceResolution::Dispatch(command)
@@ -588,12 +632,15 @@ impl SequenceResolver {
     }
 
     fn confirm_pending(&mut self) -> SequenceResolution {
-        let extensions = ExtensionUiSnapshot::default();
-        let ctx = KeyBindingContext {
-            scope: self.state.scope.unwrap_or(KeyBindingScope::Normal),
-            ..KeyBindingContext::normal(&extensions)
+        let Some(context) = self.state.context.as_ref() else {
+            self.state.clear();
+            return SequenceResolution::Cleared;
         };
-        match self.registry.match_buffer(self.state.as_slice(), ctx).exact {
+        let command = self
+            .registry
+            .match_buffer(self.state.as_slice(), context.as_context())
+            .exact;
+        match command {
             Some(command) => {
                 self.state.clear();
                 SequenceResolution::Dispatch(command)
@@ -693,9 +740,8 @@ fn generated_command_for_key(
 ) -> Option<Command> {
     match (matcher, command) {
         (GeneratedKeyMatcher::PrintableCharacter, GeneratedCommand::TextInsert) => {
-            if key
-                .modifiers()
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+            if key.modifiers().contains(KeyModifiers::CONTROL)
+                && !key.modifiers().contains(KeyModifiers::ALT)
             {
                 return None;
             }
@@ -838,7 +884,7 @@ mod tests {
     };
     use crate::app::Mode;
     use crate::command::Command;
-    use crate::condition::{ConditionExpr, RuntimeConditionContext};
+    use crate::condition::{ConditionExpr, RuntimeCondition, RuntimeConditionContext};
     use crate::extension::ExtensionUiSnapshot;
     use crate::input::shortcut::ShortcutKey;
     use crate::palette::PaletteKind;
@@ -946,6 +992,88 @@ mod tests {
         );
     }
 
+    #[test]
+    fn generated_printable_binding_accepts_ctrl_alt_text() {
+        let mut registry = SequenceRegistry::new();
+        registry.register_generated(
+            KeyBindingScope::Palette,
+            ConditionExpr::Always,
+            GeneratedKeyMatcher::PrintableCharacter,
+            GeneratedCommand::TextInsert,
+        );
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                palette_context(&extensions),
+                KeyEvent::new(
+                    KeyCode::Char('@'),
+                    KeyModifiers::CONTROL | KeyModifiers::ALT
+                ),
+            ),
+            SequenceResolution::Dispatch(Command::TextInsert {
+                text: "@".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn generated_printable_binding_ignores_ctrl_without_alt() {
+        let mut registry = SequenceRegistry::new();
+        registry.register_generated(
+            KeyBindingScope::Palette,
+            ConditionExpr::Always,
+            GeneratedKeyMatcher::PrintableCharacter,
+            GeneratedCommand::TextInsert,
+        );
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                palette_context(&extensions),
+                KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+            ),
+            SequenceResolution::Noop
+        );
+    }
+
+    #[test]
+    fn generated_printable_binding_does_not_override_exact_binding() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static_in_scope(
+                KeyBindingScope::Palette,
+                ConditionExpr::Always,
+                &[ShortcutKey::new(
+                    KeyCode::Char('@'),
+                    KeyModifiers::CONTROL | KeyModifiers::ALT,
+                )],
+                Command::TextYank,
+            )
+            .expect("exact binding should register");
+        registry.register_generated(
+            KeyBindingScope::Palette,
+            ConditionExpr::Always,
+            GeneratedKeyMatcher::PrintableCharacter,
+            GeneratedCommand::TextInsert,
+        );
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                palette_context(&extensions),
+                KeyEvent::new(
+                    KeyCode::Char('@'),
+                    KeyModifiers::CONTROL | KeyModifiers::ALT
+                ),
+            ),
+            SequenceResolution::Dispatch(Command::TextYank)
+        );
+    }
+
     fn palette_context<'a>(extensions: &'a ExtensionUiSnapshot) -> KeyBindingContext<'a> {
         KeyBindingContext {
             scope: KeyBindingScope::Palette,
@@ -954,6 +1082,13 @@ mod tests {
                 Some(PaletteKind::Command),
                 extensions,
             ),
+        }
+    }
+
+    fn normal_context<'a>(extensions: &'a ExtensionUiSnapshot) -> KeyBindingContext<'a> {
+        KeyBindingContext {
+            scope: KeyBindingScope::Normal,
+            runtime: RuntimeConditionContext::normal(extensions),
         }
     }
 
@@ -1018,6 +1153,115 @@ mod tests {
             SequenceResolution::DispatchThen {
                 first: Command::FirstPage,
                 next: Box::new(SequenceResolution::Dispatch(Command::NextPage)),
+                redraw: true,
+            }
+        );
+    }
+
+    #[test]
+    fn expired_pending_mode_change_does_not_reprocess_next_key() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('g')], Command::OpenHelp)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .expect("single-key binding should register");
+        let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
+
+        assert_eq!(
+            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            SequenceResolution::Pending
+        );
+
+        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(resolution, SequenceResolution::Dispatch(Command::OpenHelp));
+    }
+
+    #[test]
+    fn flush_timeout_uses_pending_runtime_context() {
+        static SEARCH_ACTIVE: &[RuntimeCondition] = &[RuntimeCondition::SearchIsActive];
+
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static_in_scope(
+                KeyBindingScope::Normal,
+                ConditionExpr::All(SEARCH_ACTIVE),
+                &[ShortcutKey::char('g')],
+                Command::DebugStatusShow,
+            )
+            .expect("conditional binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
+        let extensions = ExtensionUiSnapshot::with_search_active(true);
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                normal_context(&extensions),
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Pending
+        );
+
+        assert_eq!(
+            resolver.flush_timeout(),
+            SequenceResolution::Dispatch(Command::DebugStatusShow)
+        );
+    }
+
+    #[test]
+    fn next_key_timeout_confirmation_uses_pending_runtime_context() {
+        static SEARCH_ACTIVE: &[RuntimeCondition] = &[RuntimeCondition::SearchIsActive];
+
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static_in_scope(
+                KeyBindingScope::Normal,
+                ConditionExpr::All(SEARCH_ACTIVE),
+                &[ShortcutKey::char('g')],
+                Command::DebugStatusShow,
+            )
+            .expect("conditional binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('x')], Command::DebugStatusHide)
+            .expect("single-key binding should register");
+        let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
+        let active_extensions = ExtensionUiSnapshot::with_search_active(true);
+        let inactive_extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                normal_context(&active_extensions),
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Pending
+        );
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                normal_context(&inactive_extensions),
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::DispatchThen {
+                first: Command::DebugStatusShow,
+                next: Box::new(SequenceResolution::Dispatch(Command::DebugStatusHide)),
                 redraw: true,
             }
         );

@@ -329,7 +329,7 @@ pub(crate) fn register_builtin_focused_bindings(registry: &mut SequenceRegistry)
         KeyBindingScope::Palette,
         ConditionExpr::Always,
         &[ShortcutKey::alt('d')],
-        Command::TextDeletePrevWord,
+        Command::TextDeleteNextWord,
     );
     register_static_with_condition(
         registry,
@@ -552,6 +552,10 @@ mod tests {
             (
                 KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
                 Command::TextDeletePrevWord,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::ALT),
+                Command::TextDeleteNextWord,
             ),
             (
                 KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),

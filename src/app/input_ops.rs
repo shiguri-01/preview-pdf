@@ -1,4 +1,4 @@
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
@@ -36,6 +36,10 @@ impl InteractionSubsystem {
         state: &mut AppState,
         key: KeyEvent,
     ) -> AppResult<KeyEventOutcome> {
+        if let Some(outcome) = self.repair_stale_palette_mode(state, key) {
+            return Ok(outcome);
+        }
+
         match Self::route_key_event(state, key) {
             KeyEventRoute::Palette => return Ok(self.handle_scoped_key_event(state, key)),
             KeyEventRoute::Help => return Ok(self.handle_scoped_key_event(state, key)),
@@ -51,6 +55,23 @@ impl InteractionSubsystem {
             Mode::Help => KeyEventRoute::Help,
             Mode::Normal => KeyEventRoute::Normal,
         }
+    }
+
+    fn repair_stale_palette_mode(
+        &mut self,
+        state: &mut AppState,
+        key: KeyEvent,
+    ) -> Option<KeyEventOutcome> {
+        if state.mode != Mode::Palette || self.palette.manager.is_open() {
+            return None;
+        }
+
+        state.mode = Mode::Normal;
+        self.sync_sequences_with_mode(state);
+        (key.code == KeyCode::Esc).then_some(KeyEventOutcome {
+            redraw: true,
+            commands: Vec::new(),
+        })
     }
 
     fn handle_normal_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
@@ -620,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_palette_mode_escape_still_requests_close_palette_command() {
+    fn stale_palette_mode_escape_repairs_without_warning_command() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState {
             mode: Mode::Palette,
@@ -631,15 +652,9 @@ mod tests {
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
             .expect("stale palette close should be handled");
 
-        assert_eq!(state.mode, Mode::Palette);
-        assert!(!outcome.redraw);
-        assert_eq!(
-            outcome.commands,
-            vec![CommandRequest::new(
-                Command::ClosePalette,
-                CommandInvocationSource::Keymap
-            )]
-        );
+        assert_eq!(state.mode, Mode::Normal);
+        assert!(outcome.redraw);
+        assert!(outcome.commands.is_empty());
     }
 
     #[test]

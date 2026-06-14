@@ -542,9 +542,9 @@ impl SequenceResolver {
         ctx: KeyBindingContext<'_>,
         key: ShortcutKey,
     ) -> SequenceResolution {
-        let pending_exact = (!self.state.is_empty())
-            .then(|| self.registry.match_buffer(self.state.as_slice(), ctx).exact)
-            .flatten();
+        let pending_exact = self
+            .match_pending_buffer()
+            .and_then(|matched| matched.exact);
         let had_pending = !self.state.is_empty();
 
         if had_pending {
@@ -658,7 +658,10 @@ impl SequenceResolver {
         latest_key: ShortcutKey,
         pending_exact: Option<Command>,
     ) -> SequenceResolution {
-        let matched = self.registry.match_buffer(self.state.as_slice(), ctx);
+        let Some(matched) = self.match_pending_buffer() else {
+            self.state.clear();
+            return SequenceResolution::Cleared;
+        };
         match (matched.exact, matched.has_prefix) {
             (Some(command), false) => {
                 self.state.clear();
@@ -693,6 +696,14 @@ impl SequenceResolver {
                 }
             }
         }
+    }
+
+    fn match_pending_buffer(&self) -> Option<RegistryMatch> {
+        let context = self.state.context.as_ref()?;
+        Some(
+            self.registry
+                .match_buffer(self.state.as_slice(), context.as_context()),
+        )
     }
 }
 
@@ -740,9 +751,8 @@ fn generated_command_for_key(
 ) -> Option<Command> {
     match (matcher, command) {
         (GeneratedKeyMatcher::PrintableCharacter, GeneratedCommand::TextInsert) => {
-            if key.modifiers().contains(KeyModifiers::CONTROL)
-                && !key.modifiers().contains(KeyModifiers::ALT)
-            {
+            let modifiers = key.modifiers();
+            if !(modifiers.is_empty() || modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT) {
                 return None;
             }
 
@@ -807,9 +817,17 @@ fn match_numeric_prefix(
 }
 
 fn normalize_key(key: KeyEvent) -> Option<ShortcutKey> {
-    ShortcutKey::try_new(key.code, key.modifiers)
+    ShortcutKey::try_new(key.code, canonicalize_runtime_modifiers(key.modifiers))
         .ok()
         .map(normalize_shortcut_key)
+}
+
+fn canonicalize_runtime_modifiers(mut modifiers: KeyModifiers) -> KeyModifiers {
+    if modifiers.contains(KeyModifiers::META) {
+        modifiers.remove(KeyModifiers::META);
+        modifiers.insert(KeyModifiers::ALT);
+    }
+    modifiers
 }
 
 fn canonicalize_binding_key(key: ShortcutKey) -> Result<ShortcutKey, SequenceRegistrationError> {
@@ -1040,6 +1058,27 @@ mod tests {
     }
 
     #[test]
+    fn generated_printable_binding_ignores_alt_without_ctrl() {
+        let mut registry = SequenceRegistry::new();
+        registry.register_generated(
+            KeyBindingScope::Palette,
+            ConditionExpr::Always,
+            GeneratedKeyMatcher::PrintableCharacter,
+            GeneratedCommand::TextInsert,
+        );
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                palette_context(&extensions),
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT),
+            ),
+            SequenceResolution::Noop
+        );
+    }
+
+    #[test]
     fn generated_printable_binding_does_not_override_exact_binding() {
         let mut registry = SequenceRegistry::new();
         registry
@@ -1264,6 +1303,40 @@ mod tests {
                 next: Box::new(SequenceResolution::Dispatch(Command::DebugStatusHide)),
                 redraw: true,
             }
+        );
+    }
+
+    #[test]
+    fn pending_sequence_continuation_uses_captured_runtime_context() {
+        static SEARCH_ACTIVE: &[RuntimeCondition] = &[RuntimeCondition::SearchIsActive];
+
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static_in_scope(
+                KeyBindingScope::Normal,
+                ConditionExpr::All(SEARCH_ACTIVE),
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::DebugStatusShow,
+            )
+            .expect("conditional binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let active_extensions = ExtensionUiSnapshot::with_search_active(true);
+        let inactive_extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                normal_context(&active_extensions),
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Pending
+        );
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                normal_context(&inactive_extensions),
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::DebugStatusShow)
         );
     }
 

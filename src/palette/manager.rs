@@ -217,13 +217,21 @@ impl PaletteManager {
             open_payload: session.payload.as_ref(),
         };
         match provider.on_tab(&ctx, selected)? {
-            PaletteTabEffect::Noop => {}
+            PaletteTabEffect::Noop => return Ok(false),
             PaletteTabEffect::SetInput {
                 value,
-                move_cursor_to_end: _move_cursor_to_end,
+                move_cursor_to_end,
             } => {
+                let cursor = if move_cursor_to_end {
+                    value.chars().count()
+                } else {
+                    session.input.cursor().min(value.chars().count())
+                };
+                if session.input.value() == value && session.input.cursor() == cursor {
+                    return Ok(false);
+                }
                 session.input_history.clear_navigation();
-                session.input = Input::new(value);
+                session.input = Input::new(value).with_cursor(cursor);
             }
         }
         self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
@@ -231,13 +239,15 @@ impl PaletteManager {
     }
 
     pub fn select_previous(&mut self) -> bool {
+        let previous = self.active.as_ref().map(|session| session.selected);
         self.select_prev();
-        true
+        self.active.as_ref().map(|session| session.selected) != previous
     }
 
     pub fn select_next_item(&mut self) -> bool {
+        let previous = self.active.as_ref().map(|session| session.selected);
         self.select_next();
-        true
+        self.active.as_ref().map(|session| session.selected) != previous
     }
 
     pub fn recall_history(
@@ -477,13 +487,21 @@ impl PaletteManager {
         };
 
         let previous_input = session.input.value().to_string();
+        let mut changed = false;
+        let mut value_changed = false;
         for request in requests {
-            session.input.handle(request);
+            if let Some(state_changed) = session.input.handle(request) {
+                changed = true;
+                value_changed |= state_changed.value;
+            }
         }
-        if session.input.value() != previous_input {
+        if !changed {
+            return Ok(false);
+        }
+        if value_changed {
             session.input_history.clear_navigation();
+            self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
         }
-        self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
         Ok(true)
     }
 }
@@ -514,6 +532,8 @@ fn selected_candidate_for<'a>(
 
 #[cfg(test)]
 mod tests {
+    use tui_input::InputRequest;
+
     use crate::{
         app::AppState,
         extension::ExtensionUiSnapshot,
@@ -558,6 +578,37 @@ mod tests {
         let filtered_view = manager.view().expect("palette should be visible");
         assert_eq!(filtered_view.selected_idx, 0);
         assert_eq!(filtered_view.input, "p");
+    }
+
+    #[test]
+    fn palette_operations_report_noop_when_state_does_not_change() {
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        manager
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Search,
+                None,
+                None,
+            )
+            .expect("search palette should open");
+
+        assert!(!manager.select_previous());
+        assert!(
+            !manager
+                .complete(&registry, &app, &extensions)
+                .expect("no-op completion should succeed")
+        );
+        assert!(
+            !manager
+                .edit_input(&registry, &app, &extensions, InputRequest::GoToPrevChar)
+                .expect("no-op cursor movement should succeed")
+        );
     }
 
     #[test]

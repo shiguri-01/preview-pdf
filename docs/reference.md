@@ -140,7 +140,8 @@ Contract:
   target, and `enabled_when` apply to that surface.
 - Command-palette listing shows public user-intent commands only when the
   command-palette input source is allowed, target requirements are satisfied,
-  and `enabled_when` is currently satisfied.
+  and `enabled_when` is satisfied for the normal-mode context in which the
+  submitted command will run.
 - Typed command submission is separate from listing: a known typed command is
   parsed and then validated by dispatch policy, so "not listed" does not mean
   "unknown".
@@ -202,6 +203,8 @@ Orientation:
 
 Contract:
 - Printable bindings are defined by resulting characters, not by physical keys.
+- Runtime `Meta` key events are normalized to the `Alt`/`<m-...>` shortcut
+  representation. Unbound Alt-only chords are not treated as printable input.
 - Configured key bindings use the same key labels shown in help, such as
   `gg`, `<c-o>`, `<down>`, and `[count]G`.
 - Key bindings have a scope, currently normal, palette, or help. A binding only
@@ -226,9 +229,10 @@ Contract:
   history recall.
 - Help-scoped keys dispatch hidden help interaction commands such as close and
   scroll.
-- `<esc>` is a scoped built-in binding for cancellation or close behavior. When
-  a multi-key sequence is already pending, `<esc>` clears the pending sequence
-  instead of dispatching another command.
+- `<esc>` is a non-configurable built-in binding for cancellation or close
+  behavior and remains available when the configurable keymap preset is
+  `none`. When a multi-key sequence is already pending, `<esc>` clears the
+  pending sequence instead of dispatching another command.
 
 Compatibility:
 - Changing a default key binding affects user muscle memory and help output; do

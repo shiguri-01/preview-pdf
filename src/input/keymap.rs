@@ -95,14 +95,7 @@ pub fn build_builtin_sequence_registry() -> SequenceRegistry {
         Command::PrevSearchHit,
     );
     register_static(&mut registry, &[ShortcutKey::char('q')], Command::Quit);
-    register_static_with_condition(
-        &mut registry,
-        KeyBindingScope::Normal,
-        ConditionExpr::All(&WHEN_SEARCH_ACTIVE),
-        &[ShortcutKey::key(crossterm::event::KeyCode::Esc)],
-        Command::CancelSearch,
-    );
-    register_builtin_focused_bindings(&mut registry);
+    register_builtin_reserved_bindings(&mut registry);
     registry
 }
 
@@ -139,9 +132,16 @@ fn register_numeric_prefix(
         .expect("built-in numeric key binding should register");
 }
 
-pub(crate) fn register_builtin_focused_bindings(registry: &mut SequenceRegistry) {
+pub(crate) fn register_builtin_reserved_bindings(registry: &mut SequenceRegistry) {
     use crossterm::event::{KeyCode, KeyModifiers};
 
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Normal,
+        ConditionExpr::All(&WHEN_SEARCH_ACTIVE),
+        &[ShortcutKey::key(KeyCode::Esc)],
+        Command::CancelSearch,
+    );
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,
@@ -591,6 +591,42 @@ mod tests {
                 ),
                 SequenceResolution::Dispatch(expected),
                 "unexpected palette command for {key:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn palette_builtins_accept_meta_as_alt_for_word_editing() {
+        let cases = [
+            (
+                KeyEvent::new(KeyCode::Char('b'), KeyModifiers::META),
+                Command::TextMovePrevWord,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('f'), KeyModifiers::META),
+                Command::TextMoveNextWord,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('d'), KeyModifiers::META),
+                Command::TextDeleteNextWord,
+            ),
+            (
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::META),
+                Command::TextDeletePrevWord,
+            ),
+        ];
+
+        for (key, expected) in cases {
+            let registry = build_builtin_sequence_registry();
+            let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+            let extensions = ExtensionUiSnapshot::default();
+
+            assert_eq!(
+                resolver.handle_key_in_context(
+                    palette_key_context(PaletteKind::Search, &extensions),
+                    key,
+                ),
+                SequenceResolution::Dispatch(expected)
             );
         }
     }

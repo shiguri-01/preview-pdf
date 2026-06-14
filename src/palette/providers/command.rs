@@ -1,3 +1,4 @@
+use crate::app::Mode;
 use crate::command::all_command_specs;
 use crate::command::find_command_spec;
 use crate::command::first_token;
@@ -53,7 +54,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 let mut candidates = all_command_specs()
                     .into_iter()
                     .filter(|spec| {
-                        let command_ctx = command_policy_context(ctx);
+                        let command_ctx = post_submit_command_policy_context(ctx);
                         is_command_visible_in_palette(*spec, &command_ctx)
                     })
                     .map(|spec| PaletteCandidate {
@@ -81,7 +82,7 @@ impl PaletteProvider for CommandPaletteProvider {
             return Ok(effect);
         }
 
-        let command_ctx = command_policy_context(ctx);
+        let command_ctx = post_submit_command_policy_context(ctx);
         let mut deferred_error = None;
         if !input.is_empty() {
             match parse_invocable_command_text(input, &command_ctx) {
@@ -214,10 +215,10 @@ impl PaletteProvider for CommandPaletteProvider {
     }
 }
 
-fn command_policy_context<'a>(ctx: &'a PaletteContext<'a>) -> CommandPolicyContext<'a> {
+fn post_submit_command_policy_context<'a>(ctx: &'a PaletteContext<'a>) -> CommandPolicyContext<'a> {
     CommandPolicyContext {
         source: CommandInvocationSource::CommandPaletteInput,
-        runtime: RuntimeConditionContext::new(ctx.app.mode, Some(ctx.kind), ctx.extensions),
+        runtime: RuntimeConditionContext::new(Mode::Normal, None, ctx.extensions),
     }
 }
 
@@ -407,7 +408,7 @@ fn submit_selected_enum_candidate(
 
     let synthesized = apply_enum_completion(&analysis, value);
     let synthesized_trimmed = synthesized.trim();
-    let command_ctx = command_policy_context(ctx);
+    let command_ctx = post_submit_command_policy_context(ctx);
     match parse_invocable_command_text(synthesized_trimmed, &command_ctx) {
         Ok(command) => Ok(Some(PaletteSubmitEffect::Dispatch {
             command,
@@ -587,6 +588,7 @@ fn format_search_texts(
 
 #[cfg(test)]
 mod tests {
+    use crate::app::Mode;
     use crate::command::Command;
     use crate::extension::ExtensionUiSnapshot;
     use crate::input::InputHistoryRecord;
@@ -595,7 +597,7 @@ mod tests {
         PaletteProvider, PaletteSubmitEffect, PaletteTabEffect,
     };
 
-    use super::CommandPaletteProvider;
+    use super::{CommandPaletteProvider, post_submit_command_policy_context};
 
     fn ids(list: &[crate::palette::PaletteCandidate]) -> Vec<String> {
         list.iter().map(|candidate| candidate.id.clone()).collect()
@@ -616,6 +618,26 @@ mod tests {
             open_payload: None,
         };
         provider.list(&ctx).expect("list should be built")
+    }
+
+    #[test]
+    fn command_policy_uses_post_submit_normal_context() {
+        let app = PaletteAppSnapshot {
+            mode: Mode::Palette,
+            ..PaletteAppSnapshot::default()
+        };
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = PaletteContext {
+            app,
+            extensions: &extensions,
+            kind: PaletteKind::Command,
+            input: "",
+            open_payload: None,
+        };
+
+        let command_ctx = post_submit_command_policy_context(&ctx);
+        assert_eq!(command_ctx.runtime.mode, Mode::Normal);
+        assert_eq!(command_ctx.runtime.active_palette, None);
     }
 
     fn command_submit_effect(

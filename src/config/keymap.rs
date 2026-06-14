@@ -3,7 +3,7 @@ use crate::command::{
     validate_command_id_for_normal_keymap,
 };
 use crate::error::{AppError, AppResult};
-use crate::input::keymap::{build_builtin_sequence_registry, register_builtin_focused_bindings};
+use crate::input::keymap::{build_builtin_sequence_registry, register_builtin_reserved_bindings};
 use crate::input::sequence::{SequenceRegistrationError, SequenceRegistry};
 use crate::input::shortcut::{ShortcutKey, parse_shortcut_sequence};
 
@@ -64,11 +64,10 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
             let mut registry = SequenceRegistry::new();
             // TODO: Revisit this when config supports scoped key bindings.
             // `preset = "none"` currently disables only configurable normal-mode
-            // bindings; palette/help bindings are still installed as internal UI
-            // controls. Decide whether future scoped config should expose separate
-            // normal/palette/help presets or an explicit "disable all built-ins"
-            // switch instead of preserving this implicit split.
-            register_builtin_focused_bindings(&mut registry);
+            // bindings; reserved cancellation and focused-surface controls remain
+            // available. Decide whether future scoped config should expose separate
+            // normal/palette/help presets.
+            register_builtin_reserved_bindings(&mut registry);
             registry
         }
     };
@@ -222,5 +221,40 @@ fn numeric_prefix_factory(command_id: &str) -> Option<fn(usize) -> Command> {
     match command_id {
         "goto-page" => Some(|page| Command::GotoPage { page }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use crate::command::Command;
+    use crate::condition::RuntimeConditionContext;
+    use crate::extension::ExtensionUiSnapshot;
+    use crate::input::sequence::{
+        DEFAULT_SEQUENCE_TIMEOUT, KeyBindingContext, SequenceResolution, SequenceResolver,
+    };
+
+    use super::{KeymapOptions, KeymapPreset, resolve_sequence_registry};
+
+    #[test]
+    fn none_preset_preserves_reserved_search_cancellation() {
+        let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: Some(KeymapPreset::None),
+            ..KeymapOptions::default()
+        });
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::with_search_active(true);
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    scope: crate::input::sequence::KeyBindingScope::Normal,
+                    runtime: RuntimeConditionContext::normal(&extensions),
+                },
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::CancelSearch)
+        );
     }
 }

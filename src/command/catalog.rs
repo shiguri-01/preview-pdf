@@ -315,7 +315,7 @@ define_commands! {
         exec: super::handlers::pan,
     }
     PageLayoutSingle {
-        id: "page-layout-single",
+        id: "layout-single",
         title: "Single Page Layout",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
@@ -328,8 +328,8 @@ define_commands! {
         direction: Option<SpreadDirectionArg>,
         cover_policy: Option<SpreadCoverPolicyArg>,
     ) {
-        id: "page-layout-spread",
-        title: "Spread Page Layout",
+        id: "layout-spread",
+        title: "Spread Layout",
         args: &ARGS_PAGE_LAYOUT_SPREAD,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
@@ -338,8 +338,8 @@ define_commands! {
         exec: super::handlers::page_layout_spread,
     }
     DebugStatusShow {
-        id: "debug-status-show",
-        title: "Show Debug Status",
+        id: "debug-show",
+        title: "Show Debug Info",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
@@ -348,8 +348,8 @@ define_commands! {
         exec: super::handlers::debug_status_show,
     }
     DebugStatusHide {
-        id: "debug-status-hide",
-        title: "Hide Debug Status",
+        id: "debug-hide",
+        title: "Hide Debug Info",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
@@ -358,8 +358,8 @@ define_commands! {
         exec: super::handlers::debug_status_hide,
     }
     DebugStatusToggle {
-        id: "debug-status-toggle",
-        title: "Toggle Debug Status",
+        id: "debug-toggle",
+        title: "Toggle Debug Info",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
@@ -541,8 +541,8 @@ define_commands! {
         exec: super::handlers::cancel_search,
     }
     ReloadDocument {
-        id: "reload-document",
-        title: "Reload Document",
+        id: "reload",
+        title: "Reload PDF",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,

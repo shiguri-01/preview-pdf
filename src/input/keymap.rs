@@ -140,7 +140,7 @@ fn register_numeric_prefix(
 }
 
 pub(crate) fn register_builtin_focused_bindings(registry: &mut SequenceRegistry) {
-    use crossterm::event::KeyCode;
+    use crossterm::event::{KeyCode, KeyModifiers};
 
     register_static_with_condition(
         registry,
@@ -216,8 +216,22 @@ pub(crate) fn register_builtin_focused_bindings(registry: &mut SequenceRegistry)
         registry,
         KeyBindingScope::Palette,
         ConditionExpr::Always,
+        &[ShortcutKey::ctrl('h')],
+        Command::TextDeleteBackward,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
         &[ShortcutKey::key(KeyCode::Delete)],
         Command::TextDeleteForward,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::new(KeyCode::Delete, KeyModifiers::CONTROL)],
+        Command::TextDeleteNextWord,
     );
     register_static_with_condition(
         registry,
@@ -230,8 +244,120 @@ pub(crate) fn register_builtin_focused_bindings(registry: &mut SequenceRegistry)
         registry,
         KeyBindingScope::Palette,
         ConditionExpr::Always,
+        &[ShortcutKey::ctrl('b')],
+        Command::TextMoveLeft,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
         &[ShortcutKey::key(KeyCode::Right)],
         Command::TextMoveRight,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::ctrl('f')],
+        Command::TextMoveRight,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::key(KeyCode::Home)],
+        Command::TextMoveStart,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::ctrl('a')],
+        Command::TextMoveStart,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::key(KeyCode::End)],
+        Command::TextMoveEnd,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::ctrl('e')],
+        Command::TextMoveEnd,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::new(KeyCode::Left, KeyModifiers::CONTROL)],
+        Command::TextMovePrevWord,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::alt('b')],
+        Command::TextMovePrevWord,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::new(KeyCode::Right, KeyModifiers::CONTROL)],
+        Command::TextMoveNextWord,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::alt('f')],
+        Command::TextMoveNextWord,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::ctrl('w')],
+        Command::TextDeletePrevWord,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::alt('d')],
+        Command::TextDeletePrevWord,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::new(KeyCode::Backspace, KeyModifiers::ALT)],
+        Command::TextDeletePrevWord,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::ctrl('u')],
+        Command::TextDeleteLine,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::ctrl('k')],
+        Command::TextDeleteToEnd,
+    );
+    register_static_with_condition(
+        registry,
+        KeyBindingScope::Palette,
+        ConditionExpr::Always,
+        &[ShortcutKey::ctrl('y')],
+        Command::TextYank,
     );
     registry.register_generated(
         KeyBindingScope::Palette,
@@ -280,10 +406,17 @@ pub(crate) fn register_builtin_focused_bindings(registry: &mut SequenceRegistry)
 mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+    use crate::app::Mode;
     use crate::command::{Command, PanAmount, PanDirection};
+    use crate::condition::RuntimeConditionContext;
+    use crate::extension::ExtensionUiSnapshot;
+    use crate::input::sequence::KeyBindingContext;
+    use crate::palette::PaletteKind;
 
     use super::build_builtin_sequence_registry;
-    use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceResolution, SequenceResolver};
+    use crate::input::sequence::{
+        DEFAULT_SEQUENCE_TIMEOUT, KeyBindingScope, SequenceResolution, SequenceResolver,
+    };
 
     #[test]
     fn builtins_preserve_existing_single_key_bindings() {
@@ -391,5 +524,80 @@ mod tests {
             KeyModifiers::CONTROL | KeyModifiers::SHIFT,
         ));
         assert_eq!(back, SequenceResolution::Dispatch(Command::HistoryBack));
+    }
+
+    #[test]
+    fn palette_builtins_map_common_line_editing_shortcuts() {
+        let cases = [
+            (
+                KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
+                Command::TextMoveStart,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL),
+                Command::TextMoveStart,
+            ),
+            (
+                KeyEvent::new(KeyCode::End, KeyModifiers::NONE),
+                Command::TextMoveEnd,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL),
+                Command::TextMoveEnd,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL),
+                Command::TextDeleteLine,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL),
+                Command::TextDeletePrevWord,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL),
+                Command::TextDeleteToEnd,
+            ),
+            (
+                KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL),
+                Command::TextMovePrevWord,
+            ),
+            (
+                KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL),
+                Command::TextMoveNextWord,
+            ),
+            (
+                KeyEvent::new(KeyCode::Delete, KeyModifiers::CONTROL),
+                Command::TextDeleteNextWord,
+            ),
+            (
+                KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL),
+                Command::TextYank,
+            ),
+        ];
+
+        for (key, expected) in cases {
+            let registry = build_builtin_sequence_registry();
+            let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+            let extensions = ExtensionUiSnapshot::default();
+
+            assert_eq!(
+                resolver.handle_key_in_context(
+                    palette_key_context(PaletteKind::Search, &extensions),
+                    key,
+                ),
+                SequenceResolution::Dispatch(expected),
+                "unexpected palette command for {key:?}",
+            );
+        }
+    }
+
+    fn palette_key_context<'a>(
+        kind: PaletteKind,
+        extensions: &'a ExtensionUiSnapshot,
+    ) -> KeyBindingContext<'a> {
+        KeyBindingContext {
+            scope: KeyBindingScope::Palette,
+            runtime: RuntimeConditionContext::new(Mode::Normal, Some(kind), extensions),
+        }
     }
 }

@@ -1,6 +1,4 @@
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use tui_input::Input;
-use tui_input::backend::crossterm::EventHandler;
+use tui_input::{Input, InputRequest};
 
 use crate::app::AppState;
 use crate::error::AppResult;
@@ -270,7 +268,12 @@ impl PaletteManager {
         extensions: &ExtensionUiSnapshot,
         text: &str,
     ) -> AppResult<bool> {
-        self.apply_text_events(registry, app, extensions, text.chars().map(KeyCode::Char))
+        self.apply_text_requests(
+            registry,
+            app,
+            extensions,
+            text.chars().map(InputRequest::InsertChar),
+        )
     }
 
     pub fn delete_backward(
@@ -279,7 +282,7 @@ impl PaletteManager {
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
     ) -> AppResult<bool> {
-        self.apply_text_events(registry, app, extensions, [KeyCode::Backspace])
+        self.apply_text_request(registry, app, extensions, InputRequest::DeletePrevChar)
     }
 
     pub fn delete_forward(
@@ -288,7 +291,7 @@ impl PaletteManager {
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
     ) -> AppResult<bool> {
-        self.apply_text_events(registry, app, extensions, [KeyCode::Delete])
+        self.apply_text_request(registry, app, extensions, InputRequest::DeleteNextChar)
     }
 
     pub fn move_cursor_left(
@@ -297,7 +300,7 @@ impl PaletteManager {
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
     ) -> AppResult<bool> {
-        self.apply_text_events(registry, app, extensions, [KeyCode::Left])
+        self.apply_text_request(registry, app, extensions, InputRequest::GoToPrevChar)
     }
 
     pub fn move_cursor_right(
@@ -306,7 +309,17 @@ impl PaletteManager {
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
     ) -> AppResult<bool> {
-        self.apply_text_events(registry, app, extensions, [KeyCode::Right])
+        self.apply_text_request(registry, app, extensions, InputRequest::GoToNextChar)
+    }
+
+    pub fn edit_input(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+        request: InputRequest,
+    ) -> AppResult<bool> {
+        self.apply_text_request(registry, app, extensions, request)
     }
 
     pub fn view(&self) -> Option<PaletteView> {
@@ -439,25 +452,33 @@ impl PaletteManager {
         true
     }
 
-    fn apply_text_events<I>(
+    fn apply_text_request(
         &mut self,
         registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
-        key_codes: I,
+        request: InputRequest,
+    ) -> AppResult<bool> {
+        self.apply_text_requests(registry, app, extensions, [request])
+    }
+
+    fn apply_text_requests<I>(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+        requests: I,
     ) -> AppResult<bool>
     where
-        I: IntoIterator<Item = KeyCode>,
+        I: IntoIterator<Item = InputRequest>,
     {
         let Some(session) = self.active.as_mut() else {
             return Ok(false);
         };
 
         let previous_input = session.input.value().to_string();
-        for code in key_codes {
-            session
-                .input
-                .handle_event(&Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        for request in requests {
+            session.input.handle(request);
         }
         if session.input.value() != previous_input {
             session.input_history.clear_navigation();

@@ -279,6 +279,9 @@ Observable behavior:
   history; otherwise they dispatch palette selection commands.
 - Tab dispatches palette completion.
 - Enter dispatches palette submit.
+- Palette input editing preserves common line-editing behavior through scoped
+  `text.*` interaction commands, including cursor movement, word movement,
+  word/line deletion, and yank.
 - Empty candidate lists can still represent valid interactive states when the
   provider supports that behavior.
 

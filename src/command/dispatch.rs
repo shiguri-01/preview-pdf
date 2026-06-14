@@ -217,6 +217,15 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::TextDeleteForward
         | Command::TextMoveLeft
         | Command::TextMoveRight
+        | Command::TextMoveStart
+        | Command::TextMoveEnd
+        | Command::TextMovePrevWord
+        | Command::TextMoveNextWord
+        | Command::TextDeletePrevWord
+        | Command::TextDeleteNextWord
+        | Command::TextDeleteLine
+        | Command::TextDeleteToEnd
+        | Command::TextYank
         | Command::PaletteInputHistoryOlder
         | Command::PaletteInputHistoryNewer
         | Command::OpenHelp

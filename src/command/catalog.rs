@@ -235,6 +235,15 @@ macro_rules! define_commands {
     (@role TextDeleteForward) => { CommandRole::InteractionControl };
     (@role TextMoveLeft) => { CommandRole::InteractionControl };
     (@role TextMoveRight) => { CommandRole::InteractionControl };
+    (@role TextMoveStart) => { CommandRole::InteractionControl };
+    (@role TextMoveEnd) => { CommandRole::InteractionControl };
+    (@role TextMovePrevWord) => { CommandRole::InteractionControl };
+    (@role TextMoveNextWord) => { CommandRole::InteractionControl };
+    (@role TextDeletePrevWord) => { CommandRole::InteractionControl };
+    (@role TextDeleteNextWord) => { CommandRole::InteractionControl };
+    (@role TextDeleteLine) => { CommandRole::InteractionControl };
+    (@role TextDeleteToEnd) => { CommandRole::InteractionControl };
+    (@role TextYank) => { CommandRole::InteractionControl };
     (@role PaletteInputHistoryOlder) => { CommandRole::InteractionControl };
     (@role PaletteInputHistoryNewer) => { CommandRole::InteractionControl };
     (@role CloseHelp) => { CommandRole::InteractionControl };
@@ -256,6 +265,15 @@ macro_rules! define_commands {
     (@target TextDeleteForward) => { CommandTargetRequirement::ActivePalette };
     (@target TextMoveLeft) => { CommandTargetRequirement::ActivePalette };
     (@target TextMoveRight) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveStart) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveEnd) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMovePrevWord) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveNextWord) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeletePrevWord) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteNextWord) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteLine) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteToEnd) => { CommandTargetRequirement::ActivePalette };
+    (@target TextYank) => { CommandTargetRequirement::ActivePalette };
     (@target PaletteInputHistoryOlder) => { CommandTargetRequirement::ActivePalette };
     (@target PaletteInputHistoryNewer) => { CommandTargetRequirement::ActivePalette };
     (@target CloseHelp) => { CommandTargetRequirement::ActiveHelp };
@@ -530,6 +548,96 @@ define_commands! {
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_right,
+    }
+    TextMoveStart {
+        id: "text.move-start",
+        title: "Move Text Cursor to Start",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_start,
+    }
+    TextMoveEnd {
+        id: "text.move-end",
+        title: "Move Text Cursor to End",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_end,
+    }
+    TextMovePrevWord {
+        id: "text.move-prev-word",
+        title: "Move Text Cursor to Previous Word",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_prev_word,
+    }
+    TextMoveNextWord {
+        id: "text.move-next-word",
+        title: "Move Text Cursor to Next Word",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_next_word,
+    }
+    TextDeletePrevWord {
+        id: "text.delete-prev-word",
+        title: "Delete Previous Text Word",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_prev_word,
+    }
+    TextDeleteNextWord {
+        id: "text.delete-next-word",
+        title: "Delete Next Text Word",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_next_word,
+    }
+    TextDeleteLine {
+        id: "text.delete-line",
+        title: "Delete Text Line",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_line,
+    }
+    TextDeleteToEnd {
+        id: "text.delete-to-end",
+        title: "Delete Text to End",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_to_end,
+    }
+    TextYank {
+        id: "text.yank",
+        title: "Yank Text",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::Interaction,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_yank,
     }
     PaletteInputHistoryOlder {
         id: "palette.input-history-older",

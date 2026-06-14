@@ -196,6 +196,7 @@ pub enum SequenceResolution {
     Pending,
     Cleared,
     Dispatch(Command),
+    DispatchWithRedraw(Command),
     // When a pending sequence is committed before processing the latest key, the
     // old command must be emitted first and the new key must still be processed.
     DispatchThen {
@@ -292,8 +293,12 @@ impl SequenceResolver {
                     SequenceResolution::Cleared | SequenceResolution::Noop => {
                         self.handle_normalized_key(key)
                     }
-                    SequenceResolution::Pending | SequenceResolution::DispatchThen { .. } => {
-                        unreachable!("confirming a timed out sequence cannot remain pending")
+                    SequenceResolution::Pending
+                    | SequenceResolution::DispatchWithRedraw(_)
+                    | SequenceResolution::DispatchThen { .. } => {
+                        unreachable!(
+                            "confirming a timed out sequence cannot return a derived resolution"
+                        )
                     }
                 };
             }
@@ -390,6 +395,9 @@ impl SequenceResolver {
                 } else {
                     match self.handle_normalized_key(latest_key) {
                         SequenceResolution::Noop => SequenceResolution::Cleared,
+                        SequenceResolution::Dispatch(command) => {
+                            SequenceResolution::DispatchWithRedraw(command)
+                        }
                         next => next,
                     }
                 }
@@ -734,7 +742,10 @@ mod tests {
         );
 
         let mismatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
-        assert_eq!(mismatch, SequenceResolution::Dispatch(Command::NextPage));
+        assert_eq!(
+            mismatch,
+            SequenceResolution::DispatchWithRedraw(Command::NextPage)
+        );
         assert_eq!(resolver.pending_display(), None);
     }
 

@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
@@ -161,6 +161,10 @@ impl InteractionSubsystem {
     }
 
     fn help_command_for_key(key: KeyEvent) -> Option<Command> {
+        if key.modifiers != KeyModifiers::NONE {
+            return None;
+        }
+
         match key.code {
             KeyCode::Char('j') => Some(Command::HelpScrollDown),
             KeyCode::Char('k') => Some(Command::HelpScrollUp),
@@ -383,6 +387,13 @@ impl InteractionSubsystem {
                     )],
                 }
             }
+            SequenceResolution::DispatchWithRedraw(command) => KeyEventOutcome {
+                redraw: true,
+                commands: vec![CommandRequest::new(
+                    command,
+                    CommandInvocationSource::Keymap,
+                )],
+            },
         }
     }
 
@@ -556,6 +567,25 @@ mod tests {
         assert_eq!(state.help_scroll, 0);
         assert!(closed.commands.is_empty());
         assert!(closed.redraw);
+    }
+
+    #[test]
+    fn help_mode_ignores_modified_scroll_keys() {
+        let mut interaction = InteractionSubsystem::default();
+        let mut state = AppState {
+            mode: crate::app::Mode::Help,
+            ..AppState::default()
+        };
+
+        let outcome = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL),
+            )
+            .expect("modified help key should be handled");
+
+        assert!(!outcome.redraw);
+        assert!(outcome.commands.is_empty());
     }
 
     #[test]
@@ -891,6 +921,45 @@ mod tests {
             mismatch.commands,
             vec![CommandRequest::new(
                 Command::OpenHelp,
+                CommandInvocationSource::Keymap,
+            )]
+        );
+        assert_eq!(interaction.pending_sequence_status(), None);
+    }
+
+    #[test]
+    fn pending_sequence_redraws_when_reprocessed_followup_dispatches() {
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(
+                &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .expect("single-key binding should register");
+        let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
+        let mut state = AppState::default();
+
+        interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let mismatch = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            )
+            .expect("mismatched key should be reprocessed");
+        assert!(mismatch.redraw);
+        assert_eq!(
+            mismatch.commands,
+            vec![CommandRequest::new(
+                Command::NextPage,
                 CommandInvocationSource::Keymap,
             )]
         );

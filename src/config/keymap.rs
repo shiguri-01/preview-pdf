@@ -1,6 +1,6 @@
 use crate::command::{
-    Command, CommandInvocationSource, parse_command_text,
-    validate_command_id_invocation_for_source, validate_command_invocation_for_source,
+    Command, parse_command_text, validate_command_for_normal_keymap,
+    validate_command_id_for_normal_keymap,
 };
 use crate::error::{AppError, AppResult};
 use crate::input::keymap::{build_builtin_sequence_registry, register_builtin_focused_bindings};
@@ -128,13 +128,13 @@ pub(crate) fn parse_keymap_binding(key: &str, command_text: &str) -> AppResult<K
     match parse_keymap_target(key)? {
         KeymapTarget::Exact(keys) => {
             let command = parse_command_text(command_text)?;
-            validate_command_invocation_for_source(&command, CommandInvocationSource::Keymap)?;
+            validate_command_for_normal_keymap(&command)?;
             validate_exact_keys(&keys)?;
             Ok(KeymapBinding::Exact { keys, command })
         }
         KeymapTarget::NumericPrefix(suffix) => {
             let command_id = parse_numeric_prefix_command(command_text)?;
-            validate_command_id_invocation_for_source(command_id, CommandInvocationSource::Keymap)?;
+            validate_command_id_for_normal_keymap(command_id)?;
             validate_numeric_suffix(suffix)?;
             Ok(KeymapBinding::NumericPrefix { suffix, command_id })
         }

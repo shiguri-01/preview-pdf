@@ -614,6 +614,36 @@ mod tests {
     }
 
     #[test]
+    fn keymap_config_rejects_scoped_interaction_commands() {
+        for (command, expected) in [
+            ("palette.submit", "requires an active palette"),
+            ("close-help", "requires active help"),
+        ] {
+            let path = unique_temp_path(&format!("bad-keymap-interaction-{command}.toml"));
+            fs::write(
+                &path,
+                format!(
+                    r#"
+                    [keymap.bindings]
+                    "x" = "{command}"
+                    "#
+                ),
+            )
+            .expect("config file should be written");
+
+            let err =
+                load_options_from_explicit_path(&path).expect_err("config should be rejected");
+            let message = err.to_string();
+            assert!(
+                message.contains(command) && message.contains(expected),
+                "unexpected error for {command}: {err}"
+            );
+
+            fs::remove_file(&path).expect("config file should be removed");
+        }
+    }
+
+    #[test]
     fn keymap_config_rejects_escape_bindings() {
         let path = unique_temp_path("bad-keymap-key.toml");
         fs::write(

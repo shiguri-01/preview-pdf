@@ -215,9 +215,12 @@ Contract:
 - Built-in key bindings must reference known command ids and satisfy command
   invocation policy.
 - Configured key bindings currently target the normal scope and must reference
-  known commands that can be invoked from the keymap. Like built-in bindings,
-  they resolve only when their scope and runtime `enabled_when` match; dispatch
-  still validates the resolved command before applying behavior.
+  known app-target commands that can be invoked from the keymap. Scoped
+  interaction commands that require an active palette or help target are owned
+  by built-in focused bindings until scoped keymap config exists. Like built-in
+  bindings, configured bindings resolve only when their scope and runtime
+  `enabled_when` match; dispatch still validates the resolved command before
+  applying behavior.
 - Palette-scoped keys dispatch hidden palette interaction commands such as
   submit, complete, selection movement, input editing, and palette input
   history recall.

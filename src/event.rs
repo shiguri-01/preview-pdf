@@ -118,7 +118,6 @@ pub(crate) enum DomainEvent {
     Input(Event),
     InputError(String),
     Command(CommandRequest),
-    Quit,
     App(AppEvent),
     ReloadDocument(DocumentReloadRequest),
     DocumentReloaded(DocumentReloadResult),

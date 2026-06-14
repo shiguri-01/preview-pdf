@@ -310,6 +310,33 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_quit_requests_quit_and_emits_command_executed() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::Quit,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(result.outcome, CommandOutcome::QuitRequested);
+        assert_eq!(
+            result.emitted_events,
+            vec![AppEvent::CommandExecuted {
+                id: CommandId::Quit,
+                outcome: CommandOutcome::QuitRequested,
+            }]
+        );
+    }
+
+    #[test]
     fn dispatch_next_page_emits_page_changed_and_command_executed() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;

@@ -800,7 +800,7 @@ mod tests {
             &mut app,
             Command::HelpScrollDown,
             CommandInvocationSource::Keymap,
-            pdf,
+            Arc::clone(&pdf),
             &mut host,
             &mut palette_requests,
         )
@@ -816,12 +816,11 @@ mod tests {
             }]
         ));
 
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let up = dispatch(
             &mut app,
             Command::HelpScrollUp,
             CommandInvocationSource::Keymap,
-            pdf,
+            Arc::clone(&pdf),
             &mut host,
             &mut palette_requests,
         )

@@ -1,6 +1,6 @@
 ---
 name: pvf-command
-description: Add, edit, rename, or review pvf command behavior. Use when changing command ids, arguments, parsing, invocation policy, command palette visibility, key bindings, help text, or command dispatch.
+description: Add, edit, rename, or review pvf command behavior. Use when changing command ids, arguments, parsing, roles, exposure, invocation policy, target requirements, enabled_when runtime conditions, command palette visibility, key bindings, help text, or command dispatch.
 ---
 
 # PVF Command

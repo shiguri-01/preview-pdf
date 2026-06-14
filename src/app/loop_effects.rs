@@ -7,7 +7,6 @@ pub(super) struct LoopEffects {
     commands: Vec<CommandRequest>,
     events: Vec<DomainEvent>,
     redraws: Vec<RedrawReason>,
-    quit_requested: bool,
 }
 
 impl LoopEffects {
@@ -15,10 +14,9 @@ impl LoopEffects {
         Self::default()
     }
 
-    pub(super) fn from_commands(commands: Vec<CommandRequest>, quit_requested: bool) -> Self {
+    pub(super) fn from_commands(commands: Vec<CommandRequest>) -> Self {
         Self {
             commands,
-            quit_requested,
             ..Self::default()
         }
     }
@@ -31,19 +29,7 @@ impl LoopEffects {
         self.redraws.push(reason);
     }
 
-    pub(super) fn into_parts(
-        self,
-    ) -> (
-        Vec<CommandRequest>,
-        Vec<DomainEvent>,
-        Vec<RedrawReason>,
-        bool,
-    ) {
-        (
-            self.commands,
-            self.events,
-            self.redraws,
-            self.quit_requested,
-        )
+    pub(super) fn into_parts(self) -> (Vec<CommandRequest>, Vec<DomainEvent>, Vec<RedrawReason>) {
+        (self.commands, self.events, self.redraws)
     }
 }

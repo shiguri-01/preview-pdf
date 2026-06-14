@@ -121,6 +121,8 @@ Contract:
   command palette input.
 - Internal-only commands can be invoked only by provider-driven internal flows.
 - Availability checks are separate from invocation policy.
+- Availability may depend on runtime app state such as active mode, not only on
+  invocation source.
 - Command dispatch emits command execution events after validation and dispatch
   complete, including rejected commands.
 
@@ -163,6 +165,8 @@ Contract:
   from the keymap; runtime availability remains a dispatch-time check.
 - Palette-local key handling is owned by palette behavior, not the normal-mode
   keymap.
+- Help-mode-local keys are handled by the help input route when the help overlay
+  is active; they may dispatch commands without being normal-mode bindings.
 - `<esc>` is reserved for global cancellation and is not routed through the
   normal-mode keymap.
 

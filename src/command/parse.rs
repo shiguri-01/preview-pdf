@@ -1,5 +1,6 @@
 use std::num::IntErrorKind;
 
+use crate::app::Mode;
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
 use crate::palette::{PaletteKind, PaletteOpenPayload};
@@ -33,6 +34,7 @@ pub fn parse_invocable_command_text(
     input: &str,
     source: CommandInvocationSource,
     extensions: &ExtensionUiSnapshot,
+    mode: Mode,
 ) -> AppResult<Command> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -40,7 +42,11 @@ pub fn parse_invocable_command_text(
     }
 
     let id = first_token(trimmed);
-    let ctx = CommandConditionContext { extensions, source };
+    let ctx = CommandConditionContext {
+        extensions,
+        mode,
+        source,
+    };
     validate_command_id_for_source(id, &ctx)?;
     parse_command_text(trimmed)
 }
@@ -63,16 +69,18 @@ pub(super) fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResul
         "prev-page" => "prev-page does not accept arguments",
         "first-page" => "first-page does not accept arguments",
         "last-page" => "last-page does not accept arguments",
-        "page-layout-single" => "page-layout-single does not accept arguments",
+        "layout-single" => "layout-single does not accept arguments",
         "zoom-in" => "zoom-in does not accept arguments",
         "zoom-out" => "zoom-out does not accept arguments",
         "zoom-reset" => "zoom-reset does not accept arguments",
-        "debug-status-show" => "debug-status-show does not accept arguments",
-        "debug-status-hide" => "debug-status-hide does not accept arguments",
-        "debug-status-toggle" => "debug-status-toggle does not accept arguments",
+        "debug-show" => "debug-show does not accept arguments",
+        "debug-hide" => "debug-hide does not accept arguments",
+        "debug-toggle" => "debug-toggle does not accept arguments",
         "close-palette" => "close-palette does not accept arguments",
         "help" => "help does not accept arguments",
         "close-help" => "close-help does not accept arguments",
+        "help-scroll-down" => "help-scroll-down does not accept arguments",
+        "help-scroll-up" => "help-scroll-up does not accept arguments",
         "search" => "search does not accept arguments",
         "search-results" => "search-results does not accept arguments",
         "next-search-hit" => "next-search-hit does not accept arguments",
@@ -247,7 +255,7 @@ pub(super) fn parse_page_layout_spread(args_text: &str) -> AppResult<Command> {
         .transpose()?;
     if parts.next().is_some() {
         return Err(AppError::invalid_argument(
-            "page-layout-spread accepts at most 2 arguments",
+            "layout-spread accepts at most 2 arguments",
         ));
     }
 
@@ -504,27 +512,27 @@ mod tests {
     }
 
     #[test]
-    fn parse_page_layout_aliases_support_mode_and_direction() {
+    fn parse_page_layout_commands_support_mode_and_direction() {
         assert_eq!(
-            parse_command_text("page-layout-single").expect("parse should succeed"),
+            parse_command_text("layout-single").expect("parse should succeed"),
             Command::PageLayoutSingle
         );
         assert_eq!(
-            parse_command_text("page-layout-spread").expect("parse should succeed"),
+            parse_command_text("layout-spread").expect("parse should succeed"),
             Command::PageLayoutSpread {
                 direction: None,
                 cover_policy: None,
             }
         );
         assert_eq!(
-            parse_command_text("page-layout-spread rtl").expect("parse should succeed"),
+            parse_command_text("layout-spread rtl").expect("parse should succeed"),
             Command::PageLayoutSpread {
                 direction: Some(SpreadDirectionArg::Rtl),
                 cover_policy: None,
             }
         );
         assert_eq!(
-            parse_command_text("page-layout-spread rtl cover").expect("parse should succeed"),
+            parse_command_text("layout-spread rtl cover").expect("parse should succeed"),
             Command::PageLayoutSpread {
                 direction: Some(SpreadDirectionArg::Rtl),
                 cover_policy: Some(SpreadCoverPolicyArg::Cover),

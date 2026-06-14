@@ -378,6 +378,10 @@ impl SequenceResolver {
                 }
 
                 if let Some(command) = pending_exact {
+                    if command_stops_followup_reprocessing(&command) {
+                        return SequenceResolution::Dispatch(command);
+                    }
+
                     SequenceResolution::DispatchThen {
                         first: command,
                         next: Box::new(self.handle_normalized_key(latest_key)),
@@ -392,6 +396,20 @@ impl SequenceResolver {
             }
         }
     }
+}
+
+fn command_stops_followup_reprocessing(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::OpenHelp
+            | Command::CloseHelp
+            | Command::OpenPalette { .. }
+            | Command::ClosePalette
+            | Command::OpenSearch
+            | Command::OpenSearchResults
+            | Command::OpenHistory
+            | Command::OpenOutline
+    )
 }
 
 #[derive(Debug, Clone)]

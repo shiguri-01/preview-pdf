@@ -55,8 +55,7 @@ impl InputActor {
         state: &mut AppState,
     ) -> AppResult<LoopEffects> {
         let timeout_outcome = interaction.flush_sequence_timeout(state.mode);
-        let mut effects =
-            LoopEffects::from_commands(timeout_outcome.commands, timeout_outcome.quit_requested);
+        let mut effects = LoopEffects::from_commands(timeout_outcome.commands);
         if timeout_outcome.redraw {
             effects.request_redraw(RedrawReason::Input);
         }
@@ -73,8 +72,7 @@ impl InputActor {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                 self.last_input_at = Instant::now();
                 let outcome = interaction.handle_key_event(state, key)?;
-                let mut effects =
-                    LoopEffects::from_commands(outcome.commands, outcome.quit_requested);
+                let mut effects = LoopEffects::from_commands(outcome.commands);
                 if outcome.redraw {
                     effects.request_redraw(RedrawReason::Input);
                 }

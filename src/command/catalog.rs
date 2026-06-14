@@ -10,6 +10,7 @@ use super::types::{
 
 const NO_ARGS: [ArgSpec; 0] = [];
 const REQUIRES_SEARCH_ACTIVE: [CommandCondition; 1] = [CommandCondition::SearchActive];
+const REQUIRES_HELP_MODE: [CommandCondition; 1] = [CommandCondition::HelpMode];
 const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     name: "page",
     kind: ArgKind::I32,
@@ -315,7 +316,7 @@ define_commands! {
         exec: super::handlers::pan,
     }
     PageLayoutSingle {
-        id: "page-layout-single",
+        id: "layout-single",
         title: "Single Page Layout",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
@@ -328,8 +329,8 @@ define_commands! {
         direction: Option<SpreadDirectionArg>,
         cover_policy: Option<SpreadCoverPolicyArg>,
     ) {
-        id: "page-layout-spread",
-        title: "Spread Page Layout",
+        id: "layout-spread",
+        title: "Spread Layout",
         args: &ARGS_PAGE_LAYOUT_SPREAD,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
@@ -338,8 +339,8 @@ define_commands! {
         exec: super::handlers::page_layout_spread,
     }
     DebugStatusShow {
-        id: "debug-status-show",
-        title: "Show Debug Status",
+        id: "debug-show",
+        title: "Show Debug Info",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
@@ -348,8 +349,8 @@ define_commands! {
         exec: super::handlers::debug_status_show,
     }
     DebugStatusHide {
-        id: "debug-status-hide",
-        title: "Hide Debug Status",
+        id: "debug-hide",
+        title: "Hide Debug Info",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
@@ -358,8 +359,8 @@ define_commands! {
         exec: super::handlers::debug_status_hide,
     }
     DebugStatusToggle {
-        id: "debug-status-toggle",
-        title: "Toggle Debug Status",
+        id: "debug-toggle",
+        title: "Toggle Debug Info",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
@@ -409,6 +410,26 @@ define_commands! {
         availability: CommandAvailability::Always,
         parse: no_args,
         exec: super::handlers::close_help,
+    }
+    HelpScrollDown {
+        id: "help-scroll-down",
+        title: "Scroll Help Down",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
+        parse: no_args,
+        exec: super::handlers::help_scroll_down,
+    }
+    HelpScrollUp {
+        id: "help-scroll-up",
+        title: "Scroll Help Up",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Public,
+        invocation: CommandInvocationPolicy::User,
+        availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
+        parse: no_args,
+        exec: super::handlers::help_scroll_up,
     }
     OpenSearch {
         id: "search",
@@ -541,8 +562,8 @@ define_commands! {
         exec: super::handlers::cancel_search,
     }
     ReloadDocument {
-        id: "reload-document",
-        title: "Reload Document",
+        id: "reload",
+        title: "Reload PDF",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,

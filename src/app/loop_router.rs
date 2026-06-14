@@ -37,7 +37,7 @@ impl App {
     where
         S: TerminalSurface,
     {
-        let (commands, events, redraws, quit_requested) = effects.into_parts();
+        let (commands, events, redraws) = effects.into_parts();
         for reason in redraws {
             self.request_redraw(runtime, reason);
         }
@@ -54,9 +54,6 @@ impl App {
             if runtime.loop_event_tx.send(event).is_err() {
                 return LoopControl::Break;
             }
-        }
-        if quit_requested && runtime.loop_event_tx.send(DomainEvent::Quit).is_err() {
-            return LoopControl::Break;
         }
         LoopControl::Continue
     }
@@ -151,9 +148,6 @@ impl App {
             }
             WaitEvent::Event(DomainEvent::DocumentReloaded(result)) => {
                 self.handle_document_reload_result(runtime, document, result)?;
-            }
-            WaitEvent::Event(DomainEvent::Quit) => {
-                terminate_process_now(runtime);
             }
             WaitEvent::Event(DomainEvent::Wake) => {}
             WaitEvent::Closed => return Ok(LoopControl::Break),

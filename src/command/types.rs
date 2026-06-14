@@ -227,6 +227,7 @@ pub enum CommandInvocationPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandCondition {
     SearchActive,
+    HelpMode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

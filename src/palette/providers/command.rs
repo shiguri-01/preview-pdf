@@ -54,6 +54,7 @@ impl PaletteProvider for CommandPaletteProvider {
                     .filter(|spec| {
                         let command_ctx = CommandConditionContext {
                             extensions: ctx.extensions,
+                            mode: ctx.app.mode,
                             source: CommandInvocationSource::CommandPaletteInput,
                         };
                         is_command_visible_in_palette(*spec, &command_ctx)
@@ -89,6 +90,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 input,
                 CommandInvocationSource::CommandPaletteInput,
                 ctx.extensions,
+                ctx.app.mode,
             ) {
                 Ok(command) => {
                     return Ok(PaletteSubmitEffect::Dispatch {
@@ -409,6 +411,7 @@ fn submit_selected_enum_candidate(
         synthesized_trimmed,
         CommandInvocationSource::CommandPaletteInput,
         ctx.extensions,
+        ctx.app.mode,
     ) {
         Ok(command) => Ok(Some(PaletteSubmitEffect::Dispatch {
             command,
@@ -750,16 +753,16 @@ mod tests {
 
     #[test]
     fn enum_argument_phase_lists_values() {
-        let list = command_list_for_input("page-layout-spread ", false);
+        let list = command_list_for_input("layout-spread ", false);
         assert_eq!(ids(&list), vec!["ltr".to_string(), "rtl".to_string()]);
 
-        let list = command_list_for_input("page-layout-spread ltr ", false);
+        let list = command_list_for_input("layout-spread ltr ", false);
         assert_eq!(ids(&list), vec!["paired".to_string(), "cover".to_string()]);
     }
 
     #[test]
     fn enum_argument_phase_filters_values() {
-        let list = command_list_for_input("page-layout-spread r", false);
+        let list = command_list_for_input("layout-spread r", false);
         assert_eq!(ids(&list), vec!["ltr".to_string(), "rtl".to_string()]);
     }
 
@@ -782,10 +785,10 @@ mod tests {
         let list = command_list_for_input("pan t", false);
         assert_eq!(ids(&list), vec!["left".to_string(), "right".to_string()]);
 
-        let list = command_list_for_input("page-layout-spread rt", false);
+        let list = command_list_for_input("layout-spread rt", false);
         assert_eq!(ids(&list), vec!["rtl".to_string()]);
 
-        let list = command_list_for_input("page-layout-spread rtl p", false);
+        let list = command_list_for_input("layout-spread rtl p", false);
         assert_eq!(ids(&list), vec!["paired".to_string()]);
     }
 
@@ -870,7 +873,7 @@ mod tests {
 
     #[test]
     fn submit_dispatches_optional_only_page_layout_without_reopen() {
-        let effect = command_submit_effect("", "page-layout-spread", false);
+        let effect = command_submit_effect("", "layout-spread", false);
         assert_eq!(
             effect,
             PaletteSubmitEffect::Dispatch {
@@ -878,9 +881,7 @@ mod tests {
                     direction: None,
                     cover_policy: None,
                 },
-                history_record: Some(InputHistoryRecord::Command(
-                    "page-layout-spread".to_string(),
-                )),
+                history_record: Some(InputHistoryRecord::Command("layout-spread".to_string(),)),
                 next: PalettePostAction::Close,
             }
         );
@@ -947,7 +948,7 @@ mod tests {
             app,
             extensions: &extensions,
             kind: PaletteKind::Command,
-            input: "page-layout-spread",
+            input: "layout-spread",
             open_payload: None,
         };
 
@@ -962,9 +963,7 @@ mod tests {
                     direction: None,
                     cover_policy: None,
                 },
-                history_record: Some(InputHistoryRecord::Command(
-                    "page-layout-spread".to_string(),
-                )),
+                history_record: Some(InputHistoryRecord::Command("layout-spread".to_string(),)),
                 next: PalettePostAction::Close,
             }
         );
@@ -996,11 +995,11 @@ mod tests {
 
     #[test]
     fn tab_completion_replaces_enum_argument_and_appends_space() {
-        let effect = command_tab_effect("page-layout-spread r", "rtl", false);
+        let effect = command_tab_effect("layout-spread r", "rtl", false);
         assert_eq!(
             effect,
             PaletteTabEffect::SetInput {
-                value: "page-layout-spread rtl ".to_string(),
+                value: "layout-spread rtl ".to_string(),
                 move_cursor_to_end: true,
             }
         );
@@ -1008,7 +1007,7 @@ mod tests {
 
     #[test]
     fn submit_dispatches_selected_enum_argument_when_result_is_complete() {
-        let effect = command_submit_effect("page-layout-spread ", "rtl", false);
+        let effect = command_submit_effect("layout-spread ", "rtl", false);
         assert_eq!(
             effect,
             PaletteSubmitEffect::Dispatch {
@@ -1016,9 +1015,7 @@ mod tests {
                     direction: Some(crate::command::SpreadDirectionArg::Rtl),
                     cover_policy: None,
                 },
-                history_record: Some(InputHistoryRecord::Command(
-                    "page-layout-spread rtl".to_string(),
-                )),
+                history_record: Some(InputHistoryRecord::Command("layout-spread rtl".to_string(),)),
                 next: PalettePostAction::Close,
             }
         );
@@ -1026,7 +1023,7 @@ mod tests {
 
     #[test]
     fn submit_dispatches_selected_spread_cover_policy_when_result_is_complete() {
-        let effect = command_submit_effect("page-layout-spread rtl ", "cover", false);
+        let effect = command_submit_effect("layout-spread rtl ", "cover", false);
         assert_eq!(
             effect,
             PaletteSubmitEffect::Dispatch {
@@ -1035,7 +1032,7 @@ mod tests {
                     cover_policy: Some(crate::command::SpreadCoverPolicyArg::Cover),
                 },
                 history_record: Some(InputHistoryRecord::Command(
-                    "page-layout-spread rtl cover".to_string(),
+                    "layout-spread rtl cover".to_string(),
                 )),
                 next: PalettePostAction::Close,
             }
@@ -1045,15 +1042,13 @@ mod tests {
     #[test]
     fn assistive_text_uses_enum_values_for_enum_arguments() {
         assert_eq!(
-            assistive_text_for_input("page-layout-spread ", false),
-            Some(
-                "page-layout-spread [direction] [cover-policy] | direction: ltr / rtl".to_string()
-            )
+            assistive_text_for_input("layout-spread ", false),
+            Some("layout-spread [direction] [cover-policy] | direction: ltr / rtl".to_string())
         );
         assert_eq!(
-            assistive_text_for_input("page-layout-spread rtl ", false),
+            assistive_text_for_input("layout-spread rtl ", false),
             Some(
-                "page-layout-spread [direction] [cover-policy] | cover-policy: paired / cover"
+                "layout-spread [direction] [cover-policy] | cover-policy: paired / cover"
                     .to_string()
             )
         );

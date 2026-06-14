@@ -1,3 +1,4 @@
+use crate::app::Mode;
 use crate::error::{AppError, AppResult};
 use crate::extension::ExtensionUiSnapshot;
 
@@ -19,6 +20,7 @@ pub fn all_command_specs() -> Vec<CommandSpec> {
 
 pub struct CommandConditionContext<'a> {
     pub extensions: &'a ExtensionUiSnapshot,
+    pub mode: Mode,
     pub source: CommandInvocationSource,
 }
 
@@ -137,6 +139,7 @@ fn is_invocation_source_allowed(spec: CommandSpec, source: CommandInvocationSour
 fn is_condition_met(condition: CommandCondition, ctx: &CommandConditionContext<'_>) -> bool {
     match condition {
         CommandCondition::SearchActive => ctx.extensions.search_active,
+        CommandCondition::HelpMode => ctx.mode == Mode::Help,
     }
 }
 
@@ -152,6 +155,10 @@ fn unavailable_message(spec: CommandSpec, ctx: &CommandConditionContext<'_>) -> 
                 return format!("{} is unavailable while search is inactive", spec.id);
             }
             CommandCondition::SearchActive => {}
+            CommandCondition::HelpMode if ctx.mode != Mode::Help => {
+                return format!("{} is unavailable outside help", spec.id);
+            }
+            CommandCondition::HelpMode => {}
         }
     }
 
@@ -171,6 +178,7 @@ fn app_error_message(err: AppError) -> String {
 mod tests {
     use std::collections::HashSet;
 
+    use crate::app::Mode;
     use crate::extension::ExtensionUiSnapshot;
 
     use super::{
@@ -200,6 +208,7 @@ mod tests {
         let extensions = ExtensionUiSnapshot::default();
         let ctx = CommandConditionContext {
             extensions: &extensions,
+            mode: Mode::Normal,
             source: CommandInvocationSource::CommandPaletteInput,
         };
 
@@ -212,6 +221,7 @@ mod tests {
         let extensions = ExtensionUiSnapshot::default();
         let ctx = CommandConditionContext {
             extensions: &extensions,
+            mode: Mode::Normal,
             source: CommandInvocationSource::Keymap,
         };
 
@@ -229,6 +239,7 @@ mod tests {
         let extensions = ExtensionUiSnapshot::default();
         let keymap_ctx = CommandConditionContext {
             extensions: &extensions,
+            mode: Mode::Normal,
             source: CommandInvocationSource::Keymap,
         };
         validate_command_for_source(
@@ -242,6 +253,7 @@ mod tests {
 
         let palette_input_ctx = CommandConditionContext {
             extensions: &extensions,
+            mode: Mode::Normal,
             source: CommandInvocationSource::CommandPaletteInput,
         };
         let err = validate_command_id_for_source("open-palette", &palette_input_ctx)
@@ -254,11 +266,35 @@ mod tests {
         let extensions = ExtensionUiSnapshot::default();
         let ctx = CommandConditionContext {
             extensions: &extensions,
+            mode: Mode::Normal,
             source: CommandInvocationSource::CommandPaletteInput,
         };
 
         let spec = find_command_spec("close-help").expect("spec should exist");
         assert!(!is_command_visible_in_palette(spec, &ctx));
+    }
+
+    #[test]
+    fn help_scroll_commands_are_only_available_in_help_mode() {
+        let extensions = ExtensionUiSnapshot::default();
+        let normal_ctx = CommandConditionContext {
+            extensions: &extensions,
+            mode: Mode::Normal,
+            source: CommandInvocationSource::Keymap,
+        };
+        let err = validate_command_id_for_source("help-scroll-down", &normal_ctx)
+            .expect_err("help scroll should be unavailable outside help");
+        assert!(err.to_string().contains("outside help"));
+
+        let help_ctx = CommandConditionContext {
+            extensions: &extensions,
+            mode: Mode::Help,
+            source: CommandInvocationSource::Keymap,
+        };
+        validate_command_id_for_source("help-scroll-down", &help_ctx)
+            .expect("help scroll down should be available in help");
+        validate_command_id_for_source("help-scroll-up", &help_ctx)
+            .expect("help scroll up should be available in help");
     }
 
     #[test]

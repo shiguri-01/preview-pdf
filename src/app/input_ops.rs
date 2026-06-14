@@ -31,12 +31,6 @@ enum KeyEventRoute {
     Normal,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HelpKeyAction {
-    ScrollBy(isize),
-    Ignore,
-}
-
 impl InteractionSubsystem {
     pub(crate) fn handle_key_event(
         &mut self,
@@ -159,25 +153,26 @@ impl InteractionSubsystem {
         Self::sequence_outcome(resolution, false)
     }
 
-    fn handle_help_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
-        match Self::classify_help_key(key) {
-            HelpKeyAction::ScrollBy(delta) => {
-                state.scroll_help_by(delta);
-                KeyEventOutcome {
-                    redraw: true,
-                    quit_requested: false,
-                    commands: Vec::new(),
-                }
-            }
-            HelpKeyAction::Ignore => KeyEventOutcome::default(),
+    fn handle_help_key_event(&mut self, _state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
+        let Some(command) = Self::help_command_for_key(key) else {
+            return KeyEventOutcome::default();
+        };
+
+        KeyEventOutcome {
+            redraw: false,
+            quit_requested: false,
+            commands: vec![CommandRequest::new(
+                command,
+                CommandInvocationSource::Keymap,
+            )],
         }
     }
 
-    fn classify_help_key(key: KeyEvent) -> HelpKeyAction {
+    fn help_command_for_key(key: KeyEvent) -> Option<Command> {
         match key.code {
-            KeyCode::Char('j') => HelpKeyAction::ScrollBy(1),
-            KeyCode::Char('k') => HelpKeyAction::ScrollBy(-1),
-            _ => HelpKeyAction::Ignore,
+            KeyCode::Char('j') => Some(Command::HelpScrollDown),
+            KeyCode::Char('k') => Some(Command::HelpScrollUp),
+            _ => None,
         }
     }
 
@@ -529,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn help_mode_scrolls_and_requests_close_help() {
+    fn help_mode_scroll_keys_request_help_scroll_commands() {
         let mut interaction = InteractionSubsystem::default();
         let mut state = AppState {
             mode: crate::app::Mode::Help,
@@ -542,9 +537,29 @@ mod tests {
                 KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
             )
             .expect("help scroll should be handled");
-        assert_eq!(state.help_scroll, 1);
-        assert!(down.redraw);
-        assert!(down.commands.is_empty());
+        assert_eq!(state.help_scroll, 0);
+        assert!(!down.redraw);
+        assert_eq!(
+            down.commands,
+            vec![CommandRequest::new(
+                Command::HelpScrollDown,
+                CommandInvocationSource::Keymap
+            )]
+        );
+
+        let up = interaction
+            .handle_key_event(
+                &mut state,
+                KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE),
+            )
+            .expect("help scroll should be handled");
+        assert_eq!(
+            up.commands,
+            vec![CommandRequest::new(
+                Command::HelpScrollUp,
+                CommandInvocationSource::Keymap
+            )]
+        );
 
         let closed = interaction
             .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))

@@ -11,7 +11,7 @@ mod viewport;
 
 pub(super) use control::{cancel_search, quit, reload_document};
 pub(super) use debug::{debug_status_hide, debug_status_show, debug_status_toggle};
-pub(super) use help::{close_help, open_help};
+pub(super) use help::{close_help, help_scroll_down, help_scroll_up, open_help};
 pub(super) use history::{history_back, history_forward, history_goto, open_history};
 pub(super) use layout::{page_layout_single, page_layout_spread};
 pub(super) use navigation::{first_page, goto_page, last_page, next_page, prev_page};

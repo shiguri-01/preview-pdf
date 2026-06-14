@@ -1,3 +1,4 @@
+use crate::app::Mode;
 use crate::command::{
     CommandConditionContext, CommandInvocationSource, command_registry, find_command_spec,
 };
@@ -13,6 +14,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
     let extensions = ExtensionUiSnapshot::with_search_active(true);
     let ctx = CommandConditionContext {
         extensions: &extensions,
+        mode: Mode::Normal,
         source: CommandInvocationSource::Keymap,
     };
 

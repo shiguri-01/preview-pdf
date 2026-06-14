@@ -73,6 +73,7 @@ pub fn dispatch_with_view_policy(
     let extensions = extension_host.ui_snapshot();
     let ctx = CommandConditionContext {
         extensions: &extensions,
+        mode: app.mode,
         source,
     };
     if let Some(message) = rejection_message_for_command(&cmd, &ctx) {
@@ -191,6 +192,8 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::ClosePalette
         | Command::OpenHelp
         | Command::CloseHelp
+        | Command::HelpScrollDown
+        | Command::HelpScrollUp
         | Command::OpenSearch
         | Command::OpenSearchResults
         | Command::SubmitSearch { .. }
@@ -751,6 +754,87 @@ mod tests {
                 id: CommandId::CloseHelp,
                 outcome: CommandOutcome::Applied
             }
+        ));
+    }
+
+    #[test]
+    fn dispatch_help_scroll_commands_require_help_mode() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let result = dispatch(
+            &mut app,
+            Command::HelpScrollDown,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should reject through noop result");
+
+        assert_eq!(app.mode, crate::app::Mode::Normal);
+        assert_eq!(app.help_scroll, 0);
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert_eq!(
+            app.notice,
+            Some(Notice {
+                level: NoticeLevel::Warning,
+                message: "help-scroll-down is unavailable outside help".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn dispatch_help_scroll_commands_update_help_scroll() {
+        let mut app = AppState {
+            mode: crate::app::Mode::Help,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let mut palette_requests = VecDeque::new();
+
+        let down = dispatch(
+            &mut app,
+            Command::HelpScrollDown,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.help_scroll, 1);
+        assert_eq!(down.outcome, CommandOutcome::Applied);
+        assert!(matches!(
+            down.emitted_events.as_slice(),
+            [AppEvent::CommandExecuted {
+                id: CommandId::HelpScrollDown,
+                outcome: CommandOutcome::Applied
+            }]
+        ));
+
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let up = dispatch(
+            &mut app,
+            Command::HelpScrollUp,
+            CommandInvocationSource::Keymap,
+            pdf,
+            &mut host,
+            &mut palette_requests,
+        )
+        .expect("dispatch should succeed");
+
+        assert_eq!(app.help_scroll, 0);
+        assert_eq!(up.outcome, CommandOutcome::Applied);
+        assert!(matches!(
+            up.emitted_events.as_slice(),
+            [AppEvent::CommandExecuted {
+                id: CommandId::HelpScrollUp,
+                outcome: CommandOutcome::Applied
+            }]
         ));
     }
 

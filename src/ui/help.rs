@@ -360,7 +360,8 @@ mod tests {
         assert!(text.contains("x"));
         assert!(text.contains("y"));
         assert!(text.contains("A / S / W / D"));
-        assert!(!text.contains("j"));
+        assert!(!text.contains("j / k"));
+        assert!(!text.contains("Scroll help"));
         assert!(!text.contains("H / J / K / L"));
     }
 

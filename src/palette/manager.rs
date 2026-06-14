@@ -256,7 +256,7 @@ impl PaletteManager {
         let Some(session) = self.active.as_ref() else {
             return Ok(false);
         };
-        if !supports_input_history(session.kind) {
+        if !session.kind.supports_text_history() {
             return Ok(false);
         }
         let previous_input = session.input.value().to_string();
@@ -493,10 +493,6 @@ fn selected_candidate_for<'a>(
     selected: usize,
 ) -> Option<&'a PaletteCandidate> {
     visible.get(selected).and_then(|idx| candidates.get(*idx))
-}
-
-fn supports_input_history(kind: PaletteKind) -> bool {
-    matches!(kind, PaletteKind::Command | PaletteKind::Search)
 }
 
 #[cfg(test)]

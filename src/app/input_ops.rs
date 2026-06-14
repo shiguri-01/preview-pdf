@@ -12,7 +12,7 @@ use crate::event::AppEvent;
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::sequence::{KeyBindingContext, KeyBindingScope, SequenceResolution};
 use crate::input::{AppInputEvent, InputHookResult};
-use crate::palette::{PaletteKind, PaletteView};
+use crate::palette::PaletteView;
 
 use super::core::InteractionSubsystem;
 use super::state::{AppState, Mode, PaletteRequest};
@@ -105,16 +105,12 @@ impl InteractionSubsystem {
 
         KeyBindingContext {
             scope,
-            runtime: RuntimeConditionContext {
-                mode: state.mode,
+            runtime: RuntimeConditionContext::new(
+                state.mode,
                 active_palette,
-                focused_text_input: self.palette.manager.focused_text_input_available(),
-                text_history_available: matches!(
-                    active_palette,
-                    Some(PaletteKind::Command | PaletteKind::Search)
-                ),
+                self.palette.manager.focused_text_input_available(),
                 extensions,
-            },
+            ),
         }
     }
 

@@ -4,7 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::catalog::{self, Command};
-use super::spec::{CommandPolicyContext, find_command_spec, validate_command_id_for_source};
+use super::spec::{CommandPolicyContext, find_command_spec, validate_command_id_for_policy};
 use super::types::{
     PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
 };
@@ -37,7 +37,7 @@ pub fn parse_invocable_command_text(
     }
 
     let id = first_token(trimmed);
-    validate_command_id_for_source(id, ctx)?;
+    validate_command_id_for_policy(id, ctx)?;
     parse_command_text(trimmed)
 }
 

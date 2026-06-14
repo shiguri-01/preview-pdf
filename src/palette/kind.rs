@@ -28,4 +28,8 @@ impl PaletteKind {
             _ => None,
         }
     }
+
+    pub(crate) fn supports_text_history(self) -> bool {
+        matches!(self, Self::Command | Self::Search)
+    }
 }

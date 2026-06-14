@@ -8,7 +8,7 @@ use crate::input::keymap::build_builtin_sequence_registry;
 use crate::input::sequence::KeyBindingScope;
 use crate::palette::PaletteKind;
 
-use super::spec::validate_command_id_for_source;
+use super::spec::validate_command_id_for_policy;
 
 #[test]
 fn builtin_keymap_references_registered_keymap_invocable_commands() {
@@ -33,7 +33,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
             binding.keys,
             binding.command_id
         );
-        validate_command_id_for_source(binding.command_id, &ctx).unwrap_or_else(|err| {
+        validate_command_id_for_policy(binding.command_id, &ctx).unwrap_or_else(|err| {
             panic!(
                 "key binding {:?} references command {} that keymap cannot invoke: {}",
                 binding.keys, binding.command_id, err
@@ -49,7 +49,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
             binding.suffix,
             binding.command_id
         );
-        validate_command_id_for_source(binding.command_id, &ctx).unwrap_or_else(|err| {
+        validate_command_id_for_policy(binding.command_id, &ctx).unwrap_or_else(|err| {
             panic!(
                 "numeric key binding {:?} references command {} that keymap cannot invoke: {}",
                 binding.suffix, binding.command_id, err
@@ -65,7 +65,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
             binding.matcher,
             binding.command_id
         );
-        validate_command_id_for_source(binding.command_id, &ctx).unwrap_or_else(|err| {
+        validate_command_id_for_policy(binding.command_id, &ctx).unwrap_or_else(|err| {
             panic!(
                 "generated key binding {:?} references command {} that keymap cannot invoke: {}",
                 binding.matcher, binding.command_id, err
@@ -80,18 +80,16 @@ fn key_binding_command_context<'a>(
 ) -> CommandPolicyContext<'a> {
     CommandPolicyContext {
         source: CommandInvocationSource::Keymap,
-        runtime: RuntimeConditionContext {
-            mode: match scope {
+        runtime: RuntimeConditionContext::new(
+            match scope {
                 KeyBindingScope::Normal => Mode::Normal,
                 KeyBindingScope::Palette => Mode::Palette,
                 KeyBindingScope::Help => Mode::Help,
             },
-            active_palette: matches!(scope, KeyBindingScope::Palette)
-                .then_some(PaletteKind::Command),
-            focused_text_input: matches!(scope, KeyBindingScope::Palette),
-            text_history_available: matches!(scope, KeyBindingScope::Palette),
+            matches!(scope, KeyBindingScope::Palette).then_some(PaletteKind::Command),
+            matches!(scope, KeyBindingScope::Palette),
             extensions,
-        },
+        ),
     }
 }
 

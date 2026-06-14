@@ -133,6 +133,8 @@ Contract:
 - `enabled_when` may depend on runtime app state such as active search, help
   mode, palette kind, focused text input, or text history availability. Target
   requirements are not duplicated in `enabled_when`.
+- Text history availability means a focused text input whose active palette
+  supports text history; palette kind alone is not enough.
 - Command-palette listing, help display, typed command submission, and dispatch
   use command policy functions to decide how exposure, invocation policy,
   target, and `enabled_when` apply to that surface.

@@ -217,13 +217,7 @@ impl PaletteProvider for CommandPaletteProvider {
 fn command_policy_context<'a>(ctx: &'a PaletteContext<'a>) -> CommandPolicyContext<'a> {
     CommandPolicyContext {
         source: CommandInvocationSource::CommandPaletteInput,
-        runtime: RuntimeConditionContext {
-            mode: ctx.app.mode,
-            active_palette: Some(ctx.kind),
-            focused_text_input: true,
-            text_history_available: matches!(ctx.kind, PaletteKind::Command | PaletteKind::Search),
-            extensions: ctx.extensions,
-        },
+        runtime: RuntimeConditionContext::new(ctx.app.mode, Some(ctx.kind), true, ctx.extensions),
     }
 }
 

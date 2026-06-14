@@ -39,14 +39,14 @@ pub fn is_command_visible_in_palette(spec: CommandSpec, ctx: &CommandPolicyConte
         && is_command_enabled(spec, ctx)
 }
 
-pub fn validate_command_id_for_source(id: &str, ctx: &CommandPolicyContext<'_>) -> AppResult<()> {
+pub fn validate_command_id_for_policy(id: &str, ctx: &CommandPolicyContext<'_>) -> AppResult<()> {
     let Some(spec) = find_command_spec(id) else {
         return Err(AppError::invalid_argument("unknown command id"));
     };
-    validate_command_spec_for_source(spec, ctx)
+    validate_command_spec_for_policy(spec, ctx)
 }
 
-pub fn validate_command_for_source(
+pub fn validate_command_for_policy(
     command: &Command,
     ctx: &CommandPolicyContext<'_>,
 ) -> AppResult<()> {
@@ -55,7 +55,7 @@ pub fn validate_command_for_source(
             "command spec should exist for typed command",
         ));
     };
-    validate_command_spec_for_source(spec, ctx)
+    validate_command_spec_for_policy(spec, ctx)
 }
 
 pub fn validate_command_invocation_for_source(
@@ -84,12 +84,12 @@ pub fn rejection_message_for_command(
     command: &Command,
     ctx: &CommandPolicyContext<'_>,
 ) -> Option<String> {
-    validate_command_for_source(command, ctx)
+    validate_command_for_policy(command, ctx)
         .err()
         .map(app_error_message)
 }
 
-fn validate_command_spec_for_source(
+fn validate_command_spec_for_policy(
     spec: CommandSpec,
     ctx: &CommandPolicyContext<'_>,
 ) -> AppResult<()> {
@@ -243,7 +243,7 @@ mod tests {
 
     use super::{
         CommandPolicyContext, command_registry, find_command_spec, is_command_visible_in_palette,
-        validate_command_for_source, validate_command_id_for_source,
+        validate_command_for_policy, validate_command_id_for_policy,
         validate_command_invocation_for_source,
     };
     use crate::command::{Command, CommandInvocationPolicy, CommandInvocationSource};
@@ -289,11 +289,11 @@ mod tests {
             &extensions,
         );
 
-        let err = validate_command_id_for_source("next-search-hit", &ctx)
+        let err = validate_command_id_for_policy("next-search-hit", &ctx)
             .expect_err("command should be unavailable");
         assert!(err.to_string().contains("search is inactive"));
 
-        let err = validate_command_id_for_source("search-results", &ctx)
+        let err = validate_command_id_for_policy("search-results", &ctx)
             .expect_err("command should be unavailable");
         assert!(err.to_string().contains("search is inactive"));
     }
@@ -308,7 +308,7 @@ mod tests {
             false,
             &extensions,
         );
-        validate_command_for_source(
+        validate_command_for_policy(
             &Command::OpenPalette {
                 kind: crate::palette::PaletteKind::Command,
                 payload: None,
@@ -324,7 +324,7 @@ mod tests {
             true,
             &extensions,
         );
-        let err = validate_command_id_for_source("open-palette", &palette_input_ctx)
+        let err = validate_command_id_for_policy("open-palette", &palette_input_ctx)
             .expect_err("command palette input should be rejected");
         assert!(err.to_string().contains("internal command"));
     }
@@ -354,7 +354,7 @@ mod tests {
             false,
             &extensions,
         );
-        let err = validate_command_id_for_source("help-scroll-down", &normal_ctx)
+        let err = validate_command_id_for_policy("help-scroll-down", &normal_ctx)
             .expect_err("help scroll should be unavailable outside help");
         assert!(err.to_string().contains("outside help"));
 
@@ -365,9 +365,9 @@ mod tests {
             false,
             &extensions,
         );
-        validate_command_id_for_source("help-scroll-down", &help_ctx)
+        validate_command_id_for_policy("help-scroll-down", &help_ctx)
             .expect("help scroll down should be available in help");
-        validate_command_id_for_source("help-scroll-up", &help_ctx)
+        validate_command_id_for_policy("help-scroll-up", &help_ctx)
             .expect("help scroll up should be available in help");
     }
 
@@ -389,16 +389,12 @@ mod tests {
     ) -> CommandPolicyContext<'a> {
         CommandPolicyContext {
             source,
-            runtime: RuntimeConditionContext {
+            runtime: RuntimeConditionContext::new(
                 mode,
                 active_palette,
                 focused_text_input,
-                text_history_available: matches!(
-                    active_palette,
-                    Some(PaletteKind::Command | PaletteKind::Search)
-                ),
                 extensions,
-            },
+            ),
         }
     }
 }

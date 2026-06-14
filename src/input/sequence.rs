@@ -2,7 +2,6 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::Mode;
 use crate::command::Command;
 use crate::condition::{ConditionExpr, RuntimeConditionContext, evaluate_condition};
 use crate::extension::ExtensionUiSnapshot;
@@ -38,13 +37,7 @@ impl<'a> KeyBindingContext<'a> {
     pub fn normal(extensions: &'a ExtensionUiSnapshot) -> Self {
         Self {
             scope: KeyBindingScope::Normal,
-            runtime: RuntimeConditionContext {
-                mode: Mode::Normal,
-                active_palette: None,
-                focused_text_input: false,
-                text_history_available: false,
-                extensions,
-            },
+            runtime: RuntimeConditionContext::normal(extensions),
         }
     }
 }
@@ -956,13 +949,12 @@ mod tests {
     fn palette_context<'a>(extensions: &'a ExtensionUiSnapshot) -> KeyBindingContext<'a> {
         KeyBindingContext {
             scope: KeyBindingScope::Palette,
-            runtime: RuntimeConditionContext {
-                mode: Mode::Palette,
-                active_palette: Some(PaletteKind::Command),
-                focused_text_input: true,
-                text_history_available: true,
+            runtime: RuntimeConditionContext::new(
+                Mode::Palette,
+                Some(PaletteKind::Command),
+                true,
                 extensions,
-            },
+            ),
         }
     }
 

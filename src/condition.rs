@@ -44,21 +44,24 @@ pub struct RuntimeConditionContext<'a> {
 }
 
 impl<'a> RuntimeConditionContext<'a> {
-    pub fn with_scope_defaults(
+    pub fn new(
         mode: Mode,
         active_palette: Option<PaletteKind>,
+        focused_text_input: bool,
         extensions: &'a ExtensionUiSnapshot,
     ) -> RuntimeConditionContext<'a> {
         RuntimeConditionContext {
             mode,
             active_palette,
-            focused_text_input: active_palette.is_some(),
-            text_history_available: matches!(
-                active_palette,
-                Some(PaletteKind::Command | PaletteKind::Search)
-            ),
+            focused_text_input,
+            text_history_available: focused_text_input
+                && active_palette.is_some_and(PaletteKind::supports_text_history),
             extensions,
         }
+    }
+
+    pub fn normal(extensions: &'a ExtensionUiSnapshot) -> RuntimeConditionContext<'a> {
+        Self::new(Mode::Normal, None, false, extensions)
     }
 }
 
@@ -118,5 +121,63 @@ pub fn runtime_condition_is_met(
         RuntimeCondition::TextInputIsNotFocused => !ctx.focused_text_input,
         RuntimeCondition::TextHistoryIsAvailable => ctx.text_history_available,
         RuntimeCondition::TextHistoryIsUnavailable => !ctx.text_history_available,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::Mode;
+    use crate::extension::ExtensionUiSnapshot;
+    use crate::palette::PaletteKind;
+
+    use super::{RuntimeCondition, RuntimeConditionContext, runtime_condition_is_met};
+
+    #[test]
+    fn palette_kind_condition_requires_an_open_matching_palette() {
+        let extensions = ExtensionUiSnapshot::default();
+        let closed = RuntimeConditionContext::normal(&extensions);
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteKindIs(PaletteKind::Command),
+            &closed
+        ));
+
+        let open = RuntimeConditionContext::new(
+            Mode::Palette,
+            Some(PaletteKind::Command),
+            true,
+            &extensions,
+        );
+        assert!(runtime_condition_is_met(
+            RuntimeCondition::PaletteKindIs(PaletteKind::Command),
+            &open
+        ));
+    }
+
+    #[test]
+    fn text_history_requires_a_focused_history_capable_palette() {
+        let extensions = ExtensionUiSnapshot::default();
+        let focused_command = RuntimeConditionContext::new(
+            Mode::Palette,
+            Some(PaletteKind::Command),
+            true,
+            &extensions,
+        );
+        assert!(focused_command.text_history_available);
+
+        let unfocused_command = RuntimeConditionContext::new(
+            Mode::Palette,
+            Some(PaletteKind::Command),
+            false,
+            &extensions,
+        );
+        assert!(!unfocused_command.text_history_available);
+
+        let focused_outline = RuntimeConditionContext::new(
+            Mode::Palette,
+            Some(PaletteKind::Outline),
+            true,
+            &extensions,
+        );
+        assert!(!focused_outline.text_history_available);
     }
 }

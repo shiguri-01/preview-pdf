@@ -56,8 +56,7 @@ unbind = ["j"]
 
 Use the key labels shown in help, such as `G`, `<c-o>`, `<down>`, and
 `[count]G`. Palette-local keys are not part of the normal-mode keymap.
-`<enter>` can be bound like a normal key. `<esc>` is reserved for global
-cancellation and cannot be used in the normal-mode keymap.
+`<esc>` is reserved for cancellation.
 
 ## Note
 

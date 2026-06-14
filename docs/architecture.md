@@ -94,15 +94,17 @@ Terminal input enters as `DomainEvent::Input`.
 
 1. The loop router delegates input to app input handling.
 2. App input handling builds a key binding context from the active surface and
-   runtime state, such as palette kind, focused text input, and active search.
+   shared runtime condition state, such as palette kind, focused text input,
+   text history availability, and active search.
 3. Extension input hooks may intercept extension-local inputs in normal mode
    when no pending key sequence owns the input.
 4. The scoped input sequence resolver maps matching normal, palette, or help
    key bindings to typed commands. Palette keys become palette/text interaction
    commands, and help keys become help interaction commands.
 5. Command dispatch validates invocation source, resolves the required target
-   such as app, active palette, focused text input, or active help, applies
-   behavior, and emits `AppEvent` values.
+   such as app, active palette, focused text input, or active help, checks the
+   command `enabled_when` runtime condition, applies behavior, and emits
+   `AppEvent` values.
 6. The loop re-routes emitted app events and any follow-up command requests to
    extensions and other loop effects.
 7. Render workers return `DomainEvent::RenderComplete`; presenter encode

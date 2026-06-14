@@ -18,7 +18,7 @@ pub use parse::{parse_command_text, parse_invocable_command_text};
 #[cfg(test)]
 pub use spec::command_registry;
 pub use spec::{
-    CommandConditionContext, all_command_specs, find_command_spec, is_command_visible_in_palette,
+    CommandPolicyContext, all_command_specs, find_command_spec, is_command_visible_in_palette,
     validate_command_id_invocation_for_source, validate_command_invocation_for_source,
 };
 pub use types::{

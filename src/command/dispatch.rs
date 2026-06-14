@@ -10,7 +10,9 @@ use crate::input::InputHistoryService;
 use crate::palette::{PaletteManager, PaletteRegistry};
 
 use super::catalog::{Command, CommandRequest, execute_registered_command};
-use super::spec::{CommandConditionContext, rejection_message_for_command};
+use crate::condition::RuntimeConditionContext;
+
+use super::spec::{CommandPolicyContext, rejection_message_for_command};
 use super::types::{CommandInvocationSource, CommandOutcome};
 
 #[derive(Debug, Clone)]
@@ -102,12 +104,18 @@ pub fn dispatch_with_view_policy(
     } = dispatch_ctx;
     let command_id = cmd.command_id();
     let extensions = extension_host.ui_snapshot();
-    let ctx = CommandConditionContext {
-        extensions: &extensions,
-        mode: app.mode,
+    let ctx = CommandPolicyContext {
         source,
-        active_palette: palette_manager.is_open(),
-        focused_text_input: palette_manager.focused_text_input_available(),
+        runtime: RuntimeConditionContext {
+            mode: app.mode,
+            active_palette: palette_manager.active_kind(),
+            focused_text_input: palette_manager.focused_text_input_available(),
+            text_history_available: matches!(
+                palette_manager.active_kind(),
+                Some(crate::palette::PaletteKind::Command | crate::palette::PaletteKind::Search)
+            ),
+            extensions: &extensions,
+        },
     };
     if let Some(message) = rejection_message_for_command(&cmd, &ctx) {
         apply_notice(app, rejection_notice(&cmd, message));

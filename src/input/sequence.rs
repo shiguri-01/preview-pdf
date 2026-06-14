@@ -2,7 +2,10 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::app::Mode;
 use crate::command::Command;
+use crate::condition::{ConditionExpr, RuntimeConditionContext, evaluate_condition};
+use crate::extension::ExtensionUiSnapshot;
 
 use super::shortcut::{ShortcutKey, format_shortcut_key};
 
@@ -25,30 +28,23 @@ pub enum KeyBindingScope {
     Help,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyBindingCondition {
-    Always,
-    SearchActive,
-    FocusedTextInput,
-    TextHistoryAvailable,
-    TextHistoryUnavailable,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct KeyBindingContext {
+#[derive(Debug, Clone, Copy)]
+pub struct KeyBindingContext<'a> {
     pub scope: KeyBindingScope,
-    pub search_active: bool,
-    pub focused_text_input: bool,
-    pub text_history_available: bool,
+    pub runtime: RuntimeConditionContext<'a>,
 }
 
-impl KeyBindingContext {
-    pub fn normal() -> Self {
+impl<'a> KeyBindingContext<'a> {
+    pub fn normal(extensions: &'a ExtensionUiSnapshot) -> Self {
         Self {
             scope: KeyBindingScope::Normal,
-            search_active: false,
-            focused_text_input: false,
-            text_history_available: false,
+            runtime: RuntimeConditionContext {
+                mode: Mode::Normal,
+                active_palette: None,
+                focused_text_input: false,
+                text_history_available: false,
+                extensions,
+            },
         }
     }
 }
@@ -75,20 +71,20 @@ impl GeneratedCommand {
 enum SequenceBinding {
     Exact {
         scope: KeyBindingScope,
-        condition: KeyBindingCondition,
+        enabled_when: ConditionExpr,
         keys: Vec<ShortcutKey>,
         command: Command,
     },
     NumericPrefix {
         scope: KeyBindingScope,
-        condition: KeyBindingCondition,
+        enabled_when: ConditionExpr,
         suffix: ShortcutKey,
         command_id: &'static str,
         factory: NumericCommandFactory,
     },
     Generated {
         scope: KeyBindingScope,
-        condition: KeyBindingCondition,
+        enabled_when: ConditionExpr,
         matcher: GeneratedKeyMatcher,
         command: GeneratedCommand,
     },
@@ -97,7 +93,7 @@ enum SequenceBinding {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExactSequenceBinding {
     pub scope: KeyBindingScope,
-    pub condition: KeyBindingCondition,
+    pub enabled_when: ConditionExpr,
     pub keys: Vec<ShortcutKey>,
     pub command_id: &'static str,
 }
@@ -105,7 +101,7 @@ pub struct ExactSequenceBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NumericSequenceBinding {
     pub scope: KeyBindingScope,
-    pub condition: KeyBindingCondition,
+    pub enabled_when: ConditionExpr,
     pub suffix: ShortcutKey,
     pub command_id: &'static str,
 }
@@ -113,7 +109,7 @@ pub struct NumericSequenceBinding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GeneratedSequenceBinding {
     pub scope: KeyBindingScope,
-    pub condition: KeyBindingCondition,
+    pub enabled_when: ConditionExpr,
     pub matcher: GeneratedKeyMatcher,
     pub command_id: &'static str,
 }
@@ -142,7 +138,7 @@ impl SequenceRegistry {
     ) -> Result<(), SequenceRegistrationError> {
         self.register_static_in_scope(
             KeyBindingScope::Normal,
-            KeyBindingCondition::Always,
+            ConditionExpr::Always,
             keys,
             command,
         )
@@ -151,7 +147,7 @@ impl SequenceRegistry {
     pub fn register_static_in_scope(
         &mut self,
         scope: KeyBindingScope,
-        condition: KeyBindingCondition,
+        enabled_when: ConditionExpr,
         keys: &[ShortcutKey],
         command: Command,
     ) -> Result<(), SequenceRegistrationError> {
@@ -172,15 +168,17 @@ impl SequenceRegistry {
                 binding,
                 SequenceBinding::Exact {
                     scope: existing_scope,
-                    condition: existing_condition,
+                    enabled_when: existing_enabled_when,
                     keys: existing,
                     ..
-                } if *existing_scope == scope && *existing_condition == condition && existing == &keys
+                } if *existing_scope == scope
+                    && *existing_enabled_when == enabled_when
+                    && existing == &keys
             )
         });
         self.bindings.push(SequenceBinding::Exact {
             scope,
-            condition,
+            enabled_when,
             keys,
             command,
         });
@@ -195,7 +193,7 @@ impl SequenceRegistry {
     ) -> Result<(), SequenceRegistrationError> {
         self.register_numeric_prefix_in_scope(
             KeyBindingScope::Normal,
-            KeyBindingCondition::Always,
+            ConditionExpr::Always,
             command_id,
             suffix,
             factory,
@@ -205,7 +203,7 @@ impl SequenceRegistry {
     pub fn register_numeric_prefix_in_scope(
         &mut self,
         scope: KeyBindingScope,
-        condition: KeyBindingCondition,
+        enabled_when: ConditionExpr,
         command_id: &'static str,
         suffix: ShortcutKey,
         factory: NumericCommandFactory,
@@ -223,15 +221,17 @@ impl SequenceRegistry {
                 binding,
                 SequenceBinding::NumericPrefix {
                     scope: existing_scope,
-                    condition: existing_condition,
+                    enabled_when: existing_enabled_when,
                     suffix: existing,
                     ..
-                } if *existing_scope == scope && *existing_condition == condition && *existing == suffix
+                } if *existing_scope == scope
+                    && *existing_enabled_when == enabled_when
+                    && *existing == suffix
             )
         });
         self.bindings.push(SequenceBinding::NumericPrefix {
             scope,
-            condition,
+            enabled_when,
             suffix,
             command_id,
             factory,
@@ -242,7 +242,7 @@ impl SequenceRegistry {
     pub fn register_generated(
         &mut self,
         scope: KeyBindingScope,
-        condition: KeyBindingCondition,
+        enabled_when: ConditionExpr,
         matcher: GeneratedKeyMatcher,
         command: GeneratedCommand,
     ) {
@@ -251,17 +251,17 @@ impl SequenceRegistry {
                 binding,
                 SequenceBinding::Generated {
                     scope: existing_scope,
-                    condition: existing_condition,
+                    enabled_when: existing_enabled_when,
                     matcher: existing_matcher,
                     ..
                 } if *existing_scope == scope
-                    && *existing_condition == condition
+                    && *existing_enabled_when == enabled_when
                     && *existing_matcher == matcher
             )
         });
         self.bindings.push(SequenceBinding::Generated {
             scope,
-            condition,
+            enabled_when,
             matcher,
             command,
         });
@@ -321,20 +321,20 @@ impl SequenceRegistry {
             match binding {
                 SequenceBinding::Exact {
                     scope,
-                    condition,
+                    enabled_when,
                     keys,
                     command,
                 } => {
                     snapshot.exact_bindings.push(ExactSequenceBinding {
                         scope: *scope,
-                        condition: *condition,
+                        enabled_when: *enabled_when,
                         keys: keys.clone(),
                         command_id: command.id(),
                     });
                 }
                 SequenceBinding::NumericPrefix {
                     scope,
-                    condition,
+                    enabled_when,
                     suffix,
                     command_id,
                     ..
@@ -342,18 +342,18 @@ impl SequenceRegistry {
                     .numeric_prefix_bindings
                     .push(NumericSequenceBinding {
                         scope: *scope,
-                        condition: *condition,
+                        enabled_when: *enabled_when,
                         suffix: *suffix,
                         command_id,
                     }),
                 SequenceBinding::Generated {
                     scope,
-                    condition,
+                    enabled_when,
                     matcher,
                     command,
                 } => snapshot.generated_bindings.push(GeneratedSequenceBinding {
                     scope: *scope,
-                    condition: *condition,
+                    enabled_when: *enabled_when,
                     matcher: *matcher,
                     command_id: command.command_id(),
                 }),
@@ -362,7 +362,7 @@ impl SequenceRegistry {
         snapshot
     }
 
-    fn match_buffer(&self, buffer: &[ShortcutKey], ctx: KeyBindingContext) -> RegistryMatch {
+    fn match_buffer(&self, buffer: &[ShortcutKey], ctx: KeyBindingContext<'_>) -> RegistryMatch {
         let mut exact = None;
         let mut has_prefix = false;
 
@@ -485,12 +485,13 @@ impl SequenceResolver {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> SequenceResolution {
-        self.handle_key_in_context(KeyBindingContext::normal(), key)
+        let extensions = ExtensionUiSnapshot::default();
+        self.handle_key_in_context(KeyBindingContext::normal(&extensions), key)
     }
 
     pub fn handle_key_in_context(
         &mut self,
-        ctx: KeyBindingContext,
+        ctx: KeyBindingContext<'_>,
         key: KeyEvent,
     ) -> SequenceResolution {
         if !self.state.is_empty() && !self.state.is_in_scope(ctx.scope) {
@@ -510,7 +511,7 @@ impl SequenceResolver {
 
     fn handle_normalized_key(
         &mut self,
-        ctx: KeyBindingContext,
+        ctx: KeyBindingContext<'_>,
         key: ShortcutKey,
     ) -> SequenceResolution {
         let pending_exact = (!self.state.is_empty())
@@ -556,9 +557,10 @@ impl SequenceResolver {
             return SequenceResolution::Noop;
         }
 
+        let extensions = ExtensionUiSnapshot::default();
         let ctx = KeyBindingContext {
             scope: self.state.scope.unwrap_or(KeyBindingScope::Normal),
-            ..KeyBindingContext::normal()
+            ..KeyBindingContext::normal(&extensions)
         };
         match self.registry.match_buffer(self.state.as_slice(), ctx).exact {
             Some(command) => {
@@ -593,9 +595,10 @@ impl SequenceResolver {
     }
 
     fn confirm_pending(&mut self) -> SequenceResolution {
+        let extensions = ExtensionUiSnapshot::default();
         let ctx = KeyBindingContext {
             scope: self.state.scope.unwrap_or(KeyBindingScope::Normal),
-            ..KeyBindingContext::normal()
+            ..KeyBindingContext::normal(&extensions)
         };
         match self.registry.match_buffer(self.state.as_slice(), ctx).exact {
             Some(command) => {
@@ -611,7 +614,7 @@ impl SequenceResolver {
 
     fn resolve_pending_after_input(
         &mut self,
-        ctx: KeyBindingContext,
+        ctx: KeyBindingContext<'_>,
         latest_key: ShortcutKey,
         pending_exact: Option<Command>,
     ) -> SequenceResolution {
@@ -667,37 +670,33 @@ fn command_stops_followup_reprocessing(command: &Command) -> bool {
     )
 }
 
-fn binding_matches_context(binding: &SequenceBinding, ctx: KeyBindingContext) -> bool {
-    let (scope, condition) = match binding {
+fn binding_matches_context(binding: &SequenceBinding, ctx: KeyBindingContext<'_>) -> bool {
+    let (scope, enabled_when) = match binding {
         SequenceBinding::Exact {
-            scope, condition, ..
+            scope,
+            enabled_when,
+            ..
         }
         | SequenceBinding::NumericPrefix {
-            scope, condition, ..
+            scope,
+            enabled_when,
+            ..
         }
         | SequenceBinding::Generated {
-            scope, condition, ..
-        } => (*scope, *condition),
+            scope,
+            enabled_when,
+            ..
+        } => (*scope, *enabled_when),
     };
 
-    scope == ctx.scope && condition_matches_context(condition, ctx)
-}
-
-fn condition_matches_context(condition: KeyBindingCondition, ctx: KeyBindingContext) -> bool {
-    match condition {
-        KeyBindingCondition::Always => true,
-        KeyBindingCondition::SearchActive => ctx.search_active,
-        KeyBindingCondition::FocusedTextInput => ctx.focused_text_input,
-        KeyBindingCondition::TextHistoryAvailable => ctx.text_history_available,
-        KeyBindingCondition::TextHistoryUnavailable => !ctx.text_history_available,
-    }
+    scope == ctx.scope && evaluate_condition(enabled_when, &ctx.runtime)
 }
 
 fn generated_command_for_key(
     matcher: GeneratedKeyMatcher,
     command: GeneratedCommand,
     key: ShortcutKey,
-    _ctx: KeyBindingContext,
+    _ctx: KeyBindingContext<'_>,
 ) -> Option<Command> {
     match (matcher, command) {
         (GeneratedKeyMatcher::PrintableCharacter, GeneratedCommand::TextInsert) => {
@@ -840,12 +839,16 @@ fn format_pending_buffer(buffer: &[ShortcutKey]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_SEQUENCE_TIMEOUT, GeneratedCommand, GeneratedKeyMatcher, KeyBindingCondition,
-        KeyBindingContext, KeyBindingScope, SequenceRegistrationError, SequenceRegistry,
-        SequenceResolution, SequenceResolver,
+        DEFAULT_SEQUENCE_TIMEOUT, GeneratedCommand, GeneratedKeyMatcher, KeyBindingContext,
+        KeyBindingScope, SequenceRegistrationError, SequenceRegistry, SequenceResolution,
+        SequenceResolver,
     };
+    use crate::app::Mode;
     use crate::command::Command;
+    use crate::condition::{ConditionExpr, RuntimeCondition, RuntimeConditionContext};
+    use crate::extension::ExtensionUiSnapshot;
     use crate::input::shortcut::ShortcutKey;
+    use crate::palette::PaletteKind;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::time::Duration;
 
@@ -906,12 +909,13 @@ mod tests {
         registry
             .register_static_in_scope(
                 KeyBindingScope::Palette,
-                KeyBindingCondition::Always,
+                ConditionExpr::Always,
                 &[ShortcutKey::key(KeyCode::Enter)],
                 Command::PaletteSubmit,
             )
             .expect("palette binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
 
         assert_eq!(
             resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
@@ -919,10 +923,7 @@ mod tests {
         );
         assert_eq!(
             resolver.handle_key_in_context(
-                KeyBindingContext {
-                    scope: KeyBindingScope::Palette,
-                    ..KeyBindingContext::normal()
-                },
+                palette_context(&extensions),
                 KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
             ),
             SequenceResolution::Dispatch(Command::PaletteSubmit)
@@ -934,25 +935,35 @@ mod tests {
         let mut registry = SequenceRegistry::new();
         registry.register_generated(
             KeyBindingScope::Palette,
-            KeyBindingCondition::FocusedTextInput,
+            ConditionExpr::All(&[RuntimeCondition::TextInputIsFocused]),
             GeneratedKeyMatcher::PrintableCharacter,
             GeneratedCommand::TextInsert,
         );
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
 
         assert_eq!(
             resolver.handle_key_in_context(
-                KeyBindingContext {
-                    scope: KeyBindingScope::Palette,
-                    focused_text_input: true,
-                    ..KeyBindingContext::normal()
-                },
+                palette_context(&extensions),
                 KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
             ),
             SequenceResolution::Dispatch(Command::TextInsert {
                 text: "x".to_string(),
             })
         );
+    }
+
+    fn palette_context<'a>(extensions: &'a ExtensionUiSnapshot) -> KeyBindingContext<'a> {
+        KeyBindingContext {
+            scope: KeyBindingScope::Palette,
+            runtime: RuntimeConditionContext {
+                mode: Mode::Palette,
+                active_palette: Some(PaletteKind::Command),
+                focused_text_input: true,
+                text_history_available: true,
+                extensions,
+            },
+        }
     }
 
     #[test]

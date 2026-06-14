@@ -1,5 +1,7 @@
 use std::sync::OnceLock;
 
+use crate::condition::ConditionExpr;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchMatcherKind {
     ContainsInsensitive,
@@ -198,18 +200,6 @@ pub enum CommandInvocationPolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandCondition {
-    SearchActive,
-    HelpMode,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandAvailability {
-    Always,
-    AllOf(&'static [CommandCondition]),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandTargetRequirement {
     App,
     ActivePalette,
@@ -335,7 +325,7 @@ pub struct CommandSpec {
     pub exposure: CommandExposure,
     pub invocation: CommandInvocationPolicy,
     pub target: CommandTargetRequirement,
-    pub availability: CommandAvailability,
+    pub enabled_when: ConditionExpr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

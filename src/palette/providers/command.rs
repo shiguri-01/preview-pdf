@@ -4,7 +4,8 @@ use crate::command::first_token;
 use crate::command::is_command_visible_in_palette;
 use crate::command::parse_command_text;
 use crate::command::parse_invocable_command_text;
-use crate::command::{ArgHint, ArgKind, ArgSpec, CommandConditionContext, CommandInvocationSource};
+use crate::command::{ArgHint, ArgKind, ArgSpec, CommandInvocationSource, CommandPolicyContext};
+use crate::condition::RuntimeConditionContext;
 use crate::error::AppResult;
 use crate::input::InputHistoryRecord;
 use crate::input::shortcut::{
@@ -52,13 +53,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 let mut candidates = all_command_specs()
                     .into_iter()
                     .filter(|spec| {
-                        let command_ctx = CommandConditionContext {
-                            extensions: ctx.extensions,
-                            mode: ctx.app.mode,
-                            source: CommandInvocationSource::CommandPaletteInput,
-                            active_palette: true,
-                            focused_text_input: true,
-                        };
+                        let command_ctx = command_policy_context(ctx);
                         is_command_visible_in_palette(*spec, &command_ctx)
                     })
                     .map(|spec| PaletteCandidate {
@@ -86,14 +81,10 @@ impl PaletteProvider for CommandPaletteProvider {
             return Ok(effect);
         }
 
+        let command_ctx = command_policy_context(ctx);
         let mut deferred_error = None;
         if !input.is_empty() {
-            match parse_invocable_command_text(
-                input,
-                CommandInvocationSource::CommandPaletteInput,
-                ctx.extensions,
-                ctx.app.mode,
-            ) {
+            match parse_invocable_command_text(input, &command_ctx) {
                 Ok(command) => {
                     return Ok(PaletteSubmitEffect::Dispatch {
                         command,
@@ -220,6 +211,19 @@ impl PaletteProvider for CommandPaletteProvider {
         }
 
         Some(default_hint)
+    }
+}
+
+fn command_policy_context<'a>(ctx: &'a PaletteContext<'a>) -> CommandPolicyContext<'a> {
+    CommandPolicyContext {
+        source: CommandInvocationSource::CommandPaletteInput,
+        runtime: RuntimeConditionContext {
+            mode: ctx.app.mode,
+            active_palette: Some(ctx.kind),
+            focused_text_input: true,
+            text_history_available: matches!(ctx.kind, PaletteKind::Command | PaletteKind::Search),
+            extensions: ctx.extensions,
+        },
     }
 }
 
@@ -409,12 +413,8 @@ fn submit_selected_enum_candidate(
 
     let synthesized = apply_enum_completion(&analysis, value);
     let synthesized_trimmed = synthesized.trim();
-    match parse_invocable_command_text(
-        synthesized_trimmed,
-        CommandInvocationSource::CommandPaletteInput,
-        ctx.extensions,
-        ctx.app.mode,
-    ) {
+    let command_ctx = command_policy_context(ctx);
+    match parse_invocable_command_text(synthesized_trimmed, &command_ctx) {
         Ok(command) => Ok(Some(PaletteSubmitEffect::Dispatch {
             command,
             history_record: Some(InputHistoryRecord::Command(synthesized_trimmed.to_string())),

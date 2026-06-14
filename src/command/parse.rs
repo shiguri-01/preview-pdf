@@ -1,15 +1,12 @@
 use std::num::IntErrorKind;
 
-use crate::app::Mode;
 use crate::error::{AppError, AppResult};
-use crate::extension::ExtensionUiSnapshot;
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::catalog::{self, Command};
-use super::spec::{CommandConditionContext, find_command_spec, validate_command_id_for_source};
+use super::spec::{CommandPolicyContext, find_command_spec, validate_command_id_for_source};
 use super::types::{
-    CommandInvocationSource, PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
-    SpreadDirectionArg,
+    PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
 };
 
 pub fn parse_command_text(input: &str) -> AppResult<Command> {
@@ -32,9 +29,7 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
 
 pub fn parse_invocable_command_text(
     input: &str,
-    source: CommandInvocationSource,
-    extensions: &ExtensionUiSnapshot,
-    mode: Mode,
+    ctx: &CommandPolicyContext<'_>,
 ) -> AppResult<Command> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -42,14 +37,7 @@ pub fn parse_invocable_command_text(
     }
 
     let id = first_token(trimmed);
-    let ctx = CommandConditionContext {
-        extensions,
-        mode,
-        source,
-        active_palette: mode == Mode::Palette,
-        focused_text_input: mode == Mode::Palette,
-    };
-    validate_command_id_for_source(id, &ctx)?;
+    validate_command_id_for_source(id, ctx)?;
     parse_command_text(trimmed)
 }
 

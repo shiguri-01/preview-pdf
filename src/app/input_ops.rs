@@ -5,9 +5,11 @@ use crate::command::{
     Command, CommandDispatchContext, CommandDispatchResult, CommandInvocationSource,
     CommandRequest, dispatch_with_view_policy, drain_background_events,
 };
+use crate::condition::RuntimeConditionContext;
 use crate::config::ViewPolicy;
 use crate::error::AppResult;
 use crate::event::AppEvent;
+use crate::extension::ExtensionUiSnapshot;
 use crate::input::sequence::{KeyBindingContext, KeyBindingScope, SequenceResolution};
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::{PaletteKind, PaletteView};
@@ -76,19 +78,24 @@ impl InteractionSubsystem {
             }
         }
 
-        let ctx = self.key_binding_context(state);
+        let extensions = self.extensions.host.ui_snapshot();
+        let ctx = self.key_binding_context(state, &extensions);
         let resolution = self.sequences.resolver.handle_key_in_context(ctx, key);
         Self::sequence_outcome(resolution, false)
     }
 
     fn handle_scoped_key_event(&mut self, state: &AppState, key: KeyEvent) -> KeyEventOutcome {
-        let ctx = self.key_binding_context(state);
+        let extensions = self.extensions.host.ui_snapshot();
+        let ctx = self.key_binding_context(state, &extensions);
         let resolution = self.sequences.resolver.handle_key_in_context(ctx, key);
         Self::sequence_outcome(resolution, false)
     }
 
-    fn key_binding_context(&self, state: &AppState) -> KeyBindingContext {
-        let extensions = self.extensions.host.ui_snapshot();
+    fn key_binding_context<'a>(
+        &self,
+        state: &AppState,
+        extensions: &'a ExtensionUiSnapshot,
+    ) -> KeyBindingContext<'a> {
         let scope = match state.mode {
             Mode::Normal => KeyBindingScope::Normal,
             Mode::Palette => KeyBindingScope::Palette,
@@ -98,12 +105,16 @@ impl InteractionSubsystem {
 
         KeyBindingContext {
             scope,
-            search_active: extensions.search_active,
-            focused_text_input: self.palette.manager.focused_text_input_available(),
-            text_history_available: matches!(
+            runtime: RuntimeConditionContext {
+                mode: state.mode,
                 active_palette,
-                Some(PaletteKind::Command | PaletteKind::Search)
-            ),
+                focused_text_input: self.palette.manager.focused_text_input_available(),
+                text_history_available: matches!(
+                    active_palette,
+                    Some(PaletteKind::Command | PaletteKind::Search)
+                ),
+                extensions,
+            },
         }
     }
 

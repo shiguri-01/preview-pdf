@@ -6,6 +6,7 @@ pub mod perf;
 pub mod presenter;
 
 mod command;
+pub(crate) mod condition;
 mod event;
 mod extension;
 mod highlight;

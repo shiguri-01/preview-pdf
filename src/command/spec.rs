@@ -1,14 +1,14 @@
 use crate::app::Mode;
+use crate::condition::{
+    RuntimeCondition, RuntimeConditionContext, evaluate_condition, first_unmet_condition,
+};
 use crate::error::{AppError, AppResult};
-use crate::extension::ExtensionUiSnapshot;
 
 use super::catalog::{self, Command};
 use super::types::{
-    CommandAvailability, CommandCondition, CommandExposure, CommandInvocationPolicy,
-    CommandInvocationSource, CommandRole, CommandSpec, CommandTargetRequirement,
+    CommandExposure, CommandInvocationPolicy, CommandInvocationSource, CommandRole, CommandSpec,
+    CommandTargetRequirement,
 };
-
-const NO_CONDITIONS: [CommandCondition; 0] = [];
 
 pub fn command_registry() -> &'static [CommandSpec] {
     catalog::command_registry()
@@ -18,12 +18,10 @@ pub fn all_command_specs() -> Vec<CommandSpec> {
     command_registry().to_vec()
 }
 
-pub struct CommandConditionContext<'a> {
-    pub extensions: &'a ExtensionUiSnapshot,
-    pub mode: Mode,
+#[derive(Debug, Clone, Copy)]
+pub struct CommandPolicyContext<'a> {
     pub source: CommandInvocationSource,
-    pub active_palette: bool,
-    pub focused_text_input: bool,
+    pub runtime: RuntimeConditionContext<'a>,
 }
 
 pub fn find_command_spec(id: &str) -> Option<CommandSpec> {
@@ -34,17 +32,14 @@ pub fn spec_for_command(command: &Command) -> Option<CommandSpec> {
     find_command_spec(command.id())
 }
 
-pub fn is_command_visible_in_palette(spec: CommandSpec, ctx: &CommandConditionContext<'_>) -> bool {
+pub fn is_command_visible_in_palette(spec: CommandSpec, ctx: &CommandPolicyContext<'_>) -> bool {
     spec.role == CommandRole::UserIntent
         && spec.exposure == CommandExposure::Public
         && is_invocation_source_allowed(spec, ctx.source)
-        && is_command_available(spec, ctx)
+        && is_command_enabled(spec, ctx)
 }
 
-pub fn validate_command_id_for_source(
-    id: &str,
-    ctx: &CommandConditionContext<'_>,
-) -> AppResult<()> {
+pub fn validate_command_id_for_source(id: &str, ctx: &CommandPolicyContext<'_>) -> AppResult<()> {
     let Some(spec) = find_command_spec(id) else {
         return Err(AppError::invalid_argument("unknown command id"));
     };
@@ -53,7 +48,7 @@ pub fn validate_command_id_for_source(
 
 pub fn validate_command_for_source(
     command: &Command,
-    ctx: &CommandConditionContext<'_>,
+    ctx: &CommandPolicyContext<'_>,
 ) -> AppResult<()> {
     let Some(spec) = spec_for_command(command) else {
         return Err(AppError::unsupported(
@@ -87,7 +82,7 @@ pub fn validate_command_id_invocation_for_source(
 
 pub fn rejection_message_for_command(
     command: &Command,
-    ctx: &CommandConditionContext<'_>,
+    ctx: &CommandPolicyContext<'_>,
 ) -> Option<String> {
     validate_command_for_source(command, ctx)
         .err()
@@ -96,7 +91,7 @@ pub fn rejection_message_for_command(
 
 fn validate_command_spec_for_source(
     spec: CommandSpec,
-    ctx: &CommandConditionContext<'_>,
+    ctx: &CommandPolicyContext<'_>,
 ) -> AppResult<()> {
     validate_command_spec_invocation_for_source(spec, ctx.source)?;
 
@@ -104,8 +99,8 @@ fn validate_command_spec_for_source(
         return Err(AppError::invalid_argument(target_unavailable_message(spec)));
     }
 
-    if !is_command_available(spec, ctx) {
-        return Err(AppError::invalid_argument(unavailable_message(spec, ctx)));
+    if !is_command_enabled(spec, ctx) {
+        return Err(AppError::invalid_argument(disabled_message(spec, ctx)));
     }
 
     Ok(())
@@ -125,14 +120,8 @@ fn validate_command_spec_invocation_for_source(
     )))
 }
 
-fn is_command_available(spec: CommandSpec, ctx: &CommandConditionContext<'_>) -> bool {
-    match spec.availability {
-        CommandAvailability::Always => true,
-        CommandAvailability::AllOf(conditions) => conditions
-            .iter()
-            .copied()
-            .all(|condition| is_condition_met(condition, ctx)),
-    }
+fn is_command_enabled(spec: CommandSpec, ctx: &CommandPolicyContext<'_>) -> bool {
+    evaluate_condition(spec.enabled_when, &ctx.runtime)
 }
 
 fn is_invocation_source_allowed(spec: CommandSpec, source: CommandInvocationSource) -> bool {
@@ -152,45 +141,71 @@ fn is_invocation_source_allowed(spec: CommandSpec, source: CommandInvocationSour
     }
 }
 
-fn is_target_available(
-    target: CommandTargetRequirement,
-    ctx: &CommandConditionContext<'_>,
-) -> bool {
+fn is_target_available(target: CommandTargetRequirement, ctx: &CommandPolicyContext<'_>) -> bool {
     match target {
         CommandTargetRequirement::App => true,
-        CommandTargetRequirement::ActivePalette => ctx.active_palette,
-        CommandTargetRequirement::FocusedTextInput => ctx.focused_text_input,
-        CommandTargetRequirement::ActiveHelp => ctx.mode == Mode::Help,
+        CommandTargetRequirement::ActivePalette => ctx.runtime.active_palette.is_some(),
+        CommandTargetRequirement::FocusedTextInput => ctx.runtime.focused_text_input,
+        CommandTargetRequirement::ActiveHelp => ctx.runtime.mode == Mode::Help,
     }
 }
 
-fn is_condition_met(condition: CommandCondition, ctx: &CommandConditionContext<'_>) -> bool {
-    match condition {
-        CommandCondition::SearchActive => ctx.extensions.search_active,
-        CommandCondition::HelpMode => ctx.mode == Mode::Help,
-    }
-}
-
-fn unavailable_message(spec: CommandSpec, ctx: &CommandConditionContext<'_>) -> String {
-    let unmet_conditions = match spec.availability {
-        CommandAvailability::Always => &NO_CONDITIONS[..],
-        CommandAvailability::AllOf(conditions) => conditions,
-    };
-
-    for condition in unmet_conditions {
-        match condition {
-            CommandCondition::SearchActive if !ctx.extensions.search_active => {
-                return format!("{} is unavailable while search is inactive", spec.id);
-            }
-            CommandCondition::SearchActive => {}
-            CommandCondition::HelpMode if ctx.mode != Mode::Help => {
-                return format!("{} is unavailable outside help", spec.id);
-            }
-            CommandCondition::HelpMode => {}
-        }
+fn disabled_message(spec: CommandSpec, ctx: &CommandPolicyContext<'_>) -> String {
+    if let Some(condition) = first_unmet_condition(spec.enabled_when, &ctx.runtime) {
+        return condition_unavailable_message(spec.id, condition);
     }
 
     format!("{} is unavailable", spec.id)
+}
+
+fn condition_unavailable_message(id: &str, condition: RuntimeCondition) -> String {
+    match condition {
+        RuntimeCondition::ModeIs(Mode::Normal) => {
+            format!("{id} is unavailable outside normal mode")
+        }
+        RuntimeCondition::ModeIs(Mode::Palette) => {
+            format!("{id} is unavailable outside palette mode")
+        }
+        RuntimeCondition::ModeIs(Mode::Help) | RuntimeCondition::HelpIsOpen => {
+            format!("{id} is unavailable outside help")
+        }
+        RuntimeCondition::ModeIsNot(Mode::Normal) => {
+            format!("{id} is unavailable in normal mode")
+        }
+        RuntimeCondition::ModeIsNot(Mode::Palette) => {
+            format!("{id} is unavailable in palette mode")
+        }
+        RuntimeCondition::ModeIsNot(Mode::Help) | RuntimeCondition::HelpIsClosed => {
+            format!("{id} is unavailable while help is closed")
+        }
+        RuntimeCondition::SearchIsActive => {
+            format!("{id} is unavailable while search is inactive")
+        }
+        RuntimeCondition::SearchIsInactive => {
+            format!("{id} is unavailable while search is active")
+        }
+        RuntimeCondition::PaletteIsOpen => {
+            format!("{id} is unavailable without an active palette")
+        }
+        RuntimeCondition::PaletteIsClosed => {
+            format!("{id} is unavailable while a palette is active")
+        }
+        RuntimeCondition::PaletteKindIs(kind) => {
+            format!("{id} is unavailable outside the {} palette", kind.id())
+        }
+        RuntimeCondition::TextInputIsFocused => {
+            format!("{id} is unavailable without a focused text input")
+        }
+        RuntimeCondition::TextInputIsNotFocused => {
+            format!("{id} is unavailable while a text input is focused")
+        }
+        RuntimeCondition::TextHistoryIsAvailable => {
+            format!("{id} is unavailable without text input history")
+        }
+        RuntimeCondition::TextHistoryIsUnavailable => {
+            format!("{id} is unavailable while text input history is available")
+        }
+    }
 }
 
 fn target_unavailable_message(spec: CommandSpec) -> String {
@@ -222,11 +237,13 @@ mod tests {
     use std::collections::HashSet;
 
     use crate::app::Mode;
+    use crate::condition::RuntimeConditionContext;
     use crate::extension::ExtensionUiSnapshot;
+    use crate::palette::PaletteKind;
 
     use super::{
-        CommandConditionContext, command_registry, find_command_spec,
-        is_command_visible_in_palette, validate_command_for_source, validate_command_id_for_source,
+        CommandPolicyContext, command_registry, find_command_spec, is_command_visible_in_palette,
+        validate_command_for_source, validate_command_id_for_source,
         validate_command_invocation_for_source,
     };
     use crate::command::{Command, CommandInvocationPolicy, CommandInvocationSource};
@@ -249,13 +266,13 @@ mod tests {
     #[test]
     fn palette_visibility_hides_internal_commands() {
         let extensions = ExtensionUiSnapshot::default();
-        let ctx = CommandConditionContext {
-            extensions: &extensions,
-            mode: Mode::Normal,
-            source: CommandInvocationSource::CommandPaletteInput,
-            active_palette: true,
-            focused_text_input: true,
-        };
+        let ctx = policy_context(
+            CommandInvocationSource::CommandPaletteInput,
+            Mode::Normal,
+            Some(PaletteKind::Command),
+            true,
+            &extensions,
+        );
 
         let spec = find_command_spec("open-palette").expect("spec should exist");
         assert!(!is_command_visible_in_palette(spec, &ctx));
@@ -264,13 +281,13 @@ mod tests {
     #[test]
     fn command_validation_rejects_search_navigation_when_search_is_inactive() {
         let extensions = ExtensionUiSnapshot::default();
-        let ctx = CommandConditionContext {
-            extensions: &extensions,
-            mode: Mode::Normal,
-            source: CommandInvocationSource::Keymap,
-            active_palette: false,
-            focused_text_input: false,
-        };
+        let ctx = policy_context(
+            CommandInvocationSource::Keymap,
+            Mode::Normal,
+            None,
+            false,
+            &extensions,
+        );
 
         let err = validate_command_id_for_source("next-search-hit", &ctx)
             .expect_err("command should be unavailable");
@@ -284,13 +301,13 @@ mod tests {
     #[test]
     fn keymap_only_command_is_allowed_from_keymap_but_not_palette_input() {
         let extensions = ExtensionUiSnapshot::default();
-        let keymap_ctx = CommandConditionContext {
-            extensions: &extensions,
-            mode: Mode::Normal,
-            source: CommandInvocationSource::Keymap,
-            active_palette: false,
-            focused_text_input: false,
-        };
+        let keymap_ctx = policy_context(
+            CommandInvocationSource::Keymap,
+            Mode::Normal,
+            None,
+            false,
+            &extensions,
+        );
         validate_command_for_source(
             &Command::OpenPalette {
                 kind: crate::palette::PaletteKind::Command,
@@ -300,13 +317,13 @@ mod tests {
         )
         .expect("keymap should be allowed");
 
-        let palette_input_ctx = CommandConditionContext {
-            extensions: &extensions,
-            mode: Mode::Normal,
-            source: CommandInvocationSource::CommandPaletteInput,
-            active_palette: true,
-            focused_text_input: true,
-        };
+        let palette_input_ctx = policy_context(
+            CommandInvocationSource::CommandPaletteInput,
+            Mode::Normal,
+            Some(PaletteKind::Command),
+            true,
+            &extensions,
+        );
         let err = validate_command_id_for_source("open-palette", &palette_input_ctx)
             .expect_err("command palette input should be rejected");
         assert!(err.to_string().contains("internal command"));
@@ -315,13 +332,13 @@ mod tests {
     #[test]
     fn keymap_only_close_help_is_hidden_from_palette() {
         let extensions = ExtensionUiSnapshot::default();
-        let ctx = CommandConditionContext {
-            extensions: &extensions,
-            mode: Mode::Normal,
-            source: CommandInvocationSource::CommandPaletteInput,
-            active_palette: true,
-            focused_text_input: true,
-        };
+        let ctx = policy_context(
+            CommandInvocationSource::CommandPaletteInput,
+            Mode::Normal,
+            Some(PaletteKind::Command),
+            true,
+            &extensions,
+        );
 
         let spec = find_command_spec("close-help").expect("spec should exist");
         assert!(!is_command_visible_in_palette(spec, &ctx));
@@ -330,24 +347,24 @@ mod tests {
     #[test]
     fn help_scroll_commands_are_only_available_in_help_mode() {
         let extensions = ExtensionUiSnapshot::default();
-        let normal_ctx = CommandConditionContext {
-            extensions: &extensions,
-            mode: Mode::Normal,
-            source: CommandInvocationSource::Keymap,
-            active_palette: false,
-            focused_text_input: false,
-        };
+        let normal_ctx = policy_context(
+            CommandInvocationSource::Keymap,
+            Mode::Normal,
+            None,
+            false,
+            &extensions,
+        );
         let err = validate_command_id_for_source("help-scroll-down", &normal_ctx)
             .expect_err("help scroll should be unavailable outside help");
         assert!(err.to_string().contains("outside help"));
 
-        let help_ctx = CommandConditionContext {
-            extensions: &extensions,
-            mode: Mode::Help,
-            source: CommandInvocationSource::Keymap,
-            active_palette: false,
-            focused_text_input: false,
-        };
+        let help_ctx = policy_context(
+            CommandInvocationSource::Keymap,
+            Mode::Help,
+            None,
+            false,
+            &extensions,
+        );
         validate_command_id_for_source("help-scroll-down", &help_ctx)
             .expect("help scroll down should be available in help");
         validate_command_id_for_source("help-scroll-up", &help_ctx)
@@ -355,11 +372,33 @@ mod tests {
     }
 
     #[test]
-    fn invocation_validation_ignores_runtime_availability() {
+    fn invocation_validation_ignores_runtime_enabled_when() {
         validate_command_invocation_for_source(
             &Command::NextSearchHit,
             CommandInvocationSource::Keymap,
         )
         .expect("keymap config may bind state-dependent commands");
+    }
+
+    fn policy_context<'a>(
+        source: CommandInvocationSource,
+        mode: Mode,
+        active_palette: Option<PaletteKind>,
+        focused_text_input: bool,
+        extensions: &'a ExtensionUiSnapshot,
+    ) -> CommandPolicyContext<'a> {
+        CommandPolicyContext {
+            source,
+            runtime: RuntimeConditionContext {
+                mode,
+                active_palette,
+                focused_text_input,
+                text_history_available: matches!(
+                    active_palette,
+                    Some(PaletteKind::Command | PaletteKind::Search)
+                ),
+                extensions,
+            },
+        }
     }
 }

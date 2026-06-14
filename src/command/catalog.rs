@@ -1,17 +1,16 @@
+use crate::condition::{ConditionExpr, RuntimeCondition};
 use crate::error::{AppError, AppResult};
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::dispatch::{CommandExecContext, CommandExecution};
 use super::types::{
-    ArgHint, ArgKind, ArgSpec, CommandAvailability, CommandCondition, CommandExposure,
-    CommandInvocationPolicy, CommandInvocationSource, CommandRole, CommandSpec,
-    CommandTargetRequirement, PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
-    SpreadDirectionArg,
+    ArgHint, ArgKind, ArgSpec, CommandExposure, CommandInvocationPolicy, CommandInvocationSource,
+    CommandRole, CommandSpec, CommandTargetRequirement, PanAmount, PanDirection, SearchMatcherKind,
+    SpreadCoverPolicyArg, SpreadDirectionArg,
 };
 
 const NO_ARGS: [ArgSpec; 0] = [];
-const REQUIRES_SEARCH_ACTIVE: [CommandCondition; 1] = [CommandCondition::SearchActive];
-const REQUIRES_HELP_MODE: [CommandCondition; 1] = [CommandCondition::HelpMode];
+const REQUIRES_SEARCH_ACTIVE: [RuntimeCondition; 1] = [RuntimeCondition::SearchIsActive];
 const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     name: "page",
     kind: ArgKind::I32,
@@ -110,7 +109,7 @@ macro_rules! define_commands {
                 args: $args:expr,
                 exposure: $exposure:expr,
                 invocation: $invocation:expr,
-                availability: $availability:expr,
+                enabled_when: $enabled_when:expr,
                 parse: $parser:tt,
                 exec: $exec:path $(,)?
             }
@@ -176,7 +175,7 @@ macro_rules! define_commands {
                     exposure: $exposure,
                     invocation: $invocation,
                     target: define_commands!(@target $variant),
-                    availability: $availability,
+                    enabled_when: $enabled_when,
                 },
             )+
         ];
@@ -269,7 +268,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::next_page,
     }
@@ -279,7 +278,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::prev_page,
     }
@@ -289,7 +288,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::first_page,
     }
@@ -299,7 +298,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::last_page,
     }
@@ -309,7 +308,7 @@ define_commands! {
         args: &ARGS_GOTO_PAGE,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_goto_page),
         exec: super::handlers::goto_page,
     }
@@ -319,7 +318,7 @@ define_commands! {
         args: &ARGS_ZOOM,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_zoom),
         exec: super::handlers::set_zoom,
     }
@@ -329,7 +328,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::zoom_in,
     }
@@ -339,7 +338,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::zoom_out,
     }
@@ -349,7 +348,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::zoom_reset,
     }
@@ -359,7 +358,7 @@ define_commands! {
         args: &ARGS_PAN,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_pan),
         exec: super::handlers::pan,
     }
@@ -369,7 +368,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::page_layout_single,
     }
@@ -382,7 +381,7 @@ define_commands! {
         args: &ARGS_PAGE_LAYOUT_SPREAD,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_page_layout_spread),
         exec: super::handlers::page_layout_spread,
     }
@@ -392,7 +391,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::debug_status_show,
     }
@@ -402,7 +401,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::debug_status_hide,
     }
@@ -412,7 +411,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::debug_status_toggle,
     }
@@ -425,7 +424,7 @@ define_commands! {
         args: &ARGS_OPEN_PALETTE,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::KeymapOnly,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_open_palette),
         exec: super::handlers::open_palette,
     }
@@ -435,7 +434,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::close_palette,
     }
@@ -445,7 +444,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::palette_submit,
     }
@@ -455,7 +454,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::palette_complete,
     }
@@ -465,7 +464,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::palette_select_next,
     }
@@ -475,7 +474,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::palette_select_prev,
     }
@@ -485,7 +484,7 @@ define_commands! {
         args: &ARGS_TEXT_INSERT,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_text_insert),
         exec: super::handlers::text_insert,
     }
@@ -495,7 +494,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_delete_backward,
     }
@@ -505,7 +504,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_delete_forward,
     }
@@ -515,7 +514,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_left,
     }
@@ -525,7 +524,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_right,
     }
@@ -535,7 +534,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_history_older,
     }
@@ -545,7 +544,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_history_newer,
     }
@@ -555,7 +554,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::open_help,
     }
@@ -565,7 +564,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::close_help,
     }
@@ -575,7 +574,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::help_scroll_down,
     }
@@ -585,7 +584,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::Interaction,
-        availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::help_scroll_up,
     }
@@ -595,7 +594,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::open_search,
     }
@@ -605,7 +604,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
         exec: super::handlers::open_search_results,
     }
@@ -615,7 +614,7 @@ define_commands! {
         args: &ARGS_SUBMIT_SEARCH,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_submit_search),
         exec: super::handlers::submit_search,
     }
@@ -625,7 +624,7 @@ define_commands! {
         args: &ARGS_GOTO_PAGE,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: (super::parse::parse_search_goto),
         exec: super::handlers::search_result_goto,
     }
@@ -635,7 +634,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
         exec: super::handlers::next_search_hit,
     }
@@ -645,7 +644,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
         exec: super::handlers::prev_search_hit,
     }
@@ -655,7 +654,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::history_back,
     }
@@ -665,7 +664,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::history_forward,
     }
@@ -675,7 +674,7 @@ define_commands! {
         args: &ARGS_GOTO_PAGE,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_history_goto),
         exec: super::handlers::history_goto,
     }
@@ -685,7 +684,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::open_history,
     }
@@ -695,7 +694,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::open_outline,
     }
@@ -705,7 +704,7 @@ define_commands! {
         args: &ARGS_OUTLINE_GOTO,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_outline_goto),
         exec: super::handlers::outline_goto,
     }
@@ -715,7 +714,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
         exec: super::handlers::cancel_search,
     }
@@ -725,7 +724,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::reload_document,
     }
@@ -735,7 +734,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::quit,
     }

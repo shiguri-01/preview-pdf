@@ -1,10 +1,12 @@
 use crate::app::Mode;
 use crate::command::{
-    CommandConditionContext, CommandInvocationSource, command_registry, find_command_spec,
+    CommandInvocationSource, CommandPolicyContext, command_registry, find_command_spec,
 };
+use crate::condition::RuntimeConditionContext;
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::keymap::build_builtin_sequence_registry;
 use crate::input::sequence::KeyBindingScope;
+use crate::palette::PaletteKind;
 
 use super::spec::validate_command_id_for_source;
 
@@ -75,17 +77,21 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
 fn key_binding_command_context<'a>(
     scope: KeyBindingScope,
     extensions: &'a ExtensionUiSnapshot,
-) -> CommandConditionContext<'a> {
-    CommandConditionContext {
-        extensions,
-        mode: match scope {
-            KeyBindingScope::Normal => Mode::Normal,
-            KeyBindingScope::Palette => Mode::Palette,
-            KeyBindingScope::Help => Mode::Help,
-        },
+) -> CommandPolicyContext<'a> {
+    CommandPolicyContext {
         source: CommandInvocationSource::Keymap,
-        active_palette: matches!(scope, KeyBindingScope::Palette),
-        focused_text_input: matches!(scope, KeyBindingScope::Palette),
+        runtime: RuntimeConditionContext {
+            mode: match scope {
+                KeyBindingScope::Normal => Mode::Normal,
+                KeyBindingScope::Palette => Mode::Palette,
+                KeyBindingScope::Help => Mode::Help,
+            },
+            active_palette: matches!(scope, KeyBindingScope::Palette)
+                .then_some(PaletteKind::Command),
+            focused_text_input: matches!(scope, KeyBindingScope::Palette),
+            text_history_available: matches!(scope, KeyBindingScope::Palette),
+            extensions,
+        },
     }
 }
 

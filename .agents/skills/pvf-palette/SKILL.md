@@ -53,6 +53,9 @@ Do not start implementation until the interaction is clear enough to test.
 - If a palette needs app data, add read-only snapshot data instead of passing mutable app state into a provider.
 - If a palette reads extension data, expose only the needed UI snapshot fields.
 - If submit dispatches a command, ensure the command source, invocation policy, and history recording are intentional.
+- For command-palette candidate visibility, use command policy metadata and the
+  shared runtime condition context. Do not maintain a provider-local command
+  visibility list or a separate enabled-state vocabulary.
 
 ## Tests And Docs
 

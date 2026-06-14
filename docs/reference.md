@@ -117,7 +117,7 @@ Contract:
 - Command roles distinguish user intent commands, focused interaction controls,
   and internal effects.
 - Public commands may appear in user-facing command surfaces when their
-  invocation and availability policies allow it.
+  invocation policy and `enabled_when` runtime condition allow it.
 - Internal commands are runtime plumbing and must not appear in the command
   palette.
 - Keymap-only commands can be invoked from key bindings but not from direct
@@ -126,12 +126,28 @@ Contract:
   are hidden from user-facing command surfaces.
 - Internal-only commands can be invoked only by interaction flows that complete
   another user action.
-- Availability checks are separate from invocation policy.
-- Target resolution is separate from invocation policy and availability.
+- `enabled_when` checks are separate from invocation policy.
+- Target resolution is separate from invocation policy and `enabled_when`.
   Palette commands require an active palette, text commands require a focused
   text input, and help interaction commands require active help.
-- Availability may depend on runtime app state such as active mode, not only on
-  invocation source.
+- `enabled_when` may depend on runtime app state such as active search, help
+  mode, palette kind, focused text input, or text history availability. Target
+  requirements are not duplicated in `enabled_when`.
+- Command-palette listing, help display, typed command submission, and dispatch
+  use command policy functions to decide how exposure, invocation policy,
+  target, and `enabled_when` apply to that surface.
+- Command-palette listing shows public user-intent commands only when the
+  command-palette input source is allowed and `enabled_when` is currently
+  satisfied.
+- Typed command submission is separate from listing: a known typed command is
+  parsed and then validated by dispatch policy, so "not listed" does not mean
+  "unknown".
+- Help surfaces may describe configured commands and bindings without hiding
+  them solely because `enabled_when` is currently false; a surface that claims
+  to show only currently runnable actions must evaluate `enabled_when`.
+- Runtime condition vocabulary is shared by commands and key bindings. A
+  palette-kind condition is true only when a palette is open and its active
+  kind matches; a closed palette does not match any kind.
 - Command dispatch emits command execution events after validation and dispatch
   complete, including rejected commands.
 - Command dispatch may return follow-up command requests, for example when a
@@ -151,6 +167,7 @@ Owned by:
 - [src/command/spec.rs](../src/command/spec.rs)
 - [src/command/dispatch.rs](../src/command/dispatch.rs)
 - [src/command/handlers/](../src/command/handlers/)
+- [src/condition.rs](../src/condition.rs)
 
 Test coverage:
 - Command registry, parser, validation, and dispatch tests in [src/command/](../src/command/).
@@ -168,14 +185,17 @@ Contract:
 - Configured key bindings use the same key labels shown in help, such as
   `gg`, `<c-o>`, `<down>`, and `[count]G`.
 - Key bindings have a scope, currently normal, palette, or help. A binding only
-  resolves when the active key binding context matches its scope and condition.
+  resolves when the active key binding context matches its scope and
+  `enabled_when` runtime condition.
+- Key binding `enabled_when` uses the same runtime condition vocabulary as
+  command `enabled_when`; do not add a separate keymap-only condition enum.
 - Multi-key sequences can remain pending until resolved or timed out.
 - Numeric prefixes are parsed by the input sequence layer and dispatch typed
   commands.
 - Built-in key bindings must reference known command ids and satisfy command
   invocation policy.
 - Configured key bindings currently target the normal scope and must reference
-  known commands that can be invoked from the keymap; runtime availability
+  known commands that can be invoked from the keymap; runtime `enabled_when`
   remains a dispatch-time check.
 - Palette-scoped keys dispatch hidden palette or text interaction commands such
   as submit, complete, selection movement, text editing, and text history.
@@ -223,8 +243,8 @@ Contract:
 - Candidate search text is independent from rendered row text.
 - Submit effects may close, reopen, or dispatch a typed command with optional
   history recording and a post action.
-- Command-palette visibility derives from command metadata and availability,
-  not from a hand-written UI list.
+- Command-palette visibility derives from command metadata, invocation policy,
+  and `enabled_when`, not from a hand-written UI list.
 - Input history is a focused text input capability used by command and search
   palettes; it is not a provider-specific palette action.
 

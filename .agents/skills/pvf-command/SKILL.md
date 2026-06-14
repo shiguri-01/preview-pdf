@@ -36,12 +36,15 @@ Do not start implementation until the external behavior is clear enough to test.
 ## Implementation Checks
 
 - Treat the command catalog as the source for the typed command, command id,
-  role, exposure, invocation policy, target requirement, availability,
+  role, exposure, invocation policy, target requirement, `enabled_when`,
   metadata, parser routing, and execution routing.
 - Keep parser behavior, metadata args, and dispatch behavior aligned.
 - Choose role, exposure, invocation policy, target requirement, and
-  availability deliberately. Visibility, source policy, target resolution, and
-  runtime availability are separate concerns.
+  `enabled_when` deliberately. Visibility, source policy, target resolution,
+  and runtime enabled-state are separate concerns.
+- Use the shared runtime condition system for command `enabled_when` and key
+  binding `enabled_when`; do not reintroduce command-only or keymap-only
+  condition enums.
 - Choose public command names and arguments for user understanding, not internal convenience.
 - Preserve existing user-facing command names and argument contracts unless an
   explicit migration is being designed. Do not add fallback aliases or parallel

@@ -165,6 +165,14 @@ Contract:
 - Command dispatch may return follow-up command requests, for example when a
   palette submit completes a user intent or internal effect command.
 
+Known follow-ups:
+- Search command intent: `search` is the public search entry point today and
+  starts a valid search flow by opening the search palette. Direct query
+  submission still happens through the internal `submit-search` command after
+  palette submit. When this area is redesigned, keep `search` as the
+  user-intent command and make the palette an input-collection path for that
+  command instead of exposing `submit-search` as a user-facing command.
+
 Compatibility:
 - Public command ids, argument compatibility, and user-facing parser behavior
   require migration care.

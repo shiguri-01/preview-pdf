@@ -591,6 +591,10 @@ define_commands! {
         parse: no_args,
         exec: super::handlers::help_scroll_up,
     }
+    // TODO(search command): `search` is the public search entry point and currently
+    // opens the search palette. If direct query arguments are added, keep `search`
+    // as the user-intent command and let palette submit complete that command
+    // instead of exposing `submit-search`.
     OpenSearch {
         id: "search",
         title: "Search",

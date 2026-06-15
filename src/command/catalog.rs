@@ -224,31 +224,31 @@ macro_rules! define_commands {
         $exec($ctx $(, $arg)*)
     };
 
-    (@role OpenPalette) => { CommandRole::InteractionControl };
-    (@role ClosePalette) => { CommandRole::InteractionControl };
-    (@role PaletteSubmit) => { CommandRole::InteractionControl };
-    (@role PaletteComplete) => { CommandRole::InteractionControl };
-    (@role PaletteSelectNext) => { CommandRole::InteractionControl };
-    (@role PaletteSelectPrev) => { CommandRole::InteractionControl };
-    (@role TextInsert) => { CommandRole::InteractionControl };
-    (@role TextDeleteBackward) => { CommandRole::InteractionControl };
-    (@role TextDeleteForward) => { CommandRole::InteractionControl };
-    (@role TextMoveLeft) => { CommandRole::InteractionControl };
-    (@role TextMoveRight) => { CommandRole::InteractionControl };
-    (@role TextMoveStart) => { CommandRole::InteractionControl };
-    (@role TextMoveEnd) => { CommandRole::InteractionControl };
-    (@role TextMovePrevWord) => { CommandRole::InteractionControl };
-    (@role TextMoveNextWord) => { CommandRole::InteractionControl };
-    (@role TextDeletePrevWord) => { CommandRole::InteractionControl };
-    (@role TextDeleteNextWord) => { CommandRole::InteractionControl };
-    (@role TextDeleteLine) => { CommandRole::InteractionControl };
-    (@role TextDeleteToEnd) => { CommandRole::InteractionControl };
-    (@role TextYank) => { CommandRole::InteractionControl };
-    (@role PaletteInputHistoryOlder) => { CommandRole::InteractionControl };
-    (@role PaletteInputHistoryNewer) => { CommandRole::InteractionControl };
-    (@role CloseHelp) => { CommandRole::InteractionControl };
-    (@role HelpScrollDown) => { CommandRole::InteractionControl };
-    (@role HelpScrollUp) => { CommandRole::InteractionControl };
+    (@role OpenPalette) => { CommandRole::SurfaceControl };
+    (@role ClosePalette) => { CommandRole::SurfaceControl };
+    (@role PaletteSubmit) => { CommandRole::SurfaceControl };
+    (@role PaletteComplete) => { CommandRole::SurfaceControl };
+    (@role PaletteSelectNext) => { CommandRole::SurfaceControl };
+    (@role PaletteSelectPrev) => { CommandRole::SurfaceControl };
+    (@role TextInsert) => { CommandRole::SurfaceControl };
+    (@role TextDeleteBackward) => { CommandRole::SurfaceControl };
+    (@role TextDeleteForward) => { CommandRole::SurfaceControl };
+    (@role TextMoveLeft) => { CommandRole::SurfaceControl };
+    (@role TextMoveRight) => { CommandRole::SurfaceControl };
+    (@role TextMoveStart) => { CommandRole::SurfaceControl };
+    (@role TextMoveEnd) => { CommandRole::SurfaceControl };
+    (@role TextMovePrevWord) => { CommandRole::SurfaceControl };
+    (@role TextMoveNextWord) => { CommandRole::SurfaceControl };
+    (@role TextDeletePrevWord) => { CommandRole::SurfaceControl };
+    (@role TextDeleteNextWord) => { CommandRole::SurfaceControl };
+    (@role TextDeleteLine) => { CommandRole::SurfaceControl };
+    (@role TextDeleteToEnd) => { CommandRole::SurfaceControl };
+    (@role TextYank) => { CommandRole::SurfaceControl };
+    (@role PaletteInputHistoryOlder) => { CommandRole::SurfaceControl };
+    (@role PaletteInputHistoryNewer) => { CommandRole::SurfaceControl };
+    (@role CloseHelp) => { CommandRole::SurfaceControl };
+    (@role HelpScrollDown) => { CommandRole::SurfaceControl };
+    (@role HelpScrollUp) => { CommandRole::SurfaceControl };
     (@role SubmitSearch) => { CommandRole::InternalEffect };
     (@role SearchResultGoto) => { CommandRole::InternalEffect };
     (@role HistoryGoto) => { CommandRole::InternalEffect };
@@ -444,7 +444,7 @@ define_commands! {
         title: "Open Palette",
         args: &ARGS_OPEN_PALETTE,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::KeymapOnly,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_open_palette),
         exec: super::handlers::open_palette,
@@ -454,7 +454,7 @@ define_commands! {
         title: "Close Palette",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::close_palette,
@@ -464,7 +464,7 @@ define_commands! {
         title: "Submit Palette",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::palette_submit,
@@ -474,7 +474,7 @@ define_commands! {
         title: "Complete Palette Input",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::palette_complete,
@@ -484,7 +484,7 @@ define_commands! {
         title: "Select Next Palette Item",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::palette_select_next,
@@ -494,7 +494,7 @@ define_commands! {
         title: "Select Previous Palette Item",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::palette_select_prev,
@@ -504,7 +504,7 @@ define_commands! {
         title: "Insert Text",
         args: &ARGS_TEXT_INSERT,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_text_insert),
         exec: super::handlers::text_insert,
@@ -514,7 +514,7 @@ define_commands! {
         title: "Delete Previous Text Character",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_delete_backward,
@@ -524,7 +524,7 @@ define_commands! {
         title: "Delete Next Text Character",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_delete_forward,
@@ -534,7 +534,7 @@ define_commands! {
         title: "Move Text Cursor Left",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_left,
@@ -544,7 +544,7 @@ define_commands! {
         title: "Move Text Cursor Right",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_right,
@@ -554,7 +554,7 @@ define_commands! {
         title: "Move Text Cursor to Start",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_start,
@@ -564,7 +564,7 @@ define_commands! {
         title: "Move Text Cursor to End",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_end,
@@ -574,7 +574,7 @@ define_commands! {
         title: "Move Text Cursor to Previous Word",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_prev_word,
@@ -584,7 +584,7 @@ define_commands! {
         title: "Move Text Cursor to Next Word",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_move_next_word,
@@ -594,7 +594,7 @@ define_commands! {
         title: "Delete Previous Text Word",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_delete_prev_word,
@@ -604,7 +604,7 @@ define_commands! {
         title: "Delete Next Text Word",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_delete_next_word,
@@ -614,7 +614,7 @@ define_commands! {
         title: "Delete Text Line",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_delete_line,
@@ -624,7 +624,7 @@ define_commands! {
         title: "Delete Text to End",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_delete_to_end,
@@ -634,7 +634,7 @@ define_commands! {
         title: "Yank Text",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::text_yank,
@@ -644,7 +644,7 @@ define_commands! {
         title: "Recall Older Palette Input",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::All(&REQUIRES_PALETTE_INPUT_HISTORY),
         parse: no_args,
         exec: super::handlers::palette_input_history_older,
@@ -654,7 +654,7 @@ define_commands! {
         title: "Recall Newer Palette Input",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::All(&REQUIRES_PALETTE_INPUT_HISTORY),
         parse: no_args,
         exec: super::handlers::palette_input_history_newer,
@@ -674,7 +674,7 @@ define_commands! {
         title: "Close Help",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::close_help,
@@ -684,7 +684,7 @@ define_commands! {
         title: "Scroll Help Down",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::help_scroll_down,
@@ -694,7 +694,7 @@ define_commands! {
         title: "Scroll Help Up",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::Interaction,
+        invocation: CommandInvocationPolicy::BindingOnly,
         enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::help_scroll_up,

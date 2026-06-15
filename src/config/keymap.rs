@@ -4,8 +4,8 @@ use crate::command::{
 };
 use crate::error::{AppError, AppResult};
 use crate::input::keymap::{
-    build_builtin_sequence_registry, register_builtin_normal_reserved_bindings,
-    register_builtin_scoped_interaction_bindings,
+    WHEN_NORMAL, build_builtin_sequence_registry, register_builtin_normal_reserved_bindings,
+    register_builtin_surface_bindings,
 };
 use crate::input::sequence::{SequenceRegistrationError, SequenceRegistry};
 use crate::input::shortcut::{ShortcutKey, parse_shortcut_sequence};
@@ -65,13 +65,11 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
         KeymapPreset::Default => build_builtin_sequence_registry(),
         KeymapPreset::None => {
             let mut registry = SequenceRegistry::new();
-            // TODO: Revisit this when config supports scoped key bindings.
             // `preset = "none"` currently disables only configurable normal-mode
-            // bindings; reserved cancellation and scoped interaction controls remain
-            // available. Decide whether future scoped config should expose separate
-            // normal/palette/help presets.
+            // bindings; reserved cancellation and binding-only surface controls remain
+            // available.
             register_builtin_normal_reserved_bindings(&mut registry);
-            register_builtin_scoped_interaction_bindings(&mut registry);
+            register_builtin_surface_bindings(&mut registry);
             registry
         }
     };
@@ -80,12 +78,18 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
         match target {
             KeymapTarget::Exact(keys) => {
                 registry
-                    .unregister_static(keys)
+                    .unregister_static_with_condition(
+                        Some(crate::condition::ConditionExpr::All(&WHEN_NORMAL)),
+                        keys,
+                    )
                     .expect("validated exact keymap target should unregister");
             }
             KeymapTarget::NumericPrefix(suffix) => {
                 registry
-                    .unregister_numeric_prefix(*suffix)
+                    .unregister_numeric_prefix_with_condition(
+                        Some(crate::condition::ConditionExpr::All(&WHEN_NORMAL)),
+                        *suffix,
+                    )
                     .expect("validated numeric keymap target should unregister");
             }
         }
@@ -95,14 +99,23 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
         match binding {
             KeymapBinding::Exact { keys, command } => {
                 registry
-                    .register_static(keys, command.clone())
+                    .register_static_with_condition(
+                        crate::condition::ConditionExpr::All(&WHEN_NORMAL),
+                        keys,
+                        command.clone(),
+                    )
                     .expect("validated exact keymap binding should register");
             }
             KeymapBinding::NumericPrefix { suffix, command_id } => {
                 let factory = numeric_prefix_factory(command_id)
                     .expect("validated numeric prefix command should have a factory");
                 registry
-                    .register_numeric_prefix(command_id, *suffix, factory)
+                    .register_numeric_prefix_with_condition(
+                        crate::condition::ConditionExpr::All(&WHEN_NORMAL),
+                        command_id,
+                        *suffix,
+                        factory,
+                    )
                     .expect("validated numeric keymap binding should register");
             }
         }
@@ -253,7 +266,6 @@ mod tests {
         assert_eq!(
             resolver.handle_key_in_context(
                 KeyBindingContext {
-                    scope: crate::input::sequence::KeyBindingScope::Normal,
                     runtime: RuntimeConditionContext::normal(&extensions),
                 },
                 KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),

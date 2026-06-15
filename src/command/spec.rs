@@ -66,7 +66,7 @@ pub fn validate_command_for_normal_keymap(command: &Command) -> AppResult<()> {
         ));
     };
     validate_command_spec_for_normal_keymap(spec)?;
-    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Keymap)
+    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Binding)
 }
 
 pub fn validate_command_id_for_normal_keymap(id: &str) -> AppResult<()> {
@@ -74,7 +74,7 @@ pub fn validate_command_id_for_normal_keymap(id: &str) -> AppResult<()> {
         return Err(AppError::invalid_argument("unknown command id"));
     };
     validate_command_spec_for_normal_keymap(spec)?;
-    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Keymap)
+    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Binding)
 }
 
 pub fn rejection_message_for_command(
@@ -138,11 +138,10 @@ fn is_invocation_source_allowed(spec: CommandSpec, source: CommandInvocationSour
         CommandInvocationPolicy::User => {
             matches!(
                 source,
-                CommandInvocationSource::Keymap | CommandInvocationSource::CommandPaletteInput
+                CommandInvocationSource::Binding | CommandInvocationSource::CommandPaletteInput
             )
         }
-        CommandInvocationPolicy::KeymapOnly => source == CommandInvocationSource::Keymap,
-        CommandInvocationPolicy::Interaction => source == CommandInvocationSource::Interaction,
+        CommandInvocationPolicy::BindingOnly => source == CommandInvocationSource::Binding,
         CommandInvocationPolicy::InternalOnly => source == CommandInvocationSource::Internal,
     }
 }
@@ -289,7 +288,7 @@ mod tests {
     fn command_validation_rejects_search_navigation_when_search_is_inactive() {
         let extensions = ExtensionUiSnapshot::default();
         let ctx = policy_context(
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             Mode::Normal,
             None,
             &extensions,
@@ -305,10 +304,10 @@ mod tests {
     }
 
     #[test]
-    fn keymap_only_command_is_allowed_from_keymap_but_not_palette_input() {
+    fn binding_only_command_is_allowed_from_binding_but_not_palette_input() {
         let extensions = ExtensionUiSnapshot::default();
         let keymap_ctx = policy_context(
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             Mode::Normal,
             None,
             &extensions,
@@ -320,7 +319,7 @@ mod tests {
             },
             &keymap_ctx,
         )
-        .expect("keymap should be allowed");
+        .expect("binding should be allowed");
 
         let palette_input_ctx = policy_context(
             CommandInvocationSource::CommandPaletteInput,
@@ -334,7 +333,7 @@ mod tests {
     }
 
     #[test]
-    fn keymap_only_close_help_is_hidden_from_palette() {
+    fn binding_only_close_help_is_hidden_from_palette() {
         let extensions = ExtensionUiSnapshot::default();
         let ctx = policy_context(
             CommandInvocationSource::CommandPaletteInput,
@@ -374,7 +373,7 @@ mod tests {
     fn help_scroll_commands_are_only_available_in_help_mode() {
         let extensions = ExtensionUiSnapshot::default();
         let normal_ctx = policy_context(
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             Mode::Normal,
             None,
             &extensions,
@@ -384,7 +383,7 @@ mod tests {
         assert!(err.to_string().contains("outside help"));
 
         let help_ctx = policy_context(
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             Mode::Help,
             None,
             &extensions,
@@ -396,32 +395,32 @@ mod tests {
     }
 
     #[test]
-    fn interaction_commands_reject_keymap_invocation() {
+    fn binding_only_commands_reject_direct_command_input() {
         let extensions = ExtensionUiSnapshot::default();
         let ctx = policy_context(
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::CommandPaletteInput,
             Mode::Help,
             None,
             &extensions,
         );
 
         let err = validate_command_id_for_policy("help-scroll-down", &ctx)
-            .expect_err("interaction command should reject keymap invocation");
+            .expect_err("binding-only command should reject direct command input");
         assert!(err.to_string().contains("internal command"));
     }
 
     #[test]
-    fn internal_commands_reject_interaction_invocation() {
+    fn internal_commands_reject_binding_invocation() {
         let extensions = ExtensionUiSnapshot::default();
         let ctx = policy_context(
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             Mode::Normal,
             None,
             &extensions,
         );
 
         let err = validate_command_id_for_policy("submit-search", &ctx)
-            .expect_err("internal command should reject surface interaction invocation");
+            .expect_err("internal command should reject binding invocation");
         assert!(err.to_string().contains("internal command"));
 
         let internal_ctx = policy_context(
@@ -438,7 +437,7 @@ mod tests {
     fn palette_input_history_commands_require_history_capable_palette() {
         let extensions = ExtensionUiSnapshot::default();
         let command_palette_ctx = policy_context(
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             Mode::Palette,
             Some(PaletteKind::Command),
             &extensions,
@@ -447,7 +446,7 @@ mod tests {
             .expect("command palette should support input history");
 
         let outline_palette_ctx = policy_context(
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             Mode::Palette,
             Some(PaletteKind::Outline),
             &extensions,
@@ -461,7 +460,7 @@ mod tests {
     #[test]
     fn invocation_validation_ignores_runtime_enabled_when() {
         validate_command_for_normal_keymap(&Command::NextSearchHit)
-            .expect("keymap config may bind state-dependent commands");
+            .expect("configured bindings may invoke state-dependent commands");
     }
 
     fn policy_context<'a>(

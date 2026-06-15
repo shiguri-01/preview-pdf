@@ -54,7 +54,7 @@ impl InputActor {
         interaction: &mut InteractionSubsystem,
         state: &mut AppState,
     ) -> AppResult<LoopEffects> {
-        let timeout_outcome = interaction.flush_sequence_timeout(state.mode);
+        let timeout_outcome = interaction.flush_sequence_timeout(state);
         let mut effects = LoopEffects::from_commands(timeout_outcome.commands);
         if timeout_outcome.redraw {
             effects.request_redraw(RedrawReason::Input);

@@ -373,7 +373,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::Quit,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -401,7 +401,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::NextPage,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -438,7 +438,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -452,7 +452,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -476,7 +476,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomReset,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -508,7 +508,7 @@ mod tests {
                 direction: PanDirection::Right,
                 amount: PanAmount::Cells(3),
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -638,7 +638,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -667,7 +667,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -696,7 +696,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -719,7 +719,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -744,7 +744,7 @@ mod tests {
                 kind: PaletteKind::Command,
                 payload: None,
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -790,7 +790,7 @@ mod tests {
             &mut app,
             ViewPolicy::default(),
             Command::PaletteSubmit,
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             CommandDispatchContext {
                 pdf,
                 extension_host: &mut host,
@@ -844,7 +844,7 @@ mod tests {
             &mut app,
             ViewPolicy::default(),
             Command::PaletteSubmit,
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             CommandDispatchContext {
                 pdf,
                 extension_host: &mut host,
@@ -878,7 +878,7 @@ mod tests {
             &mut app,
             ViewPolicy::default(),
             Command::PaletteSelectNext,
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             CommandDispatchContext {
                 pdf,
                 extension_host: &mut host,
@@ -908,7 +908,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::OpenHelp,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -948,7 +948,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::CloseHelp,
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -985,7 +985,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::HelpScrollDown,
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1017,7 +1017,7 @@ mod tests {
         let down = dispatch(
             &mut app,
             Command::HelpScrollDown,
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             Arc::clone(&pdf),
             &mut host,
             &mut palette_requests,
@@ -1037,7 +1037,7 @@ mod tests {
         let up = dispatch(
             &mut app,
             Command::HelpScrollUp,
-            CommandInvocationSource::Interaction,
+            CommandInvocationSource::Binding,
             Arc::clone(&pdf),
             &mut host,
             &mut palette_requests,
@@ -1074,7 +1074,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::CancelSearch,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1139,7 +1139,7 @@ mod tests {
                 direction: None,
                 cover_policy: None,
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1176,7 +1176,7 @@ mod tests {
                 direction: None,
                 cover_policy: None,
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1201,7 +1201,7 @@ mod tests {
                 direction: None,
                 cover_policy: Some(SpreadCoverPolicyArg::Cover),
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1239,7 +1239,7 @@ mod tests {
                 direction: None,
                 cover_policy: None,
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             CommandDispatchContext {
                 pdf,
                 extension_host: &mut host,
@@ -1316,7 +1316,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_rejects_internal_command_from_keymap() {
+    fn dispatch_rejects_internal_command_from_binding() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
@@ -1328,7 +1328,7 @@ mod tests {
                 query: "needle".to_string(),
                 matcher: SearchMatcherKind::ContainsInsensitive,
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1343,7 +1343,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_rejects_unavailable_command_from_keymap() {
+    fn dispatch_rejects_unavailable_command_from_binding() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
@@ -1352,7 +1352,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::NextSearchHit,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,

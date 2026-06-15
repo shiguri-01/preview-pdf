@@ -614,12 +614,12 @@ mod tests {
     }
 
     #[test]
-    fn keymap_config_rejects_scoped_interaction_commands() {
+    fn keymap_config_rejects_surface_commands_with_non_app_targets() {
         for (command, expected) in [
             ("palette.submit", "requires an active palette"),
             ("close-help", "requires active help"),
         ] {
-            let path = unique_temp_path(&format!("bad-keymap-interaction-{command}.toml"));
+            let path = unique_temp_path(&format!("bad-keymap-surface-{command}.toml"));
             fs::write(
                 &path,
                 format!(

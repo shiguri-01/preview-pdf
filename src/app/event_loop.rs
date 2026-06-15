@@ -501,7 +501,7 @@ mod tests {
     use crate::event::{
         DocumentReloadReason, DocumentReloadRequest, DocumentReloadResult, DomainEvent,
     };
-    use crate::input::sequence::{KeyBindingScope, SequenceRegistry};
+    use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
     use crate::presenter::PresenterKind;
     use crate::presenter::{
@@ -912,8 +912,7 @@ mod tests {
             )
             .expect("multi-key binding should register");
         registry
-            .register_static_in_scope(
-                KeyBindingScope::Help,
+            .register_static_with_condition(
                 ConditionExpr::Always,
                 &[ShortcutKey::char('j')],
                 Command::HelpScrollDown,
@@ -1050,7 +1049,7 @@ mod tests {
             .handle_waited_event(
                 WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                     Command::GotoPage { page: 999 },
-                    CommandInvocationSource::Keymap,
+                    CommandInvocationSource::Binding,
                 ))),
                 &mut runtime,
                 &mut document,
@@ -1670,7 +1669,7 @@ mod tests {
             .handle_waited_event(
                 WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                     Command::NextPage,
-                    CommandInvocationSource::Keymap,
+                    CommandInvocationSource::Binding,
                 ))),
                 &mut runtime,
                 &mut document,
@@ -1834,7 +1833,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                 Command::PrevPage,
-                CommandInvocationSource::Keymap,
+                CommandInvocationSource::Binding,
             ))),
             &mut runtime,
             &mut document,
@@ -1884,7 +1883,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                 Command::NextSearchHit,
-                CommandInvocationSource::Keymap,
+                CommandInvocationSource::Binding,
             ))),
             &mut runtime,
             &mut document,
@@ -1924,7 +1923,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                 Command::PrevPage,
-                CommandInvocationSource::Keymap,
+                CommandInvocationSource::Binding,
             ))),
             &mut runtime,
             &mut document,

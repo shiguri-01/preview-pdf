@@ -187,15 +187,14 @@ pub enum CommandExposure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandRole {
     UserIntent,
-    InteractionControl,
+    SurfaceControl,
     InternalEffect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandInvocationPolicy {
     User,
-    KeymapOnly,
-    Interaction,
+    BindingOnly,
     InternalOnly,
 }
 
@@ -208,9 +207,8 @@ pub enum CommandTargetRequirement {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandInvocationSource {
-    Keymap,
+    Binding,
     CommandPaletteInput,
-    Interaction,
     Internal,
 }
 

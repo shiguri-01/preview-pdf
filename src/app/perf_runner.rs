@@ -116,7 +116,7 @@ impl PerfLoopDriver {
                 self.start_measured_window();
                 let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                     Command::NextPage,
-                    CommandInvocationSource::Keymap,
+                    CommandInvocationSource::Binding,
                 )));
                 self.command_count += 1;
                 false
@@ -127,7 +127,7 @@ impl PerfLoopDriver {
                     if state.current_page < last_page {
                         let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                             Command::LastPage,
-                            CommandInvocationSource::Keymap,
+                            CommandInvocationSource::Binding,
                         )));
                         self.positioned_backward_start = true;
                         return false;
@@ -143,7 +143,7 @@ impl PerfLoopDriver {
                 self.start_measured_window();
                 let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                     Command::PrevPage,
-                    CommandInvocationSource::Keymap,
+                    CommandInvocationSource::Binding,
                 )));
                 self.command_count += 1;
                 false
@@ -160,7 +160,7 @@ impl PerfLoopDriver {
                     for _ in 0..steps {
                         let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                             Command::NextPage,
-                            CommandInvocationSource::Keymap,
+                            CommandInvocationSource::Binding,
                         )));
                     }
                     self.command_count += steps;
@@ -175,7 +175,7 @@ impl PerfLoopDriver {
                     self.start_measured_window();
                     let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                         Command::ZoomIn,
-                        CommandInvocationSource::Keymap,
+                        CommandInvocationSource::Binding,
                     )));
                     self.command_count += 1;
                     self.zoomed_in = true;
@@ -184,7 +184,7 @@ impl PerfLoopDriver {
                 if self.zoomed_in && !self.zoomed_out {
                     let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
                         Command::ZoomOut,
-                        CommandInvocationSource::Keymap,
+                        CommandInvocationSource::Binding,
                     )));
                     self.command_count += 1;
                     self.zoomed_out = true;

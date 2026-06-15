@@ -114,23 +114,20 @@ Contract:
 - The command catalog owns command ids, metadata, parser routing, and dispatch
   routing.
 - Typed commands must have matching registry metadata.
-- Command roles distinguish user intent commands, surface interaction controls,
-  and internal effects.
+- Command roles distinguish user intent commands, surface controls, and
+  internal effects.
 - Public commands may appear in user-facing command surfaces when their
   invocation policy and `enabled_when` runtime condition allow it.
 - Internal commands are runtime plumbing and must not appear in the command
   palette.
-- Keymap-only commands can be invoked from key bindings but not from direct
+- Binding-only commands can be invoked from key bindings but not from direct
   command palette input.
-- Interaction commands can be invoked only by built-in scoped interaction
-  bindings or interaction flows and are hidden from user-facing command
-  surfaces.
 - Internal-only commands can be invoked only as internal follow-ups that
   complete another user action.
 - `enabled_when` checks are separate from invocation policy.
 - Target resolution is separate from invocation policy and `enabled_when`.
-  Palette interaction commands, including palette input editing, require an
-  active palette. Help interaction commands require active help.
+  Palette binding-only commands, including palette input editing, require an
+  active palette. Help binding-only commands require active help.
 - `enabled_when` may depend on runtime app state such as active search, help
   mode, palette kind, or palette input history availability. Target
   requirements are not duplicated in `enabled_when`.
@@ -199,8 +196,8 @@ Test coverage:
 
 Orientation:
 - Terminal key events are converted to typed command requests before behavior is
-  applied. Normal-mode keys and scoped surface keys are resolved by the same
-  scoped sequence registry.
+  applied. Normal-mode keys and surface keys are resolved by the same
+  conditional sequence registry.
 
 Contract:
 - Printable bindings are defined by resulting characters, not by physical keys.
@@ -208,29 +205,25 @@ Contract:
   representation. Unbound Alt-only chords are not treated as printable input.
 - Configured key bindings use the same key labels shown in help, such as
   `gg`, `<c-o>`, `<down>`, and `[count]G`.
-- Key bindings have a scope, currently normal, palette, or help. A binding only
-  resolves when the active key binding context matches its scope and
-  `enabled_when` runtime condition.
 - Key binding `enabled_when` uses the same runtime condition vocabulary as
   command `enabled_when`; do not add a separate keymap-only condition enum.
+- Every key input and sequence timeout resolves against the current runtime
+  condition state. Pending sequences do not preserve the state in which they
+  started. State transitions clear a pending sequence when it no longer
+  matches any currently enabled binding.
 - Multi-key sequences can remain pending until resolved or timed out.
 - Numeric prefixes are parsed by the input sequence layer and dispatch typed
   commands.
-- Built-in normal bindings dispatch with the keymap invocation source. Built-in
-  palette and help bindings dispatch with the interaction invocation source.
-  All built-in bindings must reference known command ids and satisfy command
-  invocation policy.
-- Configured key bindings currently target the normal scope and must reference
-  known app-target commands that can be invoked from the keymap. Scoped
-  interaction commands that require an active palette or help target are owned
-  by built-in scoped interaction bindings until scoped keymap config exists.
-  Like built-in bindings, configured bindings resolve only when their scope and
-  runtime `enabled_when` match; dispatch still validates the resolved command
-  before applying behavior.
-- Palette-scoped keys dispatch hidden palette interaction commands such as
+- All key bindings dispatch with the binding invocation source, reference known
+  command ids, and satisfy command invocation policy.
+- Configured key bindings currently receive a normal-mode runtime condition and
+  must reference known app-target commands that can be invoked from bindings.
+  Built-in surface bindings carry palette or help runtime conditions. Dispatch
+  still validates the resolved command before applying behavior.
+- Palette keys dispatch hidden palette binding-only commands such as
   submit, complete, selection movement, input editing, and palette input
   history recall.
-- Help-scoped keys dispatch hidden help interaction commands such as close and
+- Help keys dispatch hidden help binding-only commands such as close and
   scroll.
 - `<esc>` is a non-configurable built-in binding for cancellation or close
   behavior and remains available when the configurable keymap preset is
@@ -258,9 +251,9 @@ Test coverage:
 Orientation:
 - Palette behavior splits into common session mechanics and provider-owned
   semantics. The common path owns opening, palette input state, selection,
-  completion, submit, and closing. Palette-scoped key bindings turn terminal
-  keys into commands; providers own candidate meaning and the effects returned
-  for completion and submit.
+  completion, submit, and closing. Palette key bindings turn terminal keys into
+  commands when their runtime conditions match; providers own candidate meaning
+  and the effects returned for completion and submit.
 
 Contract:
 - A palette session has a kind, session id, input state, candidate list,
@@ -290,9 +283,9 @@ Observable behavior:
   history; otherwise they dispatch palette selection commands.
 - Tab dispatches palette completion.
 - Enter dispatches palette submit.
-- Palette input editing preserves common line-editing behavior through scoped
-  `text.*` interaction commands, including cursor movement, word movement,
-  word/line deletion, and yank.
+- Palette input editing preserves common line-editing behavior through
+  conditionally enabled `text.*` binding-only commands, including cursor
+  movement, word movement, word/line deletion, and yank.
 - Empty candidate lists can still represent valid interactive states when the
   provider supports that behavior.
 

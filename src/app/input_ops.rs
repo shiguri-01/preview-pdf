@@ -258,6 +258,7 @@ mod tests {
     use crate::backend::test_support::{build_pdf, unique_temp_path};
     use crate::backend::{PdfDoc, SharedPdfBackend};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
+    use crate::condition::ConditionExpr;
     use crate::config::ViewPolicy;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
@@ -573,16 +574,25 @@ mod tests {
     fn pending_sequence_reprocesses_enter_after_mismatch() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::key(KeyCode::Enter)], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::key(KeyCode::Enter)],
+                Command::NextPage,
+            )
             .expect("enter binding should register");
         let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
         let mut state = AppState::default();
@@ -621,10 +631,15 @@ mod tests {
     fn pending_exact_mismatch_requests_redraw_even_when_commands_do_not() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('x')], Command::DebugStatusHide)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('x')],
+                Command::DebugStatusHide,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('x'), ShortcutKey::char('x')],
                 Command::NextPage,
             )
@@ -664,16 +679,25 @@ mod tests {
     fn pending_exact_mismatch_does_not_reprocess_after_mode_change() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('x')], Command::OpenHelp)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('x')],
+                Command::OpenHelp,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('x'), ShortcutKey::char('x')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
         let mut state = AppState::default();
@@ -710,13 +734,18 @@ mod tests {
     fn pending_sequence_reprocesses_followup_key_after_mismatch() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::FirstPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('?')], Command::OpenHelp)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('?')],
+                Command::OpenHelp,
+            )
             .expect("single-key binding should register");
         let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
         let mut state = AppState::default();
@@ -749,13 +778,18 @@ mod tests {
     fn pending_sequence_redraws_when_reprocessed_followup_dispatches() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::FirstPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         let mut interaction = InteractionSubsystem::with_sequence_registry(registry);
         let mut state = AppState::default();
@@ -788,7 +822,8 @@ mod tests {
     fn pending_sequence_requests_redraw_when_unbound_followup_clears_it() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::FirstPage,
             )
@@ -823,10 +858,15 @@ mod tests {
     fn wake_flushes_timed_out_sequence() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
@@ -857,10 +897,15 @@ mod tests {
     fn timeout_flush_uses_current_conditions_outside_normal_mode() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
@@ -894,10 +939,15 @@ mod tests {
     fn opening_palette_preserves_pending_sequences_that_remain_enabled() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
@@ -932,10 +982,15 @@ mod tests {
     fn batched_palette_open_and_close_preserves_enabled_pending_sequences() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
@@ -975,16 +1030,25 @@ mod tests {
     fn timed_out_sequence_returns_expired_command_before_processing_new_key() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         let mut interaction =
             InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
@@ -1017,16 +1081,25 @@ mod tests {
     fn timed_out_sequence_followed_by_quit_dispatches_expired_command_then_quit() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('q')], Command::Quit)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('q')],
+                Command::Quit,
+            )
             .expect("single-key binding should register");
         let mut interaction =
             InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
@@ -1060,10 +1133,15 @@ mod tests {
         let pdf = test_pdf_backend();
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )

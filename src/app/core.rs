@@ -8,7 +8,7 @@ use crate::config::{
 use crate::error::AppResult;
 use crate::extension::ExtensionHost;
 use crate::input::InputHistoryService;
-use crate::input::keymap::build_builtin_sequence_registry;
+use crate::input::keymap::build_default_sequence_registry;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, SequenceResolver};
 use crate::palette::{PaletteManager, PaletteRegistry};
 use crate::presenter::{ImagePresenter, PresenterKind, create_presenter_with_cache_limits};
@@ -59,7 +59,7 @@ pub struct InteractionSubsystem {
 
 impl Default for InteractionSubsystem {
     fn default() -> Self {
-        Self::with_sequence_registry(build_builtin_sequence_registry())
+        Self::with_sequence_registry(build_default_sequence_registry())
     }
 }
 

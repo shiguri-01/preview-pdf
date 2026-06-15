@@ -772,10 +772,15 @@ mod tests {
             App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::OpenHelp)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::OpenHelp,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::FirstPage,
             )
@@ -833,16 +838,25 @@ mod tests {
             App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::DebugStatusShow)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::DebugStatusShow,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('x')], Command::DebugStatusHide)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('x')],
+                Command::DebugStatusHide,
+            )
             .expect("single-key binding should register");
         app.interaction =
             InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
@@ -903,16 +917,21 @@ mod tests {
             App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('x')], Command::OpenHelp)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('x')],
+                Command::OpenHelp,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('x'), ShortcutKey::char('x')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static_with_condition(
+            .register_exact(
                 ConditionExpr::Always,
                 &[ShortcutKey::char('j')],
                 Command::HelpScrollDown,

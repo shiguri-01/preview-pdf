@@ -109,15 +109,7 @@ impl SequenceRegistry {
         Self::default()
     }
 
-    pub fn register_static(
-        &mut self,
-        keys: &[ShortcutKey],
-        command: Command,
-    ) -> Result<(), SequenceRegistrationError> {
-        self.register_static_with_condition(ConditionExpr::Always, keys, command)
-    }
-
-    pub fn register_static_with_condition(
+    pub fn register_exact(
         &mut self,
         enabled_when: ConditionExpr,
         keys: &[ShortcutKey],
@@ -155,20 +147,6 @@ impl SequenceRegistry {
     }
 
     pub fn register_numeric_prefix(
-        &mut self,
-        command_id: &'static str,
-        suffix: ShortcutKey,
-        factory: NumericCommandFactory,
-    ) -> Result<(), SequenceRegistrationError> {
-        self.register_numeric_prefix_with_condition(
-            ConditionExpr::Always,
-            command_id,
-            suffix,
-            factory,
-        )
-    }
-
-    pub fn register_numeric_prefix_with_condition(
         &mut self,
         enabled_when: ConditionExpr,
         command_id: &'static str,
@@ -227,16 +205,9 @@ impl SequenceRegistry {
         });
     }
 
-    pub fn unregister_static(
+    pub fn unregister_exact(
         &mut self,
-        keys: &[ShortcutKey],
-    ) -> Result<bool, SequenceRegistrationError> {
-        self.unregister_static_with_condition(None, keys)
-    }
-
-    pub fn unregister_static_with_condition(
-        &mut self,
-        enabled_when: Option<ConditionExpr>,
+        enabled_when: ConditionExpr,
         keys: &[ShortcutKey],
     ) -> Result<bool, SequenceRegistrationError> {
         if keys.is_empty() {
@@ -255,7 +226,7 @@ impl SequenceRegistry {
                     enabled_when: existing_enabled_when,
                     keys: existing,
                     ..
-                } if enabled_when.is_none_or(|condition| condition == *existing_enabled_when)
+                } if enabled_when == *existing_enabled_when
                     && existing == &keys
             )
         });
@@ -264,14 +235,7 @@ impl SequenceRegistry {
 
     pub fn unregister_numeric_prefix(
         &mut self,
-        suffix: ShortcutKey,
-    ) -> Result<bool, SequenceRegistrationError> {
-        self.unregister_numeric_prefix_with_condition(None, suffix)
-    }
-
-    pub fn unregister_numeric_prefix_with_condition(
-        &mut self,
-        enabled_when: Option<ConditionExpr>,
+        enabled_when: ConditionExpr,
         suffix: ShortcutKey,
     ) -> Result<bool, SequenceRegistrationError> {
         let suffix = canonicalize_binding_key(suffix)?;
@@ -286,7 +250,7 @@ impl SequenceRegistry {
                     enabled_when: existing_enabled_when,
                     suffix: existing,
                     ..
-                } if enabled_when.is_none_or(|condition| condition == *existing_enabled_when)
+                } if enabled_when == *existing_enabled_when
                     && *existing == suffix
             )
         });
@@ -446,11 +410,6 @@ impl SequenceResolver {
             registry,
             state: SequenceState::new(timeout),
         }
-    }
-
-    pub fn handle_key(&mut self, key: KeyEvent) -> SequenceResolution {
-        let extensions = ExtensionUiSnapshot::default();
-        self.handle_key_in_context(KeyBindingContext::normal(&extensions), key)
     }
 
     pub fn handle_key_in_context(
@@ -821,15 +780,27 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use std::time::Duration;
 
+    fn handle_normal_key(resolver: &mut SequenceResolver, key: KeyEvent) -> SequenceResolution {
+        let extensions = ExtensionUiSnapshot::default();
+        resolver.handle_key_in_context(KeyBindingContext::normal(&extensions), key)
+    }
+
     #[test]
     fn exact_single_key_dispatches_immediately() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        let resolution = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+        );
 
         assert_eq!(resolution, SequenceResolution::Dispatch(Command::NextPage));
         assert_eq!(resolver.pending_display(), None);
@@ -839,17 +810,25 @@ mod tests {
     fn ambiguous_exact_waits_for_timeout() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
 
-        let first = resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let first = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+        );
         assert_eq!(first, SequenceResolution::Pending);
         assert_eq!(resolver.pending_display().as_deref(), Some("g"));
 
@@ -862,11 +841,18 @@ mod tests {
     fn enter_dispatches_as_a_regular_exact_binding() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::key(KeyCode::Enter)], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::key(KeyCode::Enter)],
+                Command::NextPage,
+            )
             .expect("enter binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let resolution = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
 
         assert_eq!(resolution, SequenceResolution::Dispatch(Command::NextPage));
         assert_eq!(resolver.pending_display(), None);
@@ -878,7 +864,7 @@ mod tests {
 
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static_with_condition(
+            .register_exact(
                 ConditionExpr::All(PALETTE_MODE),
                 &[ShortcutKey::key(KeyCode::Enter)],
                 Command::PaletteSubmit,
@@ -888,7 +874,10 @@ mod tests {
         let extensions = ExtensionUiSnapshot::default();
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)
+            ),
             SequenceResolution::Noop
         );
         assert_eq!(
@@ -991,7 +980,7 @@ mod tests {
     fn generated_printable_binding_does_not_override_exact_binding() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static_with_condition(
+            .register_exact(
                 ConditionExpr::Always,
                 &[ShortcutKey::new(
                     KeyCode::Char('@'),
@@ -1040,25 +1029,40 @@ mod tests {
     fn enter_after_pending_exact_match_reprocesses_as_next_key() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::key(KeyCode::Enter)], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::key(KeyCode::Enter)],
+                Command::NextPage,
+            )
             .expect("enter binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
 
-        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let resolution = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
         assert_eq!(
             resolution,
             SequenceResolution::DispatchThen {
@@ -1073,25 +1077,40 @@ mod tests {
     fn expired_pending_sequence_dispatches_before_consuming_next_key() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
 
-        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        let resolution = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+        );
         assert_eq!(
             resolution,
             SequenceResolution::DispatchThen {
@@ -1106,25 +1125,40 @@ mod tests {
     fn expired_pending_mode_change_does_not_reprocess_next_key() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::OpenHelp)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::OpenHelp,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
 
-        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        let resolution = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+        );
         assert_eq!(resolution, SequenceResolution::Dispatch(Command::OpenHelp));
     }
 
@@ -1134,14 +1168,15 @@ mod tests {
 
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static_with_condition(
+            .register_exact(
                 ConditionExpr::All(SEARCH_ACTIVE),
                 &[ShortcutKey::char('g')],
                 Command::DebugStatusShow,
             )
             .expect("conditional binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
@@ -1169,20 +1204,25 @@ mod tests {
 
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static_with_condition(
+            .register_exact(
                 ConditionExpr::All(SEARCH_ACTIVE),
                 &[ShortcutKey::char('g')],
                 Command::DebugStatusShow,
             )
             .expect("conditional binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('x')], Command::DebugStatusHide)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('x')],
+                Command::DebugStatusHide,
+            )
             .expect("single-key binding should register");
         let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
         let active_extensions = ExtensionUiSnapshot::with_search_active(true);
@@ -1211,7 +1251,7 @@ mod tests {
 
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static_with_condition(
+            .register_exact(
                 ConditionExpr::All(SEARCH_ACTIVE),
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::DebugStatusShow,
@@ -1244,7 +1284,7 @@ mod tests {
 
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static_with_condition(
+            .register_exact(
                 ConditionExpr::All(NORMAL_MODE),
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::FirstPage,
@@ -1270,7 +1310,8 @@ mod tests {
     fn enter_can_be_part_of_a_multi_key_binding() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::key(KeyCode::Enter)],
                 Command::FirstPage,
             )
@@ -1278,11 +1319,17 @@ mod tests {
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
 
-        let resolution = resolver.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let resolution = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
         assert_eq!(resolution, SequenceResolution::Dispatch(Command::FirstPage));
         assert_eq!(resolver.pending_display(), None);
     }
@@ -1291,25 +1338,40 @@ mod tests {
     fn mismatch_after_pending_exact_match_reprocesses_latest_key() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('g')],
+                Command::FirstPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('x')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('x')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
 
-        let mismatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        let mismatch = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+        );
         assert_eq!(
             mismatch,
             SequenceResolution::DispatchThen {
@@ -1325,22 +1387,33 @@ mod tests {
     fn mismatch_after_pending_prefix_reprocesses_latest_key() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::FirstPage,
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('x')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('x')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
 
-        let mismatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        let mismatch = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+        );
         assert_eq!(
             mismatch,
             SequenceResolution::DispatchWithRedraw(Command::NextPage)
@@ -1352,7 +1425,8 @@ mod tests {
     fn mismatch_after_pending_prefix_reports_clear_when_latest_key_is_unbound() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::FirstPage,
             )
@@ -1360,11 +1434,17 @@ mod tests {
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
 
-        let mismatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        let mismatch = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+        );
         assert_eq!(mismatch, SequenceResolution::Cleared);
         assert_eq!(resolver.pending_display(), None);
     }
@@ -1373,23 +1453,35 @@ mod tests {
     fn numeric_prefix_dispatches_and_formats_pending_digits() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_numeric_prefix("goto-page", ShortcutKey::char('G'), |page| {
-                Command::GotoPage { page }
-            })
+            .register_numeric_prefix(
+                ConditionExpr::Always,
+                "goto-page",
+                ShortcutKey::char('G'),
+                |page| Command::GotoPage { page },
+            )
             .expect("numeric prefix binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
         assert_eq!(resolver.pending_display().as_deref(), Some("42"));
 
-        let dispatch = resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        let dispatch = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE),
+        );
         assert_eq!(
             dispatch,
             SequenceResolution::Dispatch(Command::GotoPage { page: 42 })
@@ -1400,35 +1492,52 @@ mod tests {
     fn non_digit_exact_binding_dispatches_immediately_alongside_numeric_prefix() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('=')], Command::ZoomReset)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('=')],
+                Command::ZoomReset,
+            )
             .expect("exact binding should register");
         registry
-            .register_numeric_prefix("goto-page", ShortcutKey::char('G'), |page| {
-                Command::GotoPage { page }
-            })
+            .register_numeric_prefix(
+                ConditionExpr::Always,
+                "goto-page",
+                ShortcutKey::char('G'),
+                |page| Command::GotoPage { page },
+            )
             .expect("numeric prefix binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let reset = resolver.handle_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE));
+        let reset = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE),
+        );
         assert_eq!(reset, SequenceResolution::Dispatch(Command::ZoomReset));
         assert_eq!(resolver.pending_display(), None);
     }
 
     #[test]
-    fn unregister_static_removes_exact_binding() {
+    fn unregister_exact_removes_exact_binding() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::NextPage,
+            )
             .expect("binding should register");
 
         assert!(
             registry
-                .unregister_static(&[ShortcutKey::char('j')])
+                .unregister_exact(ConditionExpr::Always, &[ShortcutKey::char('j')])
                 .expect("binding should unregister")
         );
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Noop
         );
     }
@@ -1437,19 +1546,25 @@ mod tests {
     fn unregister_numeric_prefix_removes_count_binding() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_numeric_prefix("goto-page", ShortcutKey::char('G'), |page| {
-                Command::GotoPage { page }
-            })
+            .register_numeric_prefix(
+                ConditionExpr::Always,
+                "goto-page",
+                ShortcutKey::char('G'),
+                |page| Command::GotoPage { page },
+            )
             .expect("binding should register");
 
         assert!(
             registry
-                .unregister_numeric_prefix(ShortcutKey::char('G'))
+                .unregister_numeric_prefix(ConditionExpr::Always, ShortcutKey::char('G'))
                 .expect("binding should unregister")
         );
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Noop
         );
     }
@@ -1459,7 +1574,8 @@ mod tests {
         let mut registry = SequenceRegistry::new();
 
         let error = registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::key(KeyCode::Esc)],
                 Command::FirstPage,
             )
@@ -1472,9 +1588,12 @@ mod tests {
         let mut registry = SequenceRegistry::new();
 
         let error = registry
-            .register_numeric_prefix("goto-page", ShortcutKey::char('5'), |page| {
-                Command::GotoPage { page }
-            })
+            .register_numeric_prefix(
+                ConditionExpr::Always,
+                "goto-page",
+                ShortcutKey::char('5'),
+                |page| Command::GotoPage { page },
+            )
             .expect_err("digit suffix should be rejected");
         assert_eq!(error, SequenceRegistrationError::InvalidNumericSuffix);
     }
@@ -1483,12 +1602,19 @@ mod tests {
     fn snapshot_includes_exact_and_numeric_bindings() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('j')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::NextPage,
+            )
             .expect("single-key binding should register");
         registry
-            .register_numeric_prefix("goto-page", ShortcutKey::char('G'), |page| {
-                Command::GotoPage { page }
-            })
+            .register_numeric_prefix(
+                ConditionExpr::Always,
+                "goto-page",
+                ShortcutKey::char('G'),
+                |page| Command::GotoPage { page },
+            )
             .expect("numeric prefix binding should register");
 
         let snapshot = registry.snapshot();
@@ -1512,7 +1638,8 @@ mod tests {
         let mut registry = SequenceRegistry::new();
 
         let error = registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::new(KeyCode::Char('a'), KeyModifiers::SHIFT)],
                 Command::NextPage,
             )
@@ -1527,7 +1654,8 @@ mod tests {
     fn registry_canonicalizes_ctrl_shift_letters_to_ctrl_letters() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::new(
                     KeyCode::Char('O'),
                     KeyModifiers::CONTROL | KeyModifiers::SHIFT,
@@ -1537,8 +1665,10 @@ mod tests {
             .expect("Ctrl+Shift+letter should normalize to Ctrl+letter");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let resolution =
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        let resolution = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+        );
         assert_eq!(
             resolution,
             SequenceResolution::Dispatch(Command::HistoryBack)
@@ -1549,7 +1679,8 @@ mod tests {
     fn unsupported_modifier_input_is_ignored() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
                 Command::LastPage,
             )
@@ -1557,12 +1688,17 @@ mod tests {
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
 
-        let resolution =
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER));
+        let resolution = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('k'), KeyModifiers::SUPER),
+        );
 
         assert_eq!(resolution, SequenceResolution::Cleared);
         assert_eq!(resolver.pending_display(), None);

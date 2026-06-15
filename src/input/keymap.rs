@@ -22,130 +22,161 @@ const WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE: [RuntimeCondition; 2] = [
 ];
 const WHEN_HELP: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(crate::app::Mode::Help)];
 
-pub fn build_builtin_sequence_registry() -> SequenceRegistry {
+pub fn build_default_sequence_registry() -> SequenceRegistry {
     let mut registry = SequenceRegistry::new();
+    register_surface_open_bindings(&mut registry);
+    register_page_navigation_bindings(&mut registry);
+    register_view_bindings(&mut registry);
+    register_history_bindings(&mut registry);
+    register_search_navigation_bindings(&mut registry);
+    register_quit_binding(&mut registry);
+    register_search_cancellation_binding(&mut registry);
+    register_palette_bindings(&mut registry);
+    register_help_bindings(&mut registry);
+    registry
+}
 
-    register_static(
-        &mut registry,
+pub(crate) fn build_none_sequence_registry() -> SequenceRegistry {
+    let mut registry = SequenceRegistry::new();
+    register_search_cancellation_binding(&mut registry);
+    register_palette_bindings(&mut registry);
+    register_help_bindings(&mut registry);
+    registry
+}
+
+fn register_surface_open_bindings(registry: &mut SequenceRegistry) {
+    let when = ConditionExpr::All(&WHEN_NORMAL);
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::char(':')],
         Command::OpenPalette {
             kind: PaletteKind::Command,
             payload: None,
         },
     );
-    register_static(
-        &mut registry,
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::char('/')],
         Command::OpenSearch,
     );
-    register_static(&mut registry, &[ShortcutKey::char('?')], Command::OpenHelp);
-    register_static(
-        &mut registry,
+    register_exact_binding(registry, when, &[ShortcutKey::char('?')], Command::OpenHelp);
+}
+
+fn register_page_navigation_bindings(registry: &mut SequenceRegistry) {
+    let when = ConditionExpr::All(&WHEN_NORMAL);
+    register_exact_binding(registry, when, &[ShortcutKey::char('j')], Command::NextPage);
+    register_exact_binding(registry, when, &[ShortcutKey::char('k')], Command::PrevPage);
+    register_exact_binding(
+        registry,
+        when,
+        &[ShortcutKey::char('g'), ShortcutKey::char('g')],
+        Command::FirstPage,
+    );
+    register_exact_binding(registry, when, &[ShortcutKey::char('G')], Command::LastPage);
+    register_numeric_prefix_binding(
+        registry,
+        when,
+        "goto-page",
+        ShortcutKey::char('G'),
+        |page| Command::GotoPage { page },
+    );
+}
+
+fn register_view_bindings(registry: &mut SequenceRegistry) {
+    let when = ConditionExpr::All(&WHEN_NORMAL);
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::char('H')],
         Command::Pan {
             direction: PanDirection::Left,
             amount: PanAmount::DefaultStep,
         },
     );
-    register_static(
-        &mut registry,
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::char('J')],
         Command::Pan {
             direction: PanDirection::Down,
             amount: PanAmount::DefaultStep,
         },
     );
-    register_static(
-        &mut registry,
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::char('K')],
         Command::Pan {
             direction: PanDirection::Up,
             amount: PanAmount::DefaultStep,
         },
     );
-    register_static(
-        &mut registry,
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::char('L')],
         Command::Pan {
             direction: PanDirection::Right,
             amount: PanAmount::DefaultStep,
         },
     );
-    register_static(&mut registry, &[ShortcutKey::char('j')], Command::NextPage);
-    register_static(&mut registry, &[ShortcutKey::char('k')], Command::PrevPage);
-    register_static(
-        &mut registry,
-        &[ShortcutKey::char('g'), ShortcutKey::char('g')],
-        Command::FirstPage,
+    register_exact_binding(registry, when, &[ShortcutKey::char('+')], Command::ZoomIn);
+    register_exact_binding(registry, when, &[ShortcutKey::char('-')], Command::ZoomOut);
+    register_exact_binding(
+        registry,
+        when,
+        &[ShortcutKey::char('=')],
+        Command::ZoomReset,
     );
-    register_static(&mut registry, &[ShortcutKey::char('G')], Command::LastPage);
-    register_numeric_prefix(&mut registry, "goto-page", ShortcutKey::char('G'), |page| {
-        Command::GotoPage { page }
-    });
-    register_static(&mut registry, &[ShortcutKey::char('+')], Command::ZoomIn);
-    register_static(&mut registry, &[ShortcutKey::char('-')], Command::ZoomOut);
-    register_static(&mut registry, &[ShortcutKey::char('=')], Command::ZoomReset);
-    register_static(
-        &mut registry,
+}
+
+fn register_history_bindings(registry: &mut SequenceRegistry) {
+    let when = ConditionExpr::All(&WHEN_NORMAL);
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::ctrl('o')],
         Command::HistoryBack,
     );
-    register_static(
-        &mut registry,
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::ctrl('i')],
         Command::HistoryForward,
     );
-    register_static(
-        &mut registry,
+}
+
+fn register_search_navigation_bindings(registry: &mut SequenceRegistry) {
+    let when = ConditionExpr::All(&WHEN_NORMAL);
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::char('n')],
         Command::NextSearchHit,
     );
-    register_static(
-        &mut registry,
+    register_exact_binding(
+        registry,
+        when,
         &[ShortcutKey::char('N')],
         Command::PrevSearchHit,
     );
-    register_static(&mut registry, &[ShortcutKey::char('q')], Command::Quit);
-    register_builtin_normal_reserved_bindings(&mut registry);
-    register_builtin_surface_bindings(&mut registry);
-    registry
 }
 
-fn register_static(registry: &mut SequenceRegistry, keys: &[ShortcutKey], command: Command) {
-    register_static_with_condition(registry, ConditionExpr::All(&WHEN_NORMAL), keys, command);
+fn register_quit_binding(registry: &mut SequenceRegistry) {
+    register_exact_binding(
+        registry,
+        ConditionExpr::All(&WHEN_NORMAL),
+        &[ShortcutKey::char('q')],
+        Command::Quit,
+    );
 }
 
-fn register_static_with_condition(
-    registry: &mut SequenceRegistry,
-    enabled_when: ConditionExpr,
-    keys: &[ShortcutKey],
-    command: Command,
-) {
-    registry
-        .register_static_with_condition(enabled_when, keys, command)
-        .expect("built-in key binding should register");
-}
-
-fn register_numeric_prefix(
-    registry: &mut SequenceRegistry,
-    command_id: &'static str,
-    suffix: ShortcutKey,
-    factory: fn(usize) -> Command,
-) {
-    registry
-        .register_numeric_prefix_with_condition(
-            ConditionExpr::All(&WHEN_NORMAL),
-            command_id,
-            suffix,
-            factory,
-        )
-        .expect("built-in numeric key binding should register");
-}
-
-pub(crate) fn register_builtin_normal_reserved_bindings(registry: &mut SequenceRegistry) {
+fn register_search_cancellation_binding(registry: &mut SequenceRegistry) {
     use crossterm::event::KeyCode;
 
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_NORMAL_SEARCH_ACTIVE),
         &[ShortcutKey::key(KeyCode::Esc)],
@@ -153,190 +184,190 @@ pub(crate) fn register_builtin_normal_reserved_bindings(registry: &mut SequenceR
     );
 }
 
-pub(crate) fn register_builtin_surface_bindings(registry: &mut SequenceRegistry) {
+fn register_palette_bindings(registry: &mut SequenceRegistry) {
     use crossterm::event::{KeyCode, KeyModifiers};
 
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::Esc)],
         Command::ClosePalette,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::Enter)],
         Command::PaletteSubmit,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::Tab)],
         Command::PaletteComplete,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('p')],
         Command::PaletteSelectPrev,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('n')],
         Command::PaletteSelectNext,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_AVAILABLE),
         &[ShortcutKey::key(KeyCode::Up)],
         Command::PaletteInputHistoryOlder,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_AVAILABLE),
         &[ShortcutKey::key(KeyCode::Down)],
         Command::PaletteInputHistoryNewer,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE),
         &[ShortcutKey::key(KeyCode::Up)],
         Command::PaletteSelectPrev,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE),
         &[ShortcutKey::key(KeyCode::Down)],
         Command::PaletteSelectNext,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::Backspace)],
         Command::TextDeleteBackward,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('h')],
         Command::TextDeleteBackward,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::Delete)],
         Command::TextDeleteForward,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::new(KeyCode::Delete, KeyModifiers::CONTROL)],
         Command::TextDeleteNextWord,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::Left)],
         Command::TextMoveLeft,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('b')],
         Command::TextMoveLeft,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::Right)],
         Command::TextMoveRight,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('f')],
         Command::TextMoveRight,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::Home)],
         Command::TextMoveStart,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('a')],
         Command::TextMoveStart,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::key(KeyCode::End)],
         Command::TextMoveEnd,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('e')],
         Command::TextMoveEnd,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::new(KeyCode::Left, KeyModifiers::CONTROL)],
         Command::TextMovePrevWord,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::alt('b')],
         Command::TextMovePrevWord,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::new(KeyCode::Right, KeyModifiers::CONTROL)],
         Command::TextMoveNextWord,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::alt('f')],
         Command::TextMoveNextWord,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('w')],
         Command::TextDeletePrevWord,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::alt('d')],
         Command::TextDeleteNextWord,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::new(KeyCode::Backspace, KeyModifiers::ALT)],
         Command::TextDeletePrevWord,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('u')],
         Command::TextDeleteLine,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('k')],
         Command::TextDeleteToEnd,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_PALETTE),
         &[ShortcutKey::ctrl('y')],
@@ -347,36 +378,64 @@ pub(crate) fn register_builtin_surface_bindings(registry: &mut SequenceRegistry)
         GeneratedKeyMatcher::PrintableCharacter,
         GeneratedCommand::TextInsert,
     );
-    register_static_with_condition(
+}
+
+fn register_help_bindings(registry: &mut SequenceRegistry) {
+    use crossterm::event::KeyCode;
+
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_HELP),
         &[ShortcutKey::key(KeyCode::Esc)],
         Command::CloseHelp,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_HELP),
         &[ShortcutKey::char('j')],
         Command::HelpScrollDown,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_HELP),
         &[ShortcutKey::key(KeyCode::Down)],
         Command::HelpScrollDown,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_HELP),
         &[ShortcutKey::char('k')],
         Command::HelpScrollUp,
     );
-    register_static_with_condition(
+    register_exact_binding(
         registry,
         ConditionExpr::All(&WHEN_HELP),
         &[ShortcutKey::key(KeyCode::Up)],
         Command::HelpScrollUp,
     );
+}
+
+fn register_exact_binding(
+    registry: &mut SequenceRegistry,
+    enabled_when: ConditionExpr,
+    keys: &[ShortcutKey],
+    command: Command,
+) {
+    registry
+        .register_exact(enabled_when, keys, command)
+        .expect("key binding should register");
+}
+
+fn register_numeric_prefix_binding(
+    registry: &mut SequenceRegistry,
+    enabled_when: ConditionExpr,
+    command_id: &'static str,
+    suffix: ShortcutKey,
+    factory: fn(usize) -> Command,
+) {
+    registry
+        .register_numeric_prefix(enabled_when, command_id, suffix, factory)
+        .expect("numeric key binding should register");
 }
 
 #[cfg(test)]
@@ -390,48 +449,77 @@ mod tests {
     use crate::input::sequence::KeyBindingContext;
     use crate::palette::PaletteKind;
 
-    use super::build_builtin_sequence_registry;
+    use super::build_default_sequence_registry;
     use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceResolution, SequenceResolver};
 
+    fn handle_normal_key(resolver: &mut SequenceResolver, key: KeyEvent) -> SequenceResolution {
+        let extensions = ExtensionUiSnapshot::default();
+        resolver.handle_key_in_context(KeyBindingContext::normal(&extensions), key)
+    }
+
     #[test]
-    fn builtins_preserve_existing_single_key_bindings() {
-        let registry = build_builtin_sequence_registry();
+    fn defaults_preserve_existing_single_key_bindings() {
+        let registry = build_default_sequence_registry();
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let search = resolver.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        let search = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE),
+        );
         assert_eq!(search, SequenceResolution::Dispatch(Command::OpenSearch));
 
-        let help = resolver.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE));
+        let help = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE),
+        );
         assert_eq!(help, SequenceResolution::Dispatch(Command::OpenHelp));
 
-        let back = resolver.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
+        let back = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
+        );
         assert_eq!(back, SequenceResolution::Dispatch(Command::HistoryBack));
     }
 
     #[test]
-    fn builtins_require_double_g_for_first_page() {
-        let registry = build_builtin_sequence_registry();
+    fn defaults_require_double_g_for_first_page() {
+        let registry = build_default_sequence_registry();
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let first_g = resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let first_g = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+        );
         assert_eq!(first_g, SequenceResolution::Pending);
 
-        let second_g = resolver.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+        let second_g = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+        );
         assert_eq!(second_g, SequenceResolution::Dispatch(Command::FirstPage));
     }
 
     #[test]
-    fn builtins_support_numeric_goto_prefix() {
-        let registry = build_builtin_sequence_registry();
+    fn defaults_support_numeric_goto_prefix() {
+        let registry = build_default_sequence_registry();
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let four = resolver.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE));
+        let four = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE),
+        );
         assert_eq!(four, SequenceResolution::Pending);
 
-        let two = resolver.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE));
+        let two = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE),
+        );
         assert_eq!(two, SequenceResolution::Pending);
 
-        let goto = resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        let goto = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE),
+        );
         assert_eq!(
             goto,
             SequenceResolution::Dispatch(Command::GotoPage { page: 42 })
@@ -439,20 +527,26 @@ mod tests {
     }
 
     #[test]
-    fn builtins_map_equal_to_zoom_reset() {
-        let registry = build_builtin_sequence_registry();
+    fn defaults_map_equal_to_zoom_reset() {
+        let registry = build_default_sequence_registry();
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let reset = resolver.handle_key(KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE));
+        let reset = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE),
+        );
         assert_eq!(reset, SequenceResolution::Dispatch(Command::ZoomReset));
     }
 
     #[test]
-    fn builtins_include_pan_keys() {
-        let registry = build_builtin_sequence_registry();
+    fn defaults_include_pan_keys() {
+        let registry = build_default_sequence_registry();
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let left = resolver.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::NONE));
+        let left = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('H'), KeyModifiers::NONE),
+        );
         assert_eq!(
             left,
             SequenceResolution::Dispatch(Command::Pan {
@@ -461,7 +555,10 @@ mod tests {
             })
         );
 
-        let down = resolver.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE));
+        let down = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('J'), KeyModifiers::NONE),
+        );
         assert_eq!(
             down,
             SequenceResolution::Dispatch(Command::Pan {
@@ -472,14 +569,20 @@ mod tests {
     }
 
     #[test]
-    fn builtins_accept_shift_modified_char_events_for_uppercase_commands() {
-        let registry = build_builtin_sequence_registry();
+    fn defaults_accept_shift_modified_char_events_for_uppercase_commands() {
+        let registry = build_default_sequence_registry();
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let last_page = resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+        let last_page = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT),
+        );
         assert_eq!(last_page, SequenceResolution::Dispatch(Command::LastPage));
 
-        let pan_down = resolver.handle_key(KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT));
+        let pan_down = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(KeyCode::Char('J'), KeyModifiers::SHIFT),
+        );
         assert_eq!(
             pan_down,
             SequenceResolution::Dispatch(Command::Pan {
@@ -490,19 +593,22 @@ mod tests {
     }
 
     #[test]
-    fn builtins_accept_ctrl_shift_letter_as_ctrl_shortcut() {
-        let registry = build_builtin_sequence_registry();
+    fn defaults_accept_ctrl_shift_letter_as_ctrl_shortcut() {
+        let registry = build_default_sequence_registry();
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
-        let back = resolver.handle_key(KeyEvent::new(
-            KeyCode::Char('O'),
-            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
-        ));
+        let back = handle_normal_key(
+            &mut resolver,
+            KeyEvent::new(
+                KeyCode::Char('O'),
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+            ),
+        );
         assert_eq!(back, SequenceResolution::Dispatch(Command::HistoryBack));
     }
 
     #[test]
-    fn palette_builtins_map_common_line_editing_shortcuts() {
+    fn palette_bindings_map_common_line_editing_shortcuts() {
         let cases = [
             (
                 KeyEvent::new(KeyCode::Home, KeyModifiers::NONE),
@@ -555,7 +661,7 @@ mod tests {
         ];
 
         for (key, expected) in cases {
-            let registry = build_builtin_sequence_registry();
+            let registry = build_default_sequence_registry();
             let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
             let extensions = ExtensionUiSnapshot::default();
 
@@ -571,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn palette_builtins_accept_meta_as_alt_for_word_editing() {
+    fn palette_bindings_accept_meta_as_alt_for_word_editing() {
         let cases = [
             (
                 KeyEvent::new(KeyCode::Char('b'), KeyModifiers::META),
@@ -592,7 +698,7 @@ mod tests {
         ];
 
         for (key, expected) in cases {
-            let registry = build_builtin_sequence_registry();
+            let registry = build_default_sequence_registry();
             let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
             let extensions = ExtensionUiSnapshot::default();
 

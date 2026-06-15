@@ -790,7 +790,7 @@ mod tests {
             &mut app,
             ViewPolicy::default(),
             Command::PaletteSubmit,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             CommandDispatchContext {
                 pdf,
                 extension_host: &mut host,
@@ -814,6 +814,57 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_search_palette_submit_returns_internal_follow_up() {
+        let mut app = AppState {
+            mode: Mode::Palette,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let extensions = host.ui_snapshot();
+        manager
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Search,
+                None,
+                None,
+            )
+            .expect("search palette should open");
+        manager
+            .insert_text(&registry, &app, &extensions, "needle")
+            .expect("search input should be inserted");
+        let mut palette_requests = VecDeque::new();
+        let mut history = InputHistoryService::default();
+
+        let result = dispatch_with_view_policy(
+            &mut app,
+            ViewPolicy::default(),
+            Command::PaletteSubmit,
+            CommandInvocationSource::Interaction,
+            CommandDispatchContext {
+                pdf,
+                extension_host: &mut host,
+                palette_registry: &registry,
+                palette_manager: &mut manager,
+                palette_requests: &mut palette_requests,
+                input_history: &mut history,
+            },
+        )
+        .expect("palette submit should dispatch");
+
+        assert!(matches!(
+            result.follow_up_commands.as_slice(),
+            [request]
+                if matches!(request.command, Command::SubmitSearch { .. })
+                    && request.source == CommandInvocationSource::Internal
+        ));
+    }
+
+    #[test]
     fn dispatch_rejects_palette_command_without_active_palette() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
@@ -827,7 +878,7 @@ mod tests {
             &mut app,
             ViewPolicy::default(),
             Command::PaletteSelectNext,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             CommandDispatchContext {
                 pdf,
                 extension_host: &mut host,
@@ -897,7 +948,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::CloseHelp,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -934,7 +985,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::HelpScrollDown,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -966,7 +1017,7 @@ mod tests {
         let down = dispatch(
             &mut app,
             Command::HelpScrollDown,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             Arc::clone(&pdf),
             &mut host,
             &mut palette_requests,
@@ -986,7 +1037,7 @@ mod tests {
         let up = dispatch(
             &mut app,
             Command::HelpScrollUp,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             Arc::clone(&pdf),
             &mut host,
             &mut palette_requests,

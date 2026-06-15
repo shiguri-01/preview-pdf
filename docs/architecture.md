@@ -100,14 +100,16 @@ Terminal input enters as `DomainEvent::Input`.
 3. Extension input hooks may intercept extension-local inputs in normal mode
    when no pending key sequence owns the input.
 4. The scoped input sequence resolver maps matching normal, palette, or help
-   key bindings to typed commands. Palette keys become palette interaction
-   commands, and help keys become help interaction commands.
+   key bindings to typed commands. Normal bindings dispatch as keymap input;
+   palette and help bindings dispatch as interaction input.
 5. Command dispatch validates invocation source, resolves the required target
    such as app, active palette, or active help, checks the
    command `enabled_when` runtime condition, applies behavior, and applies
    typed command effects.
 6. The loop re-routes emitted app events, follow-up command requests, palette
    requests, and lifecycle requests to extensions and other loop effects.
+   Surface interaction commands and internal follow-up commands use distinct
+   invocation sources.
 7. Render workers return `DomainEvent::RenderComplete`; presenter encode
    workers return `DomainEvent::EncodeComplete`.
 8. UI redraws happen when input, command effects, extension background work, or

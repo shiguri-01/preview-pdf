@@ -95,7 +95,8 @@ pub fn build_builtin_sequence_registry() -> SequenceRegistry {
         Command::PrevSearchHit,
     );
     register_static(&mut registry, &[ShortcutKey::char('q')], Command::Quit);
-    register_builtin_reserved_bindings(&mut registry);
+    register_builtin_normal_reserved_bindings(&mut registry);
+    register_builtin_scoped_interaction_bindings(&mut registry);
     registry
 }
 
@@ -132,8 +133,8 @@ fn register_numeric_prefix(
         .expect("built-in numeric key binding should register");
 }
 
-pub(crate) fn register_builtin_reserved_bindings(registry: &mut SequenceRegistry) {
-    use crossterm::event::{KeyCode, KeyModifiers};
+pub(crate) fn register_builtin_normal_reserved_bindings(registry: &mut SequenceRegistry) {
+    use crossterm::event::KeyCode;
 
     register_static_with_condition(
         registry,
@@ -142,6 +143,11 @@ pub(crate) fn register_builtin_reserved_bindings(registry: &mut SequenceRegistry
         &[ShortcutKey::key(KeyCode::Esc)],
         Command::CancelSearch,
     );
+}
+
+pub(crate) fn register_builtin_scoped_interaction_bindings(registry: &mut SequenceRegistry) {
+    use crossterm::event::{KeyCode, KeyModifiers};
+
     register_static_with_condition(
         registry,
         KeyBindingScope::Palette,

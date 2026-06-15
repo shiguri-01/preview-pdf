@@ -122,10 +122,11 @@ Contract:
   palette.
 - Keymap-only commands can be invoked from key bindings but not from direct
   command palette input.
-- Interaction commands can be invoked by key bindings or interaction flows but
-  are hidden from user-facing command surfaces.
-- Internal-only commands can be invoked only by interaction flows that complete
-  another user action.
+- Interaction commands can be invoked only by built-in scoped interaction
+  bindings or interaction flows and are hidden from user-facing command
+  surfaces.
+- Internal-only commands can be invoked only as internal follow-ups that
+  complete another user action.
 - `enabled_when` checks are separate from invocation policy.
 - Target resolution is separate from invocation policy and `enabled_when`.
   Palette interaction commands, including palette input editing, require an
@@ -215,15 +216,17 @@ Contract:
 - Multi-key sequences can remain pending until resolved or timed out.
 - Numeric prefixes are parsed by the input sequence layer and dispatch typed
   commands.
-- Built-in key bindings must reference known command ids and satisfy command
+- Built-in normal bindings dispatch with the keymap invocation source. Built-in
+  palette and help bindings dispatch with the interaction invocation source.
+  All built-in bindings must reference known command ids and satisfy command
   invocation policy.
 - Configured key bindings currently target the normal scope and must reference
   known app-target commands that can be invoked from the keymap. Scoped
   interaction commands that require an active palette or help target are owned
-  by built-in focused bindings until scoped keymap config exists. Like built-in
-  bindings, configured bindings resolve only when their scope and runtime
-  `enabled_when` match; dispatch still validates the resolved command before
-  applying behavior.
+  by built-in scoped interaction bindings until scoped keymap config exists.
+  Like built-in bindings, configured bindings resolve only when their scope and
+  runtime `enabled_when` match; dispatch still validates the resolved command
+  before applying behavior.
 - Palette-scoped keys dispatch hidden palette interaction commands such as
   submit, complete, selection movement, input editing, and palette input
   history recall.

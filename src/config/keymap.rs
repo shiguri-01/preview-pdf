@@ -3,7 +3,10 @@ use crate::command::{
     validate_command_id_for_normal_keymap,
 };
 use crate::error::{AppError, AppResult};
-use crate::input::keymap::{build_builtin_sequence_registry, register_builtin_reserved_bindings};
+use crate::input::keymap::{
+    build_builtin_sequence_registry, register_builtin_normal_reserved_bindings,
+    register_builtin_scoped_interaction_bindings,
+};
 use crate::input::sequence::{SequenceRegistrationError, SequenceRegistry};
 use crate::input::shortcut::{ShortcutKey, parse_shortcut_sequence};
 
@@ -64,10 +67,11 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
             let mut registry = SequenceRegistry::new();
             // TODO: Revisit this when config supports scoped key bindings.
             // `preset = "none"` currently disables only configurable normal-mode
-            // bindings; reserved cancellation and focused-surface controls remain
+            // bindings; reserved cancellation and scoped interaction controls remain
             // available. Decide whether future scoped config should expose separate
             // normal/palette/help presets.
-            register_builtin_reserved_bindings(&mut registry);
+            register_builtin_normal_reserved_bindings(&mut registry);
+            register_builtin_scoped_interaction_bindings(&mut registry);
             registry
         }
     };

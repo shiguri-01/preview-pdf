@@ -211,6 +211,7 @@ pub enum CommandInvocationSource {
     Keymap,
     CommandPaletteInput,
     Interaction,
+    Internal,
 }
 
 #[cfg(test)]

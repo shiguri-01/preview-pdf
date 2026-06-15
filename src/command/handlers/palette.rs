@@ -58,7 +58,7 @@ pub(in crate::command) fn palette_submit(
                 PaletteKind::Search
                 | PaletteKind::SearchResults
                 | PaletteKind::History
-                | PaletteKind::Outline => CommandInvocationSource::Interaction,
+                | PaletteKind::Outline => CommandInvocationSource::Internal,
             };
             execution = execution.with_follow_up(CommandRequest::new(command, source));
             match next {

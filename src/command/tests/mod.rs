@@ -11,7 +11,7 @@ use crate::palette::PaletteKind;
 use super::spec::validate_command_id_for_policy;
 
 #[test]
-fn builtin_keymap_references_registered_keymap_invocable_commands() {
+fn builtin_bindings_reference_commands_invocable_from_their_scope() {
     let registry = build_builtin_sequence_registry();
     let snapshot = registry.snapshot();
     let extensions = ExtensionUiSnapshot::with_search_active(true);
@@ -35,7 +35,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
         );
         validate_command_id_for_policy(binding.command_id, &ctx).unwrap_or_else(|err| {
             panic!(
-                "key binding {:?} references command {} that keymap cannot invoke: {}",
+                "key binding {:?} references command {} that its scope cannot invoke: {}",
                 binding.keys, binding.command_id, err
             )
         });
@@ -51,7 +51,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
         );
         validate_command_id_for_policy(binding.command_id, &ctx).unwrap_or_else(|err| {
             panic!(
-                "numeric key binding {:?} references command {} that keymap cannot invoke: {}",
+                "numeric key binding {:?} references command {} that its scope cannot invoke: {}",
                 binding.suffix, binding.command_id, err
             )
         });
@@ -67,7 +67,7 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
         );
         validate_command_id_for_policy(binding.command_id, &ctx).unwrap_or_else(|err| {
             panic!(
-                "generated key binding {:?} references command {} that keymap cannot invoke: {}",
+                "generated key binding {:?} references command {} that its scope cannot invoke: {}",
                 binding.matcher, binding.command_id, err
             )
         });
@@ -79,7 +79,12 @@ fn key_binding_command_context<'a>(
     extensions: &'a ExtensionUiSnapshot,
 ) -> CommandPolicyContext<'a> {
     CommandPolicyContext {
-        source: CommandInvocationSource::Keymap,
+        source: match scope {
+            KeyBindingScope::Normal => CommandInvocationSource::Keymap,
+            KeyBindingScope::Palette | KeyBindingScope::Help => {
+                CommandInvocationSource::Interaction
+            }
+        },
         runtime: RuntimeConditionContext::new(
             match scope {
                 KeyBindingScope::Normal => Mode::Normal,

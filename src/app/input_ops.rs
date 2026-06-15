@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyEvent;
 
 use crate::backend::SharedPdfBackend;
 use crate::command::{
@@ -23,55 +23,18 @@ pub(crate) struct KeyEventOutcome {
     pub commands: Vec<CommandRequest>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KeyEventRoute {
-    Palette,
-    Help,
-    Normal,
-}
-
 impl InteractionSubsystem {
     pub(crate) fn handle_key_event(
         &mut self,
         state: &mut AppState,
         key: KeyEvent,
     ) -> AppResult<KeyEventOutcome> {
-        if let Some(outcome) = self.repair_stale_palette_mode(state, key) {
-            return Ok(outcome);
-        }
-
-        match Self::route_key_event(state, key) {
-            KeyEventRoute::Palette => return Ok(self.handle_scoped_key_event(state, key)),
-            KeyEventRoute::Help => return Ok(self.handle_scoped_key_event(state, key)),
-            KeyEventRoute::Normal => {}
+        match state.mode {
+            Mode::Palette | Mode::Help => return Ok(self.handle_scoped_key_event(state, key)),
+            Mode::Normal => {}
         }
 
         Ok(self.handle_normal_key_event(state, key))
-    }
-
-    fn route_key_event(state: &AppState, _key: KeyEvent) -> KeyEventRoute {
-        match state.mode {
-            Mode::Palette => KeyEventRoute::Palette,
-            Mode::Help => KeyEventRoute::Help,
-            Mode::Normal => KeyEventRoute::Normal,
-        }
-    }
-
-    fn repair_stale_palette_mode(
-        &mut self,
-        state: &mut AppState,
-        key: KeyEvent,
-    ) -> Option<KeyEventOutcome> {
-        if state.mode != Mode::Palette || self.palette.manager.is_open() {
-            return None;
-        }
-
-        state.mode = Mode::Normal;
-        self.sync_sequences_with_mode(state);
-        (key.code == KeyCode::Esc).then_some(KeyEventOutcome {
-            redraw: true,
-            commands: Vec::new(),
-        })
     }
 
     fn handle_normal_key_event(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
@@ -102,14 +65,14 @@ impl InteractionSubsystem {
         let extensions = self.extensions.host.ui_snapshot();
         let ctx = self.key_binding_context(state, &extensions);
         let resolution = self.sequences.resolver.handle_key_in_context(ctx, key);
-        Self::sequence_outcome(resolution, false)
+        Self::sequence_outcome(resolution, CommandInvocationSource::Keymap, false)
     }
 
     fn handle_scoped_key_event(&mut self, state: &AppState, key: KeyEvent) -> KeyEventOutcome {
         let extensions = self.extensions.host.ui_snapshot();
         let ctx = self.key_binding_context(state, &extensions);
         let resolution = self.sequences.resolver.handle_key_in_context(ctx, key);
-        Self::sequence_outcome(resolution, false)
+        Self::sequence_outcome(resolution, CommandInvocationSource::Interaction, false)
     }
 
     fn key_binding_context<'a>(
@@ -174,7 +137,7 @@ impl InteractionSubsystem {
             return KeyEventOutcome::default();
         }
         let resolution = self.sequences.resolver.flush_timeout();
-        Self::sequence_outcome(resolution, true)
+        Self::sequence_outcome(resolution, CommandInvocationSource::Keymap, true)
     }
 
     pub(crate) fn handle_extension_input(
@@ -219,11 +182,6 @@ impl InteractionSubsystem {
             }
         }
 
-        if !self.palette.manager.is_open() && state.mode == Mode::Palette {
-            state.mode = Mode::Normal;
-            changed = true;
-            self.sync_sequences_with_mode(state);
-        }
         changed
     }
 
@@ -272,6 +230,7 @@ impl InteractionSubsystem {
 
     fn sequence_outcome(
         resolution: SequenceResolution,
+        source: CommandInvocationSource,
         redraw_on_dispatch: bool,
     ) -> KeyEventOutcome {
         match resolution {
@@ -288,30 +247,23 @@ impl InteractionSubsystem {
                 // `DispatchThen` represents "commit the pending sequence, then keep
                 // processing the latest key" without dropping input.
                 let first_redraw = Self::command_redraw(&first, redraw_on_dispatch);
-                let mut outcome = Self::sequence_outcome(*next, redraw_on_dispatch);
+                let mut outcome = Self::sequence_outcome(*next, source, redraw_on_dispatch);
                 outcome.redraw |= redraw || first_redraw;
-                outcome.commands.insert(
-                    0,
-                    CommandRequest::new(first, CommandInvocationSource::Keymap),
-                );
+                outcome
+                    .commands
+                    .insert(0, CommandRequest::new(first, source));
                 outcome
             }
             SequenceResolution::Dispatch(command) => {
                 let redraw = Self::command_redraw(&command, redraw_on_dispatch);
                 KeyEventOutcome {
                     redraw,
-                    commands: vec![CommandRequest::new(
-                        command,
-                        CommandInvocationSource::Keymap,
-                    )],
+                    commands: vec![CommandRequest::new(command, source)],
                 }
             }
             SequenceResolution::DispatchWithRedraw(command) => KeyEventOutcome {
                 redraw: true,
-                commands: vec![CommandRequest::new(
-                    command,
-                    CommandInvocationSource::Keymap,
-                )],
+                commands: vec![CommandRequest::new(command, source)],
             },
         }
     }
@@ -409,7 +361,7 @@ mod tests {
             down.commands,
             vec![CommandRequest::new(
                 Command::HelpScrollDown,
-                CommandInvocationSource::Keymap
+                CommandInvocationSource::Interaction
             )]
         );
 
@@ -423,7 +375,7 @@ mod tests {
             up.commands,
             vec![CommandRequest::new(
                 Command::HelpScrollUp,
-                CommandInvocationSource::Keymap
+                CommandInvocationSource::Interaction
             )]
         );
 
@@ -435,7 +387,7 @@ mod tests {
             closed.commands,
             vec![CommandRequest::new(
                 Command::CloseHelp,
-                CommandInvocationSource::Keymap
+                CommandInvocationSource::Interaction
             )]
         );
         assert!(!closed.redraw);
@@ -506,7 +458,7 @@ mod tests {
             commands,
             vec![CommandRequest::new(
                 Command::CloseHelp,
-                CommandInvocationSource::Keymap
+                CommandInvocationSource::Interaction
             )]
         );
         assert!(events.is_empty());
@@ -544,7 +496,7 @@ mod tests {
             commands,
             vec![CommandRequest::new(
                 Command::ClosePalette,
-                CommandInvocationSource::Keymap
+                CommandInvocationSource::Interaction
             )]
         );
         assert!(events.is_empty());
@@ -582,7 +534,7 @@ mod tests {
             commands,
             vec![CommandRequest::new(
                 Command::PaletteSubmit,
-                CommandInvocationSource::Keymap
+                CommandInvocationSource::Interaction
             )]
         );
         assert!(events.is_empty());
@@ -609,7 +561,7 @@ mod tests {
             outcome.commands,
             vec![CommandRequest::new(
                 Command::PaletteInputHistoryOlder,
-                CommandInvocationSource::Keymap
+                CommandInvocationSource::Interaction
             )]
         );
     }
@@ -635,26 +587,9 @@ mod tests {
             outcome.commands,
             vec![CommandRequest::new(
                 Command::PaletteSelectPrev,
-                CommandInvocationSource::Keymap
+                CommandInvocationSource::Interaction
             )]
         );
-    }
-
-    #[test]
-    fn stale_palette_mode_escape_repairs_without_warning_command() {
-        let mut interaction = InteractionSubsystem::default();
-        let mut state = AppState {
-            mode: Mode::Palette,
-            ..AppState::default()
-        };
-
-        let outcome = interaction
-            .handle_key_event(&mut state, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
-            .expect("stale palette close should be handled");
-
-        assert_eq!(state.mode, Mode::Normal);
-        assert!(outcome.redraw);
-        assert!(outcome.commands.is_empty());
     }
 
     #[test]

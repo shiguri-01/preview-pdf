@@ -65,16 +65,16 @@ pub fn validate_command_for_normal_keymap(command: &Command) -> AppResult<()> {
             "command spec should exist for typed command",
         ));
     };
-    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Keymap)?;
-    validate_command_spec_for_normal_keymap(spec)
+    validate_command_spec_for_normal_keymap(spec)?;
+    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Keymap)
 }
 
 pub fn validate_command_id_for_normal_keymap(id: &str) -> AppResult<()> {
     let Some(spec) = find_command_spec(id) else {
         return Err(AppError::invalid_argument("unknown command id"));
     };
-    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Keymap)?;
-    validate_command_spec_for_normal_keymap(spec)
+    validate_command_spec_for_normal_keymap(spec)?;
+    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Keymap)
 }
 
 pub fn rejection_message_for_command(
@@ -142,11 +142,8 @@ fn is_invocation_source_allowed(spec: CommandSpec, source: CommandInvocationSour
             )
         }
         CommandInvocationPolicy::KeymapOnly => source == CommandInvocationSource::Keymap,
-        CommandInvocationPolicy::Interaction => matches!(
-            source,
-            CommandInvocationSource::Keymap | CommandInvocationSource::Interaction
-        ),
-        CommandInvocationPolicy::InternalOnly => source == CommandInvocationSource::Interaction,
+        CommandInvocationPolicy::Interaction => source == CommandInvocationSource::Interaction,
+        CommandInvocationPolicy::InternalOnly => source == CommandInvocationSource::Internal,
     }
 }
 
@@ -377,7 +374,7 @@ mod tests {
     fn help_scroll_commands_are_only_available_in_help_mode() {
         let extensions = ExtensionUiSnapshot::default();
         let normal_ctx = policy_context(
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             Mode::Normal,
             None,
             &extensions,
@@ -387,7 +384,7 @@ mod tests {
         assert!(err.to_string().contains("outside help"));
 
         let help_ctx = policy_context(
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             Mode::Help,
             None,
             &extensions,
@@ -399,10 +396,49 @@ mod tests {
     }
 
     #[test]
+    fn interaction_commands_reject_keymap_invocation() {
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = policy_context(
+            CommandInvocationSource::Keymap,
+            Mode::Help,
+            None,
+            &extensions,
+        );
+
+        let err = validate_command_id_for_policy("help-scroll-down", &ctx)
+            .expect_err("interaction command should reject keymap invocation");
+        assert!(err.to_string().contains("internal command"));
+    }
+
+    #[test]
+    fn internal_commands_reject_interaction_invocation() {
+        let extensions = ExtensionUiSnapshot::default();
+        let ctx = policy_context(
+            CommandInvocationSource::Interaction,
+            Mode::Normal,
+            None,
+            &extensions,
+        );
+
+        let err = validate_command_id_for_policy("submit-search", &ctx)
+            .expect_err("internal command should reject surface interaction invocation");
+        assert!(err.to_string().contains("internal command"));
+
+        let internal_ctx = policy_context(
+            CommandInvocationSource::Internal,
+            Mode::Normal,
+            None,
+            &extensions,
+        );
+        validate_command_id_for_policy("submit-search", &internal_ctx)
+            .expect("internal follow-up should be allowed");
+    }
+
+    #[test]
     fn palette_input_history_commands_require_history_capable_palette() {
         let extensions = ExtensionUiSnapshot::default();
         let command_palette_ctx = policy_context(
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             Mode::Palette,
             Some(PaletteKind::Command),
             &extensions,
@@ -411,7 +447,7 @@ mod tests {
             .expect("command palette should support input history");
 
         let outline_palette_ctx = policy_context(
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Interaction,
             Mode::Palette,
             Some(PaletteKind::Outline),
             &extensions,

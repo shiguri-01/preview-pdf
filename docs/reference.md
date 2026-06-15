@@ -55,11 +55,11 @@ Compatibility:
   intentionally.
 
 Owned by:
-- [src/main.rs](../src/main.rs)
+- [src/cli.rs](../src/cli.rs)
 - [src/config/](../src/config/)
 
 Test coverage:
-- CLI parser tests in [src/main.rs](../src/main.rs).
+- CLI parser tests in [src/cli.rs](../src/cli.rs).
 - Process-level integration tests if exit codes or stderr/stdout behavior need
   protection.
 
@@ -94,11 +94,11 @@ Owned by:
 - [src/config/file.rs](../src/config/file.rs)
 - [src/config/options.rs](../src/config/options.rs)
 - [src/config/policy.rs](../src/config/policy.rs)
-- [src/main.rs](../src/main.rs)
+- [src/cli.rs](../src/cli.rs)
 
 Test coverage:
 - Config file parser and resolver tests in [src/config/](../src/config/).
-- CLI config selection tests in [src/main.rs](../src/main.rs).
+- CLI config selection tests in [src/cli.rs](../src/cli.rs).
 
 ## Commands
 

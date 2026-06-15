@@ -1,6 +1,7 @@
 use crate::error::AppResult;
 
-use super::super::dispatch::{CommandExecContext, CommandExecution};
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::CommandExecution;
 
 pub(in crate::command) fn history_back(
     ctx: &mut CommandExecContext<'_>,
@@ -31,8 +32,6 @@ pub(in crate::command) fn history_goto(
 pub(in crate::command) fn open_history(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let result = ctx
-        .extension_host
-        .open_history_palette(ctx.app, ctx.palette_requests);
-    Ok(CommandExecution::from_notice_result(result))
+    Ok(CommandExecution::applied()
+        .with_palette_request(ctx.extension_host.open_history_palette(ctx.app)))
 }

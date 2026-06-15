@@ -1,6 +1,4 @@
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use tui_input::Input;
-use tui_input::backend::crossterm::EventHandler;
+use tui_input::{Input, InputRequest};
 
 use crate::app::AppState;
 use crate::error::AppResult;
@@ -13,7 +11,7 @@ use super::registry::PaletteProviderRef;
 use super::registry::PaletteRegistry;
 use super::types::{
     PaletteAppSnapshot, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView,
-    PaletteKeyResult, PaletteOpenPayload, PaletteSubmitAction, PaletteTabEffect, PaletteView,
+    PaletteOpenPayload, PaletteSubmitAction, PaletteTabEffect, PaletteView,
 };
 
 #[derive(Debug)]
@@ -151,6 +149,10 @@ impl PaletteManager {
         self.active.is_some()
     }
 
+    pub fn active_kind(&self) -> Option<PaletteKind> {
+        self.active.as_ref().map(|session| session.kind)
+    }
+
     pub fn close(&mut self) -> bool {
         self.active.take().is_some()
     }
@@ -166,111 +168,168 @@ impl PaletteManager {
         true
     }
 
-    pub fn handle_key(
+    pub fn submit(
+        &self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+    ) -> AppResult<Option<PaletteSubmitAction>> {
+        let Some(session) = self.active.as_ref() else {
+            return Ok(None);
+        };
+
+        let selected = selected_candidate(session);
+        let provider = registry.get(session.kind);
+        let app_snapshot = PaletteAppSnapshot::from(app);
+        let ctx = PaletteContext {
+            app: app_snapshot,
+            extensions,
+            kind: session.kind,
+            input: session.input.value(),
+            open_payload: session.payload.as_ref(),
+        };
+        let effect = provider.on_submit(&ctx, selected)?;
+        Ok(Some(PaletteSubmitAction {
+            session_id: session.id,
+            effect,
+        }))
+    }
+
+    pub fn complete(
         &mut self,
         registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
-        key: KeyEvent,
-    ) -> AppResult<PaletteKeyResult> {
+    ) -> AppResult<bool> {
         let Some(session) = self.active.as_mut() else {
-            return Ok(PaletteKeyResult::Consumed { redraw: false });
+            return Ok(false);
         };
 
-        match key.code {
-            KeyCode::Up => {
-                let redraw = if supports_input_history(session.kind) {
-                    let previous_input = session.input.value().to_string();
-                    let changed = self.recall_input_history(true);
-                    if changed {
-                        self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
-                    }
-                    changed
-                } else {
-                    self.select_prev();
-                    true
-                };
-                return Ok(PaletteKeyResult::Consumed { redraw });
-            }
-            KeyCode::Down => {
-                let redraw = if supports_input_history(session.kind) {
-                    let previous_input = session.input.value().to_string();
-                    let changed = self.recall_input_history(false);
-                    if changed {
-                        self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
-                    }
-                    changed
-                } else {
-                    self.select_next();
-                    true
-                };
-                return Ok(PaletteKeyResult::Consumed { redraw });
-            }
-            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.select_prev();
-                return Ok(PaletteKeyResult::Consumed { redraw: true });
-            }
-            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.select_next();
-                return Ok(PaletteKeyResult::Consumed { redraw: true });
-            }
-            KeyCode::Tab => {
-                let provider = registry.get(session.kind);
-                let selected = selected_candidate(session);
-                let previous_input = session.input.value().to_string();
-                let app_snapshot = PaletteAppSnapshot::from(app);
-                let ctx = PaletteContext {
-                    app: app_snapshot,
-                    extensions,
-                    kind: session.kind,
-                    input: session.input.value(),
-                    open_payload: session.payload.as_ref(),
-                };
-                match provider.on_tab(&ctx, selected)? {
-                    PaletteTabEffect::Noop => {}
-                    PaletteTabEffect::SetInput {
-                        value,
-                        move_cursor_to_end: _move_cursor_to_end,
-                    } => {
-                        session.input_history.clear_navigation();
-                        session.input = Input::new(value);
-                    }
-                }
-                self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
-                return Ok(PaletteKeyResult::Consumed { redraw: true });
-            }
-            KeyCode::Enter => {
-                let selected = selected_candidate(session);
-                let provider = registry.get(session.kind);
-                let app_snapshot = PaletteAppSnapshot::from(app);
-                let ctx = PaletteContext {
-                    app: app_snapshot,
-                    extensions,
-                    kind: session.kind,
-                    input: session.input.value(),
-                    open_payload: session.payload.as_ref(),
-                };
-                let effect = match provider.on_submit(&ctx, selected) {
-                    Ok(effect) => effect,
-                    Err(err) => {
-                        return Ok(PaletteKeyResult::SubmitError(err));
-                    }
-                };
-                return Ok(PaletteKeyResult::Submit(PaletteSubmitAction {
-                    session_id: session.id,
-                    effect,
-                }));
-            }
-            _ => {}
-        }
-
+        let provider = registry.get(session.kind);
+        let selected = selected_candidate(session);
         let previous_input = session.input.value().to_string();
-        session.input.handle_event(&Event::Key(key));
-        if session.input.value() != previous_input {
-            session.input_history.clear_navigation();
+        let app_snapshot = PaletteAppSnapshot::from(app);
+        let ctx = PaletteContext {
+            app: app_snapshot,
+            extensions,
+            kind: session.kind,
+            input: session.input.value(),
+            open_payload: session.payload.as_ref(),
+        };
+        match provider.on_tab(&ctx, selected)? {
+            PaletteTabEffect::Noop => return Ok(false),
+            PaletteTabEffect::SetInput {
+                value,
+                move_cursor_to_end,
+            } => {
+                let cursor = if move_cursor_to_end {
+                    value.chars().count()
+                } else {
+                    session.input.cursor().min(value.chars().count())
+                };
+                if session.input.value() == value && session.input.cursor() == cursor {
+                    return Ok(false);
+                }
+                session.input_history.clear_navigation();
+                session.input = Input::new(value).with_cursor(cursor);
+            }
         }
         self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
-        Ok(PaletteKeyResult::Consumed { redraw: true })
+        Ok(true)
+    }
+
+    pub fn select_previous(&mut self) -> bool {
+        let previous = self.active.as_ref().map(|session| session.selected);
+        self.select_prev();
+        self.active.as_ref().map(|session| session.selected) != previous
+    }
+
+    pub fn select_next_item(&mut self) -> bool {
+        let previous = self.active.as_ref().map(|session| session.selected);
+        self.select_next();
+        self.active.as_ref().map(|session| session.selected) != previous
+    }
+
+    pub fn recall_history(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+        older: bool,
+    ) -> AppResult<bool> {
+        let Some(session) = self.active.as_ref() else {
+            return Ok(false);
+        };
+        if !session.kind.supports_input_history() {
+            return Ok(false);
+        }
+        let previous_input = session.input.value().to_string();
+        let changed = self.recall_input_history(older);
+        if changed {
+            self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
+        }
+        Ok(changed)
+    }
+
+    pub fn insert_text(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+        text: &str,
+    ) -> AppResult<bool> {
+        self.apply_text_requests(
+            registry,
+            app,
+            extensions,
+            text.chars().map(InputRequest::InsertChar),
+        )
+    }
+
+    pub fn delete_backward(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+    ) -> AppResult<bool> {
+        self.apply_text_request(registry, app, extensions, InputRequest::DeletePrevChar)
+    }
+
+    pub fn delete_forward(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+    ) -> AppResult<bool> {
+        self.apply_text_request(registry, app, extensions, InputRequest::DeleteNextChar)
+    }
+
+    pub fn move_cursor_left(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+    ) -> AppResult<bool> {
+        self.apply_text_request(registry, app, extensions, InputRequest::GoToPrevChar)
+    }
+
+    pub fn move_cursor_right(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+    ) -> AppResult<bool> {
+        self.apply_text_request(registry, app, extensions, InputRequest::GoToNextChar)
+    }
+
+    pub fn edit_input(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+        request: InputRequest,
+    ) -> AppResult<bool> {
+        self.apply_text_request(registry, app, extensions, request)
     }
 
     pub fn view(&self) -> Option<PaletteView> {
@@ -402,6 +461,49 @@ impl PaletteManager {
         session.input = Input::new(next_value);
         true
     }
+
+    fn apply_text_request(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+        request: InputRequest,
+    ) -> AppResult<bool> {
+        self.apply_text_requests(registry, app, extensions, [request])
+    }
+
+    fn apply_text_requests<I>(
+        &mut self,
+        registry: &PaletteRegistry,
+        app: &AppState,
+        extensions: &ExtensionUiSnapshot,
+        requests: I,
+    ) -> AppResult<bool>
+    where
+        I: IntoIterator<Item = InputRequest>,
+    {
+        let Some(session) = self.active.as_mut() else {
+            return Ok(false);
+        };
+
+        let previous_input = session.input.value().to_string();
+        let mut changed = false;
+        let mut value_changed = false;
+        for request in requests {
+            if let Some(state_changed) = session.input.handle(request) {
+                changed = true;
+                value_changed |= state_changed.value;
+            }
+        }
+        if !changed {
+            return Ok(false);
+        }
+        if value_changed {
+            session.input_history.clear_navigation();
+            self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
+        }
+        Ok(true)
+    }
 }
 
 fn selected_candidate(session: &PaletteSession) -> Option<&PaletteCandidate> {
@@ -428,13 +530,9 @@ fn selected_candidate_for<'a>(
     visible.get(selected).and_then(|idx| candidates.get(*idx))
 }
 
-fn supports_input_history(kind: PaletteKind) -> bool {
-    matches!(kind, PaletteKind::Command | PaletteKind::Search)
-}
-
 #[cfg(test)]
 mod tests {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use tui_input::InputRequest;
 
     use crate::{
         app::AppState,
@@ -470,28 +568,47 @@ mod tests {
         let initial_view = manager.view().expect("palette should be visible");
         assert!(initial_view.items.len() > 1);
 
-        manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
-            )
-            .expect("selection move should succeed");
+        assert!(manager.select_next_item());
         let selected_view = manager.view().expect("palette should be visible");
         assert_eq!(selected_view.selected_idx, 1);
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE),
-            )
+            .insert_text(&registry, &app, &extensions, "p")
             .expect("typing should succeed");
         let filtered_view = manager.view().expect("palette should be visible");
         assert_eq!(filtered_view.selected_idx, 0);
         assert_eq!(filtered_view.input, "p");
+    }
+
+    #[test]
+    fn palette_operations_report_noop_when_state_does_not_change() {
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        manager
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Search,
+                None,
+                None,
+            )
+            .expect("search palette should open");
+
+        assert!(!manager.select_previous());
+        assert!(
+            !manager
+                .complete(&registry, &app, &extensions)
+                .expect("no-op completion should succeed")
+        );
+        assert!(
+            !manager
+                .edit_input(&registry, &app, &extensions, InputRequest::GoToPrevChar)
+                .expect("no-op cursor movement should succeed")
+        );
     }
 
     #[test]
@@ -512,31 +629,14 @@ mod tests {
             )
             .expect("command palette should open");
 
-        manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
-            )
-            .expect("selection move should succeed");
+        assert!(manager.select_next_item());
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Char('z'), KeyModifiers::NONE),
-            )
+            .insert_text(&registry, &app, &extensions, "z")
             .expect("typing should succeed");
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-            )
+            .recall_history(&registry, &app, &extensions, true)
             .expect("history recall should succeed");
         let older_view = manager.view().expect("palette should be visible");
         assert_eq!(older_view.input, "prev-page");
@@ -551,12 +651,7 @@ mod tests {
         );
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-            )
+            .recall_history(&registry, &app, &extensions, true)
             .expect("history recall should succeed");
         let oldest_view = manager.view().expect("palette should be visible");
         assert_eq!(oldest_view.input, "next-page");
@@ -571,23 +666,13 @@ mod tests {
         );
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-            )
+            .recall_history(&registry, &app, &extensions, false)
             .expect("history recall should succeed");
         let newer_view = manager.view().expect("palette should be visible");
         assert_eq!(newer_view.input, "prev-page");
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-            )
+            .recall_history(&registry, &app, &extensions, false)
             .expect("draft restore should succeed");
         let restored_view = manager.view().expect("palette should be visible");
         assert_eq!(restored_view.input, "z");
@@ -611,24 +696,12 @@ mod tests {
             )
             .expect("search palette should open");
 
-        manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL),
-            )
-            .expect("selection move should succeed");
+        assert!(manager.select_next_item());
         let selected_view = manager.view().expect("palette should be visible");
         assert_eq!(selected_view.selected_idx, 1);
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
-            )
+            .insert_text(&registry, &app, &extensions, "a")
             .expect("typing should succeed");
         let updated_view = manager.view().expect("palette should be visible");
         assert_eq!(updated_view.selected_idx, 1);
@@ -654,32 +727,17 @@ mod tests {
             .expect("command palette should open");
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
-            )
+            .recall_history(&registry, &app, &extensions, true)
             .expect("history recall should succeed");
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE),
-            )
+            .complete(&registry, &app, &extensions)
             .expect("tab completion should succeed");
 
         let completed_view = manager.view().expect("palette should be visible");
         assert_eq!(completed_view.input, "prev-page ");
 
         manager
-            .handle_key(
-                &registry,
-                &app,
-                &extensions,
-                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
-            )
+            .recall_history(&registry, &app, &extensions, false)
             .expect("down after tab should be handled");
 
         let after_down_view = manager.view().expect("palette should be visible");

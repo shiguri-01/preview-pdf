@@ -1,7 +1,7 @@
 use super::kind::PaletteKind;
 use crate::app::{AppState, Mode, PageLayoutMode, SpreadCoverPolicy};
 use crate::command::{Command, SearchMatcherKind};
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::InputHistoryRecord;
 
@@ -275,13 +275,6 @@ pub struct PaletteView {
 pub struct PaletteSubmitAction {
     pub session_id: u64,
     pub effect: PaletteSubmitEffect,
-}
-
-#[derive(Debug)]
-pub enum PaletteKeyResult {
-    Consumed { redraw: bool },
-    Submit(PaletteSubmitAction),
-    SubmitError(AppError),
 }
 
 fn join_palette_text_parts(parts: &[PaletteTextPart]) -> String {

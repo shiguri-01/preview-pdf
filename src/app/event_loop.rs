@@ -496,6 +496,7 @@ mod tests {
     use crate::command::{
         Command, CommandInvocationSource, CommandRequest, PanAmount, PanDirection,
     };
+    use crate::condition::ConditionExpr;
     use crate::config::Config;
     use crate::event::{
         DocumentReloadReason, DocumentReloadRequest, DocumentReloadResult, DomainEvent,
@@ -760,7 +761,7 @@ mod tests {
     }
 
     #[test]
-    fn wake_timeout_queues_expired_sequence_command() {
+    fn wake_timeout_applies_expired_sequence_command() {
         let tokio_runtime = Builder::new_current_thread()
             .enable_all()
             .build()
@@ -813,16 +814,15 @@ mod tests {
             .expect("wake should be handled");
 
         assert!(matches!(control, super::LoopControl::Continue));
-        assert!(matches!(
+        assert_eq!(app.state.mode, crate::app::Mode::Help);
+        assert!(!matches!(
             runtime.loop_event_rx.try_recv(),
-            Ok(DomainEvent::Command(request))
-                if request
-                    == CommandRequest::new(Command::OpenHelp, CommandInvocationSource::Keymap)
+            Ok(DomainEvent::Command(_))
         ));
     }
 
     #[test]
-    fn input_outcome_queues_expired_command_before_quit_command() {
+    fn input_outcome_applies_expired_command_before_latest_command() {
         let tokio_runtime = Builder::new_current_thread()
             .enable_all()
             .build()
@@ -833,7 +833,7 @@ mod tests {
             App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('g')], Command::FirstPage)
+            .register_static(&[ShortcutKey::char('g')], Command::DebugStatusShow)
             .expect("single-key binding should register");
         registry
             .register_static(
@@ -842,7 +842,7 @@ mod tests {
             )
             .expect("multi-key binding should register");
         registry
-            .register_static(&[ShortcutKey::char('q')], Command::Quit)
+            .register_static(&[ShortcutKey::char('x')], Command::DebugStatusHide)
             .expect("single-key binding should register");
         app.interaction =
             InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
@@ -872,7 +872,7 @@ mod tests {
         let control = app
             .handle_waited_event(
                 WaitEvent::Event(DomainEvent::Input(Event::Key(KeyEvent::new(
-                    KeyCode::Char('q'),
+                    KeyCode::Char('x'),
                     KeyModifiers::NONE,
                 )))),
                 &mut runtime,
@@ -881,16 +881,142 @@ mod tests {
             .expect("input should be handled");
 
         assert!(matches!(control, super::LoopControl::Continue));
-        assert!(matches!(
+        assert!(
+            !app.state.debug_status_visible,
+            "DebugStatusShow must be applied before DebugStatusHide"
+        );
+        assert!(!matches!(
             runtime.loop_event_rx.try_recv(),
-            Ok(DomainEvent::Command(request))
-                if request
-                    == CommandRequest::new(Command::FirstPage, CommandInvocationSource::Keymap)
+            Ok(DomainEvent::Command(_))
         ));
+    }
+
+    #[test]
+    fn focus_changing_timeout_drops_waited_input() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_static(&[ShortcutKey::char('x')], Command::OpenHelp)
+            .expect("single-key binding should register");
+        registry
+            .register_static(
+                &[ShortcutKey::char('x'), ShortcutKey::char('x')],
+                Command::LastPage,
+            )
+            .expect("multi-key binding should register");
+        registry
+            .register_static_with_condition(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('j')],
+                Command::HelpScrollDown,
+            )
+            .expect("help binding should register");
+        app.interaction =
+            InteractionSubsystem::with_sequence_registry_and_timeout(registry, Duration::ZERO);
+
+        app.interaction
+            .handle_key_event(
+                &mut app.state,
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            )
+            .expect("first key should be captured");
+
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        let mut document = ActiveDocument::new(Arc::clone(&pdf));
+
+        let control = app
+            .handle_waited_event(
+                WaitEvent::Event(DomainEvent::Input(Event::Key(KeyEvent::new(
+                    KeyCode::Char('j'),
+                    KeyModifiers::NONE,
+                )))),
+                &mut runtime,
+                &mut document,
+            )
+            .expect("input should be handled");
+
+        assert!(matches!(control, super::LoopControl::Continue));
+        assert_eq!(app.state.mode, crate::app::Mode::Help);
+        assert_eq!(app.state.help_scroll, 0);
+    }
+
+    #[test]
+    fn palette_close_from_input_applies_before_queued_input() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let _guard = tokio_runtime.enter();
+        let pdf = test_pdf_backend();
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        app.interaction
+            .palette
+            .pending_requests
+            .push_back(crate::app::PaletteRequest::Open {
+                kind: crate::palette::PaletteKind::Command,
+                payload: None,
+            });
+        assert!(app.interaction.apply_palette_requests(&mut app.state));
+        assert_eq!(app.state.mode, crate::app::Mode::Palette);
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
+            crate::app::event_bus::EventBusRuntime::spawn_headless();
+        let session = StubSession::new(80, 24);
+        let mut runtime = app
+            .initialize_loop_runtime(
+                Arc::clone(&pdf),
+                pdf.page_count(),
+                session,
+                loop_event_tx,
+                loop_event_rx,
+                loop_event_runtime,
+            )
+            .expect("runtime should initialize");
+        runtime
+            .loop_event_tx
+            .send(DomainEvent::Input(Event::Key(KeyEvent::new(
+                KeyCode::Char('x'),
+                KeyModifiers::NONE,
+            ))))
+            .expect("queued input should be accepted");
+        let mut document = ActiveDocument::new(Arc::clone(&pdf));
+
+        let control = app
+            .handle_waited_event(
+                WaitEvent::Event(DomainEvent::Input(Event::Key(KeyEvent::new(
+                    KeyCode::Esc,
+                    KeyModifiers::NONE,
+                )))),
+                &mut runtime,
+                &mut document,
+            )
+            .expect("palette close input should be handled");
+
+        assert!(matches!(control, super::LoopControl::Continue));
+        assert_eq!(app.state.mode, crate::app::Mode::Normal);
         assert!(matches!(
             runtime.loop_event_rx.try_recv(),
-            Ok(DomainEvent::Command(request))
-                if request == CommandRequest::new(Command::Quit, CommandInvocationSource::Keymap)
+            Ok(DomainEvent::Input(Event::Key(key)))
+                if key.code == KeyCode::Char('x')
         ));
     }
 
@@ -923,7 +1049,7 @@ mod tests {
             .handle_waited_event(
                 WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                     Command::GotoPage { page: 999 },
-                    CommandInvocationSource::Keymap,
+                    CommandInvocationSource::Binding,
                 ))),
                 &mut runtime,
                 &mut document,
@@ -966,7 +1092,7 @@ mod tests {
             .handle_waited_event(
                 WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                     Command::ReloadDocument,
-                    CommandInvocationSource::PaletteProvider,
+                    CommandInvocationSource::CommandPaletteInput,
                 ))),
                 &mut runtime,
                 &mut document,
@@ -1543,7 +1669,7 @@ mod tests {
             .handle_waited_event(
                 WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                     Command::NextPage,
-                    CommandInvocationSource::Keymap,
+                    CommandInvocationSource::Binding,
                 ))),
                 &mut runtime,
                 &mut document,
@@ -1707,7 +1833,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                 Command::PrevPage,
-                CommandInvocationSource::Keymap,
+                CommandInvocationSource::Binding,
             ))),
             &mut runtime,
             &mut document,
@@ -1757,7 +1883,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                 Command::NextSearchHit,
-                CommandInvocationSource::Keymap,
+                CommandInvocationSource::Binding,
             ))),
             &mut runtime,
             &mut document,
@@ -1797,7 +1923,7 @@ mod tests {
         app.handle_waited_event(
             WaitEvent::Event(DomainEvent::Command(CommandRequest::new(
                 Command::PrevPage,
-                CommandInvocationSource::Keymap,
+                CommandInvocationSource::Binding,
             ))),
             &mut runtime,
             &mut document,

@@ -1,5 +1,7 @@
 use std::sync::OnceLock;
 
+use crate::condition::ConditionExpr;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchMatcherKind {
     ContainsInsensitive,
@@ -183,29 +185,31 @@ pub enum CommandExposure {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandRole {
+    UserIntent,
+    SurfaceControl,
+    InternalEffect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandInvocationPolicy {
     User,
-    KeymapOnly,
+    BindingOnly,
     InternalOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandCondition {
-    SearchActive,
-    HelpMode,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandAvailability {
-    Always,
-    AllOf(&'static [CommandCondition]),
+pub enum CommandTargetRequirement {
+    App,
+    ActivePalette,
+    ActiveHelp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandInvocationSource {
-    Keymap,
+    Binding,
     CommandPaletteInput,
-    PaletteProvider,
+    Internal,
 }
 
 #[cfg(test)]
@@ -315,14 +319,15 @@ pub struct CommandSpec {
     pub id: &'static str,
     pub title: &'static str,
     pub args: &'static [ArgSpec],
+    pub role: CommandRole,
     pub exposure: CommandExposure,
     pub invocation: CommandInvocationPolicy,
-    pub availability: CommandAvailability,
+    pub target: CommandTargetRequirement,
+    pub enabled_when: ConditionExpr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandOutcome {
     Applied,
     Noop,
-    QuitRequested,
 }

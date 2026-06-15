@@ -1,6 +1,6 @@
 ---
 name: pvf-command
-description: Add, edit, rename, or review pvf command behavior. Use when changing command ids, arguments, parsing, invocation policy, command palette visibility, key bindings, help text, or command dispatch.
+description: Add, edit, rename, or review pvf command behavior. Use when changing command ids, arguments, parsing, roles, exposure, invocation policy, target requirements, enabled_when runtime conditions, command palette visibility, key bindings, help text, or command dispatch.
 ---
 
 # PVF Command
@@ -24,7 +24,8 @@ keymap tests.
 Before editing implementation code for a user-visible command, write a short working contract:
 
 - What is the user trying to accomplish?
-- What would the user intuitively try first: a key, command palette search, typed command, or existing workflow?
+- What would the user intuitively try first: a key, command palette search,
+  typed command, scoped interaction, or existing workflow?
 - What exact command id, arguments, key binding, title, help text, notice, or error will the user see?
 - What is the shortest successful path?
 - What happens for empty input, invalid input, unavailable state, repeated use, cancellation, and recovery?
@@ -34,11 +35,40 @@ Do not start implementation until the external behavior is clear enough to test.
 
 ## Implementation Checks
 
-- Treat the command catalog as the source for the typed command, command id, metadata, parser routing, and execution routing.
+- Treat the command catalog as the source for the typed command, command id,
+  role, exposure, invocation policy, target requirement, `enabled_when`,
+  metadata, parser routing, and execution routing.
 - Keep parser behavior, metadata args, and dispatch behavior aligned.
-- Choose exposure, invocation policy, and availability deliberately.
+- Choose role, exposure, invocation policy, target requirement, and
+  `enabled_when` deliberately. Visibility, source policy, target resolution,
+  and runtime enabled-state are separate concerns.
+- Use the shared runtime condition system for command `enabled_when` and key
+  binding `enabled_when`; do not reintroduce command-only or keymap-only
+  condition enums.
 - Choose public command names and arguments for user understanding, not internal convenience.
+- Preserve existing user-facing command names and argument contracts unless an
+  explicit migration is being designed. Do not add fallback aliases or parallel
+  old/new dispatch paths for internal redesign work.
 - Put command execution in the feature handler that owns the behavior.
+- Surface-local operations such as palette submit, palette selection, palette
+  input editing, palette input history recall, help close, and help scroll
+  should be represented as scoped key bindings or interaction command requests,
+  then resolve their active target through dispatch.
+- Keep key binding resolution in the input sequence registry. Normal, palette,
+  and help keys should share the scoped key binding path instead of adding
+  surface-local key matching.
+- Command handlers return `CommandExecution`: an `Applied` or `Noop` outcome
+  plus `CommandEffects`. Use command effects for notices, explicit app events,
+  palette requests, input-history records, follow-up command requests, and
+  lifecycle requests.
+- Do not make handlers write pending palette queues, input history, or loop
+  lifecycle state directly. Dispatch owns applying command effects after
+  validation.
+- When a command completes another command, return a follow-up command request
+  in `CommandEffects` with an intentional invocation source instead of directly
+  bypassing command validation.
+- Represent process termination as a lifecycle effect, not as a command
+  outcome.
 - If a command affects navigation, ensure emitted app events and navigation reasons still match the feature behavior.
 - If a public command should be reachable by a key, update the keymap and help surface together.
 - If command palette behavior changes, verify listing, argument hints, completion, and runtime gating.

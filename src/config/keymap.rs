@@ -1,9 +1,12 @@
 use crate::command::{
-    Command, CommandInvocationSource, parse_command_text,
-    validate_command_id_invocation_for_source, validate_command_invocation_for_source,
+    Command, parse_command_text, validate_command_for_normal_keymap,
+    validate_command_id_for_normal_keymap,
 };
 use crate::error::{AppError, AppResult};
-use crate::input::keymap::build_builtin_sequence_registry;
+use crate::input::keymap::{
+    WHEN_NORMAL, build_builtin_sequence_registry, register_builtin_normal_reserved_bindings,
+    register_builtin_surface_bindings,
+};
 use crate::input::sequence::{SequenceRegistrationError, SequenceRegistry};
 use crate::input::shortcut::{ShortcutKey, parse_shortcut_sequence};
 
@@ -60,19 +63,33 @@ impl KeymapOptions {
 pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegistry {
     let mut registry = match options.preset.unwrap_or(KeymapPreset::Default) {
         KeymapPreset::Default => build_builtin_sequence_registry(),
-        KeymapPreset::None => SequenceRegistry::new(),
+        KeymapPreset::None => {
+            let mut registry = SequenceRegistry::new();
+            // `preset = "none"` currently disables only configurable normal-mode
+            // bindings; reserved cancellation and binding-only surface controls remain
+            // available.
+            register_builtin_normal_reserved_bindings(&mut registry);
+            register_builtin_surface_bindings(&mut registry);
+            registry
+        }
     };
 
     for target in &options.unbind {
         match target {
             KeymapTarget::Exact(keys) => {
                 registry
-                    .unregister_static(keys)
+                    .unregister_static_with_condition(
+                        Some(crate::condition::ConditionExpr::All(&WHEN_NORMAL)),
+                        keys,
+                    )
                     .expect("validated exact keymap target should unregister");
             }
             KeymapTarget::NumericPrefix(suffix) => {
                 registry
-                    .unregister_numeric_prefix(*suffix)
+                    .unregister_numeric_prefix_with_condition(
+                        Some(crate::condition::ConditionExpr::All(&WHEN_NORMAL)),
+                        *suffix,
+                    )
                     .expect("validated numeric keymap target should unregister");
             }
         }
@@ -82,14 +99,23 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
         match binding {
             KeymapBinding::Exact { keys, command } => {
                 registry
-                    .register_static(keys, command.clone())
+                    .register_static_with_condition(
+                        crate::condition::ConditionExpr::All(&WHEN_NORMAL),
+                        keys,
+                        command.clone(),
+                    )
                     .expect("validated exact keymap binding should register");
             }
             KeymapBinding::NumericPrefix { suffix, command_id } => {
                 let factory = numeric_prefix_factory(command_id)
                     .expect("validated numeric prefix command should have a factory");
                 registry
-                    .register_numeric_prefix(command_id, *suffix, factory)
+                    .register_numeric_prefix_with_condition(
+                        crate::condition::ConditionExpr::All(&WHEN_NORMAL),
+                        command_id,
+                        *suffix,
+                        factory,
+                    )
                     .expect("validated numeric keymap binding should register");
             }
         }
@@ -118,13 +144,13 @@ pub(crate) fn parse_keymap_binding(key: &str, command_text: &str) -> AppResult<K
     match parse_keymap_target(key)? {
         KeymapTarget::Exact(keys) => {
             let command = parse_command_text(command_text)?;
-            validate_command_invocation_for_source(&command, CommandInvocationSource::Keymap)?;
+            validate_command_for_normal_keymap(&command)?;
             validate_exact_keys(&keys)?;
             Ok(KeymapBinding::Exact { keys, command })
         }
         KeymapTarget::NumericPrefix(suffix) => {
             let command_id = parse_numeric_prefix_command(command_text)?;
-            validate_command_id_invocation_for_source(command_id, CommandInvocationSource::Keymap)?;
+            validate_command_id_for_normal_keymap(command_id)?;
             validate_numeric_suffix(suffix)?;
             Ok(KeymapBinding::NumericPrefix { suffix, command_id })
         }
@@ -212,5 +238,39 @@ fn numeric_prefix_factory(command_id: &str) -> Option<fn(usize) -> Command> {
     match command_id {
         "goto-page" => Some(|page| Command::GotoPage { page }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use crate::command::Command;
+    use crate::condition::RuntimeConditionContext;
+    use crate::extension::ExtensionUiSnapshot;
+    use crate::input::sequence::{
+        DEFAULT_SEQUENCE_TIMEOUT, KeyBindingContext, SequenceResolution, SequenceResolver,
+    };
+
+    use super::{KeymapOptions, KeymapPreset, resolve_sequence_registry};
+
+    #[test]
+    fn none_preset_preserves_reserved_search_cancellation() {
+        let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: Some(KeymapPreset::None),
+            ..KeymapOptions::default()
+        });
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::with_search_active(true);
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    runtime: RuntimeConditionContext::normal(&extensions),
+                },
+                KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::CancelSearch)
+        );
     }
 }

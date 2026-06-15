@@ -92,17 +92,12 @@ impl HistoryState {
         Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }
 
-    pub fn open_palette(
-        &self,
-        app: &mut AppState,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> (CommandOutcome, NoticeAction) {
+    pub fn open_palette(&self, app: &AppState) -> PaletteRequest {
         let seed = self.serialize_seed(app.current_page);
-        palette_requests.push_back(PaletteRequest::Open {
+        PaletteRequest::Open {
             kind: PaletteKind::History,
             payload: Some(PaletteOpenPayload::HistorySeed(seed)),
-        });
-        (CommandOutcome::Applied, NoticeAction::Clear)
+        }
     }
 
     pub fn on_event(&mut self, event: &AppEvent) {

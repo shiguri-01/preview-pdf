@@ -6,15 +6,31 @@ use crate::config::ViewPolicy;
 use crate::error::AppResult;
 use crate::event::{AppEvent, HistoryOp, NavReason, PageGotoKind};
 use crate::extension::ExtensionHost;
+use crate::input::InputHistoryService;
+use crate::palette::{PaletteManager, PaletteRegistry};
 
-use super::catalog::{Command, execute_registered_command};
-use super::spec::{CommandConditionContext, rejection_message_for_command};
+use super::catalog::{Command, CommandRequest, execute_registered_command};
+use crate::condition::RuntimeConditionContext;
+
+use super::effects::{CommandExecution, CommandLifecycleEffect};
+use super::spec::{CommandPolicyContext, rejection_message_for_command};
 use super::types::{CommandInvocationSource, CommandOutcome};
 
 #[derive(Debug, Clone)]
 pub struct CommandDispatchResult {
     pub outcome: CommandOutcome,
     pub emitted_events: Vec<AppEvent>,
+    pub follow_up_commands: Vec<CommandRequest>,
+    pub lifecycle: CommandLifecycleEffect,
+}
+
+pub struct CommandDispatchContext<'a> {
+    pub pdf: SharedPdfBackend,
+    pub extension_host: &'a mut ExtensionHost,
+    pub palette_registry: &'a PaletteRegistry,
+    pub palette_manager: &'a mut PaletteManager,
+    pub palette_requests: &'a mut VecDeque<PaletteRequest>,
+    pub input_history: &'a mut InputHistoryService,
 }
 
 pub(super) struct CommandExecContext<'a> {
@@ -22,28 +38,13 @@ pub(super) struct CommandExecContext<'a> {
     pub view_policy: ViewPolicy,
     pub pdf: SharedPdfBackend,
     pub extension_host: &'a mut ExtensionHost,
-    pub palette_requests: &'a mut VecDeque<PaletteRequest>,
+    pub palette_registry: &'a PaletteRegistry,
+    pub palette_manager: &'a mut PaletteManager,
 }
 
 impl CommandExecContext<'_> {
     pub(super) fn page_count(&self) -> usize {
         self.pdf.page_count()
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(super) struct CommandExecution {
-    pub outcome: CommandOutcome,
-    pub notice: NoticeAction,
-}
-
-impl CommandExecution {
-    pub(super) fn from_notice_result((outcome, notice): (CommandOutcome, NoticeAction)) -> Self {
-        Self { outcome, notice }
-    }
-
-    pub(super) fn applied() -> Self {
-        Self::from_notice_result((CommandOutcome::Applied, NoticeAction::Clear))
     }
 }
 
@@ -65,16 +66,22 @@ pub fn dispatch_with_view_policy(
     view_policy: ViewPolicy,
     cmd: Command,
     source: CommandInvocationSource,
-    pdf: SharedPdfBackend,
-    extension_host: &mut ExtensionHost,
-    palette_requests: &mut VecDeque<PaletteRequest>,
+    dispatch_ctx: CommandDispatchContext<'_>,
 ) -> AppResult<CommandDispatchResult> {
+    let CommandDispatchContext {
+        pdf,
+        extension_host,
+        palette_registry,
+        palette_manager,
+        palette_requests,
+        input_history,
+    } = dispatch_ctx;
     let command_id = cmd.command_id();
     let extensions = extension_host.ui_snapshot();
-    let ctx = CommandConditionContext {
-        extensions: &extensions,
-        mode: app.mode,
+    let active_palette = palette_manager.active_kind();
+    let ctx = CommandPolicyContext {
         source,
+        runtime: RuntimeConditionContext::new(app.mode, active_palette, &extensions),
     };
     if let Some(message) = rejection_message_for_command(&cmd, &ctx) {
         apply_notice(app, rejection_notice(&cmd, message));
@@ -85,6 +92,8 @@ pub fn dispatch_with_view_policy(
                 id: command_id,
                 outcome,
             }],
+            follow_up_commands: Vec::new(),
+            lifecycle: CommandLifecycleEffect::None,
         });
     }
 
@@ -96,12 +105,18 @@ pub fn dispatch_with_view_policy(
             app,
             view_policy,
             pdf,
-            extension_host,
-            palette_requests,
+            extension_host: &mut *extension_host,
+            palette_registry,
+            palette_manager: &mut *palette_manager,
         },
         cmd,
     )?;
-    apply_notice(app, execution.notice);
+    let CommandExecution { outcome, effects } = execution;
+    apply_notice(app, effects.notice);
+    for record in effects.input_history_records {
+        input_history.record(record);
+    }
+    palette_requests.extend(effects.palette_requests);
 
     let mut emitted_events = collect_transition_events(
         app,
@@ -109,16 +124,19 @@ pub fn dispatch_with_view_policy(
         previous_page,
         prev_mode,
         &dispatched_command,
-        execution.outcome,
+        outcome,
     );
+    emitted_events.extend(effects.events);
     emitted_events.push(AppEvent::CommandExecuted {
         id: command_id,
-        outcome: execution.outcome,
+        outcome,
     });
 
     Ok(CommandDispatchResult {
-        outcome: execution.outcome,
+        outcome,
         emitted_events,
+        follow_up_commands: effects.follow_up_commands,
+        lifecycle: effects.lifecycle,
     })
 }
 
@@ -190,6 +208,26 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         | Command::DebugStatusToggle
         | Command::OpenPalette { .. }
         | Command::ClosePalette
+        | Command::PaletteSubmit
+        | Command::PaletteComplete
+        | Command::PaletteSelectNext
+        | Command::PaletteSelectPrev
+        | Command::TextInsert { .. }
+        | Command::TextDeleteBackward
+        | Command::TextDeleteForward
+        | Command::TextMoveLeft
+        | Command::TextMoveRight
+        | Command::TextMoveStart
+        | Command::TextMoveEnd
+        | Command::TextMovePrevWord
+        | Command::TextMoveNextWord
+        | Command::TextDeletePrevWord
+        | Command::TextDeleteNextWord
+        | Command::TextDeleteLine
+        | Command::TextDeleteToEnd
+        | Command::TextYank
+        | Command::PaletteInputHistoryOlder
+        | Command::PaletteInputHistoryNewer
         | Command::OpenHelp
         | Command::CloseHelp
         | Command::HelpScrollDown
@@ -213,18 +251,23 @@ mod tests {
 
     use crate::app::scale::zoom_eq;
     use crate::app::{
-        AppState, Notice, NoticeLevel, PaletteRequest, SpreadCoverPolicy, SpreadDirection,
+        AppState, Mode, Notice, NoticeLevel, PaletteRequest, SpreadCoverPolicy, SpreadDirection,
     };
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{
-        Command, CommandId, CommandInvocationSource, CommandOutcome, PanAmount, PanDirection,
-        SearchMatcherKind, SpreadCoverPolicyArg,
+        Command, CommandId, CommandInvocationSource, CommandLifecycleEffect, CommandOutcome,
+        PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
     };
     use crate::config::ViewPolicy;
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
+    use crate::input::InputHistoryService;
+    use crate::palette::{PaletteKind, PaletteManager, PaletteRegistry};
 
-    use super::{CommandDispatchResult, collect_transition_events, dispatch_with_view_policy};
+    use super::{
+        CommandDispatchContext, CommandDispatchResult, collect_transition_events,
+        dispatch_with_view_policy,
+    };
 
     struct StubPdf {
         path: PathBuf,
@@ -293,14 +336,22 @@ mod tests {
         extension_host: &mut ExtensionHost,
         palette_requests: &mut VecDeque<PaletteRequest>,
     ) -> crate::error::AppResult<CommandDispatchResult> {
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let mut history = InputHistoryService::default();
         dispatch_with_view_policy(
             app,
             ViewPolicy::default(),
             cmd,
             source,
-            pdf,
-            extension_host,
-            palette_requests,
+            CommandDispatchContext {
+                pdf,
+                extension_host,
+                palette_registry: &registry,
+                palette_manager: &mut manager,
+                palette_requests,
+                input_history: &mut history,
+            },
         )
     }
 
@@ -322,19 +373,20 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::Quit,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
         )
         .expect("dispatch should succeed");
 
-        assert_eq!(result.outcome, CommandOutcome::QuitRequested);
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(result.lifecycle, CommandLifecycleEffect::Quit);
         assert_eq!(
             result.emitted_events,
             vec![AppEvent::CommandExecuted {
                 id: CommandId::Quit,
-                outcome: CommandOutcome::QuitRequested,
+                outcome: CommandOutcome::Applied,
             }]
         );
     }
@@ -349,7 +401,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::NextPage,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -386,7 +438,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -400,7 +452,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -424,7 +476,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomReset,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -456,7 +508,7 @@ mod tests {
                 direction: PanDirection::Right,
                 amount: PanAmount::Cells(3),
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -586,7 +638,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -615,7 +667,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -644,7 +696,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -667,7 +719,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -688,8 +740,11 @@ mod tests {
 
         let result = dispatch(
             &mut app,
-            Command::ClosePalette,
-            CommandInvocationSource::PaletteProvider,
+            Command::OpenPalette {
+                kind: PaletteKind::Command,
+                payload: None,
+            },
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -701,10 +756,146 @@ mod tests {
         assert!(matches!(
             result.emitted_events[0],
             AppEvent::CommandExecuted {
-                id: CommandId::ClosePalette,
+                id: CommandId::OpenPalette,
                 outcome: CommandOutcome::Applied
             }
         ));
+    }
+
+    #[test]
+    fn dispatch_palette_submit_closes_palette_and_returns_completed_command() {
+        let mut app = AppState {
+            mode: Mode::Palette,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let extensions = host.ui_snapshot();
+        manager
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                None,
+                None,
+            )
+            .expect("command palette should open");
+        let mut palette_requests = VecDeque::new();
+        let mut history = InputHistoryService::default();
+
+        let result = dispatch_with_view_policy(
+            &mut app,
+            ViewPolicy::default(),
+            Command::PaletteSubmit,
+            CommandInvocationSource::Binding,
+            CommandDispatchContext {
+                pdf,
+                extension_host: &mut host,
+                palette_registry: &registry,
+                palette_manager: &mut manager,
+                palette_requests: &mut palette_requests,
+                input_history: &mut history,
+            },
+        )
+        .expect("palette submit should dispatch");
+
+        assert_eq!(result.outcome, CommandOutcome::Applied);
+        assert_eq!(app.mode, Mode::Normal);
+        assert!(!manager.is_open());
+        assert!(matches!(
+            result.follow_up_commands.as_slice(),
+            [request]
+                if request.command == Command::NextPage
+                    && request.source == CommandInvocationSource::CommandPaletteInput
+        ));
+    }
+
+    #[test]
+    fn dispatch_search_palette_submit_returns_internal_follow_up() {
+        let mut app = AppState {
+            mode: Mode::Palette,
+            ..AppState::default()
+        };
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let extensions = host.ui_snapshot();
+        manager
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Search,
+                None,
+                None,
+            )
+            .expect("search palette should open");
+        manager
+            .insert_text(&registry, &app, &extensions, "needle")
+            .expect("search input should be inserted");
+        let mut palette_requests = VecDeque::new();
+        let mut history = InputHistoryService::default();
+
+        let result = dispatch_with_view_policy(
+            &mut app,
+            ViewPolicy::default(),
+            Command::PaletteSubmit,
+            CommandInvocationSource::Binding,
+            CommandDispatchContext {
+                pdf,
+                extension_host: &mut host,
+                palette_registry: &registry,
+                palette_manager: &mut manager,
+                palette_requests: &mut palette_requests,
+                input_history: &mut history,
+            },
+        )
+        .expect("palette submit should dispatch");
+
+        assert!(matches!(
+            result.follow_up_commands.as_slice(),
+            [request]
+                if matches!(request.command, Command::SubmitSearch { .. })
+                    && request.source == CommandInvocationSource::Internal
+        ));
+    }
+
+    #[test]
+    fn dispatch_rejects_palette_command_without_active_palette() {
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let mut host = ExtensionHost::default();
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
+        let mut palette_requests = VecDeque::new();
+        let mut history = InputHistoryService::default();
+
+        let result = dispatch_with_view_policy(
+            &mut app,
+            ViewPolicy::default(),
+            Command::PaletteSelectNext,
+            CommandInvocationSource::Binding,
+            CommandDispatchContext {
+                pdf,
+                extension_host: &mut host,
+                palette_registry: &registry,
+                palette_manager: &mut manager,
+                palette_requests: &mut palette_requests,
+                input_history: &mut history,
+            },
+        )
+        .expect("palette command rejection should be reported as noop");
+
+        assert_eq!(result.outcome, CommandOutcome::Noop);
+        assert!(
+            app.notice
+                .as_ref()
+                .is_some_and(|notice| notice.message.contains("active palette"))
+        );
     }
 
     #[test]
@@ -717,7 +908,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::OpenHelp,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -757,7 +948,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::CloseHelp,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -794,7 +985,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::HelpScrollDown,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -826,7 +1017,7 @@ mod tests {
         let down = dispatch(
             &mut app,
             Command::HelpScrollDown,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             Arc::clone(&pdf),
             &mut host,
             &mut palette_requests,
@@ -846,7 +1037,7 @@ mod tests {
         let up = dispatch(
             &mut app,
             Command::HelpScrollUp,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             Arc::clone(&pdf),
             &mut host,
             &mut palette_requests,
@@ -883,7 +1074,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::CancelSearch,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -948,7 +1139,7 @@ mod tests {
                 direction: None,
                 cover_policy: None,
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -985,7 +1176,7 @@ mod tests {
                 direction: None,
                 cover_policy: None,
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1010,7 +1201,7 @@ mod tests {
                 direction: None,
                 cover_policy: Some(SpreadCoverPolicyArg::Cover),
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1036,7 +1227,10 @@ mod tests {
         };
         let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
+        let registry = PaletteRegistry::default();
+        let mut manager = PaletteManager::default();
         let mut palette_requests = VecDeque::new();
+        let mut history = InputHistoryService::default();
 
         let result = dispatch_with_view_policy(
             &mut app,
@@ -1045,10 +1239,15 @@ mod tests {
                 direction: None,
                 cover_policy: None,
             },
-            CommandInvocationSource::Keymap,
-            pdf,
-            &mut host,
-            &mut palette_requests,
+            CommandInvocationSource::Binding,
+            CommandDispatchContext {
+                pdf,
+                extension_host: &mut host,
+                palette_registry: &registry,
+                palette_manager: &mut manager,
+                palette_requests: &mut palette_requests,
+                input_history: &mut history,
+            },
         )
         .expect("dispatch should succeed");
 
@@ -1117,7 +1316,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_rejects_internal_command_from_keymap() {
+    fn dispatch_rejects_internal_command_from_binding() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
@@ -1129,7 +1328,7 @@ mod tests {
                 query: "needle".to_string(),
                 matcher: SearchMatcherKind::ContainsInsensitive,
             },
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,
@@ -1144,7 +1343,7 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_rejects_unavailable_command_from_keymap() {
+    fn dispatch_rejects_unavailable_command_from_binding() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
@@ -1153,7 +1352,7 @@ mod tests {
         let result = dispatch(
             &mut app,
             Command::NextSearchHit,
-            CommandInvocationSource::Keymap,
+            CommandInvocationSource::Binding,
             pdf,
             &mut host,
             &mut palette_requests,

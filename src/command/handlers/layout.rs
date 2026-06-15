@@ -1,7 +1,8 @@
 use crate::error::AppResult;
 
 use super::super::core::set_page_layout;
-use super::super::dispatch::{CommandExecContext, CommandExecution};
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::CommandExecution;
 use super::super::types::{PageLayoutModeArg, SpreadCoverPolicyArg, SpreadDirectionArg};
 
 fn direction_arg(policy: crate::app::SpreadDirection) -> SpreadDirectionArg {

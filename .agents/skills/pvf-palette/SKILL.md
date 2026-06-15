@@ -1,6 +1,6 @@
 ---
 name: pvf-palette
-description: Add, edit, rename, or review pvf palette behavior. Use when changing PaletteKind, PaletteProvider implementations, palette payloads, palette candidate rows, input modes, selection behavior, tab or submit behavior, or palette rendering contracts.
+description: Add, edit, rename, or review pvf palette behavior. Use when changing PaletteKind, PaletteProvider implementations, palette payloads, palette candidate rows, command-palette visibility, input modes, selection behavior, tab or submit behavior, palette-scoped key behavior, or palette rendering contracts.
 ---
 
 # PVF Palette
@@ -28,7 +28,10 @@ Before editing implementation code, write a short working contract:
 - What would the user intuitively do to open this palette, search within it, choose an item, and recover from a mistake?
 - What exact title, input seed, selected row, row text, assistive text, notice, or empty-state text will the user see?
 - What is the shortest successful keyboard path?
-- What happens for empty input, no matches, unavailable state, repeated use, tab, enter, escape, and history navigation?
+- What command requests are produced by tab, enter, escape, selection movement,
+  palette input editing, and history navigation?
+- What happens for empty input, no matches, unavailable state, repeated use,
+  completion, submit, close, and history navigation?
 - Which existing palette should this feel consistent with?
 
 Do not start implementation until the interaction is clear enough to test.
@@ -39,15 +42,32 @@ Do not start implementation until the interaction is clear enough to test.
 - Choose the input mode based on who owns input meaning: generic filtering, free text, or custom provider logic.
 - Keep rendered row text separate from searchable text.
 - Make row labels and assistive text scannable for users; avoid exposing internal ids unless the user intentionally types them.
-- Preserve session and selection behavior when changing open, reopen, tab, submit, or input-change flows.
+- Preserve session and selection behavior when changing open, reopen,
+  completion, submit, palette input editing, or input-change flows.
+- Do not make palette providers own raw key events. Palette-scoped keys should
+  resolve through the scoped input sequence registry and produce command
+  requests such as palette submit, palette completion, palette selection,
+  palette input editing, palette input history recall, or close.
+- Treat input history as a palette input capability, not as a
+  provider-specific palette action.
 - If a palette needs app data, add read-only snapshot data instead of passing mutable app state into a provider.
 - If a palette reads extension data, expose only the needed UI snapshot fields.
 - If submit dispatches a command, ensure the command source, invocation policy, and history recording are intentional.
+- Keep provider submit effects palette-local. `PaletteSubmitEffect` may describe
+  close, reopen, or command dispatch intent, but the palette submit command
+  handler converts it into command runtime effects; providers should not write
+  command follow-up queues or input history directly.
+- For command-palette candidate visibility, use command policy metadata and the
+  shared runtime condition context. Do not maintain a provider-local command
+  visibility list or a separate enabled-state vocabulary.
 
 ## Tests And Docs
 
-- Add or update provider tests for candidates, matching, selected item, assistive text, initial input, tab, and submit behavior.
-- Add manager or rendering tests when palette session, input history, cursor, or row layout behavior changes.
+- Add or update provider tests for candidates, matching, selected item,
+  assistive text, initial input, completion, and submit behavior.
+- Add manager, palette input, command-dispatch, or rendering tests when palette
+  session, input history, cursor, selection, submit, or row layout behavior
+  changes.
 - Update `docs/reference.md` for palette contract or built-in palette behavior
   changes.
 - Update command or extension sections only when those contracts change too.

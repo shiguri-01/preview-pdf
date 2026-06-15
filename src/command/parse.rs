@@ -1,15 +1,12 @@
 use std::num::IntErrorKind;
 
-use crate::app::Mode;
 use crate::error::{AppError, AppResult};
-use crate::extension::ExtensionUiSnapshot;
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
 use super::catalog::{self, Command};
-use super::spec::{CommandConditionContext, find_command_spec, validate_command_id_for_source};
+use super::spec::{CommandPolicyContext, find_command_spec, validate_command_id_for_policy};
 use super::types::{
-    CommandInvocationSource, PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg,
-    SpreadDirectionArg,
+    PanAmount, PanDirection, SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
 };
 
 pub fn parse_command_text(input: &str) -> AppResult<Command> {
@@ -32,9 +29,7 @@ pub fn parse_command_text(input: &str) -> AppResult<Command> {
 
 pub fn parse_invocable_command_text(
     input: &str,
-    source: CommandInvocationSource,
-    extensions: &ExtensionUiSnapshot,
-    mode: Mode,
+    ctx: &CommandPolicyContext<'_>,
 ) -> AppResult<Command> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -42,12 +37,7 @@ pub fn parse_invocable_command_text(
     }
 
     let id = first_token(trimmed);
-    let ctx = CommandConditionContext {
-        extensions,
-        mode,
-        source,
-    };
-    validate_command_id_for_source(id, &ctx)?;
+    validate_command_id_for_policy(id, ctx)?;
     parse_command_text(trimmed)
 }
 
@@ -77,6 +67,25 @@ pub(super) fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResul
         "debug-hide" => "debug-hide does not accept arguments",
         "debug-toggle" => "debug-toggle does not accept arguments",
         "close-palette" => "close-palette does not accept arguments",
+        "palette.submit" => "palette.submit does not accept arguments",
+        "palette.complete" => "palette.complete does not accept arguments",
+        "palette.select-next" => "palette.select-next does not accept arguments",
+        "palette.select-prev" => "palette.select-prev does not accept arguments",
+        "text.delete-backward" => "text.delete-backward does not accept arguments",
+        "text.delete-forward" => "text.delete-forward does not accept arguments",
+        "text.move-left" => "text.move-left does not accept arguments",
+        "text.move-right" => "text.move-right does not accept arguments",
+        "text.move-start" => "text.move-start does not accept arguments",
+        "text.move-end" => "text.move-end does not accept arguments",
+        "text.move-prev-word" => "text.move-prev-word does not accept arguments",
+        "text.move-next-word" => "text.move-next-word does not accept arguments",
+        "text.delete-prev-word" => "text.delete-prev-word does not accept arguments",
+        "text.delete-next-word" => "text.delete-next-word does not accept arguments",
+        "text.delete-line" => "text.delete-line does not accept arguments",
+        "text.delete-to-end" => "text.delete-to-end does not accept arguments",
+        "text.yank" => "text.yank does not accept arguments",
+        "palette.input-history-older" => "palette.input-history-older does not accept arguments",
+        "palette.input-history-newer" => "palette.input-history-newer does not accept arguments",
         "help" => "help does not accept arguments",
         "close-help" => "close-help does not accept arguments",
         "help-scroll-down" => "help-scroll-down does not accept arguments",
@@ -134,6 +143,17 @@ fn parse_open_palette_payload(kind: PaletteKind, input: &str) -> Option<PaletteO
         PaletteKind::History => PaletteOpenPayload::HistorySeed(input.to_string()),
         PaletteKind::Outline => PaletteOpenPayload::OutlineQuery(input.to_string()),
     })
+}
+
+pub(super) fn parse_text_insert(args_text: &str) -> AppResult<Command> {
+    let text = args_text.to_string();
+    if text.is_empty() {
+        return Err(AppError::invalid_argument(
+            "text.insert requires 1 argument: text",
+        ));
+    }
+
+    Ok(Command::TextInsert { text })
 }
 
 pub(super) fn parse_goto_page(args_text: &str) -> AppResult<Command> {

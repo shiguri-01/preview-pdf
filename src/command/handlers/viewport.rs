@@ -3,7 +3,8 @@ use crate::app::scale::{ZOOM_MAX, ZOOM_MIN, next_zoom_step, prev_zoom_step};
 use crate::error::AppResult;
 
 use super::super::core::{reset_zoom, set_zoom as set_zoom_core, set_zoom_with_notice};
-use super::super::dispatch::{CommandExecContext, CommandExecution};
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::CommandExecution;
 use super::super::types::{PanAmount, PanDirection};
 
 pub(in crate::command) fn set_zoom(

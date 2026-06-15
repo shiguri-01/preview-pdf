@@ -1,16 +1,19 @@
+use crate::condition::{ConditionExpr, RuntimeCondition};
 use crate::error::{AppError, AppResult};
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
-use super::dispatch::{CommandExecContext, CommandExecution};
+use super::dispatch::CommandExecContext;
+use super::effects::CommandExecution;
 use super::types::{
-    ArgHint, ArgKind, ArgSpec, CommandAvailability, CommandCondition, CommandExposure,
-    CommandInvocationPolicy, CommandInvocationSource, CommandSpec, PanAmount, PanDirection,
-    SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg,
+    ArgHint, ArgKind, ArgSpec, CommandExposure, CommandInvocationPolicy, CommandInvocationSource,
+    CommandRole, CommandSpec, CommandTargetRequirement, PanAmount, PanDirection, SearchMatcherKind,
+    SpreadCoverPolicyArg, SpreadDirectionArg,
 };
 
 const NO_ARGS: [ArgSpec; 0] = [];
-const REQUIRES_SEARCH_ACTIVE: [CommandCondition; 1] = [CommandCondition::SearchActive];
-const REQUIRES_HELP_MODE: [CommandCondition; 1] = [CommandCondition::HelpMode];
+const REQUIRES_SEARCH_ACTIVE: [RuntimeCondition; 1] = [RuntimeCondition::SearchIsActive];
+const REQUIRES_PALETTE_INPUT_HISTORY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputHistoryIsAvailable];
 const ARGS_GOTO_PAGE: [ArgSpec; 1] = [ArgSpec {
     name: "page",
     kind: ArgKind::I32,
@@ -79,6 +82,12 @@ const ARGS_SUBMIT_SEARCH: [ArgSpec; 2] = [
         hint: ArgHint::None,
     },
 ];
+const ARGS_TEXT_INSERT: [ArgSpec; 1] = [ArgSpec {
+    name: "text",
+    kind: ArgKind::String,
+    required: true,
+    hint: ArgHint::None,
+}];
 const ARGS_OUTLINE_GOTO: [ArgSpec; 2] = [
     ArgSpec {
         name: "page",
@@ -103,7 +112,7 @@ macro_rules! define_commands {
                 args: $args:expr,
                 exposure: $exposure:expr,
                 invocation: $invocation:expr,
-                availability: $availability:expr,
+                enabled_when: $enabled_when:expr,
                 parse: $parser:tt,
                 exec: $exec:path $(,)?
             }
@@ -165,9 +174,11 @@ macro_rules! define_commands {
                     id: $id,
                     title: $title,
                     args: $args,
+                    role: define_commands!(@role $variant),
                     exposure: $exposure,
                     invocation: $invocation,
-                    availability: $availability,
+                    target: define_commands!(@target $variant),
+                    enabled_when: $enabled_when,
                 },
             )+
         ];
@@ -212,6 +223,63 @@ macro_rules! define_commands {
     (@exec $exec:path, $ctx:expr $(, $arg:expr)*) => {
         $exec($ctx $(, $arg)*)
     };
+
+    (@role OpenPalette) => { CommandRole::SurfaceControl };
+    (@role ClosePalette) => { CommandRole::SurfaceControl };
+    (@role PaletteSubmit) => { CommandRole::SurfaceControl };
+    (@role PaletteComplete) => { CommandRole::SurfaceControl };
+    (@role PaletteSelectNext) => { CommandRole::SurfaceControl };
+    (@role PaletteSelectPrev) => { CommandRole::SurfaceControl };
+    (@role TextInsert) => { CommandRole::SurfaceControl };
+    (@role TextDeleteBackward) => { CommandRole::SurfaceControl };
+    (@role TextDeleteForward) => { CommandRole::SurfaceControl };
+    (@role TextMoveLeft) => { CommandRole::SurfaceControl };
+    (@role TextMoveRight) => { CommandRole::SurfaceControl };
+    (@role TextMoveStart) => { CommandRole::SurfaceControl };
+    (@role TextMoveEnd) => { CommandRole::SurfaceControl };
+    (@role TextMovePrevWord) => { CommandRole::SurfaceControl };
+    (@role TextMoveNextWord) => { CommandRole::SurfaceControl };
+    (@role TextDeletePrevWord) => { CommandRole::SurfaceControl };
+    (@role TextDeleteNextWord) => { CommandRole::SurfaceControl };
+    (@role TextDeleteLine) => { CommandRole::SurfaceControl };
+    (@role TextDeleteToEnd) => { CommandRole::SurfaceControl };
+    (@role TextYank) => { CommandRole::SurfaceControl };
+    (@role PaletteInputHistoryOlder) => { CommandRole::SurfaceControl };
+    (@role PaletteInputHistoryNewer) => { CommandRole::SurfaceControl };
+    (@role CloseHelp) => { CommandRole::SurfaceControl };
+    (@role HelpScrollDown) => { CommandRole::SurfaceControl };
+    (@role HelpScrollUp) => { CommandRole::SurfaceControl };
+    (@role SubmitSearch) => { CommandRole::InternalEffect };
+    (@role SearchResultGoto) => { CommandRole::InternalEffect };
+    (@role HistoryGoto) => { CommandRole::InternalEffect };
+    (@role OutlineGoto) => { CommandRole::InternalEffect };
+    (@role $variant:ident) => { CommandRole::UserIntent };
+
+    (@target ClosePalette) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteSubmit) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteComplete) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteSelectNext) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteSelectPrev) => { CommandTargetRequirement::ActivePalette };
+    (@target TextInsert) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteBackward) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteForward) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveLeft) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveRight) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveStart) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveEnd) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMovePrevWord) => { CommandTargetRequirement::ActivePalette };
+    (@target TextMoveNextWord) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeletePrevWord) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteNextWord) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteLine) => { CommandTargetRequirement::ActivePalette };
+    (@target TextDeleteToEnd) => { CommandTargetRequirement::ActivePalette };
+    (@target TextYank) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteInputHistoryOlder) => { CommandTargetRequirement::ActivePalette };
+    (@target PaletteInputHistoryNewer) => { CommandTargetRequirement::ActivePalette };
+    (@target CloseHelp) => { CommandTargetRequirement::ActiveHelp };
+    (@target HelpScrollDown) => { CommandTargetRequirement::ActiveHelp };
+    (@target HelpScrollUp) => { CommandTargetRequirement::ActiveHelp };
+    (@target $variant:ident) => { CommandTargetRequirement::App };
 }
 
 define_commands! {
@@ -221,7 +289,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::next_page,
     }
@@ -231,7 +299,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::prev_page,
     }
@@ -241,7 +309,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::first_page,
     }
@@ -251,7 +319,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::last_page,
     }
@@ -261,7 +329,7 @@ define_commands! {
         args: &ARGS_GOTO_PAGE,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_goto_page),
         exec: super::handlers::goto_page,
     }
@@ -271,7 +339,7 @@ define_commands! {
         args: &ARGS_ZOOM,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_zoom),
         exec: super::handlers::set_zoom,
     }
@@ -281,7 +349,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::zoom_in,
     }
@@ -291,7 +359,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::zoom_out,
     }
@@ -301,7 +369,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::zoom_reset,
     }
@@ -311,7 +379,7 @@ define_commands! {
         args: &ARGS_PAN,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_pan),
         exec: super::handlers::pan,
     }
@@ -321,7 +389,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::page_layout_single,
     }
@@ -334,7 +402,7 @@ define_commands! {
         args: &ARGS_PAGE_LAYOUT_SPREAD,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_page_layout_spread),
         exec: super::handlers::page_layout_spread,
     }
@@ -344,7 +412,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::debug_status_show,
     }
@@ -354,7 +422,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::debug_status_hide,
     }
@@ -364,7 +432,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::debug_status_toggle,
     }
@@ -376,8 +444,8 @@ define_commands! {
         title: "Open Palette",
         args: &ARGS_OPEN_PALETTE,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::KeymapOnly,
-        availability: CommandAvailability::Always,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_open_palette),
         exec: super::handlers::open_palette,
     }
@@ -386,10 +454,210 @@ define_commands! {
         title: "Close Palette",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::Always,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::close_palette,
+    }
+    PaletteSubmit {
+        id: "palette.submit",
+        title: "Submit Palette",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::palette_submit,
+    }
+    PaletteComplete {
+        id: "palette.complete",
+        title: "Complete Palette Input",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::palette_complete,
+    }
+    PaletteSelectNext {
+        id: "palette.select-next",
+        title: "Select Next Palette Item",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::palette_select_next,
+    }
+    PaletteSelectPrev {
+        id: "palette.select-prev",
+        title: "Select Previous Palette Item",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::palette_select_prev,
+    }
+    TextInsert(text: String) {
+        id: "text.insert",
+        title: "Insert Text",
+        args: &ARGS_TEXT_INSERT,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: (super::parse::parse_text_insert),
+        exec: super::handlers::text_insert,
+    }
+    TextDeleteBackward {
+        id: "text.delete-backward",
+        title: "Delete Previous Text Character",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_backward,
+    }
+    TextDeleteForward {
+        id: "text.delete-forward",
+        title: "Delete Next Text Character",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_forward,
+    }
+    TextMoveLeft {
+        id: "text.move-left",
+        title: "Move Text Cursor Left",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_left,
+    }
+    TextMoveRight {
+        id: "text.move-right",
+        title: "Move Text Cursor Right",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_right,
+    }
+    TextMoveStart {
+        id: "text.move-start",
+        title: "Move Text Cursor to Start",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_start,
+    }
+    TextMoveEnd {
+        id: "text.move-end",
+        title: "Move Text Cursor to End",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_end,
+    }
+    TextMovePrevWord {
+        id: "text.move-prev-word",
+        title: "Move Text Cursor to Previous Word",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_prev_word,
+    }
+    TextMoveNextWord {
+        id: "text.move-next-word",
+        title: "Move Text Cursor to Next Word",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_move_next_word,
+    }
+    TextDeletePrevWord {
+        id: "text.delete-prev-word",
+        title: "Delete Previous Text Word",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_prev_word,
+    }
+    TextDeleteNextWord {
+        id: "text.delete-next-word",
+        title: "Delete Next Text Word",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_next_word,
+    }
+    TextDeleteLine {
+        id: "text.delete-line",
+        title: "Delete Text Line",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_line,
+    }
+    TextDeleteToEnd {
+        id: "text.delete-to-end",
+        title: "Delete Text to End",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_delete_to_end,
+    }
+    TextYank {
+        id: "text.yank",
+        title: "Yank Text",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
+        parse: no_args,
+        exec: super::handlers::text_yank,
+    }
+    PaletteInputHistoryOlder {
+        id: "palette.input-history-older",
+        title: "Recall Older Palette Input",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::All(&REQUIRES_PALETTE_INPUT_HISTORY),
+        parse: no_args,
+        exec: super::handlers::palette_input_history_older,
+    }
+    PaletteInputHistoryNewer {
+        id: "palette.input-history-newer",
+        title: "Recall Newer Palette Input",
+        args: &NO_ARGS,
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::All(&REQUIRES_PALETTE_INPUT_HISTORY),
+        parse: no_args,
+        exec: super::handlers::palette_input_history_newer,
     }
     OpenHelp {
         id: "help",
@@ -397,7 +665,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::open_help,
     }
@@ -406,8 +674,8 @@ define_commands! {
         title: "Close Help",
         args: &NO_ARGS,
         exposure: CommandExposure::Internal,
-        invocation: CommandInvocationPolicy::KeymapOnly,
-        availability: CommandAvailability::Always,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::close_help,
     }
@@ -415,9 +683,9 @@ define_commands! {
         id: "help-scroll-down",
         title: "Scroll Help Down",
         args: &NO_ARGS,
-        exposure: CommandExposure::Public,
-        invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::help_scroll_down,
     }
@@ -425,19 +693,23 @@ define_commands! {
         id: "help-scroll-up",
         title: "Scroll Help Up",
         args: &NO_ARGS,
-        exposure: CommandExposure::Public,
-        invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_HELP_MODE),
+        exposure: CommandExposure::Internal,
+        invocation: CommandInvocationPolicy::BindingOnly,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::help_scroll_up,
     }
+    // TODO(search command): `search` is the public search entry point and currently
+    // opens the search palette. If direct query arguments are added, keep `search`
+    // as the user-intent command and let palette submit complete that command
+    // instead of exposing `submit-search`.
     OpenSearch {
         id: "search",
         title: "Search",
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::open_search,
     }
@@ -447,7 +719,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
         exec: super::handlers::open_search_results,
     }
@@ -457,7 +729,7 @@ define_commands! {
         args: &ARGS_SUBMIT_SEARCH,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_submit_search),
         exec: super::handlers::submit_search,
     }
@@ -467,7 +739,7 @@ define_commands! {
         args: &ARGS_GOTO_PAGE,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: (super::parse::parse_search_goto),
         exec: super::handlers::search_result_goto,
     }
@@ -477,7 +749,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
         exec: super::handlers::next_search_hit,
     }
@@ -487,7 +759,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
         exec: super::handlers::prev_search_hit,
     }
@@ -497,7 +769,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::history_back,
     }
@@ -507,7 +779,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::history_forward,
     }
@@ -517,7 +789,7 @@ define_commands! {
         args: &ARGS_GOTO_PAGE,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_history_goto),
         exec: super::handlers::history_goto,
     }
@@ -527,7 +799,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::open_history,
     }
@@ -537,7 +809,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::open_outline,
     }
@@ -547,7 +819,7 @@ define_commands! {
         args: &ARGS_OUTLINE_GOTO,
         exposure: CommandExposure::Internal,
         invocation: CommandInvocationPolicy::InternalOnly,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: (super::parse::parse_outline_goto),
         exec: super::handlers::outline_goto,
     }
@@ -557,7 +829,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::AllOf(&REQUIRES_SEARCH_ACTIVE),
+        enabled_when: ConditionExpr::All(&REQUIRES_SEARCH_ACTIVE),
         parse: no_args,
         exec: super::handlers::cancel_search,
     }
@@ -567,7 +839,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::reload_document,
     }
@@ -577,7 +849,7 @@ define_commands! {
         args: &NO_ARGS,
         exposure: CommandExposure::Public,
         invocation: CommandInvocationPolicy::User,
-        availability: CommandAvailability::Always,
+        enabled_when: ConditionExpr::Always,
         parse: no_args,
         exec: super::handlers::quit,
     }
@@ -585,13 +857,13 @@ define_commands! {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
-    use crate::app::{AppState, PaletteRequest};
+    use crate::app::AppState;
     use crate::backend::{OutlineNode, PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::extension::ExtensionHost;
+    use crate::palette::{PaletteManager, PaletteRegistry};
 
     use super::{
         CommandExecContext, CommandId, command_registry, execute_registered_command,
@@ -702,13 +974,15 @@ mod tests {
 
             let mut app = AppState::default();
             let mut extension_host = ExtensionHost::default();
-            let mut palette_requests = VecDeque::<PaletteRequest>::new();
+            let palette_registry = PaletteRegistry::default();
+            let mut palette_manager = PaletteManager::default();
             let mut ctx = CommandExecContext {
                 app: &mut app,
                 view_policy: crate::config::ViewPolicy::default(),
                 pdf: test_pdf(),
                 extension_host: &mut extension_host,
-                palette_requests: &mut palette_requests,
+                palette_registry: &palette_registry,
+                palette_manager: &mut palette_manager,
             };
 
             execute_registered_command(&mut ctx, command)

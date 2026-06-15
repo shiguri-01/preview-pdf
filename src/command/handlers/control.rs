@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use crate::app::NoticeAction;
 use crate::error::AppResult;
 
-use super::super::dispatch::{CommandExecContext, CommandExecution};
-use super::super::types::CommandOutcome;
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::{CommandExecution, CommandLifecycleEffect};
 
 pub(in crate::command) fn cancel_search(
     ctx: &mut CommandExecContext<'_>,
@@ -20,8 +19,5 @@ pub(in crate::command) fn reload_document(
 }
 
 pub(in crate::command) fn quit(_ctx: &mut CommandExecContext<'_>) -> AppResult<CommandExecution> {
-    Ok(CommandExecution {
-        outcome: CommandOutcome::QuitRequested,
-        notice: NoticeAction::Keep,
-    })
+    Ok(CommandExecution::applied().with_lifecycle(CommandLifecycleEffect::Quit))
 }

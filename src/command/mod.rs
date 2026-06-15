@@ -1,6 +1,7 @@
 mod catalog;
 mod core;
 mod dispatch;
+mod effects;
 mod handlers;
 mod parse;
 mod spec;
@@ -9,14 +10,18 @@ mod tests;
 mod types;
 
 pub use catalog::{Command, CommandId, CommandRequest};
-pub use dispatch::{CommandDispatchResult, dispatch_with_view_policy, drain_background_events};
+pub use dispatch::{
+    CommandDispatchContext, CommandDispatchResult, dispatch_with_view_policy,
+    drain_background_events,
+};
+pub use effects::CommandLifecycleEffect;
 pub(crate) use parse::first_token;
 pub use parse::{parse_command_text, parse_invocable_command_text};
 #[cfg(test)]
 pub use spec::command_registry;
 pub use spec::{
-    CommandConditionContext, all_command_specs, find_command_spec, is_command_visible_in_palette,
-    validate_command_id_invocation_for_source, validate_command_invocation_for_source,
+    CommandPolicyContext, all_command_specs, find_command_spec, is_command_visible_in_palette,
+    validate_command_for_normal_keymap, validate_command_id_for_normal_keymap,
 };
 pub use types::{
     ArgHint, ArgKind, ArgSpec, CommandInvocationSource, CommandOutcome, CommandSpec, PanAmount,

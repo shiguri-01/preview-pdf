@@ -103,9 +103,10 @@ Test coverage:
 ## Commands
 
 Orientation:
-- Commands have three review-relevant concerns: stable ids and argument parsing,
-  source-aware invocation policy, and dispatch effects. The command catalog ties
-  those concerns together; feature behavior stays in handlers and app state.
+- Commands have five review-relevant concerns: stable ids and argument parsing,
+  role, source-aware invocation policy, target requirement, and dispatch
+  effects. The command catalog ties identity and routing concerns together;
+  feature behavior stays in handlers, active targets, and app state.
 
 Contract:
 - Command ids are canonical kebab-case strings and are compatibility-sensitive
@@ -113,18 +114,63 @@ Contract:
 - The command catalog owns command ids, metadata, parser routing, and dispatch
   routing.
 - Typed commands must have matching registry metadata.
+- Command roles distinguish user intent commands, surface controls, and
+  internal effects.
 - Public commands may appear in user-facing command surfaces when their
-  invocation and availability policies allow it.
+  invocation policy and `enabled_when` runtime condition allow it.
 - Internal commands are runtime plumbing and must not appear in the command
   palette.
-- Keymap-only commands can be invoked from key bindings but not from direct
+- Binding-only commands can be invoked from key bindings but not from direct
   command palette input.
-- Internal-only commands can be invoked only by provider-driven internal flows.
-- Availability checks are separate from invocation policy.
-- Availability may depend on runtime app state such as active mode, not only on
-  invocation source.
+- Internal-only commands can be invoked only as internal follow-ups that
+  complete another user action.
+- `enabled_when` checks are separate from invocation policy.
+- Target resolution is separate from invocation policy and `enabled_when`.
+  Palette binding-only commands, including palette input editing, require an
+  active palette. Help binding-only commands require active help.
+- `enabled_when` may depend on runtime app state such as active search, help
+  mode, palette kind, or palette input history availability. Target
+  requirements are not duplicated in `enabled_when`.
+- Palette input history availability means an active palette whose kind supports
+  input history; the owning predicate lives with `PaletteKind`.
+- Command-palette listing, help display, typed command submission, and dispatch
+  use command policy functions to decide how exposure, invocation policy,
+  target, and `enabled_when` apply to that surface.
+- Command-palette listing shows public user-intent commands only when the
+  command-palette input source is allowed, target requirements are satisfied,
+  and `enabled_when` is satisfied for the normal-mode context in which the
+  submitted command will run.
+- Typed command submission is separate from listing: a known typed command is
+  parsed and then validated by dispatch policy, so "not listed" does not mean
+  "unknown".
+- Help surfaces may describe configured commands and bindings without hiding
+  them solely because `enabled_when` is currently false; a surface that claims
+  to show only currently runnable actions must evaluate `enabled_when`.
+- Runtime condition vocabulary is shared by commands and key bindings. A
+  palette-kind condition is true only when a palette is open and its active
+  kind matches; a closed palette does not match any kind.
+- Command handlers return `CommandExecution`: an `Applied` or `Noop` outcome
+  plus `CommandEffects` for notice changes, explicit app events, palette
+  requests, input-history records, follow-up command requests, and lifecycle
+  requests. Handlers may mutate their owned feature state through the execution
+  context, but they must not directly push runtime queues or record input
+  history.
+- Process lifecycle requests are command effects, not command outcomes. For
+  example, quit is an applied command with a quit lifecycle effect.
+- Dispatch applies command effects in one place, then emits transition events
+  and the final command execution event.
 - Command dispatch emits command execution events after validation and dispatch
   complete, including rejected commands.
+- Command dispatch may return follow-up command requests, for example when a
+  palette submit completes a user intent or internal effect command.
+
+Known follow-ups:
+- Search command intent: `search` is the public search entry point today and
+  starts a valid search flow by opening the search palette. Direct query
+  submission still happens through the internal `submit-search` command after
+  palette submit. When this area is redesigned, keep `search` as the
+  user-intent command and make the palette an input-collection path for that
+  command instead of exposing `submit-search` as a user-facing command.
 
 Compatibility:
 - Public command ids, argument compatibility, and user-facing parser behavior
@@ -140,6 +186,7 @@ Owned by:
 - [src/command/spec.rs](../src/command/spec.rs)
 - [src/command/dispatch.rs](../src/command/dispatch.rs)
 - [src/command/handlers/](../src/command/handlers/)
+- [src/condition.rs](../src/condition.rs)
 
 Test coverage:
 - Command registry, parser, validation, and dispatch tests in [src/command/](../src/command/).
@@ -148,27 +195,40 @@ Test coverage:
 ## Key Bindings
 
 Orientation:
-- Normal-mode key bindings turn terminal key events into typed commands through
-  the sequence registry. Palette-local keys are handled by palette session
-  logic instead.
+- Terminal key events are converted to typed command requests before behavior is
+  applied. Normal-mode keys and surface keys are resolved by the same
+  conditional sequence registry.
 
 Contract:
 - Printable bindings are defined by resulting characters, not by physical keys.
+- Runtime `Meta` key events are normalized to the `Alt`/`<m-...>` shortcut
+  representation. Unbound Alt-only chords are not treated as printable input.
 - Configured key bindings use the same key labels shown in help, such as
   `gg`, `<c-o>`, `<down>`, and `[count]G`.
+- Key binding `enabled_when` uses the same runtime condition vocabulary as
+  command `enabled_when`; do not add a separate keymap-only condition enum.
+- Every key input and sequence timeout resolves against the current runtime
+  condition state. Pending sequences do not preserve the state in which they
+  started. State transitions clear a pending sequence when it no longer
+  matches any currently enabled binding.
 - Multi-key sequences can remain pending until resolved or timed out.
 - Numeric prefixes are parsed by the input sequence layer and dispatch typed
   commands.
-- Built-in key bindings must reference known command ids and satisfy command
-  invocation policy.
-- Configured key bindings must reference known commands that can be invoked
-  from the keymap; runtime availability remains a dispatch-time check.
-- Palette-local key handling is owned by palette behavior, not the normal-mode
-  keymap.
-- Help-mode-local keys are handled by the help input route when the help overlay
-  is active; they may dispatch commands without being normal-mode bindings.
-- `<esc>` is reserved for global cancellation and is not routed through the
-  normal-mode keymap.
+- All key bindings dispatch with the binding invocation source, reference known
+  command ids, and satisfy command invocation policy.
+- Configured key bindings currently receive a normal-mode runtime condition and
+  must reference known app-target commands that can be invoked from bindings.
+  Built-in surface bindings carry palette or help runtime conditions. Dispatch
+  still validates the resolved command before applying behavior.
+- Palette keys dispatch hidden palette binding-only commands such as
+  submit, complete, selection movement, input editing, and palette input
+  history recall.
+- Help keys dispatch hidden help binding-only commands such as close and
+  scroll.
+- `<esc>` is a non-configurable built-in binding for cancellation or close
+  behavior and remains available when the configurable keymap preset is
+  `none`. When a multi-key sequence is already pending, `<esc>` clears the
+  pending sequence instead of dispatching another command.
 
 Compatibility:
 - Changing a default key binding affects user muscle memory and help output; do
@@ -190,32 +250,42 @@ Test coverage:
 
 Orientation:
 - Palette behavior splits into common session mechanics and provider-owned
-  semantics. The common path owns opening, input routing, selection, tab,
-  submit, and closing. Providers own candidate meaning and the effects returned
-  for tab and submit.
+  semantics. The common path owns opening, palette input state, selection,
+  completion, submit, and closing. Palette key bindings turn terminal keys into
+  commands when their runtime conditions match; providers own candidate meaning
+  and the effects returned for completion and submit.
 
 Contract:
 - A palette session has a kind, session id, input state, candidate list,
   visible candidate indexes, selection, optional open payload, and optional
   assistive text.
-- Palette providers own candidate generation, input mode, initial input, tab
-  effects, submit effects, assistive text, and provider-specific selection
-  defaults.
-- `PaletteManager` owns common open, cancel, input, history recall, selection,
-  tab, submit, and session-id validation behavior.
+- Palette providers own candidate generation, input mode, initial input,
+  completion effects, submit effects, assistive text, and provider-specific
+  selection defaults.
+- `PaletteManager` owns common open, cancel, palette input operations, palette
+  input history recall for palettes that support it, selection, completion,
+  submit, and session-id validation behavior.
 - Candidate search text is independent from rendered row text.
-- Submit effects may close, reopen, or dispatch a typed command with optional
-  history recording and a post action.
-- Command-palette visibility derives from command metadata and availability,
-  not from a hand-written UI list.
+- Provider submit effects describe palette-local meaning: close, reopen, or
+  dispatch a typed command with optional history recording and a post action.
+  The palette submit command handler converts those provider effects into
+  command runtime effects; providers do not write command follow-up queues or
+  input history directly.
+- Command-palette visibility derives from command metadata, invocation policy,
+  target availability, and `enabled_when`, not from a hand-written UI list.
+- Input history is an opt-in palette input capability; it is not a
+  provider-specific palette action.
 
 Observable behavior:
-- Escape closes the active palette.
-- Control-p/control-n move selection.
-- Up/down recall input history only for palettes that support it; otherwise
-  they move selection.
-- Tab applies provider tab behavior.
-- Enter applies provider submit behavior.
+- Escape dispatches the palette close command when a palette is active.
+- Control-p/control-n dispatch palette selection commands.
+- Up/down dispatch palette input history commands for palettes that support
+  history; otherwise they dispatch palette selection commands.
+- Tab dispatches palette completion.
+- Enter dispatches palette submit.
+- Palette input editing preserves common line-editing behavior through
+  conditionally enabled `text.*` binding-only commands, including cursor
+  movement, word movement, word/line deletion, and yank.
 - Empty candidate lists can still represent valid interactive states when the
   provider supports that behavior.
 

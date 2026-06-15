@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::sync::Arc;
 
 use crate::app::{AppState, NoticeAction, PaletteRequest};
@@ -20,17 +19,12 @@ pub struct OutlineState {
 }
 
 impl OutlineState {
-    pub fn open_palette(
-        &mut self,
-        pdf: SharedPdfBackend,
-        palette_requests: &mut VecDeque<PaletteRequest>,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+    pub fn open_palette(&mut self, pdf: SharedPdfBackend) -> AppResult<PaletteRequest> {
         self.ensure_loaded(pdf.as_ref())?;
-        palette_requests.push_back(PaletteRequest::Open {
+        Ok(PaletteRequest::Open {
             kind: PaletteKind::Outline,
             payload: None,
-        });
-        Ok((CommandOutcome::Applied, NoticeAction::Clear))
+        })
     }
 
     pub fn goto(
@@ -103,7 +97,6 @@ fn flatten_outline(nodes: &[OutlineNode], depth: usize, entries: &mut Vec<Outlin
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
@@ -176,10 +169,9 @@ mod tests {
             }],
         }) as SharedPdfBackend;
         let mut state = OutlineState::default();
-        let mut pending = VecDeque::new();
 
         state
-            .open_palette(pdf, &mut pending)
+            .open_palette(pdf)
             .expect("outline open should succeed");
         let entries = state.palette_entries();
 
@@ -220,10 +212,9 @@ mod tests {
             ],
         }) as SharedPdfBackend;
         let mut state = OutlineState::default();
-        let mut pending = VecDeque::new();
 
         state
-            .open_palette(pdf, &mut pending)
+            .open_palette(pdf)
             .expect("outline open should succeed");
         let entries = state.palette_entries();
 
@@ -247,15 +238,14 @@ mod tests {
             }],
         }) as SharedPdfBackend;
         let mut state = OutlineState::default();
-        let mut pending = VecDeque::new();
 
         state
-            .open_palette(Arc::clone(&pdf), &mut pending)
+            .open_palette(Arc::clone(&pdf))
             .expect("first outline open should succeed");
         let first = state.palette_entries();
 
         state
-            .open_palette(pdf, &mut pending)
+            .open_palette(pdf)
             .expect("second outline open should succeed");
         let second = state.palette_entries();
 

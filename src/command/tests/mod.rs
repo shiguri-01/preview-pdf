@@ -1,22 +1,19 @@
 use crate::app::Mode;
 use crate::command::{
-    CommandConditionContext, CommandInvocationSource, command_registry, find_command_spec,
+    CommandInvocationSource, CommandPolicyContext, command_registry, find_command_spec,
 };
+use crate::condition::{ConditionExpr, RuntimeConditionContext, evaluate_condition};
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::keymap::build_builtin_sequence_registry;
+use crate::palette::PaletteKind;
 
-use super::spec::validate_command_id_for_source;
+use super::spec::validate_command_id_for_policy;
 
 #[test]
-fn builtin_keymap_references_registered_keymap_invocable_commands() {
+fn builtin_bindings_reference_commands_invocable_when_enabled() {
     let registry = build_builtin_sequence_registry();
     let snapshot = registry.snapshot();
     let extensions = ExtensionUiSnapshot::with_search_active(true);
-    let ctx = CommandConditionContext {
-        extensions: &extensions,
-        mode: Mode::Normal,
-        source: CommandInvocationSource::Keymap,
-    };
 
     assert!(
         !snapshot.exact_bindings.is_empty(),
@@ -34,12 +31,12 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
             binding.keys,
             binding.command_id
         );
-        validate_command_id_for_source(binding.command_id, &ctx).unwrap_or_else(|err| {
-            panic!(
-                "key binding {:?} references command {} that keymap cannot invoke: {}",
-                binding.keys, binding.command_id, err
-            )
-        });
+        assert_binding_is_invocable(
+            binding.command_id,
+            binding.enabled_when,
+            &extensions,
+            format!("key binding {:?}", binding.keys),
+        );
     }
 
     for binding in snapshot.numeric_prefix_bindings {
@@ -49,13 +46,53 @@ fn builtin_keymap_references_registered_keymap_invocable_commands() {
             binding.suffix,
             binding.command_id
         );
-        validate_command_id_for_source(binding.command_id, &ctx).unwrap_or_else(|err| {
-            panic!(
-                "numeric key binding {:?} references command {} that keymap cannot invoke: {}",
-                binding.suffix, binding.command_id, err
-            )
-        });
+        assert_binding_is_invocable(
+            binding.command_id,
+            binding.enabled_when,
+            &extensions,
+            format!("numeric key binding {:?}", binding.suffix),
+        );
     }
+
+    for binding in snapshot.generated_bindings {
+        assert!(
+            find_command_spec(binding.command_id).is_some(),
+            "generated key binding {:?} references unknown command {}",
+            binding.matcher,
+            binding.command_id
+        );
+        assert_binding_is_invocable(
+            binding.command_id,
+            binding.enabled_when,
+            &extensions,
+            format!("generated key binding {:?}", binding.matcher),
+        );
+    }
+}
+
+fn assert_binding_is_invocable(
+    command_id: &str,
+    enabled_when: ConditionExpr,
+    extensions: &ExtensionUiSnapshot,
+    label: String,
+) {
+    let contexts = [
+        RuntimeConditionContext::new(Mode::Normal, None, extensions),
+        RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Command), extensions),
+        RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Outline), extensions),
+        RuntimeConditionContext::new(Mode::Help, None, extensions),
+    ];
+    let runtime = contexts
+        .into_iter()
+        .find(|ctx| evaluate_condition(enabled_when, ctx))
+        .unwrap_or_else(|| panic!("{label} has an unsatisfiable enabled_when condition"));
+    let ctx = CommandPolicyContext {
+        source: CommandInvocationSource::Binding,
+        runtime,
+    };
+    validate_command_id_for_policy(command_id, &ctx).unwrap_or_else(|err| {
+        panic!("{label} references command {command_id} that bindings cannot invoke: {err}")
+    });
 }
 
 #[test]

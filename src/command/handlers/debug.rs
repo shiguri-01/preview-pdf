@@ -1,7 +1,8 @@
 use crate::error::AppResult;
 
 use super::super::core::set_debug_status_visible;
-use super::super::dispatch::{CommandExecContext, CommandExecution};
+use super::super::dispatch::CommandExecContext;
+use super::super::effects::CommandExecution;
 
 pub(in crate::command) fn debug_status_show(
     ctx: &mut CommandExecContext<'_>,

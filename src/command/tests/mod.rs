@@ -13,7 +13,6 @@ use super::spec::validate_command_id_for_policy;
 fn default_registry_bindings_reference_commands_invocable_when_enabled() {
     let registry = build_default_sequence_registry();
     let snapshot = registry.snapshot();
-    let extensions = ExtensionUiSnapshot::with_search_active(true);
 
     assert!(
         !snapshot.exact_bindings.is_empty(),
@@ -34,7 +33,6 @@ fn default_registry_bindings_reference_commands_invocable_when_enabled() {
         assert_binding_is_invocable(
             binding.command_id,
             binding.enabled_when,
-            &extensions,
             format!("key binding {:?}", binding.keys),
         );
     }
@@ -49,7 +47,6 @@ fn default_registry_bindings_reference_commands_invocable_when_enabled() {
         assert_binding_is_invocable(
             binding.command_id,
             binding.enabled_when,
-            &extensions,
             format!("numeric key binding {:?}", binding.suffix),
         );
     }
@@ -64,35 +61,46 @@ fn default_registry_bindings_reference_commands_invocable_when_enabled() {
         assert_binding_is_invocable(
             binding.command_id,
             binding.enabled_when,
-            &extensions,
             format!("generated key binding {:?}", binding.matcher),
         );
     }
 }
 
-fn assert_binding_is_invocable(
-    command_id: &str,
-    enabled_when: ConditionExpr,
-    extensions: &ExtensionUiSnapshot,
-    label: String,
-) {
-    let contexts = [
-        RuntimeConditionContext::new(Mode::Normal, None, extensions),
-        RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Command), extensions),
-        RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Outline), extensions),
-        RuntimeConditionContext::new(Mode::Help, None, extensions),
+fn assert_binding_is_invocable(command_id: &str, enabled_when: ConditionExpr, label: String) {
+    let extension_states = [
+        ExtensionUiSnapshot::with_search_active(false),
+        ExtensionUiSnapshot::with_search_active(true),
     ];
-    let runtime = contexts
-        .into_iter()
-        .find(|ctx| evaluate_condition(enabled_when, ctx))
-        .unwrap_or_else(|| panic!("{label} has an unsatisfiable enabled_when condition"));
-    let ctx = CommandPolicyContext {
-        source: CommandInvocationSource::Binding,
-        runtime,
-    };
-    validate_command_id_for_policy(command_id, &ctx).unwrap_or_else(|err| {
-        panic!("{label} references command {command_id} that bindings cannot invoke: {err}")
+    let contexts = extension_states.iter().flat_map(|extensions| {
+        [
+            RuntimeConditionContext::new(Mode::Normal, None, extensions),
+            RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Command), extensions),
+            RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Outline), extensions),
+            RuntimeConditionContext::new(Mode::Help, None, extensions),
+        ]
     });
+    let mut enabled_context_found = false;
+
+    for runtime in contexts {
+        if !evaluate_condition(enabled_when, &runtime) {
+            continue;
+        }
+        enabled_context_found = true;
+
+        let ctx = CommandPolicyContext {
+            source: CommandInvocationSource::Binding,
+            runtime,
+        };
+        if validate_command_id_for_policy(command_id, &ctx).is_ok() {
+            return;
+        }
+    }
+
+    assert!(
+        enabled_context_found,
+        "{label} has an unsatisfiable enabled_when condition"
+    );
+    panic!("{label} references command {command_id} that bindings cannot invoke when enabled");
 }
 
 #[test]

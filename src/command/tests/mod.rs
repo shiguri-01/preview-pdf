@@ -4,24 +4,24 @@ use crate::command::{
 };
 use crate::condition::{ConditionExpr, RuntimeConditionContext, evaluate_condition};
 use crate::extension::ExtensionUiSnapshot;
-use crate::input::keymap::build_builtin_sequence_registry;
+use crate::input::keymap::build_default_sequence_registry;
 use crate::palette::PaletteKind;
 
 use super::spec::validate_command_id_for_policy;
 
 #[test]
-fn builtin_bindings_reference_commands_invocable_when_enabled() {
-    let registry = build_builtin_sequence_registry();
+fn default_registry_bindings_reference_commands_invocable_when_enabled() {
+    let registry = build_default_sequence_registry();
     let snapshot = registry.snapshot();
     let extensions = ExtensionUiSnapshot::with_search_active(true);
 
     assert!(
         !snapshot.exact_bindings.is_empty(),
-        "builtin keymap must define at least one exact binding"
+        "default registry must define at least one exact binding"
     );
     assert!(
         !snapshot.numeric_prefix_bindings.is_empty(),
-        "builtin keymap must define at least one numeric prefix binding"
+        "default registry must define at least one numeric prefix binding"
     );
 
     for binding in snapshot.exact_bindings {

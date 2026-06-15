@@ -367,13 +367,21 @@ mod tests {
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
     use crate::command::Command;
     use crate::config::{AppOptionsResolver, KeymapBinding, KeymapPreset, KeymapTarget};
-    use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceResolution, SequenceResolver};
+    use crate::extension::ExtensionUiSnapshot;
+    use crate::input::sequence::{
+        DEFAULT_SEQUENCE_TIMEOUT, KeyBindingContext, SequenceResolution, SequenceResolver,
+    };
     use crate::input::shortcut::ShortcutKey;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::{
         Config, ConfigFileSelection, default_config_path_from_env, load_options_from_explicit_path,
     };
+
+    fn handle_normal_key(resolver: &mut SequenceResolver, key: KeyEvent) -> SequenceResolution {
+        let extensions = ExtensionUiSnapshot::default();
+        resolver.handle_key_in_context(KeyBindingContext::normal(&extensions), key)
+    }
 
     fn unique_temp_path(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -520,23 +528,38 @@ mod tests {
             SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Noop
         );
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)
+            ),
             SequenceResolution::Dispatch(Command::NextPage)
         );
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Pending
         );
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Dispatch(Command::GotoPage { page: 42 })
         );
 
@@ -564,7 +587,10 @@ mod tests {
             SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
 
         assert_eq!(
-            resolver.handle_key(KeyEvent::new(KeyCode::Char('<'), KeyModifiers::NONE)),
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('<'), KeyModifiers::NONE)
+            ),
             SequenceResolution::Dispatch(Command::PrevPage)
         );
 

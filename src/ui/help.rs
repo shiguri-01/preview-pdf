@@ -272,13 +272,14 @@ fn help_rendered_height(lines: &[Line<'static>], width: u16, height: u16) -> usi
 mod tests {
     use super::{build_help_lines, help_rendered_height};
     use crate::command::{Command, PanAmount, PanDirection};
-    use crate::input::keymap::build_builtin_sequence_registry;
+    use crate::condition::ConditionExpr;
+    use crate::input::keymap::build_default_sequence_registry;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
 
     #[test]
     fn help_lines_include_runtime_bindings() {
-        let keymap = build_builtin_sequence_registry().snapshot();
+        let keymap = build_default_sequence_registry().snapshot();
         let text = build_help_lines(&keymap)
             .iter()
             .map(|line| {
@@ -304,13 +305,22 @@ mod tests {
     fn help_lines_reflect_runtime_registry_changes() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_static(&[ShortcutKey::char('x')], Command::NextPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('x')],
+                Command::NextPage,
+            )
             .expect("next-page binding should register");
         registry
-            .register_static(&[ShortcutKey::char('y')], Command::PrevPage)
+            .register_exact(
+                ConditionExpr::Always,
+                &[ShortcutKey::char('y')],
+                Command::PrevPage,
+            )
             .expect("prev-page binding should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('A')],
                 Command::Pan {
                     direction: PanDirection::Left,
@@ -319,7 +329,8 @@ mod tests {
             )
             .expect("pan left should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('S')],
                 Command::Pan {
                     direction: PanDirection::Down,
@@ -328,7 +339,8 @@ mod tests {
             )
             .expect("pan down should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('W')],
                 Command::Pan {
                     direction: PanDirection::Up,
@@ -337,7 +349,8 @@ mod tests {
             )
             .expect("pan up should register");
         registry
-            .register_static(
+            .register_exact(
+                ConditionExpr::Always,
                 &[ShortcutKey::char('D')],
                 Command::Pan {
                     direction: PanDirection::Right,
@@ -367,7 +380,7 @@ mod tests {
 
     #[test]
     fn help_scroll_limit_accounts_for_wrapping() {
-        let keymap = build_builtin_sequence_registry().snapshot();
+        let keymap = build_default_sequence_registry().snapshot();
         let raw_limit = build_help_lines(&keymap).len().saturating_sub(5);
         let wrapped_limit = help_rendered_height(&build_help_lines(&keymap), 20, 5);
 

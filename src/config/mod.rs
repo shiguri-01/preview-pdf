@@ -1,5 +1,5 @@
 mod file;
-mod keymap;
+pub(crate) mod keymap;
 mod options;
 mod policy;
 mod types;

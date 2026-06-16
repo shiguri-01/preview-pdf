@@ -5,10 +5,13 @@ use crate::command::{
 };
 use crate::condition::{ConditionExpr, RuntimeCondition};
 use crate::error::{AppError, AppResult};
-use crate::input::keymap::build_default_sequence_registry;
 use crate::input::sequence::{SequenceRegistrationError, SequenceRegistry};
 use crate::input::shortcut::{ShortcutKey, parse_shortcut_sequence};
 use crate::palette::PaletteKind;
+
+mod presets;
+
+pub(crate) use presets::{KeymapPreset, build_default_sequence_registry};
 
 const WHEN_NORMAL: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(Mode::Normal)];
 const WHEN_NORMAL_SEARCH_ACTIVE: [RuntimeCondition; 2] = [
@@ -156,7 +159,7 @@ impl KeymapOptions {
 }
 
 pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegistry {
-    let mut registry = build_default_sequence_registry();
+    let mut registry = KeymapPreset::Default.build_sequence_registry();
 
     for binding in &options.bindings {
         match binding {

@@ -2,8 +2,8 @@ use crate::command::{Command, PanAmount, PanDirection};
 use crate::condition::{ConditionExpr, RuntimeCondition};
 use crate::palette::PaletteKind;
 
-use super::sequence::{GeneratedCommand, GeneratedKeyMatcher, SequenceRegistry};
-use super::shortcut::ShortcutKey;
+use crate::input::sequence::{GeneratedCommand, GeneratedKeyMatcher, SequenceRegistry};
+use crate::input::shortcut::ShortcutKey;
 
 pub(crate) const WHEN_NORMAL: [RuntimeCondition; 1] =
     [RuntimeCondition::ModeIs(crate::app::Mode::Normal)];
@@ -22,7 +22,23 @@ const WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE: [RuntimeCondition; 2] = [
 ];
 const WHEN_HELP: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(crate::app::Mode::Help)];
 
-pub fn build_default_sequence_registry() -> SequenceRegistry {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum KeymapPreset {
+    Default,
+    #[allow(dead_code, reason = "reserved for config-owned empty keymap preset")]
+    None,
+}
+
+impl KeymapPreset {
+    pub(crate) fn build_sequence_registry(self) -> SequenceRegistry {
+        match self {
+            Self::Default => build_default_sequence_registry(),
+            Self::None => build_none_sequence_registry(),
+        }
+    }
+}
+
+pub(crate) fn build_default_sequence_registry() -> SequenceRegistry {
     let mut registry = build_base_sequence_registry();
     register_surface_open_bindings(&mut registry);
     register_page_navigation_bindings(&mut registry);
@@ -31,6 +47,10 @@ pub fn build_default_sequence_registry() -> SequenceRegistry {
     register_search_navigation_bindings(&mut registry);
     register_quit_binding(&mut registry);
     registry
+}
+
+pub(crate) fn build_none_sequence_registry() -> SequenceRegistry {
+    SequenceRegistry::new()
 }
 
 fn build_base_sequence_registry() -> SequenceRegistry {
@@ -446,12 +466,21 @@ mod tests {
     use crate::input::sequence::KeyBindingContext;
     use crate::palette::PaletteKind;
 
-    use super::build_default_sequence_registry;
+    use super::{KeymapPreset, build_default_sequence_registry};
     use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceResolution, SequenceResolver};
 
     fn handle_normal_key(resolver: &mut SequenceResolver, key: KeyEvent) -> SequenceResolution {
         let extensions = ExtensionUiSnapshot::default();
         resolver.handle_key_in_context(KeyBindingContext::normal(&extensions), key)
+    }
+
+    #[test]
+    fn none_preset_builds_empty_registry() {
+        let snapshot = KeymapPreset::None.build_sequence_registry().snapshot();
+
+        assert!(snapshot.exact_bindings.is_empty());
+        assert!(snapshot.numeric_prefix_bindings.is_empty());
+        assert!(snapshot.generated_bindings.is_empty());
     }
 
     #[test]

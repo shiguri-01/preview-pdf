@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use crate::app::scale::{ZOOM_MAX, ZOOM_MIN};
 use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
-use crate::input::keymap::build_default_sequence_registry;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry};
 
+use super::keymap::build_default_sequence_registry;
 use super::options::AppOptions;
 use super::types::{CacheConfig, Config, InputConfig, RenderConfig, ViewConfig, WatchConfig};
 

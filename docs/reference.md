@@ -243,11 +243,11 @@ Contract:
 Compatibility:
 - Changing a default keymap entry affects user muscle memory and help output; do
   it intentionally with tests.
-- Complete key inventories belong in `src/input/keymap.rs` and rendered help.
+- Complete key inventories belong in config keymap presets and rendered help.
   Docs may summarize categories of keymap entries, but should not own the table.
 
 Owned by:
-- [src/input/keymap.rs](../src/input/keymap.rs)
+- [src/config/keymap/](../src/config/keymap/)
 - [src/input/sequence.rs](../src/input/sequence.rs)
 - [src/input/shortcut.rs](../src/input/shortcut.rs)
 - [src/ui/help.rs](../src/ui/help.rs)

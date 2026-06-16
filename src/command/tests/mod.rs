@@ -3,8 +3,8 @@ use crate::command::{
     CommandInvocationSource, CommandPolicyContext, command_registry, find_command_spec,
 };
 use crate::condition::{ConditionExpr, RuntimeConditionContext, evaluate_condition};
+use crate::config::keymap::build_default_sequence_registry;
 use crate::extension::ExtensionUiSnapshot;
-use crate::input::keymap::build_default_sequence_registry;
 use crate::palette::PaletteKind;
 
 use super::spec::validate_command_id_for_policy;

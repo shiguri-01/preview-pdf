@@ -29,8 +29,10 @@ can operate on resolved policies rather than re-reading config or CLI state.
   coordination.
 - [src/command/](../src/command/) owns command ids, metadata, parsing, source-aware validation,
   dispatch, typed command outcomes, and command effects.
-- [src/input/](../src/input/) owns key sequence normalization, built-in keymap entries, numeric
-  prefixes, and input history used by palette inputs.
+- [src/input/](../src/input/) owns key sequence normalization, numeric prefixes,
+  and input history used by palette inputs.
+- [src/config/](../src/config/) owns config loading, option resolution, and
+  built-in keymap presets.
 - [src/palette/](../src/palette/) owns palette sessions, provider lookup, candidate matching,
   selection state, completion, submit, cancel, palette input state, and rendered
   palette views. It does not own raw terminal key routing.

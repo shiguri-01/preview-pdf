@@ -273,7 +273,7 @@ mod tests {
     use super::{build_help_lines, help_rendered_height};
     use crate::command::{Command, PanAmount, PanDirection};
     use crate::condition::ConditionExpr;
-    use crate::input::keymap::build_default_sequence_registry;
+    use crate::config::keymap::build_default_sequence_registry;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
 

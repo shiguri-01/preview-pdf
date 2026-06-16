@@ -23,20 +23,21 @@ const WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE: [RuntimeCondition; 2] = [
 const WHEN_HELP: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(crate::app::Mode::Help)];
 
 pub fn build_default_sequence_registry() -> SequenceRegistry {
-    let mut registry = SequenceRegistry::new();
+    let mut registry = build_base_sequence_registry();
     register_surface_open_bindings(&mut registry);
     register_page_navigation_bindings(&mut registry);
     register_view_bindings(&mut registry);
     register_history_bindings(&mut registry);
     register_search_navigation_bindings(&mut registry);
     register_quit_binding(&mut registry);
-    register_search_cancellation_binding(&mut registry);
-    register_palette_bindings(&mut registry);
-    register_help_bindings(&mut registry);
     registry
 }
 
 pub(crate) fn build_none_sequence_registry() -> SequenceRegistry {
+    build_base_sequence_registry()
+}
+
+fn build_base_sequence_registry() -> SequenceRegistry {
     let mut registry = SequenceRegistry::new();
     register_search_cancellation_binding(&mut registry);
     register_palette_bindings(&mut registry);

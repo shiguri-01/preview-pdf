@@ -241,7 +241,7 @@ mod tests {
     use super::{KeymapOptions, KeymapPreset, resolve_sequence_registry};
 
     #[test]
-    fn none_preset_preserves_current_compatibility_bindings_and_omits_defaults() {
+    fn none_preset_keeps_base_ui_bindings_and_omits_normal_defaults() {
         let registry = resolve_sequence_registry(&KeymapOptions {
             preset: Some(KeymapPreset::None),
             ..KeymapOptions::default()
@@ -251,22 +251,26 @@ mod tests {
 
         assert_eq!(
             resolver.handle_key_in_context(
-                KeyBindingContext {
-                    runtime: RuntimeConditionContext::normal(&extensions),
-                },
+                KeyBindingContext::normal(&extensions),
                 KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
             ),
             SequenceResolution::Dispatch(Command::CancelSearch)
         );
         assert_eq!(
             resolver.handle_key_in_context(
-                KeyBindingContext {
-                    runtime: RuntimeConditionContext::normal(&extensions),
-                },
+                KeyBindingContext::normal(&extensions),
                 KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
             ),
             SequenceResolution::Noop
         );
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext::normal(&extensions),
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Noop
+        );
+
         assert_eq!(
             resolver.handle_key_in_context(
                 KeyBindingContext {
@@ -288,6 +292,27 @@ mod tests {
                 KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
             ),
             SequenceResolution::Dispatch(Command::CloseHelp)
+        );
+    }
+
+    #[test]
+    fn none_preset_accepts_explicit_bindings() {
+        let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: Some(KeymapPreset::None),
+            bindings: vec![super::KeymapBinding::Exact {
+                keys: vec![crate::input::shortcut::ShortcutKey::char('j')],
+                command: Command::NextPage,
+            }],
+            ..KeymapOptions::default()
+        });
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext::normal(&ExtensionUiSnapshot::default()),
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::NextPage)
         );
     }
 }

@@ -225,10 +225,11 @@ Contract:
   history recall.
 - Help keys dispatch hidden help binding-only commands such as close and
   scroll.
-- `<esc>` is a non-configurable built-in binding for cancellation or close
-  behavior and remains available when the configurable keymap preset is
-  `none`. When a multi-key sequence is already pending, `<esc>` clears the
-  pending sequence instead of dispatching another command.
+- The `none` keymap preset omits normal-mode default bindings while keeping
+  base UI bindings for active surfaces such as palette input, help scrolling,
+  and search cancellation.
+- When a multi-key sequence is already pending, `<esc>` clears the pending
+  sequence instead of dispatching another command.
 
 Compatibility:
 - Changing a default key binding affects user muscle memory and help output; do

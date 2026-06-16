@@ -1,6 +1,6 @@
 use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 
-pub use super::keymap::{KeymapBinding, KeymapOptions, KeymapWhen};
+pub use super::keymap::{KeymapBinding, KeymapOptions, KeymapPreset, KeymapWhen};
 use super::types::Config;
 
 #[derive(Debug, Clone, Default, PartialEq)]

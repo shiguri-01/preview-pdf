@@ -11,7 +11,8 @@ use crate::palette::PaletteKind;
 
 mod presets;
 
-pub(crate) use presets::{KeymapPreset, build_default_sequence_registry};
+pub use presets::KeymapPreset;
+pub(crate) use presets::build_default_sequence_registry;
 
 const WHEN_NORMAL: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(Mode::Normal)];
 const WHEN_NORMAL_SEARCH_ACTIVE: [RuntimeCondition; 2] = [
@@ -148,18 +149,23 @@ pub enum KeymapBinding {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct KeymapOptions {
+    pub preset: Option<KeymapPreset>,
     pub bindings: Vec<KeymapBinding>,
 }
 
 impl KeymapOptions {
     pub(crate) fn merge(mut self, next: Self) -> Self {
+        self.preset = next.preset.or(self.preset);
         self.bindings.extend(next.bindings);
         self
     }
 }
 
 pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegistry {
-    let mut registry = KeymapPreset::Default.build_sequence_registry();
+    let mut registry = options
+        .preset
+        .unwrap_or(KeymapPreset::Default)
+        .build_sequence_registry();
 
     for binding in &options.bindings {
         match binding {
@@ -197,6 +203,10 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
     }
 
     registry
+}
+
+pub(crate) fn parse_keymap_preset(value: &str) -> AppResult<KeymapPreset> {
+    KeymapPreset::parse(value).ok_or(AppError::invalid_argument("unknown keymap preset"))
 }
 
 pub(crate) fn parse_keymap_when(value: &str) -> AppResult<KeymapWhen> {
@@ -359,6 +369,7 @@ mod tests {
     #[test]
     fn configured_bindings_resolve_against_their_when_condition() {
         let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: None,
             bindings: vec![
                 KeymapBinding::UnbindExact {
                     when: KeymapWhen::Normal,
@@ -407,6 +418,7 @@ mod tests {
     #[test]
     fn palette_input_history_conditions_select_distinct_bindings() {
         let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: None,
             bindings: vec![
                 KeymapBinding::Exact {
                     when: KeymapWhen::PaletteWithInputHistory,

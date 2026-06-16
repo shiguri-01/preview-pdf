@@ -65,6 +65,7 @@ struct RawConfig {
     cache: Option<RawCacheConfig>,
     view: Option<RawViewConfig>,
     input: Option<RawInputConfig>,
+    keymap_preset: Option<String>,
     keymap: Option<Vec<RawKeymapConfig>>,
     watch: Option<RawWatchConfig>,
 }
@@ -140,11 +141,19 @@ impl RawConfig {
                 .transpose()?
                 .unwrap_or_default(),
             input: self.input.map(InputOptions::from).unwrap_or_default(),
-            keymap: self
-                .keymap
-                .map(KeymapOptions::try_from)
-                .transpose()?
-                .unwrap_or_default(),
+            keymap: KeymapOptions {
+                preset: self
+                    .keymap_preset
+                    .as_deref()
+                    .map(super::keymap::parse_keymap_preset)
+                    .transpose()?,
+                bindings: self
+                    .keymap
+                    .map(KeymapOptions::try_from)
+                    .transpose()?
+                    .unwrap_or_default()
+                    .bindings,
+            },
             watch: self.watch.map(WatchOptions::from).unwrap_or_default(),
         })
     }
@@ -230,7 +239,10 @@ impl TryFrom<Vec<RawKeymapConfig>> for KeymapOptions {
             })
             .collect::<AppResult<Vec<_>>>()?;
 
-        Ok(Self { bindings })
+        Ok(Self {
+            preset: None,
+            bindings,
+        })
     }
 }
 
@@ -367,7 +379,7 @@ mod tests {
 
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
     use crate::command::Command;
-    use crate::config::{AppOptionsResolver, KeymapBinding, KeymapWhen};
+    use crate::config::{AppOptionsResolver, KeymapBinding, KeymapPreset, KeymapWhen};
     use crate::extension::ExtensionUiSnapshot;
     use crate::input::sequence::{
         DEFAULT_SEQUENCE_TIMEOUT, KeyBindingContext, SequenceResolution, SequenceResolver,
@@ -554,6 +566,47 @@ mod tests {
     }
 
     #[test]
+    fn keymap_preset_none_starts_from_empty_keymap() {
+        let path = unique_temp_path("keymap-preset-none.toml");
+        fs::write(
+            &path,
+            r#"
+            keymap_preset = "none"
+
+            [[keymap]]
+            when = "normal"
+            key = "x"
+            command = "next-page"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should parse");
+        assert_eq!(options.keymap.preset, Some(KeymapPreset::None));
+
+        let resolved = AppOptionsResolver::new().apply_options(options).resolve();
+        let mut resolver =
+            SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
+
+        assert_eq!(
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE)
+            ),
+            SequenceResolution::Noop
+        );
+        assert_eq!(
+            handle_normal_key(
+                &mut resolver,
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)
+            ),
+            SequenceResolution::Dispatch(Command::NextPage)
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
     fn keymap_config_allows_literal_less_than_binding() {
         let path = unique_temp_path("keymap-less-than.toml");
         fs::write(
@@ -600,6 +653,26 @@ mod tests {
         let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
         assert!(
             err.to_string().contains("unknown keymap condition"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_rejects_unknown_preset() {
+        let path = unique_temp_path("bad-keymap-preset.toml");
+        fs::write(
+            &path,
+            r#"
+            keymap_preset = "bob"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
+        assert!(
+            err.to_string().contains("unknown keymap preset"),
             "unexpected error: {err}"
         );
 

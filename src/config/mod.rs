@@ -9,7 +9,7 @@ pub use file::{
     load_options_from_explicit_path,
 };
 pub use options::{
-    AppOptions, CacheOptions, InputOptions, KeymapBinding, KeymapOptions, KeymapWhen,
+    AppOptions, CacheOptions, InputOptions, KeymapBinding, KeymapOptions, KeymapPreset, KeymapWhen,
     RenderOptions, ViewOptions, WatchOptions,
 };
 pub use policy::{

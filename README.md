@@ -40,9 +40,12 @@ cargo install preview-pdf
 `$XDG_CONFIG_HOME/pvf/config.toml`, `$HOME/.config/pvf/config.toml`, or
 `%APPDATA%/pvf/config.toml`.
 
-The keymap can be patched with `[[keymap]]` entries:
+The keymap can be selected with `keymap_preset` and patched with `[[keymap]]`
+entries:
 
 ```toml
+keymap_preset = "default"
+
 [[keymap]]
 when = "normal"
 key = "j"

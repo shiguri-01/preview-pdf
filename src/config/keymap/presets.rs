@@ -23,13 +23,20 @@ const WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE: [RuntimeCondition; 2] = [
 const WHEN_HELP: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(crate::app::Mode::Help)];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum KeymapPreset {
+pub enum KeymapPreset {
     Default,
-    #[allow(dead_code, reason = "reserved for config-owned empty keymap preset")]
     None,
 }
 
 impl KeymapPreset {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "default" => Some(Self::Default),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+
     pub(crate) fn build_sequence_registry(self) -> SequenceRegistry {
         match self {
             Self::Default => build_default_sequence_registry(),

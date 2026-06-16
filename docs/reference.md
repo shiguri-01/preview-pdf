@@ -207,6 +207,8 @@ Contract:
   representation. Unbound Alt-only chords are not treated as printable input.
 - Configured keymap entries use the same key labels shown in help, such as
   `gg`, `<c-o>`, `<down>`, and `[count]G`.
+- `keymap_preset` selects the starting keymap. Supported values are `default`
+  and `none`.
 - Configured keymap entries use one `when` selector, one `key` sequence, and one
   `command` value. `when` names where the binding is active; `key` names the
   sequence; `command` names the command to dispatch, or `false` to unbind.

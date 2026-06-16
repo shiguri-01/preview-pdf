@@ -1,26 +1,11 @@
 use crate::command::{Command, PanAmount, PanDirection};
-use crate::condition::{ConditionExpr, RuntimeCondition};
+use crate::condition::ConditionExpr;
 use crate::palette::PaletteKind;
 
 use crate::input::sequence::{GeneratedCommand, GeneratedKeyMatcher, SequenceRegistry};
 use crate::input::shortcut::ShortcutKey;
 
-pub(crate) const WHEN_NORMAL: [RuntimeCondition; 1] =
-    [RuntimeCondition::ModeIs(crate::app::Mode::Normal)];
-const WHEN_NORMAL_SEARCH_ACTIVE: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(crate::app::Mode::Normal),
-    RuntimeCondition::SearchIsActive,
-];
-const WHEN_PALETTE: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(crate::app::Mode::Palette)];
-const WHEN_PALETTE_INPUT_HISTORY_AVAILABLE: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(crate::app::Mode::Palette),
-    RuntimeCondition::PaletteInputHistoryIsAvailable,
-];
-const WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(crate::app::Mode::Palette),
-    RuntimeCondition::PaletteInputHistoryIsUnavailable,
-];
-const WHEN_HELP: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(crate::app::Mode::Help)];
+use super::KeymapWhen;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeymapPreset {
@@ -69,7 +54,7 @@ fn build_base_sequence_registry() -> SequenceRegistry {
 }
 
 fn register_surface_open_bindings(registry: &mut SequenceRegistry) {
-    let when = ConditionExpr::All(&WHEN_NORMAL);
+    let when = KeymapWhen::Normal.condition();
     register_exact_binding(
         registry,
         when,
@@ -89,7 +74,7 @@ fn register_surface_open_bindings(registry: &mut SequenceRegistry) {
 }
 
 fn register_page_navigation_bindings(registry: &mut SequenceRegistry) {
-    let when = ConditionExpr::All(&WHEN_NORMAL);
+    let when = KeymapWhen::Normal.condition();
     register_exact_binding(registry, when, &[ShortcutKey::char('j')], Command::NextPage);
     register_exact_binding(registry, when, &[ShortcutKey::char('k')], Command::PrevPage);
     register_exact_binding(
@@ -109,7 +94,7 @@ fn register_page_navigation_bindings(registry: &mut SequenceRegistry) {
 }
 
 fn register_view_bindings(registry: &mut SequenceRegistry) {
-    let when = ConditionExpr::All(&WHEN_NORMAL);
+    let when = KeymapWhen::Normal.condition();
     register_exact_binding(
         registry,
         when,
@@ -157,7 +142,7 @@ fn register_view_bindings(registry: &mut SequenceRegistry) {
 }
 
 fn register_history_bindings(registry: &mut SequenceRegistry) {
-    let when = ConditionExpr::All(&WHEN_NORMAL);
+    let when = KeymapWhen::Normal.condition();
     register_exact_binding(
         registry,
         when,
@@ -173,7 +158,7 @@ fn register_history_bindings(registry: &mut SequenceRegistry) {
 }
 
 fn register_search_navigation_bindings(registry: &mut SequenceRegistry) {
-    let when = ConditionExpr::All(&WHEN_NORMAL);
+    let when = KeymapWhen::Normal.condition();
     register_exact_binding(
         registry,
         when,
@@ -191,7 +176,7 @@ fn register_search_navigation_bindings(registry: &mut SequenceRegistry) {
 fn register_quit_binding(registry: &mut SequenceRegistry) {
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_NORMAL),
+        KeymapWhen::Normal.condition(),
         &[ShortcutKey::char('q')],
         Command::Quit,
     );
@@ -202,7 +187,7 @@ fn register_search_cancellation_binding(registry: &mut SequenceRegistry) {
 
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_NORMAL_SEARCH_ACTIVE),
+        KeymapWhen::NormalSearchActive.condition(),
         &[ShortcutKey::key(KeyCode::Esc)],
         Command::CancelSearch,
     );
@@ -213,192 +198,192 @@ fn register_palette_bindings(registry: &mut SequenceRegistry) {
 
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::Esc)],
         Command::ClosePalette,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::Enter)],
         Command::PaletteSubmit,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::Tab)],
         Command::PaletteComplete,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('p')],
         Command::PaletteSelectPrev,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('n')],
         Command::PaletteSelectNext,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_AVAILABLE),
+        KeymapWhen::PaletteWithInputHistory.condition(),
         &[ShortcutKey::key(KeyCode::Up)],
         Command::PaletteInputHistoryOlder,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_AVAILABLE),
+        KeymapWhen::PaletteWithInputHistory.condition(),
         &[ShortcutKey::key(KeyCode::Down)],
         Command::PaletteInputHistoryNewer,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE),
+        KeymapWhen::PaletteNoInputHistory.condition(),
         &[ShortcutKey::key(KeyCode::Up)],
         Command::PaletteSelectPrev,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE_INPUT_HISTORY_UNAVAILABLE),
+        KeymapWhen::PaletteNoInputHistory.condition(),
         &[ShortcutKey::key(KeyCode::Down)],
         Command::PaletteSelectNext,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::Backspace)],
         Command::TextDeleteBackward,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('h')],
         Command::TextDeleteBackward,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::Delete)],
         Command::TextDeleteForward,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::new(KeyCode::Delete, KeyModifiers::CONTROL)],
         Command::TextDeleteNextWord,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::Left)],
         Command::TextMoveLeft,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('b')],
         Command::TextMoveLeft,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::Right)],
         Command::TextMoveRight,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('f')],
         Command::TextMoveRight,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::Home)],
         Command::TextMoveStart,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('a')],
         Command::TextMoveStart,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::key(KeyCode::End)],
         Command::TextMoveEnd,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('e')],
         Command::TextMoveEnd,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::new(KeyCode::Left, KeyModifiers::CONTROL)],
         Command::TextMovePrevWord,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::alt('b')],
         Command::TextMovePrevWord,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::new(KeyCode::Right, KeyModifiers::CONTROL)],
         Command::TextMoveNextWord,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::alt('f')],
         Command::TextMoveNextWord,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('w')],
         Command::TextDeletePrevWord,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::alt('d')],
         Command::TextDeleteNextWord,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::new(KeyCode::Backspace, KeyModifiers::ALT)],
         Command::TextDeletePrevWord,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('u')],
         Command::TextDeleteLine,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('k')],
         Command::TextDeleteToEnd,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         &[ShortcutKey::ctrl('y')],
         Command::TextYank,
     );
     registry.register_generated(
-        ConditionExpr::All(&WHEN_PALETTE),
+        KeymapWhen::Palette.condition(),
         GeneratedKeyMatcher::PrintableCharacter,
         GeneratedCommand::TextInsert,
     );
@@ -409,31 +394,31 @@ fn register_help_bindings(registry: &mut SequenceRegistry) {
 
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_HELP),
+        KeymapWhen::Help.condition(),
         &[ShortcutKey::key(KeyCode::Esc)],
         Command::CloseHelp,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_HELP),
+        KeymapWhen::Help.condition(),
         &[ShortcutKey::char('j')],
         Command::HelpScrollDown,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_HELP),
+        KeymapWhen::Help.condition(),
         &[ShortcutKey::key(KeyCode::Down)],
         Command::HelpScrollDown,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_HELP),
+        KeymapWhen::Help.condition(),
         &[ShortcutKey::char('k')],
         Command::HelpScrollUp,
     );
     register_exact_binding(
         registry,
-        ConditionExpr::All(&WHEN_HELP),
+        KeymapWhen::Help.condition(),
         &[ShortcutKey::key(KeyCode::Up)],
         Command::HelpScrollUp,
     );

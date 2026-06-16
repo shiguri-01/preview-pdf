@@ -66,7 +66,7 @@ struct RawConfig {
     view: Option<RawViewConfig>,
     input: Option<RawInputConfig>,
     keymap_preset: Option<String>,
-    keymap: Option<Vec<RawKeymapConfig>>,
+    keymap: Option<Vec<RawKeymapEntry>>,
     watch: Option<RawWatchConfig>,
 }
 
@@ -109,7 +109,7 @@ struct RawInputConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-struct RawKeymapConfig {
+struct RawKeymapEntry {
     when: String,
     key: String,
     command: RawKeymapCommand,
@@ -141,19 +141,7 @@ impl RawConfig {
                 .transpose()?
                 .unwrap_or_default(),
             input: self.input.map(InputOptions::from).unwrap_or_default(),
-            keymap: KeymapOptions {
-                preset: self
-                    .keymap_preset
-                    .as_deref()
-                    .map(super::keymap::parse_keymap_preset)
-                    .transpose()?,
-                bindings: self
-                    .keymap
-                    .map(KeymapOptions::try_from)
-                    .transpose()?
-                    .unwrap_or_default()
-                    .bindings,
-            },
+            keymap: parse_keymap_options(self.keymap_preset.as_deref(), self.keymap)?,
             watch: self.watch.map(WatchOptions::from).unwrap_or_default(),
         })
     }
@@ -219,31 +207,31 @@ impl From<RawInputConfig> for InputOptions {
     }
 }
 
-impl TryFrom<Vec<RawKeymapConfig>> for KeymapOptions {
-    type Error = AppError;
-
-    fn try_from(raw: Vec<RawKeymapConfig>) -> Result<Self, Self::Error> {
-        let bindings = raw
+fn parse_keymap_options(
+    preset: Option<&str>,
+    entries: Option<Vec<RawKeymapEntry>>,
+) -> AppResult<KeymapOptions> {
+    Ok(KeymapOptions {
+        preset: preset.map(super::keymap::parse_keymap_preset).transpose()?,
+        bindings: entries
+            .unwrap_or_default()
             .iter()
-            .map(|entry| {
-                let command = match &entry.command {
-                    RawKeymapCommand::Command(command) => Some(command.as_str()),
-                    RawKeymapCommand::Unbind(false) => None,
-                    RawKeymapCommand::Unbind(true) => {
-                        return Err(AppError::invalid_argument(
-                            "keymap command must be a command string or false",
-                        ));
-                    }
-                };
-                super::keymap::parse_keymap_binding(&entry.when, &entry.key, command)
-            })
-            .collect::<AppResult<Vec<_>>>()?;
+            .map(parse_keymap_entry)
+            .collect::<AppResult<Vec<_>>>()?,
+    })
+}
 
-        Ok(Self {
-            preset: None,
-            bindings,
-        })
-    }
+fn parse_keymap_entry(entry: &RawKeymapEntry) -> AppResult<super::keymap::KeymapBinding> {
+    let command = match &entry.command {
+        RawKeymapCommand::Command(command) => Some(command.as_str()),
+        RawKeymapCommand::Unbind(false) => None,
+        RawKeymapCommand::Unbind(true) => {
+            return Err(AppError::invalid_argument(
+                "keymap command must be a command string or false",
+            ));
+        }
+    };
+    super::keymap::parse_keymap_binding(&entry.when, &entry.key, command)
 }
 
 impl From<RawWatchConfig> for WatchOptions {

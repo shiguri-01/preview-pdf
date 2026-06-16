@@ -16,7 +16,7 @@ or install from crates.io:
 cargo install preview-pdf
 ```
 
-## Keys
+## Keymap
 
 | Key | Action |
 |---|---|

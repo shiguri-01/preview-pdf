@@ -33,10 +33,6 @@ pub fn build_default_sequence_registry() -> SequenceRegistry {
     registry
 }
 
-pub(crate) fn build_none_sequence_registry() -> SequenceRegistry {
-    build_base_sequence_registry()
-}
-
 fn build_base_sequence_registry() -> SequenceRegistry {
     let mut registry = SequenceRegistry::new();
     register_search_cancellation_binding(&mut registry);

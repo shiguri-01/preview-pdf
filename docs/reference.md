@@ -79,9 +79,11 @@ Contract:
 - `--config` and `--no-config` are mutually exclusive.
 - Partial config files leave unspecified options absent so later sources and
   defaults can still apply.
-- Top-level `[keymap]` config patches the normal-mode key sequence registry.
+- `[[keymap]]` config entries patch the shared conditional key sequence
+  registry. Each entry has `when`, `key`, and `command` fields. `command` is
+  either a command string or `false` to unbind the key.
 - Validation and sanitization that users can observe, such as enum rejection,
-  keymap preset and command validation, safe duration minimums, and zoom bounds,
+  keymap condition and command validation, safe duration minimums, and zoom bounds,
   are part of the config contract.
 
 Compatibility:
@@ -120,7 +122,7 @@ Contract:
   invocation policy and `enabled_when` runtime condition allow it.
 - Internal commands are runtime plumbing and must not appear in the command
   palette.
-- Binding-only commands can be invoked from key bindings but not from direct
+- Binding-only commands can be invoked from the keymap but not from direct
   command palette input.
 - Internal-only commands can be invoked only as internal follow-ups that
   complete another user action.
@@ -143,10 +145,10 @@ Contract:
 - Typed command submission is separate from listing: a known typed command is
   parsed and then validated by dispatch policy, so "not listed" does not mean
   "unknown".
-- Help surfaces may describe configured commands and bindings without hiding
+- Help surfaces may describe configured commands and keymap entries without hiding
   them solely because `enabled_when` is currently false; a surface that claims
   to show only currently runnable actions must evaluate `enabled_when`.
-- Runtime condition vocabulary is shared by commands and key bindings. A
+- Runtime condition vocabulary is shared by commands and keymap entries. A
   palette-kind condition is true only when a palette is open and its active
   kind matches; a closed palette does not match any kind.
 - Command handlers return `CommandExecution`: an `Applied` or `Noop` outcome
@@ -192,7 +194,7 @@ Test coverage:
 - Command registry, parser, validation, and dispatch tests in [src/command/](../src/command/).
 - Command-palette provider tests where command metadata affects palette UI.
 
-## Key Bindings
+## Keymap
 
 Orientation:
 - Terminal key events are converted to typed command requests before behavior is
@@ -200,12 +202,22 @@ Orientation:
   conditional sequence registry.
 
 Contract:
-- Printable bindings are defined by resulting characters, not by physical keys.
+- Printable keymap entries are defined by resulting characters, not by physical keys.
 - Runtime `Meta` key events are normalized to the `Alt`/`<m-...>` shortcut
   representation. Unbound Alt-only chords are not treated as printable input.
-- Configured key bindings use the same key labels shown in help, such as
+- Configured keymap entries use the same key labels shown in help, such as
   `gg`, `<c-o>`, `<down>`, and `[count]G`.
-- Key binding `enabled_when` uses the same runtime condition vocabulary as
+- Configured keymap entries use one `when` selector, one `key` sequence, and one
+  `command` value. `when` names where the binding is active; `key` names the
+  sequence; `command` names the command to dispatch, or `false` to unbind.
+- When multiple configured keymap entries use the same `when` selector and `key`
+  sequence, the later entry replaces the earlier entry.
+- Supported `when` selectors are `normal`, `normal.search-active`,
+  `normal.search-inactive`, `help`, `palette`, `palette.command`,
+  `palette.search`, `palette.search-results`, `palette.history`,
+  `palette.outline`, `palette.with-input-history`, and
+  `palette.no-input-history`.
+- Keymap `enabled_when` uses the same runtime condition vocabulary as
   command `enabled_when`; do not add a separate keymap-only condition enum.
 - Every key input and sequence timeout resolves against the current runtime
   condition state. Pending sequences do not preserve the state in which they
@@ -214,28 +226,25 @@ Contract:
 - Multi-key sequences can remain pending until resolved or timed out.
 - Numeric prefixes are parsed by the input sequence layer and dispatch typed
   commands.
-- All key bindings dispatch with the binding invocation source, reference known
+- All keymap entries dispatch with the binding invocation source, reference known
   command ids, and satisfy command invocation policy.
-- Configured key bindings currently receive a normal-mode runtime condition and
-  must reference known app-target commands that can be invoked from bindings.
-  Built-in surface bindings carry palette or help runtime conditions. Dispatch
-  still validates the resolved command before applying behavior.
+- Configured keymap entries may target normal, help, and palette conditions.
+  Palette-target commands require a palette `when` selector; help-target
+  commands require `when = "help"`. Dispatch still validates the resolved
+  command before applying behavior.
 - Palette keys dispatch hidden palette binding-only commands such as
   submit, complete, selection movement, input editing, and palette input
   history recall.
 - Help keys dispatch hidden help binding-only commands such as close and
   scroll.
-- The `none` keymap preset omits normal-mode default bindings while keeping
-  base UI bindings for active surfaces such as palette input, help scrolling,
-  and search cancellation.
 - When a multi-key sequence is already pending, `<esc>` clears the pending
   sequence instead of dispatching another command.
 
 Compatibility:
-- Changing a default key binding affects user muscle memory and help output; do
+- Changing a default keymap entry affects user muscle memory and help output; do
   it intentionally with tests.
 - Complete key inventories belong in `src/input/keymap.rs` and rendered help.
-  Docs may summarize categories of bindings, but should not own the table.
+  Docs may summarize categories of keymap entries, but should not own the table.
 
 Owned by:
 - [src/input/keymap.rs](../src/input/keymap.rs)
@@ -252,7 +261,7 @@ Test coverage:
 Orientation:
 - Palette behavior splits into common session mechanics and provider-owned
   semantics. The common path owns opening, palette input state, selection,
-  completion, submit, and closing. Palette key bindings turn terminal keys into
+  completion, submit, and closing. Palette keymap entries turn terminal keys into
   commands when their runtime conditions match; providers own candidate meaning
   and the effects returned for completion and submit.
 

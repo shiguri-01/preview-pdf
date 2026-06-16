@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -66,7 +65,7 @@ struct RawConfig {
     cache: Option<RawCacheConfig>,
     view: Option<RawViewConfig>,
     input: Option<RawInputConfig>,
-    keymap: Option<RawKeymapConfig>,
+    keymap: Option<Vec<RawKeymapConfig>>,
     watch: Option<RawWatchConfig>,
 }
 
@@ -108,12 +107,18 @@ struct RawInputConfig {
     sequence_timeout_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
-#[serde(default)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 struct RawKeymapConfig {
-    preset: Option<String>,
-    unbind: Vec<String>,
-    bindings: BTreeMap<String, String>,
+    when: String,
+    key: String,
+    command: RawKeymapCommand,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+enum RawKeymapCommand {
+    Command(String),
+    Unbind(bool),
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
@@ -205,31 +210,27 @@ impl From<RawInputConfig> for InputOptions {
     }
 }
 
-impl TryFrom<RawKeymapConfig> for KeymapOptions {
+impl TryFrom<Vec<RawKeymapConfig>> for KeymapOptions {
     type Error = AppError;
 
-    fn try_from(raw: RawKeymapConfig) -> Result<Self, Self::Error> {
-        let preset = raw
-            .preset
-            .as_deref()
-            .map(super::keymap::parse_keymap_preset)
-            .transpose()?;
-        let unbind = raw
-            .unbind
-            .iter()
-            .map(|key| super::keymap::parse_keymap_target(key))
-            .collect::<AppResult<Vec<_>>>()?;
+    fn try_from(raw: Vec<RawKeymapConfig>) -> Result<Self, Self::Error> {
         let bindings = raw
-            .bindings
             .iter()
-            .map(|(key, command)| super::keymap::parse_keymap_binding(key, command))
+            .map(|entry| {
+                let command = match &entry.command {
+                    RawKeymapCommand::Command(command) => Some(command.as_str()),
+                    RawKeymapCommand::Unbind(false) => None,
+                    RawKeymapCommand::Unbind(true) => {
+                        return Err(AppError::invalid_argument(
+                            "keymap command must be a command string or false",
+                        ));
+                    }
+                };
+                super::keymap::parse_keymap_binding(&entry.when, &entry.key, command)
+            })
             .collect::<AppResult<Vec<_>>>()?;
 
-        Ok(Self {
-            preset,
-            unbind,
-            bindings,
-        })
+        Ok(Self { bindings })
     }
 }
 
@@ -366,7 +367,7 @@ mod tests {
 
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
     use crate::command::Command;
-    use crate::config::{AppOptionsResolver, KeymapBinding, KeymapPreset, KeymapTarget};
+    use crate::config::{AppOptionsResolver, KeymapBinding, KeymapWhen};
     use crate::extension::ExtensionUiSnapshot;
     use crate::input::sequence::{
         DEFAULT_SEQUENCE_TIMEOUT, KeyBindingContext, SequenceResolution, SequenceResolver,
@@ -464,41 +465,46 @@ mod tests {
     }
 
     #[test]
-    fn explicit_config_reads_keymap_section() {
+    fn explicit_config_reads_keymap_entries() {
         let path = unique_temp_path("keymap.toml");
         fs::write(
             &path,
             r#"
-            [keymap]
-            preset = "none"
-            unbind = ["j", "[count]G"]
+            [[keymap]]
+            when = "normal"
+            key = "<down>"
+            command = "next-page"
 
-            [keymap.bindings]
-            "<down>" = "next-page"
-            "[count]G" = "goto-page"
+            [[keymap]]
+            when = "normal"
+            key = "[count]G"
+            command = "goto-page"
+
+            [[keymap]]
+            when = "normal"
+            key = "j"
+            command = false
             "#,
         )
         .expect("config file should be written");
 
         let options = load_options_from_explicit_path(&path).expect("config should parse");
-        assert_eq!(options.keymap.preset, Some(KeymapPreset::None));
-        assert_eq!(
-            options.keymap.unbind,
-            vec![
-                KeymapTarget::Exact(vec![ShortcutKey::char('j')]),
-                KeymapTarget::NumericPrefix(ShortcutKey::char('G')),
-            ]
-        );
         assert_eq!(
             options.keymap.bindings,
             vec![
                 KeymapBinding::Exact {
+                    when: KeymapWhen::Normal,
                     keys: vec![ShortcutKey::key(KeyCode::Down)],
                     command: Command::NextPage,
                 },
                 KeymapBinding::NumericPrefix {
+                    when: KeymapWhen::Normal,
                     suffix: ShortcutKey::char('G'),
                     command_id: "goto-page",
+                },
+                KeymapBinding::UnbindExact {
+                    when: KeymapWhen::Normal,
+                    keys: vec![ShortcutKey::char('j')],
                 },
             ]
         );
@@ -512,12 +518,15 @@ mod tests {
         fs::write(
             &path,
             r#"
-            [keymap]
-            preset = "none"
+            [[keymap]]
+            when = "normal"
+            key = "<down>"
+            command = "next-page"
 
-            [keymap.bindings]
-            "<down>" = "next-page"
-            "[count]G" = "goto-page"
+            [[keymap]]
+            when = "normal"
+            key = "j"
+            command = false
             "#,
         )
         .expect("config file should be written");
@@ -541,28 +550,6 @@ mod tests {
             ),
             SequenceResolution::Dispatch(Command::NextPage)
         );
-        assert_eq!(
-            handle_normal_key(
-                &mut resolver,
-                KeyEvent::new(KeyCode::Char('4'), KeyModifiers::NONE)
-            ),
-            SequenceResolution::Pending
-        );
-        assert_eq!(
-            handle_normal_key(
-                &mut resolver,
-                KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE)
-            ),
-            SequenceResolution::Pending
-        );
-        assert_eq!(
-            handle_normal_key(
-                &mut resolver,
-                KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE)
-            ),
-            SequenceResolution::Dispatch(Command::GotoPage { page: 42 })
-        );
-
         fs::remove_file(&path).expect("config file should be removed");
     }
 
@@ -572,11 +559,10 @@ mod tests {
         fs::write(
             &path,
             r#"
-            [keymap]
-            preset = "none"
-
-            [keymap.bindings]
-            "<" = "prev-page"
+            [[keymap]]
+            when = "normal"
+            key = "<"
+            command = "prev-page"
             "#,
         )
         .expect("config file should be written");
@@ -598,20 +584,92 @@ mod tests {
     }
 
     #[test]
-    fn keymap_config_rejects_unknown_preset() {
-        let path = unique_temp_path("bad-keymap-preset.toml");
+    fn keymap_config_rejects_unknown_when() {
+        let path = unique_temp_path("bad-keymap-when.toml");
         fs::write(
             &path,
             r#"
-            [keymap]
-            preset = "emacs"
+            [[keymap]]
+            when = "emacs"
+            key = "x"
+            command = "next-page"
             "#,
         )
         .expect("config file should be written");
 
         let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
         assert!(
-            err.to_string().contains("unknown keymap preset"),
+            err.to_string().contains("unknown keymap condition"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_rejects_legacy_table_shape() {
+        let path = unique_temp_path("legacy-keymap.toml");
+        fs::write(
+            &path,
+            r#"
+            [keymap]
+            preset = "none"
+
+            [keymap.bindings]
+            "j" = "next-page"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
+        assert!(
+            err.to_string().contains("invalid"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_rejects_true_command_value() {
+        let path = unique_temp_path("true-keymap-command.toml");
+        fs::write(
+            &path,
+            r#"
+            [[keymap]]
+            when = "normal"
+            key = "j"
+            command = true
+            "#,
+        )
+        .expect("config file should be written");
+
+        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
+        assert!(
+            err.to_string()
+                .contains("command must be a command string or false"),
+            "unexpected error: {err}"
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn keymap_config_requires_command() {
+        let path = unique_temp_path("missing-keymap-action.toml");
+        fs::write(
+            &path,
+            r#"
+            [[keymap]]
+            when = "normal"
+            key = "j"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
+        assert!(
+            err.to_string().contains("missing field `command`"),
             "unexpected error: {err}"
         );
 
@@ -624,8 +682,10 @@ mod tests {
         fs::write(
             &path,
             r#"
-            [keymap.bindings]
-            "x" = "submit-search needle"
+            [[keymap]]
+            when = "normal"
+            key = "x"
+            command = "submit-search needle"
             "#,
         )
         .expect("config file should be written");
@@ -650,8 +710,10 @@ mod tests {
                 &path,
                 format!(
                     r#"
-                    [keymap.bindings]
-                    "x" = "{command}"
+                    [[keymap]]
+                    when = "normal"
+                    key = "x"
+                    command = "{command}"
                     "#
                 ),
             )
@@ -670,19 +732,28 @@ mod tests {
     }
 
     #[test]
-    fn keymap_config_rejects_escape_bindings() {
-        let path = unique_temp_path("bad-keymap-key.toml");
+    fn keymap_config_accepts_single_escape_bindings() {
+        let path = unique_temp_path("esc-keymap-key.toml");
         fs::write(
             &path,
             r#"
-            [keymap.bindings]
-            "<esc>" = "quit"
+            [[keymap]]
+            when = "normal"
+            key = "<esc>"
+            command = "quit"
             "#,
         )
         .expect("config file should be written");
 
-        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
-        assert!(err.to_string().contains("<esc>"), "unexpected error: {err}");
+        let options = load_options_from_explicit_path(&path).expect("config should load");
+        assert_eq!(
+            options.keymap.bindings,
+            vec![KeymapBinding::Exact {
+                when: KeymapWhen::Normal,
+                keys: vec![ShortcutKey::key(KeyCode::Esc)],
+                command: Command::Quit,
+            }]
+        );
 
         fs::remove_file(&path).expect("config file should be removed");
     }
@@ -693,8 +764,10 @@ mod tests {
         fs::write(
             &path,
             r#"
-            [keymap.bindings]
-            "<enter>" = "next-page"
+            [[keymap]]
+            when = "normal"
+            key = "<enter>"
+            command = "next-page"
             "#,
         )
         .expect("config file should be written");
@@ -703,6 +776,7 @@ mod tests {
         assert_eq!(
             options.keymap.bindings,
             vec![KeymapBinding::Exact {
+                when: KeymapWhen::Normal,
                 keys: vec![ShortcutKey::key(KeyCode::Enter)],
                 command: Command::NextPage,
             }]
@@ -730,8 +804,6 @@ mod tests {
         assert_eq!(options.render.max_render_scale, None);
         assert_eq!(options.view.initial_page, None);
         assert_eq!(options.input.sequence_timeout_ms, None);
-        assert_eq!(options.keymap.preset, None);
-        assert!(options.keymap.unbind.is_empty());
         assert!(options.keymap.bindings.is_empty());
         assert_eq!(options.watch.enabled, None);
 

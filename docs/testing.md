@@ -45,7 +45,7 @@ protection: parser behavior, compatibility rules, cross-module consistency,
 stale-result handling, and observable user-facing outcomes.
 
 Use both when a topic needs a mental model and a guardrail. For example,
-[reference.md](reference.md) explains that key bindings are owned by the input registry and
+[reference.md](reference.md) explains that keymap entries are owned by the input registry and
 must resolve to invocable commands; command tests verify that registry
 consistency.
 
@@ -90,7 +90,7 @@ through the subsystem boundary. If not, add an in-file unit test near the code.
 Prefer writing or updating the test before changing behavior.
 
 Use test-first work for bug fixes, command parsing or dispatch behavior, key
-binding resolution, palette interaction semantics, extension event propagation,
+keymap resolution, palette interaction semantics, extension event propagation,
 render stale-result handling, config compatibility, and CLI-visible behavior.
 
 For pure refactors, first check whether existing tests already cover the

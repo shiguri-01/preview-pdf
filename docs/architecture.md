@@ -29,7 +29,7 @@ can operate on resolved policies rather than re-reading config or CLI state.
   coordination.
 - [src/command/](../src/command/) owns command ids, metadata, parsing, source-aware validation,
   dispatch, typed command outcomes, and command effects.
-- [src/input/](../src/input/) owns key sequence normalization, built-in key bindings, numeric
+- [src/input/](../src/input/) owns key sequence normalization, built-in keymap entries, numeric
   prefixes, and input history used by palette inputs.
 - [src/palette/](../src/palette/) owns palette sessions, provider lookup, candidate matching,
   selection state, completion, submit, cancel, palette input state, and rendered
@@ -59,7 +59,7 @@ Palette providers receive read-only app and extension snapshots. They should
 request behavior by returning typed effects or commands instead of taking
 `AppState` directly. Surface-local operations such as palette submit, palette
 selection, palette input editing, palette input history recall, and help
-scrolling enter the same command dispatch path as normal-mode key bindings.
+scrolling enter the same command dispatch path as normal-mode keymap entries.
 
 Extensions own extension-local state and observe `AppEvent` values. Shared UI
 data crosses from extensions to palettes through `ExtensionUiSnapshot`.
@@ -94,14 +94,14 @@ communication uses snapshots, command requests, events, or worker completions.
 Terminal input enters as `DomainEvent::Input`.
 
 1. The loop router delegates input to app input handling.
-2. App input handling builds a key binding context from the active surface and
+2. App input handling builds a keymap context from the active surface and
    shared runtime condition state, such as palette kind, palette input history
    availability, and active search.
 3. Extension input hooks may intercept extension-local inputs in normal mode
    when no pending key sequence owns the input.
-4. The input sequence resolver evaluates every binding against the current
+4. The input sequence resolver evaluates every keymap entry against the current
    shared runtime conditions and maps matching key sequences to typed commands.
-   All resolved key bindings dispatch as binding input.
+   All resolved keymap entries dispatch as binding input.
 5. Command dispatch validates invocation source, resolves the required target
    such as app, active palette, or active help, checks the
    command `enabled_when` runtime condition, applies behavior, and applies

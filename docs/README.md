@@ -24,7 +24,7 @@ source for architecture, reference contracts, and testing guidance.
   flow, subsystem boundaries, ownership, or event routing.
 - Put stable developer-facing behavior in [reference.md](reference.md) when a change
   intentionally changes CLI behavior, config compatibility, command policy,
-  key binding resolution, palette semantics, extension host behavior, render
+  keymap resolution, palette semantics, extension host behavior, render
   stale-result behavior, cache behavior visible outside the implementation, or
   performance diagnostics contracts.
 - Put testing policy in [testing.md](testing.md) when a change affects how behavior should

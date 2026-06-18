@@ -59,24 +59,6 @@ pub fn validate_command_for_policy(
     validate_command_spec_for_policy(spec, ctx)
 }
 
-pub fn validate_command_for_normal_keymap(command: &Command) -> AppResult<()> {
-    let Some(spec) = spec_for_command(command) else {
-        return Err(AppError::unsupported(
-            "command spec should exist for typed command",
-        ));
-    };
-    validate_command_spec_for_normal_keymap(spec)?;
-    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Binding)
-}
-
-pub fn validate_command_id_for_normal_keymap(id: &str) -> AppResult<()> {
-    let Some(spec) = find_command_spec(id) else {
-        return Err(AppError::invalid_argument("unknown command id"));
-    };
-    validate_command_spec_for_normal_keymap(spec)?;
-    validate_command_spec_invocation_for_source(spec, CommandInvocationSource::Binding)
-}
-
 pub fn rejection_message_for_command(
     command: &Command,
     ctx: &CommandPolicyContext<'_>,
@@ -114,18 +96,6 @@ fn validate_command_spec_invocation_for_source(
     Err(AppError::invalid_argument(format!(
         "{} is an internal command and cannot be invoked directly",
         spec.id
-    )))
-}
-
-fn validate_command_spec_for_normal_keymap(spec: CommandSpec) -> AppResult<()> {
-    if spec.target == CommandTargetRequirement::App {
-        return Ok(());
-    }
-
-    Err(AppError::invalid_argument(format!(
-        "{} cannot be bound in normal keymap because it {}",
-        spec.id,
-        target_requirement_label(spec.target)
     )))
 }
 
@@ -218,14 +188,6 @@ fn target_unavailable_message(spec: CommandSpec) -> String {
     }
 }
 
-fn target_requirement_label(target: CommandTargetRequirement) -> &'static str {
-    match target {
-        CommandTargetRequirement::App => "targets the app",
-        CommandTargetRequirement::ActivePalette => "requires an active palette",
-        CommandTargetRequirement::ActiveHelp => "requires active help",
-    }
-}
-
 fn app_error_message(err: AppError) -> String {
     match err {
         AppError::InvalidArgument(message)
@@ -246,8 +208,7 @@ mod tests {
 
     use super::{
         CommandPolicyContext, command_registry, find_command_spec, is_command_visible_in_palette,
-        validate_command_for_normal_keymap, validate_command_for_policy,
-        validate_command_id_for_policy,
+        validate_command_for_policy, validate_command_id_for_policy,
     };
     use crate::command::types::{CommandRole, CommandTargetRequirement};
     use crate::command::{
@@ -455,12 +416,6 @@ mod tests {
             validate_command_for_policy(&Command::PaletteInputHistoryOlder, &outline_palette_ctx)
                 .expect_err("outline palette should not support input history");
         assert!(err.to_string().contains("palette input history"));
-    }
-
-    #[test]
-    fn invocation_validation_ignores_runtime_enabled_when() {
-        validate_command_for_normal_keymap(&Command::NextSearchHit)
-            .expect("configured bindings may invoke state-dependent commands");
     }
 
     fn policy_context<'a>(

@@ -1,6 +1,5 @@
 pub mod events;
 pub mod history;
-pub mod keymap;
 pub mod sequence;
 pub mod shortcut;
 

@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::config::Config;
+use crate::config::keymap::build_default_sequence_registry;
 use crate::config::{
     AppOptions, AppOptionsResolver, CachePolicy, EventLoopPolicy, InputPolicy, RenderPolicy,
     ResolvedAppOptions, ViewPolicy, WatchPolicy, load_default_app_options,
@@ -8,7 +9,6 @@ use crate::config::{
 use crate::error::AppResult;
 use crate::extension::ExtensionHost;
 use crate::input::InputHistoryService;
-use crate::input::keymap::build_default_sequence_registry;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, SequenceResolver};
 use crate::palette::{PaletteManager, PaletteRegistry};
 use crate::presenter::{ImagePresenter, PresenterKind, create_presenter_with_cache_limits};

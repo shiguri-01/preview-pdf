@@ -16,7 +16,7 @@ or install from crates.io:
 cargo install preview-pdf
 ```
 
-## Keys
+## Keymap
 
 | Key | Action |
 |---|---|
@@ -40,23 +40,36 @@ cargo install preview-pdf
 `$XDG_CONFIG_HOME/pvf/config.toml`, `$HOME/.config/pvf/config.toml`, or
 `%APPDATA%/pvf/config.toml`.
 
-Normal-mode key bindings can be patched with `[keymap]`:
+The keymap can be selected with `keymap_preset` and patched with `[[keymap]]`
+entries:
 
 ```toml
-[keymap]
-preset = "default" # or "none"
-unbind = ["j"]
+keymap_preset = "default"
 
-[keymap.bindings]
-"<down>" = "next-page"
-"gg" = "first-page"
-"[count]G" = "goto-page"
-":" = "open-palette command"
+[[keymap]]
+when = "normal"
+key = "j"
+command = false
+
+[[keymap]]
+when = "normal"
+key = "<down>"
+command = "next-page"
+
+[[keymap]]
+when = "normal"
+key = "gg"
+command = "first-page"
+
+[[keymap]]
+when = "palette"
+key = "<esc>"
+command = "close-palette"
 ```
 
 Use the key labels shown in help, such as `G`, `<c-o>`, `<down>`, and
-`[count]G`. Palette-local keys are not part of the normal-mode keymap.
-`<esc>` is reserved for cancellation.
+`[count]G`. Common `when` values include `normal`, `help`, `palette`,
+`palette.with-input-history`, and `palette.no-input-history`.
 
 ## Note
 

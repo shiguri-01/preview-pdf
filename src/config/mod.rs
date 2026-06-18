@@ -1,5 +1,5 @@
 mod file;
-mod keymap;
+pub(crate) mod keymap;
 mod options;
 mod policy;
 mod types;
@@ -9,8 +9,8 @@ pub use file::{
     load_options_from_explicit_path,
 };
 pub use options::{
-    AppOptions, CacheOptions, InputOptions, KeymapBinding, KeymapOptions, KeymapPreset,
-    KeymapTarget, RenderOptions, ViewOptions, WatchOptions,
+    AppOptions, CacheOptions, InputOptions, KeymapBinding, KeymapOptions, KeymapPreset, KeymapWhen,
+    RenderOptions, ViewOptions, WatchOptions,
 };
 pub use policy::{
     AppOptionsResolver, CachePolicy, EventLoopPolicy, InputPolicy, RenderPolicy,

@@ -462,4 +462,38 @@ mod tests {
             SequenceResolution::Dispatch(Command::PaletteSelectPrev)
         );
     }
+
+    #[test]
+    fn unbind_ignores_missing_bindings() {
+        let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: Some(super::KeymapPreset::None),
+            bindings: vec![
+                KeymapBinding::UnbindExact {
+                    when: KeymapWhen::Normal,
+                    keys: vec![ShortcutKey::char('x')],
+                },
+                KeymapBinding::UnbindNumericPrefix {
+                    when: KeymapWhen::Normal,
+                    suffix: ShortcutKey::char('g'),
+                },
+            ],
+        });
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext::normal(&extensions),
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Noop
+        );
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext::normal(&extensions),
+                KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Noop
+        );
+    }
 }

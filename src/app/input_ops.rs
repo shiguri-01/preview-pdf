@@ -69,9 +69,15 @@ impl InteractionSubsystem {
         extensions: &'a ExtensionUiSnapshot,
     ) -> KeyBindingContext<'a> {
         let active_palette = self.palette.manager.active_kind();
+        let palette_input_empty = self.palette.manager.active_input_is_empty();
 
         KeyBindingContext {
-            runtime: RuntimeConditionContext::new(state.mode, active_palette, extensions),
+            runtime: RuntimeConditionContext::with_palette_input_empty(
+                state.mode,
+                active_palette,
+                palette_input_empty,
+                extensions,
+            ),
         }
     }
 

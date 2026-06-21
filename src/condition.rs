@@ -148,6 +148,8 @@ pub enum RuntimeCondition {
     HelpIsClosed,
     PaletteInputHistoryIsAvailable,
     PaletteInputHistoryIsUnavailable,
+    PaletteInputIsEmpty,
+    PaletteInputIsNotEmpty,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -155,6 +157,7 @@ pub struct RuntimeConditionContext<'a> {
     pub mode: Mode,
     pub active_palette: Option<PaletteKind>,
     pub palette_input_history_available: bool,
+    pub palette_input_empty: bool,
     pub extensions: &'a ExtensionUiSnapshot,
 }
 
@@ -169,6 +172,23 @@ impl<'a> RuntimeConditionContext<'a> {
             active_palette,
             palette_input_history_available: active_palette
                 .is_some_and(PaletteKind::supports_input_history),
+            palette_input_empty: false,
+            extensions,
+        }
+    }
+
+    pub fn with_palette_input_empty(
+        mode: Mode,
+        active_palette: Option<PaletteKind>,
+        palette_input_empty: bool,
+        extensions: &'a ExtensionUiSnapshot,
+    ) -> RuntimeConditionContext<'a> {
+        RuntimeConditionContext {
+            mode,
+            active_palette,
+            palette_input_history_available: active_palette
+                .is_some_and(PaletteKind::supports_input_history),
+            palette_input_empty,
             extensions,
         }
     }
@@ -232,6 +252,12 @@ pub fn runtime_condition_is_met(
         RuntimeCondition::HelpIsClosed => ctx.mode != Mode::Help,
         RuntimeCondition::PaletteInputHistoryIsAvailable => ctx.palette_input_history_available,
         RuntimeCondition::PaletteInputHistoryIsUnavailable => !ctx.palette_input_history_available,
+        RuntimeCondition::PaletteInputIsEmpty => {
+            ctx.active_palette.is_some() && ctx.palette_input_empty
+        }
+        RuntimeCondition::PaletteInputIsNotEmpty => {
+            ctx.active_palette.is_some() && !ctx.palette_input_empty
+        }
     }
 }
 
@@ -268,6 +294,16 @@ fn add_condition(conditions: &mut Vec<RuntimeCondition>, condition: RuntimeCondi
                 RuntimeCondition::PaletteInputHistoryIsUnavailable,
             );
         }
+        RuntimeCondition::PaletteInputIsEmpty => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
+            add_atom(conditions, RuntimeCondition::PaletteInputIsEmpty);
+        }
+        RuntimeCondition::PaletteInputIsNotEmpty => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
+            add_atom(conditions, RuntimeCondition::PaletteInputIsNotEmpty);
+        }
     }
 }
 
@@ -289,7 +325,9 @@ fn condition_weight(condition: RuntimeCondition) -> u16 {
         | RuntimeCondition::HelpIsOpen
         | RuntimeCondition::HelpIsClosed
         | RuntimeCondition::PaletteInputHistoryIsAvailable
-        | RuntimeCondition::PaletteInputHistoryIsUnavailable => 1,
+        | RuntimeCondition::PaletteInputHistoryIsUnavailable
+        | RuntimeCondition::PaletteInputIsEmpty
+        | RuntimeCondition::PaletteInputIsNotEmpty => 1,
     }
 }
 
@@ -306,6 +344,8 @@ fn condition_key(condition: RuntimeCondition) -> (u8, u8) {
         RuntimeCondition::HelpIsClosed => (8, 0),
         RuntimeCondition::PaletteInputHistoryIsAvailable => (9, 0),
         RuntimeCondition::PaletteInputHistoryIsUnavailable => (10, 0),
+        RuntimeCondition::PaletteInputIsEmpty => (11, 0),
+        RuntimeCondition::PaletteInputIsNotEmpty => (12, 0),
     }
 }
 
@@ -365,6 +405,49 @@ mod tests {
         let outline =
             RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Outline), &extensions);
         assert!(!outline.palette_input_history_available);
+    }
+
+    #[test]
+    fn palette_input_conditions_require_an_active_palette() {
+        let extensions = ExtensionUiSnapshot::default();
+        let empty = RuntimeConditionContext::with_palette_input_empty(
+            Mode::Palette,
+            Some(PaletteKind::Command),
+            true,
+            &extensions,
+        );
+        let not_empty = RuntimeConditionContext::with_palette_input_empty(
+            Mode::Palette,
+            Some(PaletteKind::Command),
+            false,
+            &extensions,
+        );
+        let closed = RuntimeConditionContext::normal(&extensions);
+
+        assert!(runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsEmpty,
+            &empty
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsNotEmpty,
+            &empty
+        ));
+        assert!(runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsNotEmpty,
+            &not_empty
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsEmpty,
+            &not_empty
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsEmpty,
+            &closed
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsNotEmpty,
+            &closed
+        ));
     }
 
     #[test]

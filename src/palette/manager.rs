@@ -153,6 +153,12 @@ impl PaletteManager {
         self.active.as_ref().map(|session| session.kind)
     }
 
+    pub fn active_input_is_empty(&self) -> bool {
+        self.active
+            .as_ref()
+            .is_some_and(|session| session.input.value().is_empty())
+    }
+
     pub fn close(&mut self) -> bool {
         self.active.take().is_some()
     }

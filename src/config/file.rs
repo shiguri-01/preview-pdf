@@ -872,6 +872,45 @@ mod tests {
     }
 
     #[test]
+    fn keymap_config_accepts_palette_input_state_bindings() {
+        let path = unique_temp_path("palette-input-state-keymap.toml");
+        fs::write(
+            &path,
+            r#"
+            [[keymap]]
+            when = "palette.input-empty"
+            key = "<backspace>"
+            command = "close-palette"
+
+            [[keymap]]
+            when = "palette.input-not-empty"
+            key = "<backspace>"
+            command = "text.delete-backward"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should load");
+        assert_eq!(
+            options.keymap.bindings,
+            vec![
+                KeymapBinding::Exact {
+                    when: KeymapWhen::PaletteInputEmpty,
+                    keys: vec![ShortcutKey::key(KeyCode::Backspace)],
+                    command: Command::ClosePalette,
+                },
+                KeymapBinding::Exact {
+                    when: KeymapWhen::PaletteInputNotEmpty,
+                    keys: vec![ShortcutKey::key(KeyCode::Backspace)],
+                    command: Command::TextDeleteBackward,
+                },
+            ]
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
     fn explicit_config_reads_view_input_and_watch_sections() {
         let path = unique_temp_path("view-input-watch-options.toml");
         fs::write(

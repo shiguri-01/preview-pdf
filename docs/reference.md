@@ -226,7 +226,8 @@ Contract:
   `normal.search-inactive`, `help`, `palette`, `palette.command`,
   `palette.search`, `palette.search-results`, `palette.history`,
   `palette.outline`, `palette.with-input-history`, and
-  `palette.no-input-history`.
+  `palette.no-input-history`, `palette.input-empty`, and
+  `palette.input-not-empty`.
 - Keymap `enabled_when` uses the same runtime condition vocabulary as
   command `enabled_when`; do not add a separate keymap-only condition enum.
 - Every key input and sequence timeout resolves against the current runtime

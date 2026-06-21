@@ -530,6 +530,49 @@ mod tests {
     }
 
     #[test]
+    fn configured_palette_input_empty_binding_overrides_default_palette_backspace() {
+        let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: Some(super::KeymapPreset::Default),
+            bindings: vec![KeymapBinding::Exact {
+                when: KeymapWhen::PaletteInputEmpty,
+                keys: vec![ShortcutKey::key(KeyCode::Backspace)],
+                command: Command::ClosePalette,
+            }],
+        });
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    runtime: RuntimeConditionContext::with_palette_input_empty(
+                        Mode::Palette,
+                        Some(PaletteKind::Command),
+                        true,
+                        &extensions,
+                    ),
+                },
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::ClosePalette)
+        );
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    runtime: RuntimeConditionContext::with_palette_input_empty(
+                        Mode::Palette,
+                        Some(PaletteKind::Command),
+                        false,
+                        &extensions,
+                    ),
+                },
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::TextDeleteBackward)
+        );
+    }
+
+    #[test]
     fn unbind_ignores_missing_bindings() {
         let registry = resolve_sequence_registry(&KeymapOptions {
             preset: Some(super::KeymapPreset::None),

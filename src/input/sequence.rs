@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::command::Command;
-use crate::condition::{ConditionExpr, RuntimeConditionContext, evaluate_condition};
+use crate::condition::{BindingCondition, ConditionExpr, RuntimeConditionContext};
 use crate::extension::ExtensionUiSnapshot;
 
 use super::shortcut::{ShortcutKey, format_shortcut_key};
@@ -54,21 +54,30 @@ impl GeneratedCommand {
 #[derive(Debug, Clone)]
 enum SequenceBinding {
     Exact {
-        enabled_when: ConditionExpr,
+        enabled_when: BindingCondition,
+        priority: BindingPriority,
         keys: Vec<ShortcutKey>,
         command: Command,
     },
     NumericPrefix {
-        enabled_when: ConditionExpr,
+        enabled_when: BindingCondition,
+        priority: BindingPriority,
         suffix: ShortcutKey,
         command_id: &'static str,
         factory: NumericCommandFactory,
     },
     Generated {
-        enabled_when: ConditionExpr,
+        enabled_when: BindingCondition,
+        priority: BindingPriority,
         matcher: GeneratedKeyMatcher,
         command: GeneratedCommand,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct BindingPriority {
+    score: u16,
+    order: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +111,7 @@ pub struct SequenceRegistrySnapshot {
 #[derive(Debug, Clone, Default)]
 pub struct SequenceRegistry {
     bindings: Vec<SequenceBinding>,
+    next_order: u64,
 }
 
 impl SequenceRegistry {
@@ -127,6 +137,9 @@ impl SequenceRegistry {
             .map(canonicalize_binding_key)
             .collect::<Result<Vec<_>, _>>()?;
 
+        let enabled_when = BindingCondition::new(enabled_when);
+        let priority = self.next_priority(&enabled_when);
+
         self.bindings.retain(|binding| {
             !matches!(
                 binding,
@@ -134,12 +147,13 @@ impl SequenceRegistry {
                     enabled_when: existing_enabled_when,
                     keys: existing,
                     ..
-                } if *existing_enabled_when == enabled_when
+                } if existing_enabled_when == &enabled_when
                     && existing == &keys
             )
         });
         self.bindings.push(SequenceBinding::Exact {
             enabled_when,
+            priority,
             keys,
             command,
         });
@@ -161,6 +175,9 @@ impl SequenceRegistry {
             return Err(SequenceRegistrationError::InvalidNumericSuffix);
         }
 
+        let enabled_when = BindingCondition::new(enabled_when);
+        let priority = self.next_priority(&enabled_when);
+
         self.bindings.retain(|binding| {
             !matches!(
                 binding,
@@ -168,12 +185,13 @@ impl SequenceRegistry {
                     enabled_when: existing_enabled_when,
                     suffix: existing,
                     ..
-                } if *existing_enabled_when == enabled_when
+                } if existing_enabled_when == &enabled_when
                     && *existing == suffix
             )
         });
         self.bindings.push(SequenceBinding::NumericPrefix {
             enabled_when,
+            priority,
             suffix,
             command_id,
             factory,
@@ -187,6 +205,9 @@ impl SequenceRegistry {
         matcher: GeneratedKeyMatcher,
         command: GeneratedCommand,
     ) {
+        let enabled_when = BindingCondition::new(enabled_when);
+        let priority = self.next_priority(&enabled_when);
+
         self.bindings.retain(|binding| {
             !matches!(
                 binding,
@@ -194,12 +215,13 @@ impl SequenceRegistry {
                     enabled_when: existing_enabled_when,
                     matcher: existing_matcher,
                     ..
-                } if *existing_enabled_when == enabled_when
+                } if existing_enabled_when == &enabled_when
                     && *existing_matcher == matcher
             )
         });
         self.bindings.push(SequenceBinding::Generated {
             enabled_when,
+            priority,
             matcher,
             command,
         });
@@ -219,6 +241,7 @@ impl SequenceRegistry {
             .map(canonicalize_binding_key)
             .collect::<Result<Vec<_>, _>>()?;
         let original_len = self.bindings.len();
+        let enabled_when = BindingCondition::new(enabled_when);
         self.bindings.retain(|binding| {
             !matches!(
                 binding,
@@ -226,7 +249,7 @@ impl SequenceRegistry {
                     enabled_when: existing_enabled_when,
                     keys: existing,
                     ..
-                } if enabled_when == *existing_enabled_when
+                } if &enabled_when == existing_enabled_when
                     && existing == &keys
             )
         });
@@ -243,6 +266,7 @@ impl SequenceRegistry {
             return Err(SequenceRegistrationError::InvalidNumericSuffix);
         }
         let original_len = self.bindings.len();
+        let enabled_when = BindingCondition::new(enabled_when);
         self.bindings.retain(|binding| {
             !matches!(
                 binding,
@@ -250,7 +274,7 @@ impl SequenceRegistry {
                     enabled_when: existing_enabled_when,
                     suffix: existing,
                     ..
-                } if enabled_when == *existing_enabled_when
+                } if &enabled_when == existing_enabled_when
                     && *existing == suffix
             )
         });
@@ -265,9 +289,10 @@ impl SequenceRegistry {
                     enabled_when,
                     keys,
                     command,
+                    ..
                 } => {
                     snapshot.exact_bindings.push(ExactSequenceBinding {
-                        enabled_when: *enabled_when,
+                        enabled_when: enabled_when.original(),
                         keys: keys.clone(),
                         command_id: command.id(),
                     });
@@ -280,7 +305,7 @@ impl SequenceRegistry {
                 } => snapshot
                     .numeric_prefix_bindings
                     .push(NumericSequenceBinding {
-                        enabled_when: *enabled_when,
+                        enabled_when: enabled_when.original(),
                         suffix: *suffix,
                         command_id,
                     }),
@@ -288,8 +313,9 @@ impl SequenceRegistry {
                     enabled_when,
                     matcher,
                     command,
+                    ..
                 } => snapshot.generated_bindings.push(GeneratedSequenceBinding {
-                    enabled_when: *enabled_when,
+                    enabled_when: enabled_when.original(),
                     matcher: *matcher,
                     command_id: command.command_id(),
                 }),
@@ -298,8 +324,18 @@ impl SequenceRegistry {
         snapshot
     }
 
+    fn next_priority(&mut self, enabled_when: &BindingCondition) -> BindingPriority {
+        let order = self.next_order;
+        self.next_order = self.next_order.saturating_add(1);
+        BindingPriority {
+            score: enabled_when.priority_score(),
+            order,
+        }
+    }
+
     fn match_buffer(&self, buffer: &[ShortcutKey], ctx: KeyBindingContext<'_>) -> RegistryMatch {
         let mut exact = None;
+        let mut generated = None;
         let mut has_prefix = false;
 
         for binding in &self.bindings {
@@ -308,35 +344,68 @@ impl SequenceRegistry {
             }
 
             match binding {
-                SequenceBinding::Exact { keys, command, .. } => {
+                SequenceBinding::Exact {
+                    priority,
+                    keys,
+                    command,
+                    ..
+                } => {
                     if keys.as_slice() == buffer {
-                        exact = Some(command.clone());
+                        exact = select_higher_priority_command(
+                            exact,
+                            CommandMatch {
+                                priority: *priority,
+                                command: command.clone(),
+                            },
+                        );
                     } else if keys.starts_with(buffer) {
                         has_prefix = true;
                     }
                 }
                 SequenceBinding::NumericPrefix {
-                    suffix, factory, ..
+                    priority,
+                    suffix,
+                    factory,
+                    ..
                 } => match match_numeric_prefix(buffer, *suffix, *factory) {
                     NumericMatch::None => {}
                     NumericMatch::Prefix => has_prefix = true,
-                    NumericMatch::Exact(command) => exact = Some(command),
+                    NumericMatch::Exact(command) => {
+                        exact = select_higher_priority_command(
+                            exact,
+                            CommandMatch {
+                                priority: *priority,
+                                command,
+                            },
+                        );
+                    }
                 },
                 SequenceBinding::Generated {
-                    matcher, command, ..
+                    priority,
+                    matcher,
+                    command,
+                    ..
                 } => {
-                    if exact.is_none()
-                        && buffer.len() == 1
+                    if buffer.len() == 1
                         && let Some(command) =
                             generated_command_for_key(*matcher, *command, buffer[0], ctx)
                     {
-                        exact = Some(command);
+                        generated = select_higher_priority_command(
+                            generated,
+                            CommandMatch {
+                                priority: *priority,
+                                command,
+                            },
+                        );
                     }
                 }
             }
         }
 
-        RegistryMatch { exact, has_prefix }
+        RegistryMatch {
+            exact: exact.or(generated).map(|matched| matched.command),
+            has_prefix,
+        }
     }
 }
 
@@ -609,10 +678,10 @@ fn binding_matches_context(binding: &SequenceBinding, ctx: KeyBindingContext<'_>
     let enabled_when = match binding {
         SequenceBinding::Exact { enabled_when, .. }
         | SequenceBinding::NumericPrefix { enabled_when, .. }
-        | SequenceBinding::Generated { enabled_when, .. } => *enabled_when,
+        | SequenceBinding::Generated { enabled_when, .. } => enabled_when,
     };
 
-    evaluate_condition(enabled_when, &ctx.runtime)
+    enabled_when.is_met(&ctx.runtime)
 }
 
 fn generated_command_for_key(
@@ -642,6 +711,22 @@ fn generated_command_for_key(
 struct RegistryMatch {
     exact: Option<Command>,
     has_prefix: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CommandMatch {
+    priority: BindingPriority,
+    command: Command,
+}
+
+fn select_higher_priority_command(
+    current: Option<CommandMatch>,
+    candidate: CommandMatch,
+) -> Option<CommandMatch> {
+    match current {
+        Some(current) if current.priority > candidate.priority => Some(current),
+        _ => Some(candidate),
+    }
 }
 
 enum NumericMatch {
@@ -890,6 +975,71 @@ mod tests {
     }
 
     #[test]
+    fn more_specific_binding_wins_over_later_broad_binding() {
+        static PALETTE_MODE: &[RuntimeCondition] = &[RuntimeCondition::ModeIs(Mode::Palette)];
+        static COMMAND_PALETTE: &[RuntimeCondition] =
+            &[RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
+
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_exact(
+                ConditionExpr::All(COMMAND_PALETTE),
+                &[ShortcutKey::key(KeyCode::Enter)],
+                Command::PaletteSubmit,
+            )
+            .expect("specific binding should register");
+        registry
+            .register_exact(
+                ConditionExpr::All(PALETTE_MODE),
+                &[ShortcutKey::key(KeyCode::Enter)],
+                Command::ClosePalette,
+            )
+            .expect("broad binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                palette_context(&extensions),
+                KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::PaletteSubmit)
+        );
+    }
+
+    #[test]
+    fn equal_priority_bindings_use_later_registration() {
+        static SEARCH_ACTIVE: &[RuntimeCondition] = &[RuntimeCondition::SearchIsActive];
+        static NORMAL_MODE: &[RuntimeCondition] = &[RuntimeCondition::ModeIs(Mode::Normal)];
+
+        let mut registry = SequenceRegistry::new();
+        registry
+            .register_exact(
+                ConditionExpr::All(SEARCH_ACTIVE),
+                &[ShortcutKey::char('x')],
+                Command::DebugStatusShow,
+            )
+            .expect("first binding should register");
+        registry
+            .register_exact(
+                ConditionExpr::All(NORMAL_MODE),
+                &[ShortcutKey::char('x')],
+                Command::DebugStatusHide,
+            )
+            .expect("later binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::with_search_active(true);
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                normal_context(&extensions),
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::DebugStatusHide)
+        );
+    }
+
+    #[test]
     fn generated_printable_binding_builds_text_insert_command() {
         let mut registry = SequenceRegistry::new();
         registry.register_generated(
@@ -1006,6 +1156,37 @@ mod tests {
                 ),
             ),
             SequenceResolution::Dispatch(Command::TextYank)
+        );
+    }
+
+    #[test]
+    fn generated_printable_binding_does_not_override_lower_priority_exact_binding() {
+        static PALETTE_MODE: &[RuntimeCondition] = &[RuntimeCondition::ModeIs(Mode::Palette)];
+        static COMMAND_PALETTE: &[RuntimeCondition] =
+            &[RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
+
+        let mut registry = SequenceRegistry::new();
+        registry.register_generated(
+            ConditionExpr::All(COMMAND_PALETTE),
+            GeneratedKeyMatcher::PrintableCharacter,
+            GeneratedCommand::TextInsert,
+        );
+        registry
+            .register_exact(
+                ConditionExpr::All(PALETTE_MODE),
+                &[ShortcutKey::char('x')],
+                Command::ClosePalette,
+            )
+            .expect("exact binding should register");
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                palette_context(&extensions),
+                KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::ClosePalette)
         );
     }
 

@@ -214,11 +214,20 @@ Contract:
   sequence; `command` names the command to dispatch, or `false` to unbind.
 - When multiple configured keymap entries use the same `when` selector and `key`
   sequence, the later entry replaces the earlier entry.
+- Key binding conditions are normalized before priority is calculated. Implied
+  conditions are added once, so adding a condition already implied by another
+  condition does not increase priority; for example, `palette.command` and
+  `palette` plus `palette.command` have the same normalized priority.
+- When multiple enabled key bindings match the same key sequence, the binding
+  with the highest normalized condition priority wins. If matching bindings
+  have the same priority, the later registered binding wins; preset bindings
+  are registered before configured bindings.
 - Supported `when` selectors are `normal`, `normal.search-active`,
   `normal.search-inactive`, `help`, `palette`, `palette.command`,
   `palette.search`, `palette.search-results`, `palette.history`,
   `palette.outline`, `palette.with-input-history`, and
-  `palette.no-input-history`.
+  `palette.no-input-history`, `palette.input-empty`, and
+  `palette.input-not-empty`.
 - Keymap `enabled_when` uses the same runtime condition vocabulary as
   command `enabled_when`; do not add a separate keymap-only condition enum.
 - Every key input and sequence timeout resolves against the current runtime

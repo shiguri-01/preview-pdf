@@ -79,9 +79,15 @@ pub fn dispatch_with_view_policy(
     let command_id = cmd.command_id();
     let extensions = extension_host.ui_snapshot();
     let active_palette = palette_manager.active_kind();
+    let palette_input_empty = palette_manager.active_input_is_empty();
     let ctx = CommandPolicyContext {
         source,
-        runtime: RuntimeConditionContext::new(app.mode, active_palette, &extensions),
+        runtime: RuntimeConditionContext::with_palette_input_empty(
+            app.mode,
+            active_palette,
+            palette_input_empty,
+            &extensions,
+        ),
     };
     if let Some(message) = rejection_message_for_command(&cmd, &ctx) {
         apply_notice(app, rejection_notice(&cmd, message));

@@ -9,6 +9,84 @@ pub enum ConditionExpr {
     Any(&'static [RuntimeCondition]),
 }
 
+#[derive(Debug, Clone, Eq)]
+pub struct BindingCondition {
+    original: ConditionExpr,
+    alternatives: Vec<Vec<RuntimeCondition>>,
+}
+
+impl PartialEq for BindingCondition {
+    fn eq(&self, other: &Self) -> bool {
+        self.alternatives == other.alternatives
+    }
+}
+
+impl BindingCondition {
+    pub fn new(expr: ConditionExpr) -> Self {
+        let mut alternatives = match expr {
+            ConditionExpr::Always => vec![Vec::new()],
+            ConditionExpr::All(conditions) => vec![normalize_conditions(conditions)],
+            ConditionExpr::Any(conditions) => conditions
+                .iter()
+                .copied()
+                .map(|condition| normalize_conditions(&[condition]))
+                .collect(),
+        };
+        sort_and_dedup_alternatives(&mut alternatives);
+        Self {
+            original: expr,
+            alternatives,
+        }
+    }
+
+    pub fn original(&self) -> ConditionExpr {
+        self.original
+    }
+
+    pub fn priority_score(&self) -> u16 {
+        self.alternatives
+            .iter()
+            .map(|conditions| {
+                conditions
+                    .iter()
+                    .copied()
+                    .map(condition_weight)
+                    .sum::<u16>()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    pub fn is_met(&self, ctx: &RuntimeConditionContext<'_>) -> bool {
+        self.alternatives.iter().any(|conditions| {
+            conditions
+                .iter()
+                .copied()
+                .all(|condition| runtime_condition_is_met(condition, ctx))
+        })
+    }
+}
+
+fn normalize_conditions(conditions: &[RuntimeCondition]) -> Vec<RuntimeCondition> {
+    let mut normalized = Vec::new();
+    for condition in conditions {
+        add_condition(&mut normalized, *condition);
+    }
+    normalized.sort_by_key(|condition| condition_key(*condition));
+    normalized
+}
+
+fn sort_and_dedup_alternatives(alternatives: &mut Vec<Vec<RuntimeCondition>>) {
+    alternatives.sort_by_key(|conditions| {
+        conditions
+            .iter()
+            .copied()
+            .map(condition_key)
+            .collect::<Vec<_>>()
+    });
+    alternatives.dedup();
+}
+
 /// Shared runtime predicates for command `enabled_when` and key binding
 /// `enabled_when`.
 ///
@@ -30,6 +108,8 @@ pub enum RuntimeCondition {
     HelpIsClosed,
     PaletteInputHistoryIsAvailable,
     PaletteInputHistoryIsUnavailable,
+    PaletteInputIsEmpty,
+    PaletteInputIsNotEmpty,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -37,6 +117,7 @@ pub struct RuntimeConditionContext<'a> {
     pub mode: Mode,
     pub active_palette: Option<PaletteKind>,
     pub palette_input_history_available: bool,
+    pub palette_input_empty: bool,
     pub extensions: &'a ExtensionUiSnapshot,
 }
 
@@ -51,6 +132,23 @@ impl<'a> RuntimeConditionContext<'a> {
             active_palette,
             palette_input_history_available: active_palette
                 .is_some_and(PaletteKind::supports_input_history),
+            palette_input_empty: false,
+            extensions,
+        }
+    }
+
+    pub fn with_palette_input_empty(
+        mode: Mode,
+        active_palette: Option<PaletteKind>,
+        palette_input_empty: bool,
+        extensions: &'a ExtensionUiSnapshot,
+    ) -> RuntimeConditionContext<'a> {
+        RuntimeConditionContext {
+            mode,
+            active_palette,
+            palette_input_history_available: active_palette
+                .is_some_and(PaletteKind::supports_input_history),
+            palette_input_empty,
             extensions,
         }
     }
@@ -113,7 +211,122 @@ pub fn runtime_condition_is_met(
         RuntimeCondition::HelpIsOpen => ctx.mode == Mode::Help,
         RuntimeCondition::HelpIsClosed => ctx.mode != Mode::Help,
         RuntimeCondition::PaletteInputHistoryIsAvailable => ctx.palette_input_history_available,
-        RuntimeCondition::PaletteInputHistoryIsUnavailable => !ctx.palette_input_history_available,
+        RuntimeCondition::PaletteInputHistoryIsUnavailable => {
+            ctx.active_palette.is_some() && !ctx.palette_input_history_available
+        }
+        RuntimeCondition::PaletteInputIsEmpty => {
+            ctx.active_palette.is_some() && ctx.palette_input_empty
+        }
+        RuntimeCondition::PaletteInputIsNotEmpty => {
+            ctx.active_palette.is_some() && !ctx.palette_input_empty
+        }
+    }
+}
+
+fn add_condition(conditions: &mut Vec<RuntimeCondition>, condition: RuntimeCondition) {
+    match condition {
+        RuntimeCondition::ModeIs(_)
+        | RuntimeCondition::ModeIsNot(_)
+        | RuntimeCondition::SearchIsActive
+        | RuntimeCondition::SearchIsInactive
+        | RuntimeCondition::PaletteIsClosed
+        | RuntimeCondition::HelpIsClosed => add_atom(conditions, condition),
+        RuntimeCondition::PaletteIsOpen => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
+        }
+        RuntimeCondition::PaletteKindIs(kind) => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
+            add_atom(conditions, RuntimeCondition::PaletteKindIs(kind));
+        }
+        RuntimeCondition::HelpIsOpen => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Help));
+            add_atom(conditions, RuntimeCondition::HelpIsOpen);
+        }
+        RuntimeCondition::PaletteInputHistoryIsAvailable => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
+            add_atom(conditions, RuntimeCondition::PaletteInputHistoryIsAvailable);
+        }
+        RuntimeCondition::PaletteInputHistoryIsUnavailable => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
+            add_atom(
+                conditions,
+                RuntimeCondition::PaletteInputHistoryIsUnavailable,
+            );
+        }
+        RuntimeCondition::PaletteInputIsEmpty => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
+            add_atom(conditions, RuntimeCondition::PaletteInputIsEmpty);
+        }
+        RuntimeCondition::PaletteInputIsNotEmpty => {
+            add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
+            add_atom(conditions, RuntimeCondition::PaletteInputIsNotEmpty);
+        }
+    }
+}
+
+fn add_atom(conditions: &mut Vec<RuntimeCondition>, condition: RuntimeCondition) {
+    if !conditions.contains(&condition) {
+        conditions.push(condition);
+    }
+}
+
+fn condition_weight(condition: RuntimeCondition) -> u16 {
+    match condition {
+        RuntimeCondition::ModeIs(_)
+        | RuntimeCondition::ModeIsNot(_)
+        | RuntimeCondition::SearchIsActive
+        | RuntimeCondition::SearchIsInactive
+        | RuntimeCondition::PaletteIsOpen
+        | RuntimeCondition::PaletteIsClosed
+        | RuntimeCondition::PaletteKindIs(_)
+        | RuntimeCondition::HelpIsOpen
+        | RuntimeCondition::HelpIsClosed
+        | RuntimeCondition::PaletteInputHistoryIsAvailable
+        | RuntimeCondition::PaletteInputHistoryIsUnavailable
+        | RuntimeCondition::PaletteInputIsEmpty
+        | RuntimeCondition::PaletteInputIsNotEmpty => 1,
+    }
+}
+
+fn condition_key(condition: RuntimeCondition) -> (u8, u8) {
+    match condition {
+        RuntimeCondition::ModeIs(mode) => (0, mode_key(mode)),
+        RuntimeCondition::ModeIsNot(mode) => (1, mode_key(mode)),
+        RuntimeCondition::SearchIsActive => (2, 0),
+        RuntimeCondition::SearchIsInactive => (3, 0),
+        RuntimeCondition::PaletteIsOpen => (4, 0),
+        RuntimeCondition::PaletteIsClosed => (5, 0),
+        RuntimeCondition::PaletteKindIs(kind) => (6, palette_kind_key(kind)),
+        RuntimeCondition::HelpIsOpen => (7, 0),
+        RuntimeCondition::HelpIsClosed => (8, 0),
+        RuntimeCondition::PaletteInputHistoryIsAvailable => (9, 0),
+        RuntimeCondition::PaletteInputHistoryIsUnavailable => (10, 0),
+        RuntimeCondition::PaletteInputIsEmpty => (11, 0),
+        RuntimeCondition::PaletteInputIsNotEmpty => (12, 0),
+    }
+}
+
+fn mode_key(mode: Mode) -> u8 {
+    match mode {
+        Mode::Normal => 0,
+        Mode::Palette => 1,
+        Mode::Help => 2,
+    }
+}
+
+fn palette_kind_key(kind: PaletteKind) -> u8 {
+    match kind {
+        PaletteKind::Command => 0,
+        PaletteKind::Search => 1,
+        PaletteKind::SearchResults => 2,
+        PaletteKind::History => 3,
+        PaletteKind::Outline => 4,
     }
 }
 
@@ -123,7 +336,10 @@ mod tests {
     use crate::extension::ExtensionUiSnapshot;
     use crate::palette::PaletteKind;
 
-    use super::{RuntimeCondition, RuntimeConditionContext, runtime_condition_is_met};
+    use super::{
+        BindingCondition, ConditionExpr, RuntimeCondition, RuntimeConditionContext,
+        runtime_condition_is_met,
+    };
 
     #[test]
     fn palette_kind_condition_requires_an_open_matching_palette() {
@@ -152,5 +368,116 @@ mod tests {
         let outline =
             RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Outline), &extensions);
         assert!(!outline.palette_input_history_available);
+        assert!(runtime_condition_is_met(
+            RuntimeCondition::PaletteInputHistoryIsUnavailable,
+            &outline
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputHistoryIsUnavailable,
+            &RuntimeConditionContext::normal(&extensions)
+        ));
+    }
+
+    #[test]
+    fn palette_input_conditions_require_an_active_palette() {
+        let extensions = ExtensionUiSnapshot::default();
+        let empty = RuntimeConditionContext::with_palette_input_empty(
+            Mode::Palette,
+            Some(PaletteKind::Command),
+            true,
+            &extensions,
+        );
+        let not_empty = RuntimeConditionContext::with_palette_input_empty(
+            Mode::Palette,
+            Some(PaletteKind::Command),
+            false,
+            &extensions,
+        );
+        let closed = RuntimeConditionContext::normal(&extensions);
+
+        assert!(runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsEmpty,
+            &empty
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsNotEmpty,
+            &empty
+        ));
+        assert!(runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsNotEmpty,
+            &not_empty
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsEmpty,
+            &not_empty
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsEmpty,
+            &closed
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputIsNotEmpty,
+            &closed
+        ));
+    }
+
+    #[test]
+    fn binding_conditions_are_normalized_idempotently() {
+        static PALETTE_COMMAND: &[RuntimeCondition] =
+            &[RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
+        static PALETTE_PLUS_COMMAND: &[RuntimeCondition] = &[
+            RuntimeCondition::ModeIs(Mode::Palette),
+            RuntimeCondition::PaletteKindIs(PaletteKind::Command),
+        ];
+        static PALETTE_DUPLICATED: &[RuntimeCondition] = &[
+            RuntimeCondition::ModeIs(Mode::Palette),
+            RuntimeCondition::ModeIs(Mode::Palette),
+        ];
+
+        let command = BindingCondition::new(ConditionExpr::All(PALETTE_COMMAND));
+        let palette_plus_command = BindingCondition::new(ConditionExpr::All(PALETTE_PLUS_COMMAND));
+        assert_eq!(command, palette_plus_command);
+        assert_eq!(
+            command.priority_score(),
+            palette_plus_command.priority_score()
+        );
+
+        let palette = BindingCondition::new(ConditionExpr::All(&[RuntimeCondition::ModeIs(
+            Mode::Palette,
+        )]));
+        let duplicated = BindingCondition::new(ConditionExpr::All(PALETTE_DUPLICATED));
+        assert_eq!(palette, duplicated);
+        assert_eq!(palette.priority_score(), duplicated.priority_score());
+    }
+
+    #[test]
+    fn single_alternative_conditions_have_the_same_normalized_form() {
+        static PALETTE_COMMAND: &[RuntimeCondition] =
+            &[RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
+
+        let all = BindingCondition::new(ConditionExpr::All(PALETTE_COMMAND));
+        let any = BindingCondition::new(ConditionExpr::Any(PALETTE_COMMAND));
+
+        assert_eq!(all, any);
+        assert_eq!(all.priority_score(), any.priority_score());
+    }
+
+    #[test]
+    fn binding_condition_priority_counts_distinct_normalized_constraints() {
+        static PALETTE: &[RuntimeCondition] = &[RuntimeCondition::ModeIs(Mode::Palette)];
+        static PALETTE_COMMAND: &[RuntimeCondition] =
+            &[RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
+        static PALETTE_COMMAND_WITH_HISTORY: &[RuntimeCondition] = &[
+            RuntimeCondition::PaletteKindIs(PaletteKind::Command),
+            RuntimeCondition::PaletteInputHistoryIsAvailable,
+        ];
+
+        let palette = BindingCondition::new(ConditionExpr::All(PALETTE));
+        let command = BindingCondition::new(ConditionExpr::All(PALETTE_COMMAND));
+        let command_with_history =
+            BindingCondition::new(ConditionExpr::All(PALETTE_COMMAND_WITH_HISTORY));
+
+        assert!(palette.priority_score() < command.priority_score());
+        assert!(command.priority_score() < command_with_history.priority_score());
     }
 }

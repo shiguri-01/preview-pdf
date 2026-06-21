@@ -25,34 +25,23 @@ const WHEN_NORMAL_SEARCH_INACTIVE: [RuntimeCondition; 2] = [
 ];
 const WHEN_HELP: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(Mode::Help)];
 const WHEN_PALETTE: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(Mode::Palette)];
-const WHEN_PALETTE_COMMAND: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::Command),
-];
-const WHEN_PALETTE_SEARCH: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::Search),
-];
-const WHEN_PALETTE_SEARCH_RESULTS: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::SearchResults),
-];
-const WHEN_PALETTE_HISTORY: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::History),
-];
-const WHEN_PALETTE_OUTLINE: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::Outline),
-];
-const WHEN_PALETTE_WITH_INPUT_HISTORY: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteInputHistoryIsAvailable,
-];
-const WHEN_PALETTE_NO_INPUT_HISTORY: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteInputHistoryIsUnavailable,
-];
+const WHEN_PALETTE_COMMAND: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
+const WHEN_PALETTE_SEARCH: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::Search)];
+const WHEN_PALETTE_SEARCH_RESULTS: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::SearchResults)];
+const WHEN_PALETTE_HISTORY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::History)];
+const WHEN_PALETTE_OUTLINE: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::Outline)];
+const WHEN_PALETTE_WITH_INPUT_HISTORY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputHistoryIsAvailable];
+const WHEN_PALETTE_NO_INPUT_HISTORY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputHistoryIsUnavailable];
+const WHEN_PALETTE_INPUT_EMPTY: [RuntimeCondition; 1] = [RuntimeCondition::PaletteInputIsEmpty];
+const WHEN_PALETTE_INPUT_NOT_EMPTY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputIsNotEmpty];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeymapWhen {
@@ -68,6 +57,8 @@ pub enum KeymapWhen {
     PaletteOutline,
     PaletteWithInputHistory,
     PaletteNoInputHistory,
+    PaletteInputEmpty,
+    PaletteInputNotEmpty,
 }
 
 impl KeymapWhen {
@@ -85,6 +76,8 @@ impl KeymapWhen {
             "palette.outline" => Some(Self::PaletteOutline),
             "palette.with-input-history" => Some(Self::PaletteWithInputHistory),
             "palette.no-input-history" => Some(Self::PaletteNoInputHistory),
+            "palette.input-empty" => Some(Self::PaletteInputEmpty),
+            "palette.input-not-empty" => Some(Self::PaletteInputNotEmpty),
             _ => None,
         }
     }
@@ -103,6 +96,8 @@ impl KeymapWhen {
             Self::PaletteOutline => ConditionExpr::All(&WHEN_PALETTE_OUTLINE),
             Self::PaletteWithInputHistory => ConditionExpr::All(&WHEN_PALETTE_WITH_INPUT_HISTORY),
             Self::PaletteNoInputHistory => ConditionExpr::All(&WHEN_PALETTE_NO_INPUT_HISTORY),
+            Self::PaletteInputEmpty => ConditionExpr::All(&WHEN_PALETTE_INPUT_EMPTY),
+            Self::PaletteInputNotEmpty => ConditionExpr::All(&WHEN_PALETTE_INPUT_NOT_EMPTY),
         }
     }
 
@@ -117,6 +112,8 @@ impl KeymapWhen {
                 | Self::PaletteOutline
                 | Self::PaletteWithInputHistory
                 | Self::PaletteNoInputHistory
+                | Self::PaletteInputEmpty
+                | Self::PaletteInputNotEmpty
         )
     }
 
@@ -460,6 +457,99 @@ mod tests {
                 KeyEvent::new(KeyCode::Up, KeyModifiers::NONE),
             ),
             SequenceResolution::Dispatch(Command::PaletteSelectPrev)
+        );
+    }
+
+    #[test]
+    fn palette_input_empty_condition_can_override_broad_palette_binding() {
+        let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: None,
+            bindings: vec![
+                KeymapBinding::Exact {
+                    when: KeymapWhen::Palette,
+                    keys: vec![ShortcutKey::key(KeyCode::Backspace)],
+                    command: Command::TextDeleteBackward,
+                },
+                KeymapBinding::Exact {
+                    when: KeymapWhen::PaletteInputEmpty,
+                    keys: vec![ShortcutKey::key(KeyCode::Backspace)],
+                    command: Command::ClosePalette,
+                },
+            ],
+        });
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    runtime: RuntimeConditionContext::with_palette_input_empty(
+                        Mode::Palette,
+                        Some(PaletteKind::Command),
+                        true,
+                        &extensions,
+                    ),
+                },
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::ClosePalette)
+        );
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    runtime: RuntimeConditionContext::with_palette_input_empty(
+                        Mode::Palette,
+                        Some(PaletteKind::Command),
+                        false,
+                        &extensions,
+                    ),
+                },
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::TextDeleteBackward)
+        );
+    }
+
+    #[test]
+    fn configured_palette_input_empty_binding_overrides_default_palette_backspace() {
+        let registry = resolve_sequence_registry(&KeymapOptions {
+            preset: Some(super::KeymapPreset::Default),
+            bindings: vec![KeymapBinding::Exact {
+                when: KeymapWhen::PaletteInputEmpty,
+                keys: vec![ShortcutKey::key(KeyCode::Backspace)],
+                command: Command::ClosePalette,
+            }],
+        });
+        let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
+        let extensions = ExtensionUiSnapshot::default();
+
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    runtime: RuntimeConditionContext::with_palette_input_empty(
+                        Mode::Palette,
+                        Some(PaletteKind::Command),
+                        true,
+                        &extensions,
+                    ),
+                },
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::ClosePalette)
+        );
+        assert_eq!(
+            resolver.handle_key_in_context(
+                KeyBindingContext {
+                    runtime: RuntimeConditionContext::with_palette_input_empty(
+                        Mode::Palette,
+                        Some(PaletteKind::Command),
+                        false,
+                        &extensions,
+                    ),
+                },
+                KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE),
+            ),
+            SequenceResolution::Dispatch(Command::TextDeleteBackward)
         );
     }
 

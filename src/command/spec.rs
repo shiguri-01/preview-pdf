@@ -173,6 +173,12 @@ fn condition_unavailable_message(id: &str, condition: RuntimeCondition) -> Strin
         RuntimeCondition::PaletteInputHistoryIsUnavailable => {
             format!("{id} is unavailable while palette input history is available")
         }
+        RuntimeCondition::PaletteInputIsEmpty => {
+            format!("{id} is unavailable while palette input is not empty")
+        }
+        RuntimeCondition::PaletteInputIsNotEmpty => {
+            format!("{id} is unavailable while palette input is empty")
+        }
     }
 }
 

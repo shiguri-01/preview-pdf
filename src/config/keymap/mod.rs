@@ -25,42 +25,23 @@ const WHEN_NORMAL_SEARCH_INACTIVE: [RuntimeCondition; 2] = [
 ];
 const WHEN_HELP: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(Mode::Help)];
 const WHEN_PALETTE: [RuntimeCondition; 1] = [RuntimeCondition::ModeIs(Mode::Palette)];
-const WHEN_PALETTE_COMMAND: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::Command),
-];
-const WHEN_PALETTE_SEARCH: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::Search),
-];
-const WHEN_PALETTE_SEARCH_RESULTS: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::SearchResults),
-];
-const WHEN_PALETTE_HISTORY: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::History),
-];
-const WHEN_PALETTE_OUTLINE: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteKindIs(PaletteKind::Outline),
-];
-const WHEN_PALETTE_WITH_INPUT_HISTORY: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteInputHistoryIsAvailable,
-];
-const WHEN_PALETTE_NO_INPUT_HISTORY: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteInputHistoryIsUnavailable,
-];
-const WHEN_PALETTE_INPUT_EMPTY: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteInputIsEmpty,
-];
-const WHEN_PALETTE_INPUT_NOT_EMPTY: [RuntimeCondition; 2] = [
-    RuntimeCondition::ModeIs(Mode::Palette),
-    RuntimeCondition::PaletteInputIsNotEmpty,
-];
+const WHEN_PALETTE_COMMAND: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
+const WHEN_PALETTE_SEARCH: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::Search)];
+const WHEN_PALETTE_SEARCH_RESULTS: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::SearchResults)];
+const WHEN_PALETTE_HISTORY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::History)];
+const WHEN_PALETTE_OUTLINE: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteKindIs(PaletteKind::Outline)];
+const WHEN_PALETTE_WITH_INPUT_HISTORY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputHistoryIsAvailable];
+const WHEN_PALETTE_NO_INPUT_HISTORY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputHistoryIsUnavailable];
+const WHEN_PALETTE_INPUT_EMPTY: [RuntimeCondition; 1] = [RuntimeCondition::PaletteInputIsEmpty];
+const WHEN_PALETTE_INPUT_NOT_EMPTY: [RuntimeCondition; 1] =
+    [RuntimeCondition::PaletteInputIsNotEmpty];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeymapWhen {

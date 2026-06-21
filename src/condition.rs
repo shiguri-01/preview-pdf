@@ -9,69 +9,33 @@ pub enum ConditionExpr {
     Any(&'static [RuntimeCondition]),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BindingConditionKind {
-    Always,
-    All,
-    Any,
-}
-
 #[derive(Debug, Clone, Eq)]
 pub struct BindingCondition {
     original: ConditionExpr,
-    kind: BindingConditionKind,
     alternatives: Vec<Vec<RuntimeCondition>>,
 }
 
 impl PartialEq for BindingCondition {
     fn eq(&self, other: &Self) -> bool {
-        self.kind == other.kind && self.alternatives == other.alternatives
+        self.alternatives == other.alternatives
     }
 }
 
 impl BindingCondition {
     pub fn new(expr: ConditionExpr) -> Self {
-        match expr {
-            ConditionExpr::Always => Self {
-                original: expr,
-                kind: BindingConditionKind::Always,
-                alternatives: Vec::new(),
-            },
-            ConditionExpr::All(conditions) => {
-                let mut normalized = Vec::new();
-                for condition in conditions {
-                    add_condition(&mut normalized, *condition);
-                }
-                normalized.sort_by_key(|condition| condition_key(*condition));
-                Self {
-                    original: expr,
-                    kind: BindingConditionKind::All,
-                    alternatives: vec![normalized],
-                }
-            }
-            ConditionExpr::Any(conditions) => {
-                let mut alternatives = Vec::new();
-                for condition in conditions {
-                    let mut normalized = Vec::new();
-                    add_condition(&mut normalized, *condition);
-                    normalized.sort_by_key(|condition| condition_key(*condition));
-                    if !alternatives.contains(&normalized) {
-                        alternatives.push(normalized);
-                    }
-                }
-                alternatives.sort_by_key(|conditions| {
-                    conditions
-                        .iter()
-                        .copied()
-                        .map(condition_key)
-                        .collect::<Vec<_>>()
-                });
-                Self {
-                    original: expr,
-                    kind: BindingConditionKind::Any,
-                    alternatives,
-                }
-            }
+        let mut alternatives = match expr {
+            ConditionExpr::Always => vec![Vec::new()],
+            ConditionExpr::All(conditions) => vec![normalize_conditions(conditions)],
+            ConditionExpr::Any(conditions) => conditions
+                .iter()
+                .copied()
+                .map(|condition| normalize_conditions(&[condition]))
+                .collect(),
+        };
+        sort_and_dedup_alternatives(&mut alternatives);
+        Self {
+            original: expr,
+            alternatives,
         }
     }
 
@@ -80,51 +44,47 @@ impl BindingCondition {
     }
 
     pub fn priority_score(&self) -> u16 {
-        match self.kind {
-            BindingConditionKind::Always => 0,
-            BindingConditionKind::All => self
-                .alternatives
-                .first()
-                .map(|conditions| {
-                    conditions
-                        .iter()
-                        .copied()
-                        .map(condition_weight)
-                        .sum::<u16>()
-                })
-                .unwrap_or(0),
-            BindingConditionKind::Any => self
-                .alternatives
-                .iter()
-                .map(|conditions| {
-                    conditions
-                        .iter()
-                        .copied()
-                        .map(condition_weight)
-                        .sum::<u16>()
-                })
-                .max()
-                .unwrap_or(0),
-        }
+        self.alternatives
+            .iter()
+            .map(|conditions| {
+                conditions
+                    .iter()
+                    .copied()
+                    .map(condition_weight)
+                    .sum::<u16>()
+            })
+            .max()
+            .unwrap_or(0)
     }
 
     pub fn is_met(&self, ctx: &RuntimeConditionContext<'_>) -> bool {
-        match self.kind {
-            BindingConditionKind::Always => true,
-            BindingConditionKind::All => self.alternatives.first().is_some_and(|conditions| {
-                conditions
-                    .iter()
-                    .copied()
-                    .all(|condition| runtime_condition_is_met(condition, ctx))
-            }),
-            BindingConditionKind::Any => self.alternatives.iter().any(|conditions| {
-                conditions
-                    .iter()
-                    .copied()
-                    .all(|condition| runtime_condition_is_met(condition, ctx))
-            }),
-        }
+        self.alternatives.iter().any(|conditions| {
+            conditions
+                .iter()
+                .copied()
+                .all(|condition| runtime_condition_is_met(condition, ctx))
+        })
     }
+}
+
+fn normalize_conditions(conditions: &[RuntimeCondition]) -> Vec<RuntimeCondition> {
+    let mut normalized = Vec::new();
+    for condition in conditions {
+        add_condition(&mut normalized, *condition);
+    }
+    normalized.sort_by_key(|condition| condition_key(*condition));
+    normalized
+}
+
+fn sort_and_dedup_alternatives(alternatives: &mut Vec<Vec<RuntimeCondition>>) {
+    alternatives.sort_by_key(|conditions| {
+        conditions
+            .iter()
+            .copied()
+            .map(condition_key)
+            .collect::<Vec<_>>()
+    });
+    alternatives.dedup();
 }
 
 /// Shared runtime predicates for command `enabled_when` and key binding
@@ -251,7 +211,9 @@ pub fn runtime_condition_is_met(
         RuntimeCondition::HelpIsOpen => ctx.mode == Mode::Help,
         RuntimeCondition::HelpIsClosed => ctx.mode != Mode::Help,
         RuntimeCondition::PaletteInputHistoryIsAvailable => ctx.palette_input_history_available,
-        RuntimeCondition::PaletteInputHistoryIsUnavailable => !ctx.palette_input_history_available,
+        RuntimeCondition::PaletteInputHistoryIsUnavailable => {
+            ctx.active_palette.is_some() && !ctx.palette_input_history_available
+        }
         RuntimeCondition::PaletteInputIsEmpty => {
             ctx.active_palette.is_some() && ctx.palette_input_empty
         }
@@ -289,6 +251,7 @@ fn add_condition(conditions: &mut Vec<RuntimeCondition>, condition: RuntimeCondi
         }
         RuntimeCondition::PaletteInputHistoryIsUnavailable => {
             add_atom(conditions, RuntimeCondition::ModeIs(Mode::Palette));
+            add_atom(conditions, RuntimeCondition::PaletteIsOpen);
             add_atom(
                 conditions,
                 RuntimeCondition::PaletteInputHistoryIsUnavailable,
@@ -405,6 +368,14 @@ mod tests {
         let outline =
             RuntimeConditionContext::new(Mode::Palette, Some(PaletteKind::Outline), &extensions);
         assert!(!outline.palette_input_history_available);
+        assert!(runtime_condition_is_met(
+            RuntimeCondition::PaletteInputHistoryIsUnavailable,
+            &outline
+        ));
+        assert!(!runtime_condition_is_met(
+            RuntimeCondition::PaletteInputHistoryIsUnavailable,
+            &RuntimeConditionContext::normal(&extensions)
+        ));
     }
 
     #[test]
@@ -477,6 +448,18 @@ mod tests {
         let duplicated = BindingCondition::new(ConditionExpr::All(PALETTE_DUPLICATED));
         assert_eq!(palette, duplicated);
         assert_eq!(palette.priority_score(), duplicated.priority_score());
+    }
+
+    #[test]
+    fn single_alternative_conditions_have_the_same_normalized_form() {
+        static PALETTE_COMMAND: &[RuntimeCondition] =
+            &[RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
+
+        let all = BindingCondition::new(ConditionExpr::All(PALETTE_COMMAND));
+        let any = BindingCondition::new(ConditionExpr::Any(PALETTE_COMMAND));
+
+        assert_eq!(all, any);
+        assert_eq!(all.priority_score(), any.priority_score());
     }
 
     #[test]

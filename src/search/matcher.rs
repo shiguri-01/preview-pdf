@@ -8,8 +8,6 @@ use super::engine::SearchOccurrence;
 
 pub trait SearchMatcher: Send + Sync {
     fn prepare_query(&self, raw_query: &str) -> String;
-    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool;
-    fn locate_text_matches(&self, page_text: &str, prepared_query: &str) -> Vec<SearchOccurrence>;
     fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence>;
 }
 
@@ -29,14 +27,6 @@ impl SearchMatcher for ContainsMatcher {
         prepare_contains_query(raw_query, self.case_sensitive)
     }
 
-    fn matches_page(&self, page_text: &str, prepared_query: &str) -> bool {
-        page_matches_contains(page_text, prepared_query, self.case_sensitive)
-    }
-
-    fn locate_text_matches(&self, page_text: &str, prepared_query: &str) -> Vec<SearchOccurrence> {
-        locate_text_occurrences(page_text, prepared_query, self.case_sensitive)
-    }
-
     fn locate_matches(&self, page: &TextPage, prepared_query: &str) -> Vec<SearchOccurrence> {
         locate_occurrences(&page.glyphs, prepared_query, self.case_sensitive)
     }
@@ -44,21 +34,6 @@ impl SearchMatcher for ContainsMatcher {
 
 pub(crate) fn prepare_contains_query(raw_query: &str, case_sensitive: bool) -> String {
     normalize_text_for_search(raw_query, case_sensitive, false)
-}
-
-pub(crate) fn page_matches_contains(
-    page_text: &str,
-    prepared_query: &str,
-    case_sensitive: bool,
-) -> bool {
-    let prepared_page = normalize_text_for_search(page_text, case_sensitive, false);
-    if prepared_page.contains(prepared_query) {
-        return true;
-    }
-
-    let whitespace_insensitive_page = normalize_text_for_search(page_text, case_sensitive, true);
-    let whitespace_insensitive_query = normalize_text_for_search(prepared_query, true, true);
-    whitespace_insensitive_page.contains(&whitespace_insensitive_query)
 }
 
 pub(crate) fn locate_occurrences(
@@ -73,20 +48,6 @@ pub(crate) fn locate_occurrences(
     }
 
     locate_occurrences_with_strategy(glyphs, prepared_query, case_sensitive, true)
-}
-
-pub(crate) fn locate_text_occurrences(
-    text: &str,
-    prepared_query: &str,
-    case_sensitive: bool,
-) -> Vec<SearchOccurrence> {
-    let occurrences =
-        locate_text_occurrences_with_strategy(text, prepared_query, case_sensitive, false);
-    if !occurrences.is_empty() {
-        return occurrences;
-    }
-
-    locate_text_occurrences_with_strategy(text, prepared_query, case_sensitive, true)
 }
 
 pub(crate) fn occurrence_highlight_unavailable(
@@ -163,38 +124,6 @@ fn build_hit_snippet(
     )
 }
 
-fn build_text_hit_snippet(text: &str, char_start: usize, char_end: usize) -> SnippetPresentation {
-    const CONTEXT_CHARS: usize = 16;
-
-    let chars: Vec<char> = text.chars().collect();
-    if chars.is_empty() || char_start >= chars.len() || char_end < char_start {
-        return SnippetPresentation {
-            text: String::new(),
-            match_start: None,
-            match_end: None,
-        };
-    }
-
-    let char_end = char_end.min(chars.len() - 1);
-    let context_start = char_start.saturating_sub(CONTEXT_CHARS);
-    let context_end = char_end
-        .saturating_add(CONTEXT_CHARS)
-        .saturating_add(1)
-        .min(chars.len());
-
-    let before = chars[context_start..char_start].iter().collect::<String>();
-    let matched = chars[char_start..=char_end].iter().collect::<String>();
-    let after = chars[char_end + 1..context_end].iter().collect::<String>();
-
-    build_snippet_text(
-        before,
-        matched,
-        after,
-        context_start > 0,
-        context_end < chars.len(),
-    )
-}
-
 fn build_snippet_text(
     before: String,
     matched: String,
@@ -226,86 +155,6 @@ fn build_snippet_text(
         match_start,
         match_end,
     }
-}
-
-fn locate_text_occurrences_with_strategy(
-    text: &str,
-    prepared_query: &str,
-    case_sensitive: bool,
-    ignore_whitespace: bool,
-) -> Vec<SearchOccurrence> {
-    if prepared_query.is_empty() {
-        return Vec::new();
-    }
-
-    let (search_text, char_map) =
-        normalize_text_with_char_map(text, case_sensitive, ignore_whitespace);
-    if search_text.is_empty() {
-        return Vec::new();
-    }
-
-    let query_text = normalize_text_for_search(prepared_query, true, ignore_whitespace);
-    if query_text.is_empty() || query_text.len() > search_text.len() {
-        return Vec::new();
-    }
-
-    let char_byte_offsets: Vec<usize> = search_text
-        .char_indices()
-        .map(|(offset, _)| offset)
-        .collect();
-    let query_char_len = query_text.chars().count();
-    if query_char_len == 0 || query_char_len > char_map.len() {
-        return Vec::new();
-    }
-
-    let mut occurrences = Vec::new();
-    let mut cursor_byte = 0;
-    while cursor_byte <= search_text.len() {
-        let Some(relative_match_byte) = search_text[cursor_byte..].find(&query_text) else {
-            break;
-        };
-        let match_byte = cursor_byte + relative_match_byte;
-        let match_char_start = char_byte_offsets
-            .binary_search(&match_byte)
-            .expect("str::find returned a non-character-boundary offset");
-        let char_start = char_map[match_char_start];
-        let char_end = char_map[match_char_start + query_char_len - 1];
-        let snippet = build_text_hit_snippet(text, char_start, char_end);
-        occurrences.push(SearchOccurrence {
-            match_start: char_start,
-            match_end: char_end,
-            rects: Vec::new(),
-            snippet: snippet.text,
-            snippet_match_start: snippet.match_start,
-            snippet_match_end: snippet.match_end,
-        });
-        cursor_byte = match_byte + query_text.len();
-    }
-
-    occurrences
-}
-
-fn normalize_text_with_char_map(
-    text: &str,
-    case_sensitive: bool,
-    ignore_whitespace: bool,
-) -> (String, Vec<usize>) {
-    let mut search_text = String::new();
-    let mut char_map = Vec::new();
-
-    for (char_index, ch) in text.chars().enumerate() {
-        if ignore_whitespace && ch.is_whitespace() {
-            continue;
-        }
-        push_normalized_chars(ch, case_sensitive, |normalized| {
-            if !ignore_whitespace || !normalized.is_whitespace() {
-                search_text.push(normalized);
-                char_map.push(char_index);
-            }
-        });
-    }
-
-    (search_text, char_map)
 }
 
 fn locate_occurrences_with_strategy(

@@ -53,12 +53,8 @@ impl PdfBackend for PdfDoc {
         })
     }
 
-    fn extract_text(&self, page: usize) -> AppResult<String> {
-        PdfDoc::extract_text(self, page)
-    }
-
-    fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage> {
-        PdfDoc::extract_positioned_text(self, page)
+    fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
+        PdfDoc::extract_text_page(self, page)
     }
 
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
@@ -86,10 +82,8 @@ mod tests {
     use crate::backend::{PdfBackend, PdfRect};
 
     use super::{
-        PdfDoc,
-        document::pixel_buffer_from_pixmap,
-        encoding::decode_pdf_text_string,
-        text::{PlainTextExtractDevice, PositionedTextExtractDevice},
+        PdfDoc, document::pixel_buffer_from_pixmap, encoding::decode_pdf_text_string,
+        text::TextPageExtractDevice,
     };
 
     #[test]
@@ -186,13 +180,16 @@ mod tests {
     }
 
     #[test]
-    fn extract_text_returns_page_bucket_text() {
+    fn extract_text_page_returns_page_bucket_text() {
         let file = unique_temp_path("text.pdf");
         fs::write(&file, build_pdf(&["hello world", "second page"]))
             .expect("test file should be created");
 
         let doc = PdfDoc::open(&file).expect("pdf should open");
-        let text = doc.extract_text(0).expect("extract should succeed");
+        let text = doc
+            .extract_text_page(0)
+            .expect("extract should succeed")
+            .plain_text();
         let normalized: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
         assert!(normalized.contains("helloworld"));
 
@@ -200,7 +197,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_text_does_not_insert_false_space_from_tj_position_gap() {
+    fn extract_text_page_does_not_insert_false_space_from_tj_position_gap() {
         let file = unique_temp_path("tj_gap.pdf");
         fs::write(
             &file,
@@ -209,7 +206,10 @@ mod tests {
         .expect("test file should be created");
 
         let doc = PdfDoc::open(&file).expect("pdf should open");
-        let text = doc.extract_text(0).expect("extract should succeed");
+        let text = doc
+            .extract_text_page(0)
+            .expect("extract should succeed")
+            .plain_text();
         let normalized: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
         assert!(
             normalized.to_lowercase().contains("helloworld"),
@@ -263,18 +263,8 @@ mod tests {
     }
 
     #[test]
-    fn plain_text_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
-        let mut device = PlainTextExtractDevice::default();
-
-        device.push_glyph_text("ll".to_owned(), 10.0, 20.0);
-        device.push_glyph_text("ll".to_owned(), 10.0, 20.0);
-
-        assert_eq!(device.finish(), "ll");
-    }
-
-    #[test]
-    fn positioned_text_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
-        let mut device = PositionedTextExtractDevice::default();
+    fn text_page_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
+        let mut device = TextPageExtractDevice::default();
         let bbox = Some(PdfRect {
             x0: 1.0,
             y0: 2.0,

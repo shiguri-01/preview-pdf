@@ -208,18 +208,6 @@ impl SearchMatcher for CancelMatcher {
         String::new()
     }
 
-    fn matches_page(&self, _page_text: &str, _prepared_query: &str) -> bool {
-        false
-    }
-
-    fn locate_text_matches(
-        &self,
-        _page_text: &str,
-        _prepared_query: &str,
-    ) -> Vec<SearchOccurrence> {
-        Vec::new()
-    }
-
     fn locate_matches(&self, _page: &TextPage, _prepared_query: &str) -> Vec<SearchOccurrence> {
         Vec::new()
     }

@@ -175,63 +175,8 @@ pub struct TextPage {
 }
 
 impl TextPage {
-    pub fn extracted_text(&self) -> String {
-        let mut out = String::new();
-        let mut last_rect: Option<PdfRect> = None;
-        for glyph in &self.glyphs {
-            push_extracted_char(&mut out, glyph.ch, glyph.bbox, &mut last_rect);
-        }
-        out.trim().to_owned()
-    }
-}
-
-const LINE_BREAK_THRESHOLD: f32 = 6.0;
-
-fn push_extracted_char(
-    out: &mut String,
-    ch: char,
-    bbox: Option<PdfRect>,
-    last_rect: &mut Option<PdfRect>,
-) {
-    if ch == '\n' || ch == '\r' {
-        push_newline(out);
-        if bbox.is_some() {
-            *last_rect = bbox;
-        }
-        return;
-    }
-    if ch.is_whitespace() {
-        push_space(out);
-        if bbox.is_some() {
-            *last_rect = bbox;
-        }
-        return;
-    }
-
-    if let (Some(last), Some(bbox)) = (*last_rect, bbox)
-        && (bbox.y0 - last.y0).abs() > LINE_BREAK_THRESHOLD
-    {
-        push_newline(out);
-    }
-
-    out.push(ch);
-    if bbox.is_some() {
-        *last_rect = bbox;
-    }
-}
-
-fn push_newline(out: &mut String) {
-    while out.ends_with(' ') {
-        out.pop();
-    }
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-}
-
-fn push_space(out: &mut String) {
-    if !out.ends_with([' ', '\n']) {
-        out.push(' ');
+    pub fn plain_text(&self) -> String {
+        self.glyphs.iter().map(|glyph| glyph.ch).collect()
     }
 }
 
@@ -244,8 +189,7 @@ pub trait PdfBackend: Send + Sync {
     fn render_context(&self) -> Box<dyn PdfRenderContext + '_> {
         Box::new(DefaultPdfRenderContext { backend: self })
     }
-    fn extract_text(&self, page: usize) -> AppResult<String>;
-    fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage>;
+    fn extract_text_page(&self, page: usize) -> AppResult<TextPage>;
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>>;
 }
 
@@ -331,47 +275,32 @@ mod tests {
     fn _assert_pdf_backend_object_safe(_: &dyn PdfBackend) {}
 
     #[test]
-    fn text_page_extracted_text_preserves_line_breaks() {
+    fn text_page_plain_text_preserves_glyph_stream_text() {
         let page = TextPage {
             width_pt: 100.0,
             height_pt: 100.0,
             glyphs: vec![
                 TextGlyph {
                     ch: 'A',
-                    bbox: Some(PdfRect {
-                        x0: 1.0,
-                        y0: 1.0,
-                        x1: 2.0,
-                        y1: 2.0,
-                    }),
+                    bbox: None,
                 },
                 TextGlyph {
                     ch: ' ',
-                    bbox: Some(PdfRect {
-                        x0: 3.0,
-                        y0: 1.0,
-                        x1: 4.0,
-                        y1: 2.0,
-                    }),
+                    bbox: None,
                 },
                 TextGlyph {
                     ch: 'B',
-                    bbox: Some(PdfRect {
-                        x0: 1.0,
-                        y0: 20.0,
-                        x1: 2.0,
-                        y1: 21.0,
-                    }),
+                    bbox: None,
                 },
             ],
             dropped_glyphs: 0,
         };
 
-        assert_eq!(page.extracted_text(), "A\nB");
+        assert_eq!(page.plain_text(), "A B");
     }
 
     #[test]
-    fn text_page_extracted_text_keeps_line_context_across_unbounded_space() {
+    fn text_page_plain_text_does_not_infer_line_breaks_from_geometry() {
         let page = TextPage {
             width_pt: 100.0,
             height_pt: 100.0,
@@ -402,6 +331,6 @@ mod tests {
             dropped_glyphs: 1,
         };
 
-        assert_eq!(page.extracted_text(), "A\nB");
+        assert_eq!(page.plain_text(), "A B");
     }
 }

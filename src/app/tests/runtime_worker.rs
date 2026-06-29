@@ -126,11 +126,7 @@ impl PdfBackend for PageDimensionFailingPdf {
         })
     }
 
-    fn extract_text(&self, _page: usize) -> AppResult<String> {
-        Err(AppError::unsupported("not needed in runtime test"))
-    }
-
-    fn extract_positioned_text(&self, _page: usize) -> AppResult<crate::backend::TextPage> {
+    fn extract_text_page(&self, _page: usize) -> AppResult<crate::backend::TextPage> {
         Err(AppError::unsupported("not needed in runtime test"))
     }
 

@@ -212,7 +212,7 @@ impl SearchPageCache {
 }
 
 fn estimate_text_page_bytes(text_page: &TextPage) -> usize {
-    size_of::<TextPage>() + text_page.glyphs.len() * size_of::<TextGlyph>()
+    size_of::<TextPage>() + text_page.glyphs.capacity() * size_of::<TextGlyph>()
 }
 
 pub(crate) fn worker_main(
@@ -421,25 +421,27 @@ fn run_job(
         };
 
         let text_page = match text_page {
-            Ok(text_page) => text_page,
+            Ok(text_page) => Some(text_page),
             Err(err) => {
                 let _ = event_tx.send(SearchEvent::Failed {
                     generation: job.generation,
                     message: err.to_string(),
                 });
-                return WorkerControl::Continue;
+                None
             }
         };
 
-        let mut occurrences = job.matcher.locate_matches(text_page.as_ref(), &query);
-        for occurrence in &mut occurrences {
-            if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
-                highlight_unavailable = true;
+        if let Some(text_page) = text_page {
+            let mut occurrences = job.matcher.locate_matches(text_page.as_ref(), &query);
+            for occurrence in &mut occurrences {
+                if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
+                    highlight_unavailable = true;
+                }
+                apply_hit_snippet(occurrence, &text_page.glyphs);
             }
-            apply_hit_snippet(occurrence, &text_page.glyphs);
-        }
-        if !occurrences.is_empty() {
-            hits.push(SearchPageHit { page, occurrences });
+            if !occurrences.is_empty() {
+                hits.push(SearchPageHit { page, occurrences });
+            }
         }
 
         let scanned_pages = page + 1;
@@ -565,11 +567,14 @@ mod tests {
 
     use super::{
         PendingWorkerWork, PrewarmControl, PrewarmJob, SearchJob, SearchPageCache, WorkerRequest,
-        estimate_text_page_bytes, run_prewarm_job,
+        estimate_text_page_bytes, run_job, run_prewarm_job,
     };
-    use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
+    use crate::backend::{
+        OutlineNode, PdfBackend, PdfRect, RgbaFrame, SharedPdfBackend, TextGlyph, TextPage,
+    };
     use crate::command::SearchMatcherKind;
     use crate::error::{AppError, AppResult};
+    use crate::search::engine::SearchEvent;
     use crate::search::matcher::matcher_for_kind;
 
     struct CountingTextPageStubPdf {
@@ -625,6 +630,55 @@ mod tests {
                 .lock()
                 .expect("text page calls lock should not be poisoned");
             calls[page] += 1;
+            Ok(self.pages[page].clone())
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+    }
+
+    struct FailingPageStubPdf {
+        path: PathBuf,
+        pages: Vec<TextPage>,
+        failing_page: usize,
+    }
+
+    impl FailingPageStubPdf {
+        fn new(pages: Vec<TextPage>, failing_page: usize) -> Self {
+            Self {
+                path: PathBuf::from("failing-page.pdf"),
+                pages,
+                failing_page,
+            }
+        }
+    }
+
+    impl PdfBackend for FailingPageStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            404
+        }
+
+        fn page_count(&self) -> usize {
+            self.pages.len()
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+
+        fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
+            if page == self.failing_page {
+                return Err(AppError::unsupported("page text unavailable"));
+            }
             Ok(self.pages[page].clone())
         }
 
@@ -848,6 +902,54 @@ mod tests {
             PrewarmControl::Finished
         ));
         assert_eq!(pdf.text_page_calls(), vec![1, 1]);
+    }
+
+    #[test]
+    fn search_continues_after_page_text_extraction_failure() {
+        let pdf = Arc::new(FailingPageStubPdf::new(
+            vec![text_page("alpha"), text_page("broken"), text_page("beta")],
+            1,
+        )) as SharedPdfBackend;
+        let (_request_tx, request_rx) = unbounded_channel();
+        let mut request_rx = request_rx;
+        let (event_tx, mut event_rx) = unbounded_channel();
+        let mut pending = PendingWorkerWork::default();
+        let mut page_cache = SearchPageCache::with_limits(4, usize::MAX);
+
+        let control = run_job(
+            SearchJob {
+                generation: 1,
+                pdf,
+                query: "beta".to_string(),
+                matcher: matcher_for_kind(SearchMatcherKind::ContainsInsensitive),
+            },
+            &mut request_rx,
+            &event_tx,
+            &mut pending,
+            &mut page_cache,
+        );
+
+        assert!(matches!(control, super::WorkerControl::Continue));
+        let mut events = Vec::new();
+        while let Ok(event) = event_rx.try_recv() {
+            events.push(event);
+        }
+        assert!(events.iter().any(|event| matches!(
+            event,
+            SearchEvent::Failed {
+                message,
+                ..
+            } if message.contains("page text unavailable")
+        )));
+        let completed = events
+            .iter()
+            .find_map(|event| match event {
+                SearchEvent::Completed { hits, .. } => Some(hits),
+                _ => None,
+            })
+            .expect("search should complete after skipping failed page");
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].page, 2);
     }
 
     fn text_page(text: &str) -> TextPage {

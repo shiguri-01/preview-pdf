@@ -79,12 +79,9 @@ mod tests {
     };
     use crate::error::AppError;
 
-    use crate::backend::{PdfBackend, PdfRect};
+    use crate::backend::PdfBackend;
 
-    use super::{
-        PdfDoc, document::pixel_buffer_from_pixmap, encoding::decode_pdf_text_string,
-        text::TextPageExtractDevice,
-    };
+    use super::{PdfDoc, document::pixel_buffer_from_pixmap, encoding::decode_pdf_text_string};
 
     #[test]
     fn open_rejects_directory_path() {
@@ -192,6 +189,10 @@ mod tests {
             .plain_text();
         let normalized: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
         assert!(normalized.contains("helloworld"));
+        assert!(
+            !normalized.contains("secondpage"),
+            "page 0 extraction leaked text from another page: {text:?}"
+        );
 
         fs::remove_file(&file).expect("test file should be removed");
     }
@@ -210,9 +211,9 @@ mod tests {
             .extract_text_page(0)
             .expect("extract should succeed")
             .plain_text();
-        let normalized: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
+        let lower = text.to_lowercase();
         assert!(
-            normalized.to_lowercase().contains("helloworld"),
+            lower.contains("helloworld") && !lower.contains("hello world"),
             "expected stable extraction without false splits, got: {text:?}"
         );
 
@@ -260,24 +261,6 @@ mod tests {
         );
 
         fs::remove_file(&file).expect("test file should be removed");
-    }
-
-    #[test]
-    fn text_page_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
-        let mut device = TextPageExtractDevice::default();
-        let bbox = Some(PdfRect {
-            x0: 1.0,
-            y0: 2.0,
-            x1: 3.0,
-            y1: 4.0,
-        });
-
-        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
-        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
-
-        let text: String = device.glyphs.iter().map(|glyph| glyph.ch).collect();
-        assert_eq!(text, "ff");
-        assert_eq!(device.glyphs.len(), 2);
     }
 
     #[test]

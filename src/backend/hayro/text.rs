@@ -26,14 +26,14 @@ pub(super) fn extract_text_page_with_device(page: &Page<'_>) -> TextPage {
 }
 
 #[derive(Default)]
-pub(super) struct TextPageExtractDevice {
+struct TextPageExtractDevice {
     last_glyph: Option<(String, i32, i32)>,
-    pub(super) glyphs: Vec<TextGlyph>,
+    glyphs: Vec<TextGlyph>,
     dropped_glyphs: usize,
 }
 
 impl TextPageExtractDevice {
-    pub(super) fn finish(self, width_pt: f32, height_pt: f32) -> TextPage {
+    fn finish(self, width_pt: f32, height_pt: f32) -> TextPage {
         TextPage {
             width_pt,
             height_pt,
@@ -42,11 +42,14 @@ impl TextPageExtractDevice {
         }
     }
 
-    pub(super) fn push_glyph_text(&mut self, text: String, bbox: Option<PdfRect>, x: f64, y: f64) {
+    fn push_glyph_text(&mut self, text: String, bbox: Option<PdfRect>, x: f64, y: f64) {
         if self.is_duplicate_glyph(&text, x, y) {
             return;
         }
 
+        if bbox.is_none() {
+            self.dropped_glyphs += text.chars().count();
+        }
         self.glyphs
             .extend(text.chars().map(|ch| TextGlyph { ch, bbox }));
         self.set_last_glyph(text, x, y);
@@ -103,9 +106,6 @@ impl<'a> Device<'a> for TextPageExtractDevice {
 
         let position = (transform * glyph_transform) * Point::ORIGIN;
         let bbox = glyph_bbox(glyph, transform, glyph_transform);
-        if bbox.is_none() {
-            self.dropped_glyphs += 1;
-        }
         self.push_glyph_text(bf_string_text(ch), bbox, position.x, position.y);
     }
 
@@ -142,5 +142,40 @@ fn bf_string_text(value: BfString) -> String {
     match value {
         BfString::Char(ch) => ch.to_string(),
         BfString::String(text) => text,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PdfRect, TextPageExtractDevice};
+
+    #[test]
+    fn duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
+        let mut device = TextPageExtractDevice::default();
+        let bbox = Some(PdfRect {
+            x0: 1.0,
+            y0: 2.0,
+            x1: 3.0,
+            y1: 4.0,
+        });
+
+        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
+        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
+
+        let text: String = device.glyphs.iter().map(|glyph| glyph.ch).collect();
+        assert_eq!(text, "ff");
+        assert_eq!(device.glyphs.len(), 2);
+    }
+
+    #[test]
+    fn dropped_glyph_count_matches_emitted_unbounded_glyphs() {
+        let mut device = TextPageExtractDevice::default();
+
+        device.push_glyph_text("ffi".to_owned(), None, 10.0, 20.0);
+        device.push_glyph_text("ffi".to_owned(), None, 10.0, 20.0);
+
+        let page = device.finish(100.0, 100.0);
+        assert_eq!(page.glyphs.len(), 3);
+        assert_eq!(page.dropped_glyphs, 3);
     }
 }

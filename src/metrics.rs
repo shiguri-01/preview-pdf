@@ -162,6 +162,7 @@ impl PerfStats {
     }
 
     pub fn add_encode_canceled_tasks(&mut self, canceled: usize) {
+        self.canceled_tasks += canceled;
         self.encode_canceled_tasks += canceled;
     }
 
@@ -179,6 +180,7 @@ impl PerfStats {
         self.encode_queue_depth = presenter.encode_queue_depth;
         self.encode_in_flight = presenter.encode_in_flight;
         self.encode_canceled_tasks = presenter.encode_canceled_tasks;
+        self.canceled_tasks = self.render_canceled_tasks + self.encode_canceled_tasks;
         self.encode_samples_ms = presenter.encode_samples_ms.clone();
         self.blit_samples_ms = presenter.blit_samples_ms.clone();
         self.encode_queue_wait_samples_ms = presenter.encode_queue_wait_samples_ms.clone();

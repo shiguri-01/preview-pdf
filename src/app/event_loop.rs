@@ -55,6 +55,7 @@ impl App {
         S: TerminalSession,
         D: LoopDriver,
     {
+        let session = RestoringSession::new(session);
         let page_count = pdf.page_count();
         if page_count == 0 {
             return Err(AppError::invalid_argument("pdf has no pages"));
@@ -460,14 +461,60 @@ async fn wait_next_event(
     }
 }
 
+struct RestoringSession<S: TerminalSession> {
+    session: S,
+    active: bool,
+}
+
+impl<S: TerminalSession> RestoringSession<S> {
+    fn new(session: S) -> Self {
+        Self {
+            session,
+            active: true,
+        }
+    }
+}
+
+impl<S: TerminalSession> TerminalSurface for RestoringSession<S> {
+    fn size(&self) -> std::io::Result<ratatui::layout::Size> {
+        self.session.size()
+    }
+
+    fn draw<F>(&mut self, render: F) -> std::io::Result<()>
+    where
+        F: FnOnce(&mut ratatui::Frame<'_>),
+    {
+        self.session.draw(render)
+    }
+}
+
+impl<S: TerminalSession> TerminalSession for RestoringSession<S> {
+    fn restore(&mut self) -> std::io::Result<()> {
+        if !self.active {
+            return Ok(());
+        }
+        self.session.restore()?;
+        self.active = false;
+        Ok(())
+    }
+}
+
+impl<S: TerminalSession> Drop for RestoringSession<S> {
+    fn drop(&mut self) {
+        let _ = self.restore();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
     use std::fs;
     use std::future::Future;
     use std::io;
+    use std::path::{Path, PathBuf};
     use std::pin::Pin;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -480,13 +527,17 @@ mod tests {
     use crate::app::core::InteractionSubsystem;
     use crate::app::loop_runtime::ActiveDocument;
     use crate::app::terminal_session::{TerminalSession, TerminalSurface};
+    use crate::app::{
+        LoopDriver, LoopDriverDecision, LoopDriverHandle, LoopMetricsSnapshot, LoopObservation,
+    };
     use crate::backend::test_support::{build_pdf, unique_temp_path};
-    use crate::backend::{PdfDoc, SharedPdfBackend};
+    use crate::backend::{OutlineNode, PdfBackend, PdfDoc, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{
         Command, CommandInvocationSource, CommandRequest, PanAmount, PanDirection,
     };
     use crate::condition::ConditionExpr;
     use crate::config::Config;
+    use crate::error::{AppError, AppResult};
     use crate::event::{
         DocumentReloadReason, DocumentReloadRequest, DocumentReloadResult, DomainEvent,
     };
@@ -560,12 +611,21 @@ mod tests {
 
     struct StubSession {
         size: Size,
+        restore_count: Option<Arc<AtomicUsize>>,
     }
 
     impl StubSession {
         fn new(width: u16, height: u16) -> Self {
             Self {
                 size: Size::new(width, height),
+                restore_count: None,
+            }
+        }
+
+        fn with_restore_count(width: u16, height: u16, restore_count: Arc<AtomicUsize>) -> Self {
+            Self {
+                size: Size::new(width, height),
+                restore_count: Some(restore_count),
             }
         }
     }
@@ -585,7 +645,79 @@ mod tests {
 
     impl TerminalSession for StubSession {
         fn restore(&mut self) -> io::Result<()> {
+            if let Some(count) = &self.restore_count {
+                count.fetch_add(1, Ordering::Relaxed);
+            }
             Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct RestoreProbeDriver;
+
+    impl LoopDriver for RestoreProbeDriver {
+        type Output = ();
+
+        fn on_iteration(
+            &mut self,
+            _observation: LoopObservation,
+            _handle: &mut LoopDriverHandle<'_>,
+        ) -> AppResult<LoopDriverDecision> {
+            Ok(LoopDriverDecision::Finish)
+        }
+
+        fn on_finish(
+            &mut self,
+            _observation: LoopObservation,
+            _metrics: LoopMetricsSnapshot,
+        ) -> AppResult<Self::Output> {
+            Ok(())
+        }
+
+        fn on_loop_break(&mut self) -> AppResult<Self::Output> {
+            Ok(())
+        }
+    }
+
+    struct EmptyPdfBackend {
+        path: PathBuf,
+    }
+
+    impl EmptyPdfBackend {
+        fn new() -> Self {
+            Self {
+                path: PathBuf::from("empty.pdf"),
+            }
+        }
+    }
+
+    impl PdfBackend for EmptyPdfBackend {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            0
+        }
+
+        fn page_count(&self) -> usize {
+            0
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Err(AppError::invalid_argument("empty pdf"))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::invalid_argument("empty pdf"))
+        }
+
+        fn extract_text_page(&self, _page: usize) -> AppResult<TextPage> {
+            Err(AppError::invalid_argument("empty pdf"))
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Ok(Vec::new())
         }
     }
 
@@ -604,6 +736,27 @@ mod tests {
         let doc = PdfDoc::open(&file).expect("pdf should open");
         fs::remove_file(&file).expect("test pdf should be removed");
         Arc::new(doc)
+    }
+
+    #[test]
+    fn run_loop_restores_session_when_pdf_has_no_pages() {
+        let tokio_runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let restore_count = Arc::new(AtomicUsize::new(0));
+        let mut app =
+            App::new_with_config(PresenterKind::RatatuiImage, Config::default()).expect("app init");
+        let session = StubSession::with_restore_count(80, 24, Arc::clone(&restore_count));
+        let pdf: SharedPdfBackend = Arc::new(EmptyPdfBackend::new());
+        let driver = RestoreProbeDriver;
+
+        let err = tokio_runtime
+            .block_on(app.run_loop(pdf, session, super::LoopEventMode::Headless, driver))
+            .expect_err("empty pdf should fail before the loop starts");
+
+        assert!(err.to_string().contains("pdf has no pages"));
+        assert_eq!(restore_count.load(Ordering::Relaxed), 1);
     }
 
     fn failed_render_result(

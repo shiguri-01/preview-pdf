@@ -465,7 +465,7 @@ mod tests {
         assert_eq!(stats.render_in_flight, 2);
         assert_eq!(stats.encode_queue_depth, 3);
         assert_eq!(stats.encode_in_flight, 1);
-        assert_eq!(stats.canceled_tasks, 2);
+        assert_eq!(stats.canceled_tasks, 3);
         assert_eq!(stats.render_canceled_tasks, 2);
         assert_eq!(stats.encode_canceled_tasks, 1);
         assert_eq!(stats.redraw_requests_total, 2);
@@ -495,6 +495,7 @@ mod tests {
         assert_eq!(runtime.cache_hit_rate_l2, 0.8);
         assert_eq!(runtime.encode_queue_depth, 4);
         assert_eq!(runtime.encode_in_flight, 1);
+        assert_eq!(runtime.canceled_tasks, 3);
         assert_eq!(runtime.encode_canceled_tasks, 3);
         assert_eq!(runtime.encode_samples_ms(), &[5.0]);
         assert_eq!(runtime.blit_samples_ms(), &[2.0]);

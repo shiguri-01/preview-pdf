@@ -62,8 +62,10 @@ request behavior by returning typed effects or commands instead of taking
 selection, palette input editing, palette input history recall, and help
 scrolling enter the same command dispatch path as normal-mode keymap entries.
 
-Extensions own extension-local state and observe `AppEvent` values. Shared UI
-data crosses from extensions to palettes through `ExtensionUiSnapshot`.
+Extensions own extension-local state and observe `AppEvent` values.
+`ExtensionHost` owns concrete extension state, hook routing, and shared
+snapshots. Feature behavior stays with the feature modules. Shared UI data
+crosses from extensions to palettes through `ExtensionUiSnapshot`.
 
 Render workers and presenter encode workers communicate with the loop through
 typed request and completion values. They do not mutate app state directly.
@@ -137,9 +139,10 @@ operation methods. Key routing remains outside providers and produces commands;
 the active palette is the command target for palette operations.
 
 Extensions:
-Built-in features that need background state, event observation, or status-bar
-segments live behind `ExtensionHost`. They are internal modules, not a dynamic
-plugin system.
+Built-in features that need background state, event observation, status-bar
+segments, palette-facing snapshots, or render projections live behind
+`ExtensionHost`. The host owns hook order and snapshot composition. They are
+internal modules, not a dynamic plugin system.
 
 Render and presenter:
 Raw page rasterization and terminal protocol encoding are separated because

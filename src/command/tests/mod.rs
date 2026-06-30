@@ -9,6 +9,16 @@ use crate::palette::PaletteKind;
 
 use super::spec::validate_command_id_for_policy;
 
+fn extension_snapshot(search_active: bool) -> ExtensionUiSnapshot {
+    ExtensionUiSnapshot {
+        search: crate::search::SearchUiSnapshot {
+            active: search_active,
+            ..Default::default()
+        },
+        ..ExtensionUiSnapshot::default()
+    }
+}
+
 #[test]
 fn default_registry_bindings_reference_commands_invocable_when_enabled() {
     let registry = build_default_sequence_registry();
@@ -67,10 +77,7 @@ fn default_registry_bindings_reference_commands_invocable_when_enabled() {
 }
 
 fn assert_binding_is_invocable(command_id: &str, enabled_when: ConditionExpr, label: String) {
-    let extension_states = [
-        ExtensionUiSnapshot::with_search_active(false),
-        ExtensionUiSnapshot::with_search_active(true),
-    ];
+    let extension_states = [extension_snapshot(false), extension_snapshot(true)];
     let contexts = extension_states.iter().flat_map(|extensions| {
         [
             RuntimeConditionContext::new(Mode::Normal, None, extensions),

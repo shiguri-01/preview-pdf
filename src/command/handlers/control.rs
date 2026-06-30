@@ -8,7 +8,8 @@ use super::super::effects::{CommandExecution, CommandLifecycleEffect};
 pub(in crate::command) fn cancel_search(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let _ = ctx.extension_host.cancel_search(Arc::clone(&ctx.pdf))?;
+    let pdf = Arc::clone(&ctx.pdf);
+    let _ = ctx.extension_host.command_ports().search.cancel(pdf)?;
     Ok(CommandExecution::applied())
 }
 

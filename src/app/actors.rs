@@ -350,7 +350,8 @@ impl UiActor {
                     highlight_overlay: interaction
                         .extensions
                         .host
-                        .highlight_overlay_for(step.visible_pages.existing_pages()),
+                        .render_snapshot(step.visible_pages.existing_pages())
+                        .highlight_overlay,
                     generation: render_generation,
                     nav_streak,
                 },

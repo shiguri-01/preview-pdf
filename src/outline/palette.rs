@@ -41,7 +41,7 @@ impl PaletteProvider for OutlinePaletteProvider {
         let mut page_text_matches = Vec::new();
         let mut unfiltered = Vec::new();
 
-        for (index, entry) in ctx.extensions.outline_entries.iter().enumerate() {
+        for (index, entry) in ctx.extensions.outline.entries.iter().enumerate() {
             let candidate = outline_candidate(index, entry);
             if query.is_empty() {
                 unfiltered.push(candidate);
@@ -101,7 +101,7 @@ impl PaletteProvider for OutlinePaletteProvider {
         ctx: &PaletteContext<'_>,
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
-        if ctx.extensions.outline_entries.is_empty() {
+        if ctx.extensions.outline.entries.is_empty() {
             Some("No outline entries in this document".to_string())
         } else {
             let enter = format_shortcut_key(crate::input::shortcut::ShortcutKey::key(
@@ -197,7 +197,9 @@ mod tests {
             depth: 0,
         }];
         let extensions = ExtensionUiSnapshot {
-            outline_entries: entries.into(),
+            outline: crate::outline::OutlineUiSnapshot {
+                entries: entries.into(),
+            },
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
@@ -235,7 +237,9 @@ mod tests {
             },
         ];
         let extensions = ExtensionUiSnapshot {
-            outline_entries: entries.into(),
+            outline: crate::outline::OutlineUiSnapshot {
+                entries: entries.into(),
+            },
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
@@ -274,7 +278,9 @@ mod tests {
             },
         ];
         let extensions = ExtensionUiSnapshot {
-            outline_entries: entries.into(),
+            outline: crate::outline::OutlineUiSnapshot {
+                entries: entries.into(),
+            },
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
@@ -306,7 +312,9 @@ mod tests {
             depth: 0,
         }];
         let extensions = ExtensionUiSnapshot {
-            outline_entries: entries.into(),
+            outline: crate::outline::OutlineUiSnapshot {
+                entries: entries.into(),
+            },
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {

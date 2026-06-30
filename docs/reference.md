@@ -340,12 +340,17 @@ Orientation:
 Contract:
 - Extensions are internal modules composed statically by `ExtensionHost`.
 - Extension state remains concrete and owned by the host.
+- `ExtensionHost` owns lifecycle routing, hook ordering, and shared snapshots.
+- Feature operations are owned by feature runtime or state types.
 - Extension hooks operate on extension-owned state plus shared app state.
 - Input hooks return ignored when they do not claim an input.
 - The first claimed input hook result wins.
 - Event hooks observe typed `AppEvent` values emitted by command dispatch and
   runtime flow.
 - Background hooks report whether visible or behavioral state changed.
+- Document reload behavior is handled through extension lifecycle hooks. Each
+  extension explicitly decides whether to reset, preserve, or rehydrate its
+  state for the new document.
 - Extension UI data exposed to palettes crosses through `ExtensionUiSnapshot`.
 
 Compatibility:

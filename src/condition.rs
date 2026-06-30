@@ -203,8 +203,8 @@ pub fn runtime_condition_is_met(
     match condition {
         RuntimeCondition::ModeIs(mode) => ctx.mode == mode,
         RuntimeCondition::ModeIsNot(mode) => ctx.mode != mode,
-        RuntimeCondition::SearchIsActive => ctx.extensions.search_active,
-        RuntimeCondition::SearchIsInactive => !ctx.extensions.search_active,
+        RuntimeCondition::SearchIsActive => ctx.extensions.search.active,
+        RuntimeCondition::SearchIsInactive => !ctx.extensions.search.active,
         RuntimeCondition::PaletteIsOpen => ctx.active_palette.is_some(),
         RuntimeCondition::PaletteIsClosed => ctx.active_palette.is_none(),
         RuntimeCondition::PaletteKindIs(kind) => ctx.active_palette == Some(kind),

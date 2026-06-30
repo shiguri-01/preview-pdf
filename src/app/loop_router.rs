@@ -293,8 +293,10 @@ impl App {
             self.request_redraw(runtime, RedrawReason::StateChanged);
         }
         if self.state.current_page != previous_page {
-            self.interaction
-                .sync_search_after_page_change(Arc::clone(&document.pdf), self.state.current_page);
+            self.interaction.sync_extensions_after_page_change(
+                Arc::clone(&document.pdf),
+                self.state.current_page,
+            );
         }
         if dispatch.lifecycle == CommandLifecycleEffect::Quit {
             terminate_process_now(runtime);

@@ -193,7 +193,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         }
         Command::SearchResultGoto { .. } | Command::NextSearchHit | Command::PrevSearchHit => {
             Some(NavReason::Search {
-                query: extension_host.search_query().to_string(),
+                query: extension_host.search().query().to_string(),
             })
         }
         Command::HistoryBack => Some(NavReason::History(HistoryOp::Back)),
@@ -1020,14 +1020,16 @@ mod tests {
         let mut host = ExtensionHost::default();
         let mut palette_requests = VecDeque::new();
 
-        host.submit_search(
-            &mut app,
-            Arc::clone(&pdf),
-            "needle".to_string(),
-            SearchMatcherKind::ContainsInsensitive,
-        )
-        .expect("submit-search should succeed");
-        assert!(host.ui_snapshot().search_active);
+        host.command_ports()
+            .search
+            .submit(
+                &mut app,
+                Arc::clone(&pdf),
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit-search should succeed");
+        assert!(host.ui_snapshot().search.active);
 
         let result = dispatch(
             &mut app,
@@ -1041,7 +1043,7 @@ mod tests {
 
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(result.emitted_events.len(), 1);
-        assert!(!host.ui_snapshot().search_active);
+        assert!(!host.ui_snapshot().search.active);
         assert_eq!(app.notice, None);
         assert!(palette_requests.is_empty());
     }
@@ -1051,13 +1053,15 @@ mod tests {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = ExtensionHost::default();
-        host.submit_search(
-            &mut app,
-            pdf,
-            "needle".to_string(),
-            SearchMatcherKind::ContainsInsensitive,
-        )
-        .expect("submit-search should succeed");
+        host.command_ports()
+            .search
+            .submit(
+                &mut app,
+                pdf,
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit-search should succeed");
 
         let prev_page = app.current_page;
         let prev_mode = app.mode;

@@ -182,8 +182,10 @@ impl SearchRuntime {
         *self = Self::default();
         self.prewarm(Arc::clone(&pdf));
         if let Some((query, matcher)) = active_search
-            && let Err(err) = self.submit(app, pdf, query, matcher)
+            && let Err(err) = self.submit(app, Arc::clone(&pdf), query, matcher)
         {
+            *self = Self::default();
+            self.prewarm(pdf);
             app.set_warning_notice(format!("Could not restore search after reload: {err}"));
         }
     }
@@ -276,21 +278,20 @@ impl SearchState {
         query: String,
         matcher: SearchMatcherKind,
     ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.query = query;
-        self.matcher = matcher;
-
-        let query = self.query.trim().to_string();
+        let query = query.trim().to_string();
         if query.is_empty() {
             self.generation = search_engine.cancel(Arc::clone(&pdf))?;
             self.query.clear();
+            self.matcher = matcher;
             self.clear_results();
             return Ok((CommandOutcome::Noop, NoticeAction::Clear));
         }
 
-        let matcher = matcher_for_kind(self.matcher);
-        let generation = search_engine.submit(Arc::clone(&pdf), query.clone(), matcher)?;
+        let search_matcher = matcher_for_kind(matcher);
+        let generation = search_engine.submit(Arc::clone(&pdf), query.clone(), search_matcher)?;
 
         self.query = query;
+        self.matcher = matcher;
         self.generation = generation;
         self.in_progress = true;
         self.scanned_pages_progress = 0;

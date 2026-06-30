@@ -143,7 +143,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
-    use crate::command::SearchMatcherKind;
+    use crate::command::{CommandOutcome, SearchMatcherKind};
+    use crate::event::{AppEvent, NavReason, PageGotoKind};
 
     use super::ExtensionHost;
 
@@ -279,5 +280,29 @@ mod tests {
             SearchMatcherKind::ContainsSensitive
         );
         assert_eq!(host.status_bar_segments(&app), vec!["SEARCH 0 hits"]);
+    }
+
+    #[test]
+    fn document_reload_resets_history_navigation() {
+        let mut host = ExtensionHost::default();
+        let mut app = crate::app::AppState {
+            current_page: 3,
+            ..crate::app::AppState::default()
+        };
+        host.handle_event(
+            &AppEvent::PageChanged {
+                from: 0,
+                to: 3,
+                reason: NavReason::PageGoto(PageGotoKind::Specific),
+            },
+            &mut app,
+        );
+
+        host.on_document_reloaded(&mut app, Arc::new(StubPdf::new(4)) as SharedPdfBackend);
+        let (outcome, notice) = host.command_ports().history.back(&mut app, 4);
+
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert_eq!(notice, crate::app::NoticeAction::Clear);
+        assert_eq!(app.current_page, 3);
     }
 }

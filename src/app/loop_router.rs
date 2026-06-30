@@ -293,9 +293,10 @@ impl App {
             self.request_redraw(runtime, RedrawReason::StateChanged);
         }
         if self.state.current_page != previous_page {
+            let visible_pages = self.state.visible_page_slots(runtime.page_count);
             self.interaction.sync_extensions_after_page_change(
                 Arc::clone(&document.pdf),
-                self.state.current_page,
+                visible_pages.existing_pages(),
             );
         }
         if dispatch.lifecycle == CommandLifecycleEffect::Quit {

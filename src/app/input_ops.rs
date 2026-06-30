@@ -100,11 +100,11 @@ impl InteractionSubsystem {
     pub(crate) fn sync_extensions_after_page_change(
         &mut self,
         pdf: SharedPdfBackend,
-        current_page: usize,
+        visible_pages: [Option<usize>; 2],
     ) {
         self.extensions
             .host
-            .on_visible_pages_changed(pdf, [Some(current_page), None]);
+            .on_visible_pages_changed(pdf, visible_pages);
     }
 
     pub(crate) fn palette_view(&self) -> Option<PaletteView> {

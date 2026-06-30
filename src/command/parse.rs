@@ -54,54 +54,9 @@ pub(super) fn parse_no_args(id: &str, args_text: &str, cmd: Command) -> AppResul
         return Ok(cmd);
     }
 
-    Err(AppError::invalid_argument(match id {
-        "next-page" => "next-page does not accept arguments",
-        "prev-page" => "prev-page does not accept arguments",
-        "first-page" => "first-page does not accept arguments",
-        "last-page" => "last-page does not accept arguments",
-        "layout-single" => "layout-single does not accept arguments",
-        "zoom-in" => "zoom-in does not accept arguments",
-        "zoom-out" => "zoom-out does not accept arguments",
-        "zoom-reset" => "zoom-reset does not accept arguments",
-        "debug-show" => "debug-show does not accept arguments",
-        "debug-hide" => "debug-hide does not accept arguments",
-        "debug-toggle" => "debug-toggle does not accept arguments",
-        "close-palette" => "close-palette does not accept arguments",
-        "palette.submit" => "palette.submit does not accept arguments",
-        "palette.complete" => "palette.complete does not accept arguments",
-        "palette.select-next" => "palette.select-next does not accept arguments",
-        "palette.select-prev" => "palette.select-prev does not accept arguments",
-        "text.delete-backward" => "text.delete-backward does not accept arguments",
-        "text.delete-forward" => "text.delete-forward does not accept arguments",
-        "text.move-left" => "text.move-left does not accept arguments",
-        "text.move-right" => "text.move-right does not accept arguments",
-        "text.move-start" => "text.move-start does not accept arguments",
-        "text.move-end" => "text.move-end does not accept arguments",
-        "text.move-prev-word" => "text.move-prev-word does not accept arguments",
-        "text.move-next-word" => "text.move-next-word does not accept arguments",
-        "text.delete-prev-word" => "text.delete-prev-word does not accept arguments",
-        "text.delete-next-word" => "text.delete-next-word does not accept arguments",
-        "text.delete-line" => "text.delete-line does not accept arguments",
-        "text.delete-to-end" => "text.delete-to-end does not accept arguments",
-        "text.yank" => "text.yank does not accept arguments",
-        "palette.input-history-older" => "palette.input-history-older does not accept arguments",
-        "palette.input-history-newer" => "palette.input-history-newer does not accept arguments",
-        "help" => "help does not accept arguments",
-        "close-help" => "close-help does not accept arguments",
-        "help-scroll-down" => "help-scroll-down does not accept arguments",
-        "help-scroll-up" => "help-scroll-up does not accept arguments",
-        "search" => "search does not accept arguments",
-        "search-results" => "search-results does not accept arguments",
-        "next-search-hit" => "next-search-hit does not accept arguments",
-        "prev-search-hit" => "prev-search-hit does not accept arguments",
-        "history-back" => "history-back does not accept arguments",
-        "history-forward" => "history-forward does not accept arguments",
-        "history" => "history does not accept arguments",
-        "outline" => "outline does not accept arguments",
-        "cancel-search" => "cancel-search does not accept arguments",
-        "quit" => "quit does not accept arguments",
-        _ => "command does not accept arguments",
-    }))
+    Err(AppError::invalid_argument(format!(
+        "{id} does not accept arguments"
+    )))
 }
 
 pub(super) fn parse_open_palette(args_text: &str) -> AppResult<Command> {

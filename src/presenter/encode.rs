@@ -128,7 +128,7 @@ pub(crate) fn spawn_encode_worker(
     (request_tx, result_rx, worker)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn enqueue_encode_request(
     lane: EncodeLaneKind,
     request: EncodeWorkerRequest,

@@ -54,8 +54,6 @@ fn apply_notice(app: &mut AppState, action: NoticeAction) {
 
 fn rejection_notice(command: &Command, message: String) -> NoticeAction {
     match command {
-        // Search hit navigation is often retried while search state is still settling,
-        // so keep the current notice instead of replacing it with a generic rejection.
         Command::NextSearchHit | Command::PrevSearchHit => NoticeAction::Keep,
         _ => NoticeAction::warning(message),
     }
@@ -204,48 +202,7 @@ fn derive_nav_reason(command: &Command, extension_host: &ExtensionHost) -> Optio
         Command::OutlineGoto { title, .. } => Some(NavReason::Outline {
             title: title.clone(),
         }),
-        Command::SetZoom { .. }
-        | Command::ZoomIn
-        | Command::ZoomOut
-        | Command::ZoomReset
-        | Command::Pan { .. }
-        | Command::DebugStatusShow
-        | Command::DebugStatusHide
-        | Command::DebugStatusToggle
-        | Command::OpenPalette { .. }
-        | Command::ClosePalette
-        | Command::PaletteSubmit
-        | Command::PaletteComplete
-        | Command::PaletteSelectNext
-        | Command::PaletteSelectPrev
-        | Command::TextInsert { .. }
-        | Command::TextDeleteBackward
-        | Command::TextDeleteForward
-        | Command::TextMoveLeft
-        | Command::TextMoveRight
-        | Command::TextMoveStart
-        | Command::TextMoveEnd
-        | Command::TextMovePrevWord
-        | Command::TextMoveNextWord
-        | Command::TextDeletePrevWord
-        | Command::TextDeleteNextWord
-        | Command::TextDeleteLine
-        | Command::TextDeleteToEnd
-        | Command::TextYank
-        | Command::PaletteInputHistoryOlder
-        | Command::PaletteInputHistoryNewer
-        | Command::OpenHelp
-        | Command::CloseHelp
-        | Command::HelpScrollDown
-        | Command::HelpScrollUp
-        | Command::OpenSearch
-        | Command::OpenSearchResults
-        | Command::SubmitSearch { .. }
-        | Command::OpenHistory
-        | Command::OpenOutline
-        | Command::CancelSearch
-        | Command::ReloadDocument
-        | Command::Quit => None,
+        _ => None,
     }
 }
 

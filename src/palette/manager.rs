@@ -292,42 +292,6 @@ impl PaletteManager {
         )
     }
 
-    pub fn delete_backward(
-        &mut self,
-        registry: &PaletteRegistry,
-        app: &AppState,
-        extensions: &ExtensionUiSnapshot,
-    ) -> AppResult<bool> {
-        self.apply_text_request(registry, app, extensions, InputRequest::DeletePrevChar)
-    }
-
-    pub fn delete_forward(
-        &mut self,
-        registry: &PaletteRegistry,
-        app: &AppState,
-        extensions: &ExtensionUiSnapshot,
-    ) -> AppResult<bool> {
-        self.apply_text_request(registry, app, extensions, InputRequest::DeleteNextChar)
-    }
-
-    pub fn move_cursor_left(
-        &mut self,
-        registry: &PaletteRegistry,
-        app: &AppState,
-        extensions: &ExtensionUiSnapshot,
-    ) -> AppResult<bool> {
-        self.apply_text_request(registry, app, extensions, InputRequest::GoToPrevChar)
-    }
-
-    pub fn move_cursor_right(
-        &mut self,
-        registry: &PaletteRegistry,
-        app: &AppState,
-        extensions: &ExtensionUiSnapshot,
-    ) -> AppResult<bool> {
-        self.apply_text_request(registry, app, extensions, InputRequest::GoToNextChar)
-    }
-
     pub fn edit_input(
         &mut self,
         registry: &PaletteRegistry,

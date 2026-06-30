@@ -870,6 +870,16 @@ mod tests {
         resolver.handle_key_in_context(KeyBindingContext::normal(&extensions), key)
     }
 
+    fn extension_snapshot(search_active: bool) -> ExtensionUiSnapshot {
+        ExtensionUiSnapshot {
+            search: crate::search::SearchUiSnapshot {
+                active: search_active,
+                ..Default::default()
+            },
+            ..ExtensionUiSnapshot::default()
+        }
+    }
+
     #[test]
     fn exact_single_key_dispatches_immediately() {
         let mut registry = SequenceRegistry::new();
@@ -1028,7 +1038,7 @@ mod tests {
             )
             .expect("later binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
-        let extensions = ExtensionUiSnapshot::with_search_active(true);
+        let extensions = extension_snapshot(true);
 
         assert_eq!(
             resolver.handle_key_in_context(
@@ -1363,7 +1373,7 @@ mod tests {
             )
             .expect("multi-key binding should register");
         let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
-        let extensions = ExtensionUiSnapshot::with_search_active(true);
+        let extensions = extension_snapshot(true);
 
         assert_eq!(
             resolver.handle_key_in_context(
@@ -1406,7 +1416,7 @@ mod tests {
             )
             .expect("single-key binding should register");
         let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
-        let active_extensions = ExtensionUiSnapshot::with_search_active(true);
+        let active_extensions = extension_snapshot(true);
         let inactive_extensions = ExtensionUiSnapshot::default();
 
         assert_eq!(
@@ -1439,7 +1449,7 @@ mod tests {
             )
             .expect("conditional binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
-        let active_extensions = ExtensionUiSnapshot::with_search_active(true);
+        let active_extensions = extension_snapshot(true);
         let inactive_extensions = ExtensionUiSnapshot::default();
 
         assert_eq!(

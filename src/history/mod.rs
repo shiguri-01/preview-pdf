@@ -2,11 +2,12 @@ pub mod palette;
 pub mod state;
 
 use crate::app::AppState;
+use crate::backend::SharedPdfBackend;
 use crate::event::AppEvent;
 use crate::extension::Extension;
 use crate::input::{AppInputEvent, InputHookResult};
 pub use palette::HistoryPaletteProvider;
-pub use state::HistoryState;
+pub use state::{HistoryCommandPort, HistoryState};
 
 pub struct HistoryExtension;
 
@@ -29,5 +30,9 @@ impl Extension for HistoryExtension {
     fn handle_event(state: &mut Self::State, event: &AppEvent, app: &mut AppState) {
         let _ = app;
         state.on_event(event);
+    }
+
+    fn on_document_reloaded(state: &mut Self::State, _app: &mut AppState, _pdf: SharedPdfBackend) {
+        *state = HistoryState::default();
     }
 }

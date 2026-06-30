@@ -9,7 +9,7 @@ use crate::event::AppEvent;
 use crate::extension::Extension;
 pub use palette::SearchPaletteProvider;
 pub use palette::SearchResultsPaletteProvider;
-pub use state::{SearchPaletteEntry, SearchRuntime};
+pub use state::{SearchCommandPort, SearchRuntime, SearchUiSnapshot};
 
 pub struct SearchExtension;
 
@@ -28,6 +28,14 @@ impl Extension for SearchExtension {
 
     fn handle_event(state: &mut Self::State, event: &AppEvent, app: &mut AppState) {
         let _ = (state, event, app);
+    }
+
+    fn on_document_reloaded(
+        state: &mut Self::State,
+        app: &mut AppState,
+        pdf: crate::backend::SharedPdfBackend,
+    ) {
+        state.on_document_reloaded(app, pdf);
     }
 
     fn status_bar_segment(state: &Self::State, _app: &AppState) -> Option<String> {

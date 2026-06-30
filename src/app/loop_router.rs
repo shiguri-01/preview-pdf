@@ -263,7 +263,10 @@ impl App {
             return Ok(LoopControl::Continue);
         }
         let state_before_command = self.state.clone();
-        let previous_page = self.state.current_page;
+        let previous_visible_pages = self
+            .state
+            .visible_page_slots(runtime.page_count)
+            .existing_pages();
         let view_policy = self.view_policy;
         let dispatch = match self.interaction.dispatch_command(
             &mut self.state,
@@ -292,9 +295,15 @@ impl App {
         if palette_changed {
             self.request_redraw(runtime, RedrawReason::StateChanged);
         }
-        if self.state.current_page != previous_page {
-            self.interaction
-                .sync_search_after_page_change(Arc::clone(&document.pdf), self.state.current_page);
+        let current_visible_pages = self
+            .state
+            .visible_page_slots(runtime.page_count)
+            .existing_pages();
+        if current_visible_pages != previous_visible_pages {
+            self.interaction.sync_extensions_after_page_change(
+                Arc::clone(&document.pdf),
+                current_visible_pages,
+            );
         }
         if dispatch.lifecycle == CommandLifecycleEffect::Quit {
             terminate_process_now(runtime);

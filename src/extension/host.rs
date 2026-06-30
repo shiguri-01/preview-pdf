@@ -1,33 +1,31 @@
 use std::sync::Arc;
 
-use crate::app::{AppState, NoticeAction, PaletteRequest};
+use crate::app::AppState;
 use crate::backend::SharedPdfBackend;
-use crate::command::{CommandOutcome, SearchMatcherKind};
-use crate::error::AppResult;
 use crate::event::AppEvent;
 use crate::highlight::HighlightOverlaySnapshot;
-use crate::history::{HistoryExtension, HistoryState};
+use crate::history::{HistoryCommandPort, HistoryExtension, HistoryState};
 use crate::input::{AppInputEvent, InputHookResult};
-use crate::outline::{OutlineExtension, OutlinePaletteEntry, OutlineState};
-use crate::search::{SearchExtension, SearchPaletteEntry, SearchRuntime};
+use crate::outline::{OutlineCommandPort, OutlineExtension, OutlineState, OutlineUiSnapshot};
+use crate::search::{SearchCommandPort, SearchExtension, SearchRuntime, SearchUiSnapshot};
 
 use super::traits::Extension;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtensionUiSnapshot {
-    pub search_active: bool,
-    pub search_results_entries: Arc<[SearchPaletteEntry]>,
-    pub outline_entries: Arc<[OutlinePaletteEntry]>,
+    pub search: SearchUiSnapshot,
+    pub outline: OutlineUiSnapshot,
 }
 
-impl ExtensionUiSnapshot {
-    pub fn with_search_active(search_active: bool) -> Self {
-        Self {
-            search_active,
-            search_results_entries: Arc::from([]),
-            outline_entries: Arc::from([]),
-        }
-    }
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExtensionRenderSnapshot {
+    pub highlight_overlay: HighlightOverlaySnapshot,
+}
+
+pub(crate) struct ExtensionCommandPorts<'a> {
+    pub search: SearchCommandPort<'a>,
+    pub history: HistoryCommandPort<'a>,
+    pub outline: OutlineCommandPort<'a>,
 }
 
 pub struct ExtensionHost {
@@ -43,6 +41,18 @@ impl ExtensionHost {
             history: HistoryExtension::init_state(),
             outline: OutlineExtension::init_state(),
         }
+    }
+
+    pub(crate) fn command_ports(&mut self) -> ExtensionCommandPorts<'_> {
+        ExtensionCommandPorts {
+            search: SearchCommandPort::new(&mut self.search),
+            history: HistoryCommandPort::new(&mut self.history),
+            outline: OutlineCommandPort::new(&mut self.outline),
+        }
+    }
+
+    pub(crate) fn search(&self) -> &SearchRuntime {
+        &self.search
     }
 
     pub fn handle_input(&mut self, event: AppInputEvent, app: &mut AppState) -> InputHookResult {
@@ -71,120 +81,23 @@ impl ExtensionHost {
         search_changed || history_changed
     }
 
-    pub fn open_search_palette(&mut self) -> PaletteRequest {
-        self.search.open_palette()
-    }
-
-    pub fn submit_search(
-        &mut self,
-        app: &mut AppState,
-        pdf: SharedPdfBackend,
-        query: String,
-        matcher: SearchMatcherKind,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.search.submit(app, pdf, query, matcher)
-    }
-
-    pub fn prewarm_search_text(&mut self, pdf: SharedPdfBackend) {
+    pub fn on_document_opened(&mut self, pdf: SharedPdfBackend) {
         self.search.prewarm(pdf);
     }
 
-    pub fn reset_for_document_reload(&mut self, app: &mut AppState, pdf: SharedPdfBackend) {
-        let active_search = self
-            .search
-            .is_active()
-            .then(|| (self.search.query().to_string(), self.search.matcher()));
-        self.search = SearchExtension::init_state();
-        self.outline = OutlineExtension::init_state();
-        self.search.prewarm(Arc::clone(&pdf));
-        if let Some((query, matcher)) = active_search
-            && let Err(err) = self.search.submit(app, pdf, query, matcher)
-        {
-            app.set_warning_notice(format!("Could not restore search after reload: {err}"));
-        }
+    pub fn on_document_reloaded(&mut self, app: &mut AppState, pdf: SharedPdfBackend) {
+        SearchExtension::on_document_reloaded(&mut self.search, app, Arc::clone(&pdf));
+        HistoryExtension::on_document_reloaded(&mut self.history, app, Arc::clone(&pdf));
+        OutlineExtension::on_document_reloaded(&mut self.outline, app, pdf);
     }
 
-    pub fn resolve_search_priority_geometry(
+    pub fn on_visible_pages_changed(
         &mut self,
         pdf: SharedPdfBackend,
         visible_pages: [Option<usize>; 2],
     ) {
+        self.search.prewarm(Arc::clone(&pdf));
         self.search.resolve_priority_geometry(pdf, visible_pages);
-    }
-
-    pub fn open_search_results_palette(&mut self) -> Option<PaletteRequest> {
-        self.search.open_results_palette()
-    }
-
-    pub fn search_result_goto(
-        &mut self,
-        app: &mut AppState,
-        page_count: usize,
-        page: usize,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.search.goto_result(app, page_count, page)
-    }
-
-    pub fn cancel_search(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
-        self.search.cancel(pdf)
-    }
-
-    pub fn next_search_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
-        self.search.next_hit(app)
-    }
-
-    pub fn prev_search_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
-        self.search.prev_hit(app)
-    }
-
-    pub fn history_back(
-        &mut self,
-        app: &mut AppState,
-        page_count: usize,
-    ) -> (CommandOutcome, NoticeAction) {
-        self.history.back(app, page_count)
-    }
-
-    pub fn history_forward(
-        &mut self,
-        app: &mut AppState,
-        page_count: usize,
-    ) -> (CommandOutcome, NoticeAction) {
-        self.history.forward(app, page_count)
-    }
-
-    pub fn history_goto(
-        &mut self,
-        app: &mut AppState,
-        page_count: usize,
-        page: usize,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.history.goto(app, page_count, page)
-    }
-
-    pub fn open_history_palette(&self, app: &AppState) -> PaletteRequest {
-        self.history.open_palette(app)
-    }
-
-    pub fn open_outline_palette(&mut self, pdf: SharedPdfBackend) -> AppResult<PaletteRequest> {
-        self.outline.open_palette(pdf)
-    }
-
-    pub fn outline_goto(
-        &mut self,
-        app: &mut AppState,
-        page_count: usize,
-        page: usize,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.outline.goto(app, page_count, page)
-    }
-
-    pub fn search_query(&self) -> &str {
-        self.search.query()
-    }
-
-    pub fn search_matcher(&self) -> SearchMatcherKind {
-        self.search.matcher()
     }
 
     pub fn status_bar_segments(&self, app: &AppState) -> Vec<String> {
@@ -204,18 +117,17 @@ impl ExtensionHost {
 
     pub fn ui_snapshot(&self) -> ExtensionUiSnapshot {
         ExtensionUiSnapshot {
-            search_active: self.search.is_active(),
-            search_results_entries: self.search.palette_entries(),
-            outline_entries: self.outline.palette_entries(),
+            search: self.search.ui_snapshot(),
+            outline: self.outline.ui_snapshot(),
         }
     }
 
-    pub fn highlight_overlay_for(
-        &self,
-        visible_pages: [Option<usize>; 2],
-    ) -> HighlightOverlaySnapshot {
-        self.search
-            .highlight_overlay_for_visible_pages(visible_pages)
+    pub fn render_snapshot(&self, visible_pages: [Option<usize>; 2]) -> ExtensionRenderSnapshot {
+        ExtensionRenderSnapshot {
+            highlight_overlay: self
+                .search
+                .highlight_overlay_for_visible_pages(visible_pages),
+        }
     }
 }
 
@@ -231,7 +143,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
-    use crate::command::SearchMatcherKind;
+    use crate::command::{CommandOutcome, SearchMatcherKind};
+    use crate::event::{AppEvent, NavReason, PageGotoKind};
 
     use super::ExtensionHost;
 
@@ -300,13 +213,15 @@ mod tests {
         let mut app = crate::app::AppState::default();
         let pdf = StubPdf::new(4);
 
-        host.submit_search(
-            &mut app,
-            Arc::new(pdf) as SharedPdfBackend,
-            "needle".to_string(),
-            SearchMatcherKind::ContainsInsensitive,
-        )
-        .expect("submit-search should succeed");
+        host.command_ports()
+            .search
+            .submit(
+                &mut app,
+                Arc::new(pdf) as SharedPdfBackend,
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit-search should succeed");
 
         let segments = host.status_bar_segments(&app);
         assert_eq!(segments.len(), 1);
@@ -319,18 +234,24 @@ mod tests {
         let mut app = crate::app::AppState::default();
         let pdf = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
 
-        host.submit_search(
-            &mut app,
-            Arc::clone(&pdf),
-            "needle".to_string(),
-            SearchMatcherKind::ContainsInsensitive,
-        )
-        .expect("submit-search should succeed");
-        assert!(host.ui_snapshot().search_active);
+        host.command_ports()
+            .search
+            .submit(
+                &mut app,
+                Arc::clone(&pdf),
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit-search should succeed");
+        assert!(host.ui_snapshot().search.active);
 
-        let canceled = host.cancel_search(pdf).expect("cancel should succeed");
+        let canceled = host
+            .command_ports()
+            .search
+            .cancel(pdf)
+            .expect("cancel should succeed");
         assert!(canceled);
-        assert!(!host.ui_snapshot().search_active);
+        assert!(!host.ui_snapshot().search.active);
     }
 
     #[test]
@@ -340,19 +261,48 @@ mod tests {
         let first = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
         let second = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
 
-        host.submit_search(
-            &mut app,
-            first,
-            "needle".to_string(),
-            SearchMatcherKind::ContainsSensitive,
-        )
-        .expect("submit-search should succeed");
+        host.command_ports()
+            .search
+            .submit(
+                &mut app,
+                first,
+                "needle".to_string(),
+                SearchMatcherKind::ContainsSensitive,
+            )
+            .expect("submit-search should succeed");
 
-        host.reset_for_document_reload(&mut app, second);
+        host.on_document_reloaded(&mut app, second);
 
-        assert!(host.ui_snapshot().search_active);
-        assert_eq!(host.search_query(), "needle");
-        assert_eq!(host.search_matcher(), SearchMatcherKind::ContainsSensitive);
+        assert!(host.ui_snapshot().search.active);
+        assert_eq!(host.search().query(), "needle");
+        assert_eq!(
+            host.search().matcher(),
+            SearchMatcherKind::ContainsSensitive
+        );
         assert_eq!(host.status_bar_segments(&app), vec!["SEARCH 0 hits"]);
+    }
+
+    #[test]
+    fn document_reload_resets_history_navigation() {
+        let mut host = ExtensionHost::default();
+        let mut app = crate::app::AppState {
+            current_page: 3,
+            ..crate::app::AppState::default()
+        };
+        host.handle_event(
+            &AppEvent::PageChanged {
+                from: 0,
+                to: 3,
+                reason: NavReason::PageGoto(PageGotoKind::Specific),
+            },
+            &mut app,
+        );
+
+        host.on_document_reloaded(&mut app, Arc::new(StubPdf::new(4)) as SharedPdfBackend);
+        let (outcome, notice) = host.command_ports().history.back(&mut app, 4);
+
+        assert_eq!(outcome, CommandOutcome::Noop);
+        assert_eq!(notice, crate::app::NoticeAction::Clear);
+        assert_eq!(app.current_page, 3);
     }
 }

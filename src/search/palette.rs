@@ -172,7 +172,7 @@ impl PaletteProvider for SearchResultsPaletteProvider {
     }
 
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
-        let entries = ctx.extensions.search_results_entries.as_ref();
+        let entries = ctx.extensions.search.results_entries.as_ref();
         let query = ctx.input.trim().to_ascii_lowercase();
         if query.is_empty() {
             return Ok(build_result_candidates(entries));
@@ -226,7 +226,7 @@ impl PaletteProvider for SearchResultsPaletteProvider {
         ctx: &PaletteContext<'_>,
         _selected: Option<&PaletteCandidate>,
     ) -> Option<String> {
-        if ctx.extensions.search_results_entries.is_empty() {
+        if ctx.extensions.search.results_entries.is_empty() {
             return Some("0 hits".to_string());
         }
 
@@ -330,7 +330,7 @@ mod tests {
         palette::{
             PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenPayload, PaletteProvider,
         },
-        search::SearchPaletteEntry,
+        search::state::SearchPaletteEntry,
     };
 
     use super::{SearchPaletteProvider, SearchResultsPaletteProvider};
@@ -393,14 +393,17 @@ mod tests {
         let provider = SearchResultsPaletteProvider;
         let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot {
-            search_results_entries: vec![SearchPaletteEntry {
-                index: 1,
-                page: 4,
-                snippet: "…foo needle bar…".to_string(),
-                snippet_match_start: Some(7),
-                snippet_match_end: Some(13),
-            }]
-            .into(),
+            search: crate::search::SearchUiSnapshot {
+                results_entries: vec![SearchPaletteEntry {
+                    index: 1,
+                    page: 4,
+                    snippet: "…foo needle bar…".to_string(),
+                    snippet_match_start: Some(7),
+                    snippet_match_end: Some(13),
+                }]
+                .into(),
+                ..Default::default()
+            },
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
@@ -430,23 +433,26 @@ mod tests {
             ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot {
-            search_results_entries: vec![
-                SearchPaletteEntry {
-                    index: 1,
-                    page: 8,
-                    snippet: "other".to_string(),
-                    snippet_match_start: None,
-                    snippet_match_end: None,
-                },
-                SearchPaletteEntry {
-                    index: 2,
-                    page: 5,
-                    snippet: "right".to_string(),
-                    snippet_match_start: None,
-                    snippet_match_end: None,
-                },
-            ]
-            .into(),
+            search: crate::search::SearchUiSnapshot {
+                results_entries: vec![
+                    SearchPaletteEntry {
+                        index: 1,
+                        page: 8,
+                        snippet: "other".to_string(),
+                        snippet_match_start: None,
+                        snippet_match_end: None,
+                    },
+                    SearchPaletteEntry {
+                        index: 2,
+                        page: 5,
+                        snippet: "right".to_string(),
+                        snippet_match_start: None,
+                        snippet_match_end: None,
+                    },
+                ]
+                .into(),
+                ..Default::default()
+            },
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {
@@ -474,23 +480,26 @@ mod tests {
             ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot {
-            search_results_entries: vec![
-                SearchPaletteEntry {
-                    index: 1,
-                    page: 0,
-                    snippet: "cover".to_string(),
-                    snippet_match_start: None,
-                    snippet_match_end: None,
-                },
-                SearchPaletteEntry {
-                    index: 2,
-                    page: 1,
-                    snippet: "next".to_string(),
-                    snippet_match_start: None,
-                    snippet_match_end: None,
-                },
-            ]
-            .into(),
+            search: crate::search::SearchUiSnapshot {
+                results_entries: vec![
+                    SearchPaletteEntry {
+                        index: 1,
+                        page: 0,
+                        snippet: "cover".to_string(),
+                        snippet_match_start: None,
+                        snippet_match_end: None,
+                    },
+                    SearchPaletteEntry {
+                        index: 2,
+                        page: 1,
+                        snippet: "next".to_string(),
+                        snippet_match_start: None,
+                        snippet_match_end: None,
+                    },
+                ]
+                .into(),
+                ..Default::default()
+            },
             ..ExtensionUiSnapshot::default()
         };
         let ctx = PaletteContext {

@@ -22,6 +22,45 @@ pub struct HistoryState {
     suppress_next_record: bool,
 }
 
+pub struct HistoryCommandPort<'a> {
+    state: &'a mut HistoryState,
+}
+
+impl<'a> HistoryCommandPort<'a> {
+    pub(crate) fn new(state: &'a mut HistoryState) -> Self {
+        Self { state }
+    }
+
+    pub(crate) fn back(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+    ) -> (CommandOutcome, NoticeAction) {
+        self.state.back(app, page_count)
+    }
+
+    pub(crate) fn forward(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+    ) -> (CommandOutcome, NoticeAction) {
+        self.state.forward(app, page_count)
+    }
+
+    pub(crate) fn goto(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+        page: usize,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        self.state.goto(app, page_count, page)
+    }
+
+    pub(crate) fn open_palette(&self, app: &AppState) -> PaletteRequest {
+        self.state.open_palette(app)
+    }
+}
+
 impl HistoryState {
     pub fn back(
         &mut self,

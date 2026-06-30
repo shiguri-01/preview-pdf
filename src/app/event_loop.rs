@@ -146,7 +146,8 @@ impl App {
             render_actor.nav_mut().intent(),
             tracked_scale,
         );
-        self.interaction.prewarm_search_text(Arc::clone(&pdf));
+        self.interaction
+            .prepare_extensions_for_document(Arc::clone(&pdf));
 
         Ok(LoopRuntime {
             page_count,
@@ -336,7 +337,8 @@ impl App {
             .interaction
             .extensions
             .host
-            .highlight_overlay_for(current_view.visible_pages.existing_pages())
+            .render_snapshot(current_view.visible_pages.existing_pages())
+            .highlight_overlay
             .stamp;
         let base_pan = self.current_pan();
         let interactive = input_actor.is_interactive(prefetch_pause_after_input);

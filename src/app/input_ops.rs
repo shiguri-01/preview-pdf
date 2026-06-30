@@ -85,8 +85,8 @@ impl InteractionSubsystem {
         drain_background_events(state, &mut self.extensions.host)
     }
 
-    pub(crate) fn prewarm_search_text(&mut self, pdf: SharedPdfBackend) {
-        self.extensions.host.prewarm_search_text(pdf);
+    pub(crate) fn prepare_extensions_for_document(&mut self, pdf: SharedPdfBackend) {
+        self.extensions.host.on_document_opened(pdf);
     }
 
     pub(crate) fn reset_extensions_for_document_reload(
@@ -94,18 +94,17 @@ impl InteractionSubsystem {
         state: &mut AppState,
         pdf: SharedPdfBackend,
     ) {
-        self.extensions.host.reset_for_document_reload(state, pdf);
+        self.extensions.host.on_document_reloaded(state, pdf);
     }
 
-    pub(crate) fn sync_search_after_page_change(
+    pub(crate) fn sync_extensions_after_page_change(
         &mut self,
         pdf: SharedPdfBackend,
-        current_page: usize,
+        visible_pages: [Option<usize>; 2],
     ) {
-        self.extensions.host.prewarm_search_text(pdf.clone());
         self.extensions
             .host
-            .resolve_search_priority_geometry(pdf, [Some(current_page), None]);
+            .on_visible_pages_changed(pdf, visible_pages);
     }
 
     pub(crate) fn palette_view(&self) -> Option<PaletteView> {

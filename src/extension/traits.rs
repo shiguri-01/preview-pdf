@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::backend::SharedPdfBackend;
 use crate::event::AppEvent;
 use crate::input::{AppInputEvent, InputHookResult};
 
@@ -23,6 +24,10 @@ pub trait Extension {
     fn on_background(state: &mut Self::State, app: &mut AppState) -> bool {
         let _ = (state, app);
         false
+    }
+
+    fn on_document_reloaded(state: &mut Self::State, app: &mut AppState, pdf: SharedPdfBackend) {
+        let _ = (state, app, pdf);
     }
 
     fn status_bar_segment(state: &Self::State, app: &AppState) -> Option<String> {

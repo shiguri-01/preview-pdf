@@ -16,6 +16,61 @@ pub struct SearchRuntime {
     engine: SearchEngine,
 }
 
+pub struct SearchCommandPort<'a> {
+    runtime: &'a mut SearchRuntime,
+}
+
+impl<'a> SearchCommandPort<'a> {
+    pub(crate) fn new(runtime: &'a mut SearchRuntime) -> Self {
+        Self { runtime }
+    }
+
+    pub(crate) fn open_palette(&mut self) -> PaletteRequest {
+        self.runtime.open_palette()
+    }
+
+    pub(crate) fn submit(
+        &mut self,
+        app: &mut AppState,
+        pdf: SharedPdfBackend,
+        query: String,
+        matcher: SearchMatcherKind,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        self.runtime.submit(app, pdf, query, matcher)
+    }
+
+    pub(crate) fn open_results_palette(&mut self) -> Option<PaletteRequest> {
+        self.runtime.open_results_palette()
+    }
+
+    pub(crate) fn goto_result(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+        page: usize,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        self.runtime.goto_result(app, page_count, page)
+    }
+
+    pub(crate) fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
+        self.runtime.cancel(pdf)
+    }
+
+    pub(crate) fn next_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
+        self.runtime.next_hit(app)
+    }
+
+    pub(crate) fn prev_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
+        self.runtime.prev_hit(app)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SearchUiSnapshot {
+    pub active: bool,
+    pub results_entries: Arc<[SearchPaletteEntry]>,
+}
+
 impl SearchRuntime {
     pub fn open_palette(&mut self) -> PaletteRequest {
         self.state.open_palette()
@@ -112,6 +167,28 @@ impl SearchRuntime {
         self.state
             .highlight_overlay_for_visible_pages(visible_pages)
     }
+
+    pub fn ui_snapshot(&self) -> SearchUiSnapshot {
+        SearchUiSnapshot {
+            active: self.is_active(),
+            results_entries: self.palette_entries(),
+        }
+    }
+
+    pub fn on_document_reloaded(&mut self, app: &mut AppState, pdf: SharedPdfBackend) {
+        let active_search = self
+            .is_active()
+            .then(|| (self.query().to_string(), self.matcher()));
+        *self = Self::default();
+        self.prewarm(Arc::clone(&pdf));
+        if let Some((query, matcher)) = active_search
+            && let Err(err) = self.submit(app, Arc::clone(&pdf), query, matcher)
+        {
+            *self = Self::default();
+            self.prewarm(pdf);
+            app.set_warning_notice(format!("Could not restore search after reload: {err}"));
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,21 +278,20 @@ impl SearchState {
         query: String,
         matcher: SearchMatcherKind,
     ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.query = query;
-        self.matcher = matcher;
-
-        let query = self.query.trim().to_string();
+        let query = query.trim().to_string();
         if query.is_empty() {
             self.generation = search_engine.cancel(Arc::clone(&pdf))?;
             self.query.clear();
+            self.matcher = matcher;
             self.clear_results();
             return Ok((CommandOutcome::Noop, NoticeAction::Clear));
         }
 
-        let matcher = matcher_for_kind(self.matcher);
-        let generation = search_engine.submit(Arc::clone(&pdf), query.clone(), matcher)?;
+        let search_matcher = matcher_for_kind(matcher);
+        let generation = search_engine.submit(Arc::clone(&pdf), query.clone(), search_matcher)?;
 
         self.query = query;
+        self.matcher = matcher;
         self.generation = generation;
         self.in_progress = true;
         self.scanned_pages_progress = 0;

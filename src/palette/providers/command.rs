@@ -603,13 +603,23 @@ mod tests {
         list.iter().map(|candidate| candidate.id.clone()).collect()
     }
 
+    fn extension_snapshot(search_active: bool) -> ExtensionUiSnapshot {
+        ExtensionUiSnapshot {
+            search: crate::search::SearchUiSnapshot {
+                active: search_active,
+                ..Default::default()
+            },
+            ..ExtensionUiSnapshot::default()
+        }
+    }
+
     fn command_list_for_input(
         input: &str,
         search_active: bool,
     ) -> Vec<crate::palette::PaletteCandidate> {
         let provider = CommandPaletteProvider;
         let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
+        let extensions = extension_snapshot(search_active);
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
@@ -647,7 +657,7 @@ mod tests {
     ) -> PaletteSubmitEffect {
         let provider = CommandPaletteProvider;
         let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
+        let extensions = extension_snapshot(search_active);
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
@@ -668,7 +678,7 @@ mod tests {
     fn command_tab_effect(input: &str, selected_id: &str, search_active: bool) -> PaletteTabEffect {
         let provider = CommandPaletteProvider;
         let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
+        let extensions = extension_snapshot(search_active);
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
@@ -689,7 +699,7 @@ mod tests {
     fn assistive_text_for_input(input: &str, search_active: bool) -> Option<String> {
         let provider = CommandPaletteProvider;
         let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::with_search_active(search_active);
+        let extensions = extension_snapshot(search_active);
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
@@ -739,7 +749,7 @@ mod tests {
     fn list_shows_search_hit_navigation_when_search_is_active() {
         let provider = CommandPaletteProvider;
         let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::with_search_active(true);
+        let extensions = extension_snapshot(true);
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
@@ -1108,7 +1118,7 @@ mod tests {
     fn submit_reopens_when_input_targets_internal_command() {
         let provider = CommandPaletteProvider;
         let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::with_search_active(true);
+        let extensions = extension_snapshot(true);
         let ctx = PaletteContext {
             app,
             extensions: &extensions,

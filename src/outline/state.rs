@@ -18,6 +18,34 @@ pub struct OutlineState {
     cache: Option<OutlineCache>,
 }
 
+pub struct OutlineCommandPort<'a> {
+    state: &'a mut OutlineState,
+}
+
+impl<'a> OutlineCommandPort<'a> {
+    pub(crate) fn new(state: &'a mut OutlineState) -> Self {
+        Self { state }
+    }
+
+    pub(crate) fn open_palette(&mut self, pdf: SharedPdfBackend) -> AppResult<PaletteRequest> {
+        self.state.open_palette(pdf)
+    }
+
+    pub(crate) fn goto(
+        &mut self,
+        app: &mut AppState,
+        page_count: usize,
+        page: usize,
+    ) -> AppResult<(CommandOutcome, NoticeAction)> {
+        self.state.goto(app, page_count, page)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutlineUiSnapshot {
+    pub entries: Arc<[OutlinePaletteEntry]>,
+}
+
 impl OutlineState {
     pub fn open_palette(&mut self, pdf: SharedPdfBackend) -> AppResult<PaletteRequest> {
         self.ensure_loaded(pdf.as_ref())?;
@@ -50,6 +78,16 @@ impl OutlineState {
             .as_ref()
             .map(|cache| Arc::clone(&cache.entries))
             .unwrap_or_else(|| Arc::from([]))
+    }
+
+    pub fn ui_snapshot(&self) -> OutlineUiSnapshot {
+        OutlineUiSnapshot {
+            entries: self.palette_entries(),
+        }
+    }
+
+    pub fn on_document_reloaded(&mut self) {
+        *self = Self::default();
     }
 
     fn ensure_loaded(&mut self, pdf: &dyn PdfBackend) -> AppResult<()> {

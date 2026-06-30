@@ -1,9 +1,9 @@
-use std::num::NonZeroUsize;
-
-use lru::LruCache;
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::backend::RgbaFrame;
+use crate::cache::{
+    BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy, RemovedEntry,
+};
 use crate::render::cache::RenderedPageKey;
 
 use super::traits::{PanOffset, Viewport};
@@ -20,7 +20,6 @@ pub(crate) enum TerminalFrameState {
 
 pub(crate) struct TerminalFrameEntry {
     state: TerminalFrameState,
-    approx_bytes: usize,
 }
 
 impl TerminalFrameEntry {
@@ -38,19 +37,9 @@ pub(crate) struct TerminalFrameKey {
     pub(crate) overlay_stamp: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct CacheCounters {
-    hits: u64,
-    misses: u64,
-}
-
 pub(crate) struct TerminalFrameCache {
-    max_entries: usize,
-    memory_budget_bytes: usize,
-    pub(crate) entries: LruCache<TerminalFrameKey, TerminalFrameEntry>,
-    pub(crate) memory_bytes: usize,
+    entries: BudgetedLruCache<TerminalFrameKey, TerminalFrameEntry>,
     pending_work_count: usize,
-    counters: CacheCounters,
 }
 
 impl Default for TerminalFrameCache {
@@ -61,27 +50,14 @@ impl Default for TerminalFrameCache {
 
 impl TerminalFrameCache {
     pub(crate) fn new(max_entries: usize, memory_budget_bytes: usize) -> Self {
-        let max_entries = max_entries.max(1);
         Self {
-            max_entries,
-            memory_budget_bytes: memory_budget_bytes.max(1),
-            entries: LruCache::new(
-                NonZeroUsize::new(max_entries).expect("l2 cache entries is non-zero"),
-            ),
-            memory_bytes: 0,
+            entries: BudgetedLruCache::new(CacheLimits::new(max_entries, memory_budget_bytes)),
             pending_work_count: 0,
-            counters: CacheCounters::default(),
         }
     }
 
     pub(crate) fn lookup_mut(&mut self, key: &TerminalFrameKey) -> Option<&mut TerminalFrameEntry> {
-        if self.entries.peek(key).is_some() {
-            self.counters.hits += 1;
-            return self.entries.get_mut(key);
-        }
-
-        self.counters.misses += 1;
-        None
+        self.entries.get_mut(key)
     }
 
     pub(crate) fn cached_mut(&mut self, key: &TerminalFrameKey) -> Option<&mut TerminalFrameEntry> {
@@ -120,73 +96,49 @@ impl TerminalFrameCache {
             .copied()
             .filter(|protected| *protected != key)
             .collect::<Vec<_>>();
-        if approx_bytes > self.memory_budget_bytes {
-            if !allow_single_oversize {
-                return false;
-            }
-
-            self.pop_entry(&key);
-
-            // Keep the visible ready frame resident while swapping in an oversize current
-            // entry. We allow this narrow over-budget state so the viewer never regresses
-            // from "image visible" back to blank while the replacement frame is pending.
-            // If the cache is configured for a single entry, honor that cap and fall back
-            // to the original replacement behavior.
-            let protected_keys = if self.max_entries > 1 {
-                protected_keys.as_slice()
-            } else {
-                &[]
-            };
-            self.retain_only(protected_keys, key);
-            self.memory_bytes = self.memory_bytes.saturating_add(approx_bytes);
-            self.pending_work_count += 1;
-            if let Some((_evicted_key, evicted)) = self.entries.push(
-                key,
-                TerminalFrameEntry {
-                    state: TerminalFrameState::PendingFrame(frame),
-                    approx_bytes,
-                },
-            ) {
-                self.memory_bytes = self.memory_bytes.saturating_sub(evicted.approx_bytes);
-                self.note_removed_state(&evicted.state);
-            }
-            return true;
-        }
-
-        // Preserve single-entry oversize recovery for current page:
-        // while a lone oversize entry is resident, reject unrelated
-        // non-oversize inserts (typically prefetch) that would evict it.
         if !allow_single_oversize
-            && self.memory_bytes > self.memory_budget_bytes
+            && self.entries.memory_bytes() > self.entries.memory_budget_bytes()
             && self.entries.peek(&key).is_none()
         {
             return false;
         }
 
-        self.pop_entry(&key);
-
-        self.memory_bytes += approx_bytes;
-        self.pending_work_count += 1;
-        if let Some((_evicted_key, evicted)) = self.entries.push(
+        // Keep visible ready frames resident while swapping in an oversize current
+        // entry. If the cache is configured for a single entry, honor that cap.
+        let protected_keys = if self.entries.max_entries() > 1 {
+            protected_keys.as_slice()
+        } else {
+            &[]
+        };
+        let outcome = self.entries.insert(
             key,
             TerminalFrameEntry {
                 state: TerminalFrameState::PendingFrame(frame),
-                approx_bytes,
             },
-        ) {
-            self.memory_bytes = self.memory_bytes.saturating_sub(evicted.approx_bytes);
-            self.note_removed_state(&evicted.state);
+            approx_bytes,
+            InsertPolicy {
+                oversize: if allow_single_oversize {
+                    OversizePolicy::Admit
+                } else {
+                    OversizePolicy::Reject
+                },
+                eviction: if protected_keys.is_empty() {
+                    EvictionPolicy::Normal
+                } else {
+                    EvictionPolicy::Protect(protected_keys)
+                },
+            },
+        );
+        if !outcome.inserted {
+            return false;
         }
-        self.evict_while_needed(&protected_keys);
+        self.note_removed_entries(outcome.replaced.into_iter().chain(outcome.evicted));
+        self.pending_work_count += 1;
         true
     }
 
     pub(crate) fn hit_rate(&self) -> f64 {
-        let lookups = self.counters.hits + self.counters.misses;
-        if lookups == 0 {
-            return 0.0;
-        }
-        self.counters.hits as f64 / lookups as f64
+        self.entries.hit_rate()
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -195,12 +147,17 @@ impl TerminalFrameCache {
 
     #[cfg(test)]
     pub(crate) fn max_entries(&self) -> usize {
-        self.max_entries
+        self.entries.max_entries()
     }
 
     #[cfg(test)]
     pub(crate) fn memory_budget_bytes(&self) -> usize {
-        self.memory_budget_bytes
+        self.entries.memory_budget_bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn memory_bytes(&self) -> usize {
+        self.entries.memory_bytes()
     }
 
     pub(crate) fn has_pending_work(&self) -> bool {
@@ -229,86 +186,30 @@ impl TerminalFrameCache {
     }
 
     pub(crate) fn clear(&mut self) {
-        self.entries.clear();
-        self.memory_bytes = 0;
+        let _ = self.entries.clear();
         self.pending_work_count = 0;
     }
 
     pub(crate) fn remove(&mut self, key: &TerminalFrameKey) -> bool {
-        self.pop_entry(key).is_some()
-    }
-
-    fn evict_while_needed(&mut self, protected_keys: &[TerminalFrameKey]) {
-        while self.entries.len() > self.max_entries || self.memory_bytes > self.memory_budget_bytes
-        {
-            if self.entries.len() == 1
-                && protected_keys
-                    .iter()
-                    .any(|key| self.entries.peek(key).is_some())
-            {
-                break;
-            }
-            let Some((_key, entry)) = self.pop_lru_unprotected(protected_keys) else {
-                break;
-            };
-            self.memory_bytes = self.memory_bytes.saturating_sub(entry.approx_bytes);
-            self.note_removed_state(&entry.state);
-        }
-    }
-
-    fn retain_only(&mut self, protected_keys: &[TerminalFrameKey], inserted_key: TerminalFrameKey) {
-        let doomed: Vec<_> = self
-            .entries
-            .iter()
-            .map(|(key, _)| *key)
-            .filter(|key| *key != inserted_key && !protected_keys.contains(key))
-            .collect();
-
-        for key in doomed {
-            let _ = self.remove(&key);
-        }
-    }
-
-    fn pop_lru_unprotected(
-        &mut self,
-        protected_keys: &[TerminalFrameKey],
-    ) -> Option<(TerminalFrameKey, TerminalFrameEntry)> {
-        let mut protected_entry = Vec::new();
-
-        loop {
-            match self.entries.pop_lru() {
-                Some((key, entry)) if protected_keys.contains(&key) => {
-                    protected_entry.push((key, entry));
-                    continue;
-                }
-                Some(pair) => {
-                    for (key, entry) in protected_entry.into_iter().rev() {
-                        let _ = self.entries.push(key, entry);
-                        let _ = self.entries.demote(&key);
-                    }
-                    return Some(pair);
-                }
-                None => {
-                    for (key, entry) in protected_entry.into_iter().rev() {
-                        let _ = self.entries.push(key, entry);
-                        let _ = self.entries.demote(&key);
-                    }
-                    return None;
-                }
-            }
-        }
-    }
-
-    fn pop_entry(&mut self, key: &TerminalFrameKey) -> Option<TerminalFrameEntry> {
-        let entry = self.entries.pop(key)?;
-        self.memory_bytes = self.memory_bytes.saturating_sub(entry.approx_bytes);
-        self.note_removed_state(&entry.state);
-        Some(entry)
+        let Some(removed) = self.entries.remove(key) else {
+            return false;
+        };
+        self.note_removed_state(&removed.value.state);
+        true
     }
 
     fn note_removed_state(&mut self, state: &TerminalFrameState) {
         if state_has_pending_work(state) {
             self.pending_work_count = self.pending_work_count.saturating_sub(1);
+        }
+    }
+
+    fn note_removed_entries(
+        &mut self,
+        entries: impl IntoIterator<Item = RemovedEntry<TerminalFrameKey, TerminalFrameEntry>>,
+    ) {
+        for entry in entries {
+            self.note_removed_state(&entry.value.state);
         }
     }
 }
@@ -318,4 +219,198 @@ fn state_has_pending_work(state: &TerminalFrameState) -> bool {
         state,
         TerminalFrameState::PendingFrame(_) | TerminalFrameState::Encoding
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::backend::RgbaFrame;
+
+    use super::*;
+
+    fn frame() -> RgbaFrame {
+        RgbaFrame {
+            width: 4,
+            height: 4,
+            pixels: vec![200; 4 * 4 * 4].into(),
+        }
+    }
+
+    fn key(page: usize) -> TerminalFrameKey {
+        TerminalFrameKey {
+            rendered_page: RenderedPageKey::new(1, page, 1.0),
+            viewport: Viewport {
+                x: 0,
+                y: 0,
+                width: 80,
+                height: 24,
+            },
+            pan: PanOffset::default(),
+            overlay_stamp: 0,
+        }
+    }
+
+    #[test]
+    fn cached_mut_does_not_touch_lru_order() {
+        let mut cache = TerminalFrameCache::default();
+        for page in 0..L2_MAX_ENTRIES {
+            let _ = cache.insert(key(page), frame(), 1, false, None);
+        }
+
+        let oldest = key(0);
+        assert!(cache.cached_mut(&oldest).is_some());
+        let _ = cache.insert(key(L2_MAX_ENTRIES), frame(), 1, false, None);
+
+        assert!(cache.cached_mut(&oldest).is_none());
+        assert!(cache.cached_mut(&key(1)).is_some());
+    }
+
+    #[test]
+    fn insert_at_capacity_keeps_memory_accounting_consistent() {
+        let mut cache = TerminalFrameCache::default();
+        for page in 0..L2_MAX_ENTRIES {
+            let _ = cache.insert(key(page), frame(), 16, false, None);
+        }
+        let _ = cache.insert(key(L2_MAX_ENTRIES), frame(), 20, false, None);
+
+        let expected = (L2_MAX_ENTRIES - 1) * 16 + 20;
+        assert_eq!(cache.len(), L2_MAX_ENTRIES);
+        assert_eq!(cache.memory_bytes(), expected);
+    }
+
+    #[test]
+    fn insert_keeps_pending_frame_buffer_shared() {
+        let mut cache = TerminalFrameCache::default();
+        let key = key(0);
+        let source = frame();
+        let _ = cache.insert(key, source.clone(), source.byte_len(), false, None);
+
+        let stored_pixels = match cache.cached_mut(&key).map(|entry| entry.state()) {
+            Some(TerminalFrameState::PendingFrame(frame)) => &frame.pixels,
+            _ => panic!("expected pending frame"),
+        };
+        assert!(source.pixels.ptr_eq(stored_pixels));
+    }
+
+    #[test]
+    fn pending_work_tracks_state_transitions() {
+        let mut cache = TerminalFrameCache::default();
+        let key = key(0);
+        let _ = cache.insert(key, frame(), 16, false, None);
+        assert!(cache.has_pending_work());
+
+        assert!(cache.set_state(&key, TerminalFrameState::Failed));
+        assert!(!cache.has_pending_work());
+
+        assert!(cache.set_state(&key, TerminalFrameState::Encoding));
+        assert!(cache.has_pending_work());
+
+        assert!(cache.remove(&key));
+        assert!(!cache.has_pending_work());
+    }
+
+    #[test]
+    fn pending_work_tracks_eviction_and_clear() {
+        let mut cache = TerminalFrameCache::new(1, 64);
+        let first = key(0);
+        let second = key(1);
+        assert!(cache.insert(first, frame(), 16, false, None));
+        assert!(cache.insert(second, frame(), 16, false, None));
+        assert!(cache.cached_mut(&first).is_none());
+        assert!(cache.has_pending_work());
+
+        cache.clear();
+        assert!(!cache.has_pending_work());
+    }
+
+    #[test]
+    fn oversize_insert_without_override_preserves_existing_entries() {
+        let mut cache = TerminalFrameCache::new(8, 32);
+        let kept = key(0);
+        let oversize = key(1);
+        let _ = cache.insert(kept, frame(), 16, false, None);
+
+        let inserted = cache.insert(oversize, frame(), 64, false, None);
+        assert!(!inserted);
+        assert!(cache.cached_mut(&kept).is_some());
+        assert!(cache.cached_mut(&oversize).is_none());
+    }
+
+    #[test]
+    fn oversize_insert_with_override_keeps_single_entry() {
+        let mut cache = TerminalFrameCache::new(8, 32);
+        let kept = key(0);
+        let oversize = key(1);
+        let _ = cache.insert(kept, frame(), 16, false, None);
+
+        let inserted = cache.insert(oversize, frame(), 64, true, None);
+        assert!(inserted);
+        assert!(cache.cached_mut(&kept).is_none());
+        assert!(cache.cached_mut(&oversize).is_some());
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn oversize_insert_with_protected_key_keeps_visible_entry() {
+        let mut cache = TerminalFrameCache::new(8, 32);
+        let visible = key(0);
+        let oversize = key(1);
+        let _ = cache.insert(visible, frame(), 16, false, None);
+
+        let inserted = cache.insert(oversize, frame(), 64, true, Some(visible));
+        assert!(inserted);
+        assert!(cache.cached_mut(&visible).is_some());
+        assert!(cache.cached_mut(&oversize).is_some());
+        assert_eq!(cache.len(), 2);
+        assert!(cache.memory_bytes() > cache.memory_budget_bytes());
+    }
+
+    #[test]
+    fn oversize_insert_with_protected_keys_keeps_visible_entries() {
+        let mut cache = TerminalFrameCache::new(8, 32);
+        let left_visible = key(0);
+        let right_visible = key(1);
+        let oversize = key(2);
+        let _ = cache.insert(left_visible, frame(), 16, false, None);
+        let _ = cache.insert(right_visible, frame(), 16, false, None);
+
+        let inserted =
+            cache.insert_protected(oversize, frame(), 64, true, &[left_visible, right_visible]);
+        assert!(inserted);
+        assert!(cache.cached_mut(&left_visible).is_some());
+        assert!(cache.cached_mut(&right_visible).is_some());
+        assert!(cache.cached_mut(&oversize).is_some());
+        assert_eq!(cache.len(), 3);
+        assert!(cache.memory_bytes() > cache.memory_budget_bytes());
+    }
+
+    #[test]
+    fn oversize_insert_with_protected_key_respects_single_entry_limit() {
+        let mut cache = TerminalFrameCache::new(1, 32);
+        let visible = key(0);
+        let oversize = key(1);
+        let _ = cache.insert(visible, frame(), 16, false, None);
+
+        let inserted = cache.insert(oversize, frame(), 64, true, Some(visible));
+        assert!(inserted);
+        assert!(cache.cached_mut(&visible).is_none());
+        assert!(cache.cached_mut(&oversize).is_some());
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn non_oversize_insert_does_not_evict_single_oversize_entry() {
+        let mut cache = TerminalFrameCache::new(8, 32);
+        let oversize = key(1);
+        let prefetch = key(2);
+
+        assert!(cache.insert(oversize, frame(), 64, true, None));
+        assert_eq!(cache.len(), 1);
+        assert!(cache.cached_mut(&oversize).is_some());
+
+        let inserted_prefetch = cache.insert(prefetch, frame(), 16, false, None);
+        assert!(!inserted_prefetch);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.cached_mut(&oversize).is_some());
+        assert!(cache.cached_mut(&prefetch).is_none());
+    }
 }

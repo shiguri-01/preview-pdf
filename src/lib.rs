@@ -1,5 +1,6 @@
 pub mod app;
 pub mod backend;
+pub(crate) mod cache;
 pub mod config;
 pub mod error;
 pub mod perf;

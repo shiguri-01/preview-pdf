@@ -1,8 +1,7 @@
-use std::num::NonZeroUsize;
-
-use lru::LruCache;
-
 use crate::backend::RgbaFrame;
+use crate::cache::{
+    BudgetedLruCache, CacheCounters, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy,
+};
 
 const DEFAULT_MEMORY_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES: usize = 128;
@@ -31,20 +30,9 @@ impl RenderedPageKey {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct CacheCounters {
-    pub hits: u64,
-    pub misses: u64,
-    pub evictions: u64,
-}
-
 #[derive(Debug, Clone)]
 pub struct RenderedPageCache {
-    max_entries: usize,
-    memory_budget_bytes: usize,
-    memory_bytes: usize,
-    entries: LruCache<RenderedPageKey, RgbaFrame>,
-    counters: CacheCounters,
+    entries: BudgetedLruCache<RenderedPageKey, RgbaFrame>,
 }
 
 impl Default for RenderedPageCache {
@@ -55,26 +43,13 @@ impl Default for RenderedPageCache {
 
 impl RenderedPageCache {
     pub fn new(max_entries: usize, memory_budget_bytes: usize) -> Self {
-        let max_entries = max_entries.max(1);
         Self {
-            max_entries,
-            memory_budget_bytes: memory_budget_bytes.max(1),
-            memory_bytes: 0,
-            entries: LruCache::new(
-                NonZeroUsize::new(max_entries).expect("max entries is non-zero"),
-            ),
-            counters: CacheCounters::default(),
+            entries: BudgetedLruCache::new(CacheLimits::new(max_entries, memory_budget_bytes)),
         }
     }
 
     pub fn get(&mut self, key: &RenderedPageKey) -> Option<&RgbaFrame> {
-        if self.entries.peek(key).is_some() {
-            self.counters.hits += 1;
-            return self.entries.get(key);
-        }
-
-        self.counters.misses += 1;
-        None
+        self.entries.get(key)
     }
 
     pub fn get_cloned(&mut self, key: &RenderedPageKey) -> Option<RgbaFrame> {
@@ -88,76 +63,44 @@ impl RenderedPageCache {
         allow_single_oversize: bool,
     ) -> bool {
         let frame_bytes = frame.byte_len();
-        if frame_bytes > self.memory_budget_bytes {
-            if !allow_single_oversize {
-                return false;
-            }
-            self.clear();
-            self.memory_bytes = frame_bytes;
-            self.entries.put(key, frame);
-            return true;
-        }
-
-        // Keep the single-entry oversize recovery path stable:
-        // reject unrelated non-oversize inserts while a lone oversize
-        // frame is intentionally resident.
         if !allow_single_oversize
-            && self.memory_bytes > self.memory_budget_bytes
-            && self.entries.len() == 1
+            && self.entries.memory_bytes() > self.entries.memory_budget_bytes()
             && self.entries.peek(&key).is_none()
-            && self
-                .entries
-                .peek_lru()
-                .is_some_and(|(_cached_key, cached)| cached.byte_len() > self.memory_budget_bytes)
         {
             return false;
         }
-
-        if let Some(prev) = self.entries.pop(&key) {
-            self.memory_bytes = self.memory_bytes.saturating_sub(prev.byte_len());
-        }
-
-        let implicit_evicted_bytes =
-            if self.entries.len() >= self.max_entries && self.entries.peek(&key).is_none() {
-                self.entries
-                    .peek_lru()
-                    .map(|(_key, frame)| frame.byte_len())
-            } else {
-                None
-            };
-
-        self.memory_bytes += frame_bytes;
-        self.entries.put(key, frame);
-        if let Some(evicted_bytes) = implicit_evicted_bytes {
-            self.memory_bytes = self.memory_bytes.saturating_sub(evicted_bytes);
-            self.counters.evictions += 1;
-        }
-        self.evict_while_needed();
-        true
+        self.entries
+            .insert(
+                key,
+                frame,
+                frame_bytes,
+                InsertPolicy {
+                    oversize: if allow_single_oversize {
+                        OversizePolicy::Admit
+                    } else {
+                        OversizePolicy::Reject
+                    },
+                    eviction: EvictionPolicy::Normal,
+                },
+            )
+            .inserted
     }
 
     pub fn remove_doc(&mut self, doc_id: u64) {
-        let doomed: Vec<_> = self
+        let removed = self
             .entries
-            .iter()
-            .filter_map(|(key, _)| (key.doc_id == doc_id).then_some(*key))
-            .collect();
-
-        for key in doomed {
-            self.remove(&key);
-        }
+            .remove_where(|key, _frame| key.doc_id == doc_id);
+        self.entries.add_evictions(removed.len() as u64);
     }
 
     pub fn remove(&mut self, key: &RenderedPageKey) {
-        if let Some(frame) = self.entries.pop(key) {
-            self.memory_bytes = self.memory_bytes.saturating_sub(frame.byte_len());
-            self.counters.evictions += 1;
+        if self.entries.remove(key).is_some() {
+            self.entries.add_evictions(1);
         }
     }
 
     pub fn clear(&mut self) {
-        self.entries.clear();
-        self.memory_bytes = 0;
+        let _ = self.entries.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -165,11 +108,11 @@ impl RenderedPageCache {
     }
 
     pub fn max_entries(&self) -> usize {
-        self.max_entries
+        self.entries.max_entries()
     }
 
     pub fn memory_budget_bytes(&self) -> usize {
-        self.memory_budget_bytes
+        self.entries.memory_budget_bytes()
     }
 
     pub fn contains(&self, key: &RenderedPageKey) -> bool {
@@ -181,33 +124,15 @@ impl RenderedPageCache {
     }
 
     pub fn memory_bytes(&self) -> usize {
-        self.memory_bytes
+        self.entries.memory_bytes()
     }
 
     pub fn counters(&self) -> CacheCounters {
-        self.counters
+        self.entries.counters()
     }
 
     pub fn hit_rate(&self) -> f64 {
-        let lookups = self.counters.hits + self.counters.misses;
-        if lookups == 0 {
-            return 0.0;
-        }
-        self.counters.hits as f64 / lookups as f64
-    }
-
-    fn evict_while_needed(&mut self) {
-        while self.entries.len() > self.max_entries || self.memory_bytes > self.memory_budget_bytes
-        {
-            if self.entries.len() == 1 {
-                break;
-            }
-            let Some((_key, frame)) = self.entries.pop_lru() else {
-                break;
-            };
-            self.memory_bytes = self.memory_bytes.saturating_sub(frame.byte_len());
-            self.counters.evictions += 1;
-        }
+        self.entries.hit_rate()
     }
 }
 

@@ -423,8 +423,9 @@ fn run_job(
         let text_page = match text_page {
             Ok(text_page) => Some(text_page),
             Err(err) => {
-                let _ = event_tx.send(SearchEvent::Failed {
+                let _ = event_tx.send(SearchEvent::PageSkipped {
                     generation: job.generation,
+                    page,
                     message: err.to_string(),
                 });
                 None
@@ -936,7 +937,8 @@ mod tests {
         }
         assert!(events.iter().any(|event| matches!(
             event,
-            SearchEvent::Failed {
+            SearchEvent::PageSkipped {
+                page: 1,
                 message,
                 ..
             } if message.contains("page text unavailable")

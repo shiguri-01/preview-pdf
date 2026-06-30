@@ -166,6 +166,7 @@ impl Default for SearchState {
 
 impl SearchState {
     const HIGHLIGHT_UNAVAILABLE_NOTICE: &str = "some search highlights are unavailable";
+    const PAGE_SKIPPED_NOTICE: &str = "some pages could not be searched";
 
     pub fn open_palette(&mut self) -> PaletteRequest {
         let payload = if self.query.is_empty() {
@@ -355,18 +356,15 @@ impl SearchState {
                         changed = true;
                     }
                 }
-                SearchEvent::Failed {
+                SearchEvent::PageSkipped {
                     generation,
-                    message,
+                    page: _,
+                    message: _,
                 } => {
                     if generation != self.generation {
                         continue;
                     }
-                    self.in_progress = false;
-                    self.last_error = Some(message.clone());
-                    app.apply_notice_action(NoticeAction::error(format!(
-                        "search failed: {message}"
-                    )));
+                    app.apply_notice_action(NoticeAction::warning(Self::PAGE_SKIPPED_NOTICE));
                     changed = true;
                 }
             }

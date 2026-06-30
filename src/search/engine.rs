@@ -37,8 +37,9 @@ pub enum SearchEvent {
         occurrences: Vec<SearchOccurrence>,
         highlight_unavailable: bool,
     },
-    Failed {
+    PageSkipped {
         generation: u64,
+        page: usize,
         message: String,
     },
 }

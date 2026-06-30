@@ -37,8 +37,9 @@ pub enum SearchEvent {
         occurrences: Vec<SearchOccurrence>,
         highlight_unavailable: bool,
     },
-    Failed {
+    PageSkipped {
         generation: u64,
+        page: usize,
         message: String,
     },
 }
@@ -206,18 +207,6 @@ struct CancelMatcher;
 impl SearchMatcher for CancelMatcher {
     fn prepare_query(&self, _raw_query: &str) -> String {
         String::new()
-    }
-
-    fn matches_page(&self, _page_text: &str, _prepared_query: &str) -> bool {
-        false
-    }
-
-    fn locate_text_matches(
-        &self,
-        _page_text: &str,
-        _prepared_query: &str,
-    ) -> Vec<SearchOccurrence> {
-        Vec::new()
     }
 
     fn locate_matches(&self, _page: &TextPage, _prepared_query: &str) -> Vec<SearchOccurrence> {

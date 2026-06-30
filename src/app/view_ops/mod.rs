@@ -780,14 +780,15 @@ mod tests {
             })
         }
 
-        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
-            Ok(String::new())
-        }
-
-        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+        fn extract_text_page(&self, page: usize) -> crate::error::AppResult<TextPage> {
+            let (width_pt, height_pt) = self
+                .dims
+                .get(page)
+                .copied()
+                .ok_or(crate::error::AppError::invalid_argument("out of range"))?;
             Ok(TextPage {
-                width_pt: 612.0,
-                height_pt: 792.0,
+                width_pt,
+                height_pt,
                 glyphs: Vec::new(),
                 dropped_glyphs: 0,
             })

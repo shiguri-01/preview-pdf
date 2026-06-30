@@ -166,6 +166,7 @@ impl Default for SearchState {
 
 impl SearchState {
     const HIGHLIGHT_UNAVAILABLE_NOTICE: &str = "some search highlights are unavailable";
+    const PAGE_SKIPPED_NOTICE: &str = "some pages could not be searched";
 
     pub fn open_palette(&mut self) -> PaletteRequest {
         let payload = if self.query.is_empty() {
@@ -355,18 +356,15 @@ impl SearchState {
                         changed = true;
                     }
                 }
-                SearchEvent::Failed {
+                SearchEvent::PageSkipped {
                     generation,
-                    message,
+                    page: _,
+                    message: _,
                 } => {
                     if generation != self.generation {
                         continue;
                     }
-                    self.in_progress = false;
-                    self.last_error = Some(message.clone());
-                    app.apply_notice_action(NoticeAction::error(format!(
-                        "search failed: {message}"
-                    )));
+                    app.apply_notice_action(NoticeAction::warning(Self::PAGE_SKIPPED_NOTICE));
                     changed = true;
                 }
             }
@@ -556,7 +554,6 @@ mod tests {
     use crate::app::{AppState, NoticeAction, NoticeLevel, PageLayoutMode, PaletteRequest};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{CommandOutcome, SearchMatcherKind};
-    use crate::error::AppError;
     use crate::palette::{PaletteKind, PaletteOpenPayload};
     use crate::search::engine::{SearchEngine, SearchPageHit};
 
@@ -600,12 +597,7 @@ mod tests {
                 pixels: vec![0, 0, 0, 0].into(),
             })
         }
-
-        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
-            Ok(String::new())
-        }
-
-        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+        fn extract_text_page(&self, _page: usize) -> crate::error::AppResult<TextPage> {
             Ok(TextPage {
                 width_pt: 612.0,
                 height_pt: 792.0,
@@ -621,14 +613,22 @@ mod tests {
 
     struct HighlightUnavailableStubPdf {
         path: PathBuf,
-        text: String,
+        page: TextPage,
     }
 
     impl HighlightUnavailableStubPdf {
         fn new(text: &str) -> Self {
             Self {
                 path: PathBuf::from("highlight-unavailable.pdf"),
-                text: text.to_string(),
+                page: TextPage {
+                    width_pt: 612.0,
+                    height_pt: 792.0,
+                    glyphs: text
+                        .chars()
+                        .map(|ch| crate::backend::TextGlyph { ch, bbox: None })
+                        .collect(),
+                    dropped_glyphs: text.chars().count(),
+                },
             }
         }
     }
@@ -657,13 +657,8 @@ mod tests {
                 pixels: vec![0, 0, 0, 0].into(),
             })
         }
-
-        fn extract_text(&self, _page: usize) -> crate::error::AppResult<String> {
-            Ok(self.text.clone())
-        }
-
-        fn extract_positioned_text(&self, _page: usize) -> crate::error::AppResult<TextPage> {
-            Err(AppError::unsupported("positioned text unavailable"))
+        fn extract_text_page(&self, _page: usize) -> crate::error::AppResult<TextPage> {
+            Ok(self.page.clone())
         }
 
         fn extract_outline(&self) -> crate::error::AppResult<Vec<crate::backend::OutlineNode>> {

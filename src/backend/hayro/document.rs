@@ -15,7 +15,7 @@ use crate::error::{AppError, AppResult};
 
 use super::PdfDoc;
 use super::outline::extract_outline_nodes;
-use super::text::{extract_positioned_text_with_device, extract_text_with_device};
+use super::text::extract_text_page_with_device;
 
 impl PdfDoc {
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
@@ -142,7 +142,7 @@ impl PdfDoc {
         })
     }
 
-    pub fn extract_text(&self, page: usize) -> AppResult<String> {
+    pub fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
         if page >= self.page_count() {
             return Err(AppError::invalid_argument("page index is out of range"));
         }
@@ -153,21 +153,7 @@ impl PdfDoc {
             .get(page)
             .ok_or(AppError::invalid_argument("page index is out of range"))?;
 
-        Ok(extract_text_with_device(page_ref).trim().to_owned())
-    }
-
-    pub fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage> {
-        if page >= self.page_count() {
-            return Err(AppError::invalid_argument("page index is out of range"));
-        }
-
-        let page_ref = self
-            .pdf
-            .pages()
-            .get(page)
-            .ok_or(AppError::invalid_argument("page index is out of range"))?;
-
-        Ok(extract_positioned_text_with_device(page_ref))
+        Ok(extract_text_page_with_device(page_ref))
     }
 
     pub fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {

@@ -53,12 +53,8 @@ impl PdfBackend for PdfDoc {
         })
     }
 
-    fn extract_text(&self, page: usize) -> AppResult<String> {
-        PdfDoc::extract_text(self, page)
-    }
-
-    fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage> {
-        PdfDoc::extract_positioned_text(self, page)
+    fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
+        PdfDoc::extract_text_page(self, page)
     }
 
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
@@ -83,14 +79,9 @@ mod tests {
     };
     use crate::error::AppError;
 
-    use crate::backend::{PdfBackend, PdfRect};
+    use crate::backend::PdfBackend;
 
-    use super::{
-        PdfDoc,
-        document::pixel_buffer_from_pixmap,
-        encoding::decode_pdf_text_string,
-        text::{PlainTextExtractDevice, PositionedTextExtractDevice},
-    };
+    use super::{PdfDoc, document::pixel_buffer_from_pixmap, encoding::decode_pdf_text_string};
 
     #[test]
     fn open_rejects_directory_path() {
@@ -186,21 +177,28 @@ mod tests {
     }
 
     #[test]
-    fn extract_text_returns_page_bucket_text() {
+    fn extract_text_page_returns_page_bucket_text() {
         let file = unique_temp_path("text.pdf");
         fs::write(&file, build_pdf(&["hello world", "second page"]))
             .expect("test file should be created");
 
         let doc = PdfDoc::open(&file).expect("pdf should open");
-        let text = doc.extract_text(0).expect("extract should succeed");
+        let text = doc
+            .extract_text_page(0)
+            .expect("extract should succeed")
+            .plain_text();
         let normalized: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
         assert!(normalized.contains("helloworld"));
+        assert!(
+            !normalized.contains("secondpage"),
+            "page 0 extraction leaked text from another page: {text:?}"
+        );
 
         fs::remove_file(&file).expect("test file should be removed");
     }
 
     #[test]
-    fn extract_text_does_not_insert_false_space_from_tj_position_gap() {
+    fn extract_text_page_does_not_insert_false_space_from_tj_position_gap() {
         let file = unique_temp_path("tj_gap.pdf");
         fs::write(
             &file,
@@ -209,10 +207,13 @@ mod tests {
         .expect("test file should be created");
 
         let doc = PdfDoc::open(&file).expect("pdf should open");
-        let text = doc.extract_text(0).expect("extract should succeed");
-        let normalized: String = text.chars().filter(|ch| !ch.is_whitespace()).collect();
+        let text = doc
+            .extract_text_page(0)
+            .expect("extract should succeed")
+            .plain_text();
+        let lower = text.to_lowercase();
         assert!(
-            normalized.to_lowercase().contains("helloworld"),
+            lower.contains("helloworld") && !lower.contains("hello world"),
             "expected stable extraction without false splits, got: {text:?}"
         );
 
@@ -260,34 +261,6 @@ mod tests {
         );
 
         fs::remove_file(&file).expect("test file should be removed");
-    }
-
-    #[test]
-    fn plain_text_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
-        let mut device = PlainTextExtractDevice::default();
-
-        device.push_glyph_text("ll".to_owned(), 10.0, 20.0);
-        device.push_glyph_text("ll".to_owned(), 10.0, 20.0);
-
-        assert_eq!(device.finish(), "ll");
-    }
-
-    #[test]
-    fn positioned_text_duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
-        let mut device = PositionedTextExtractDevice::default();
-        let bbox = Some(PdfRect {
-            x0: 1.0,
-            y0: 2.0,
-            x1: 3.0,
-            y1: 4.0,
-        });
-
-        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
-        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
-
-        let text: String = device.glyphs.iter().map(|glyph| glyph.ch).collect();
-        assert_eq!(text, "ff");
-        assert_eq!(device.glyphs.len(), 2);
     }
 
     #[test]

@@ -82,16 +82,9 @@ struct BudgetedPageCache<V> {
     memory_bytes: usize,
 }
 
-struct SearchTextCache {
-    pages: BudgetedPageCache<Arc<str>>,
-}
-
-struct SearchGeometryCache {
+struct SearchPageCache {
     pages: BudgetedPageCache<Arc<TextPage>>,
 }
-
-#[cfg(test)]
-type SearchPageCache = SearchGeometryCache;
 
 impl<V> BudgetedPageCache<V> {
     fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
@@ -173,32 +166,7 @@ impl<V> BudgetedPageCache<V> {
     }
 }
 
-impl SearchTextCache {
-    const DEFAULT_MAX_ENTRIES: usize = 16_384;
-    const DEFAULT_MEMORY_BUDGET_BYTES: usize = 48 * 1024 * 1024;
-
-    fn new() -> Self {
-        Self::with_limits(Self::DEFAULT_MAX_ENTRIES, Self::DEFAULT_MEMORY_BUDGET_BYTES)
-    }
-
-    fn with_limits(max_entries: usize, memory_budget_bytes: usize) -> Self {
-        Self {
-            pages: BudgetedPageCache::with_limits(max_entries, memory_budget_bytes),
-        }
-    }
-
-    fn get(&mut self, doc_id: u64, page: usize) -> Option<Arc<str>> {
-        self.pages.get(doc_id, page).map(Arc::clone)
-    }
-
-    fn try_insert_without_eviction(&mut self, doc_id: u64, page: usize, text: Arc<str>) -> bool {
-        let estimated_bytes = estimate_search_text_bytes(&text);
-        self.pages
-            .try_insert_without_eviction(doc_id, page, text, estimated_bytes)
-    }
-}
-
-impl SearchGeometryCache {
+impl SearchPageCache {
     const DEFAULT_MAX_ENTRIES: usize = 16_384;
     const DEFAULT_MEMORY_BUDGET_BYTES: usize = 16 * 1024 * 1024;
 
@@ -243,18 +211,8 @@ impl SearchGeometryCache {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn estimate_search_text_bytes(text: &Arc<str>) -> usize {
-    size_of::<Arc<str>>() + text.len()
-}
-
-#[cfg(not(test))]
-fn estimate_search_text_bytes(text: &Arc<str>) -> usize {
-    size_of::<Arc<str>>() + text.len()
-}
-
 fn estimate_text_page_bytes(text_page: &TextPage) -> usize {
-    size_of::<TextPage>() + text_page.glyphs.len() * size_of::<TextGlyph>()
+    size_of::<TextPage>() + text_page.glyphs.capacity() * size_of::<TextGlyph>()
 }
 
 pub(crate) fn worker_main(
@@ -262,8 +220,7 @@ pub(crate) fn worker_main(
     event_tx: UnboundedSender<SearchEvent>,
 ) {
     let mut pending = PendingWorkerWork::default();
-    let mut text_cache = SearchTextCache::new();
-    let mut geometry_cache = SearchGeometryCache::new();
+    let mut page_cache = SearchPageCache::new();
     let mut prewarm_finished_doc_ids = HashSet::new();
 
     loop {
@@ -279,8 +236,7 @@ pub(crate) fn worker_main(
                     &mut request_rx,
                     &event_tx,
                     &mut pending,
-                    &mut text_cache,
-                    &mut geometry_cache,
+                    &mut page_cache,
                 ) {
                     WorkerControl::Continue => {}
                     WorkerControl::Shutdown => break,
@@ -296,8 +252,7 @@ pub(crate) fn worker_main(
                     job,
                     &mut request_rx,
                     &mut pending,
-                    &mut text_cache,
-                    &mut geometry_cache,
+                    &mut page_cache,
                     &mut prewarm_finished_doc_ids,
                 ) {
                     PrewarmControl::Finished => {}
@@ -314,8 +269,7 @@ pub(crate) fn worker_main(
                         &mut request_rx,
                         &event_tx,
                         &mut pending,
-                        &mut text_cache,
-                        &mut geometry_cache,
+                        &mut page_cache,
                     ) {
                         WorkerControl::Continue => {}
                         WorkerControl::Shutdown => break,
@@ -327,8 +281,7 @@ pub(crate) fn worker_main(
                         job,
                         &mut request_rx,
                         &mut pending,
-                        &mut text_cache,
-                        &mut geometry_cache,
+                        &mut page_cache,
                         &mut prewarm_finished_doc_ids,
                     ) {
                         PrewarmControl::Finished => {}
@@ -346,8 +299,7 @@ pub(crate) fn worker_main(
             &mut request_rx,
             &event_tx,
             &mut pending,
-            &mut text_cache,
-            &mut geometry_cache,
+            &mut page_cache,
         ) {
             WorkerControl::Continue => {}
             WorkerControl::Shutdown => break,
@@ -374,8 +326,7 @@ fn run_prewarm_job(
     job: PrewarmJob,
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     pending: &mut PendingWorkerWork,
-    text_cache: &mut SearchTextCache,
-    geometry_cache: &mut SearchGeometryCache,
+    page_cache: &mut SearchPageCache,
     prewarm_finished_doc_ids: &mut HashSet<u64>,
 ) -> PrewarmControl {
     let doc = job.pdf.clone();
@@ -403,17 +354,15 @@ fn run_prewarm_job(
             }
             WorkerControl::Shutdown => return PrewarmControl::Shutdown,
         }
-        if text_cache.get(doc_id, page).is_some() {
+        if page_cache.get(doc_id, page).is_some() {
             continue;
         }
-        if let Ok(text_page) = doc.extract_positioned_text(page) {
+        if let Ok(text_page) = doc.extract_text_page(page) {
             let text_page = Arc::new(text_page);
-            let text: Arc<str> = Arc::from(text_page.extracted_text());
-            if !text_cache.try_insert_without_eviction(doc_id, page, text) {
+            if !page_cache.try_insert_without_eviction(doc_id, page, text_page) {
                 prewarm_finished_doc_ids.insert(doc_id);
                 break;
             }
-            geometry_cache.try_insert_without_eviction(doc_id, page, text_page);
         }
     }
 
@@ -426,8 +375,7 @@ fn run_job(
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     event_tx: &UnboundedSender<SearchEvent>,
     pending: &mut PendingWorkerWork,
-    text_cache: &mut SearchTextCache,
-    geometry_cache: &mut SearchGeometryCache,
+    page_cache: &mut SearchPageCache,
 ) -> WorkerControl {
     let query = job.matcher.prepare_query(job.query.trim());
     if query.is_empty() {
@@ -463,56 +411,37 @@ fn run_job(
             WorkerControl::Shutdown => return WorkerControl::Shutdown,
         }
 
-        let page_text = match text_cache.get(doc_id, page) {
-            Some(text) => Ok(text),
-            None => doc.extract_positioned_text(page).map(|text_page| {
+        let text_page = match page_cache.get(doc_id, page) {
+            Some(text_page) => Ok(text_page),
+            None => doc.extract_text_page(page).map(|text_page| {
                 let text_page = Arc::new(text_page);
-                let text: Arc<str> = Arc::from(text_page.extracted_text());
-                text_cache.try_insert_without_eviction(doc_id, page, Arc::clone(&text));
-                geometry_cache.try_insert_without_eviction(doc_id, page, text_page);
-                text
+                page_cache.try_insert_without_eviction(doc_id, page, Arc::clone(&text_page));
+                text_page
             }),
         };
 
-        match page_text {
-            Ok(text) => {
-                let occurrences = match geometry_cache.get(doc_id, page) {
-                    Some(text_page) => {
-                        let mut occurrences =
-                            job.matcher.locate_matches(text_page.as_ref(), &query);
-                        for occurrence in &mut occurrences {
-                            if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
-                                highlight_unavailable = true;
-                            }
-                            apply_hit_snippet(occurrence, &text_page.glyphs);
-                        }
-                        occurrences
-                    }
-                    None => job.matcher.locate_text_matches(&text, &query),
-                };
-                if !occurrences.is_empty() {
-                    hits.push(SearchPageHit { page, occurrences });
-                }
+        let text_page = match text_page {
+            Ok(text_page) => Some(text_page),
+            Err(err) => {
+                let _ = event_tx.send(SearchEvent::PageSkipped {
+                    generation: job.generation,
+                    page,
+                    message: err.to_string(),
+                });
+                None
             }
-            Err(_) => {
-                let text = match doc.extract_text(page) {
-                    Ok(text) => text,
-                    Err(err) => {
-                        let _ = event_tx.send(SearchEvent::Failed {
-                            generation: job.generation,
-                            message: err.to_string(),
-                        });
-                        return WorkerControl::Continue;
-                    }
-                };
+        };
 
-                if job.matcher.matches_page(&text, &query) {
-                    hits.push(SearchPageHit {
-                        page,
-                        occurrences: Vec::new(),
-                    });
+        if let Some(text_page) = text_page {
+            let mut occurrences = job.matcher.locate_matches(text_page.as_ref(), &query);
+            for occurrence in &mut occurrences {
+                if occurrence_highlight_unavailable(occurrence, &text_page.glyphs) {
                     highlight_unavailable = true;
                 }
+                apply_hit_snippet(occurrence, &text_page.glyphs);
+            }
+            if !occurrences.is_empty() {
+                hits.push(SearchPageHit { page, occurrences });
             }
         }
 
@@ -540,8 +469,7 @@ fn run_geometry_job(
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
     event_tx: &UnboundedSender<SearchEvent>,
     pending: &mut PendingWorkerWork,
-    text_cache: &mut SearchTextCache,
-    geometry_cache: &mut SearchGeometryCache,
+    page_cache: &mut SearchPageCache,
 ) -> WorkerControl {
     let query = job.matcher.prepare_query(job.query.trim());
     if query.is_empty() {
@@ -571,20 +499,16 @@ fn run_geometry_job(
             WorkerControl::Shutdown => return WorkerControl::Shutdown,
         }
 
-        let positioned_text = match geometry_cache.get(doc_id, page) {
+        let text_page = match page_cache.get(doc_id, page) {
             Some(text_page) => Ok(text_page),
-            None => doc.extract_positioned_text(page).map(|text_page| {
+            None => doc.extract_text_page(page).map(|text_page| {
                 let text_page = Arc::new(text_page);
-                if text_cache.get(doc_id, page).is_none() {
-                    let text: Arc<str> = Arc::from(text_page.extracted_text());
-                    text_cache.try_insert_without_eviction(doc_id, page, text);
-                }
-                geometry_cache.insert(doc_id, page, Arc::clone(&text_page));
+                page_cache.insert(doc_id, page, Arc::clone(&text_page));
                 text_page
             }),
         };
 
-        let Ok(text_page) = positioned_text else {
+        let Ok(text_page) = text_page else {
             continue;
         };
 
@@ -643,42 +567,44 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::{
-        PendingWorkerWork, PrewarmControl, PrewarmJob, SearchGeometryCache, SearchJob,
-        SearchPageCache, SearchTextCache, WorkerRequest, estimate_search_text_bytes,
-        estimate_text_page_bytes, run_prewarm_job,
+        PendingWorkerWork, PrewarmControl, PrewarmJob, SearchJob, SearchPageCache, WorkerRequest,
+        estimate_text_page_bytes, run_job, run_prewarm_job,
     };
-    use crate::backend::{OutlineNode, PdfBackend, PdfRect, RgbaFrame, TextGlyph, TextPage};
+    use crate::backend::{
+        OutlineNode, PdfBackend, PdfRect, RgbaFrame, SharedPdfBackend, TextGlyph, TextPage,
+    };
     use crate::command::SearchMatcherKind;
     use crate::error::{AppError, AppResult};
+    use crate::search::engine::SearchEvent;
     use crate::search::matcher::matcher_for_kind;
 
-    struct CountingPositionedStubPdf {
+    struct CountingTextPageStubPdf {
         path: PathBuf,
         doc_id: u64,
         pages: Vec<TextPage>,
-        positioned_calls: Mutex<Vec<usize>>,
+        text_page_calls: Mutex<Vec<usize>>,
     }
 
-    impl CountingPositionedStubPdf {
+    impl CountingTextPageStubPdf {
         fn new(doc_id: u64, pages: Vec<TextPage>) -> Self {
             let page_count = pages.len();
             Self {
-                path: PathBuf::from(format!("counting-positioned-{doc_id}.pdf")),
+                path: PathBuf::from(format!("counting-text-page-{doc_id}.pdf")),
                 doc_id,
                 pages,
-                positioned_calls: Mutex::new(vec![0; page_count]),
+                text_page_calls: Mutex::new(vec![0; page_count]),
             }
         }
 
-        fn positioned_calls(&self) -> Vec<usize> {
-            self.positioned_calls
+        fn text_page_calls(&self) -> Vec<usize> {
+            self.text_page_calls
                 .lock()
-                .expect("positioned calls lock should not be poisoned")
+                .expect("text page calls lock should not be poisoned")
                 .clone()
         }
     }
 
-    impl PdfBackend for CountingPositionedStubPdf {
+    impl PdfBackend for CountingTextPageStubPdf {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -699,16 +625,61 @@ mod tests {
             Err(AppError::unsupported("not needed in search test"))
         }
 
-        fn extract_text(&self, page: usize) -> AppResult<String> {
-            Ok(self.pages[page].extracted_text())
+        fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
+            let mut calls = self
+                .text_page_calls
+                .lock()
+                .expect("text page calls lock should not be poisoned");
+            calls[page] += 1;
+            Ok(self.pages[page].clone())
         }
 
-        fn extract_positioned_text(&self, page: usize) -> AppResult<TextPage> {
-            let mut calls = self
-                .positioned_calls
-                .lock()
-                .expect("positioned calls lock should not be poisoned");
-            calls[page] += 1;
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+    }
+
+    struct FailingPageStubPdf {
+        path: PathBuf,
+        pages: Vec<TextPage>,
+        failing_page: usize,
+    }
+
+    impl FailingPageStubPdf {
+        fn new(pages: Vec<TextPage>, failing_page: usize) -> Self {
+            Self {
+                path: PathBuf::from("failing-page.pdf"),
+                pages,
+                failing_page,
+            }
+        }
+    }
+
+    impl PdfBackend for FailingPageStubPdf {
+        fn path(&self) -> &Path {
+            &self.path
+        }
+
+        fn doc_id(&self) -> u64 {
+            404
+        }
+
+        fn page_count(&self) -> usize {
+            self.pages.len()
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Ok((100.0, 100.0))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Err(AppError::unsupported("not needed in search test"))
+        }
+
+        fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
+            if page == self.failing_page {
+                return Err(AppError::unsupported("page text unavailable"));
+            }
             Ok(self.pages[page].clone())
         }
 
@@ -789,7 +760,7 @@ mod tests {
             cache
                 .get(1, 0)
                 .expect("replacement page should exist")
-                .extracted_text(),
+                .plain_text(),
             "alpha"
         );
         assert_eq!(cache.memory_bytes(), expected_bytes);
@@ -805,14 +776,14 @@ mod tests {
             cache
                 .get(1, 0)
                 .expect("doc 1 page should exist")
-                .extracted_text(),
+                .plain_text(),
             "alpha"
         );
         assert_eq!(
             cache
                 .get(2, 0)
                 .expect("doc 2 page should exist")
-                .extracted_text(),
+                .plain_text(),
             "beta"
         );
     }
@@ -848,16 +819,15 @@ mod tests {
     fn prewarm_does_not_retry_after_memory_budget_is_reached() {
         let first_page = text_page("alpha");
         let second_page = text_page("beta gamma");
-        let budget = estimate_search_text_bytes(&Arc::from(first_page.extracted_text()));
-        let pdf = Arc::new(CountingPositionedStubPdf::new(
+        let budget = estimate_text_page_bytes(&first_page);
+        let pdf = Arc::new(CountingTextPageStubPdf::new(
             302,
             vec![first_page, second_page],
         ));
         let (_request_tx, request_rx) = unbounded_channel();
         let mut request_rx = request_rx;
         let mut pending = PendingWorkerWork::default();
-        let mut text_cache = SearchTextCache::with_limits(4, budget);
-        let mut geometry_cache = SearchGeometryCache::with_limits(4, usize::MAX);
+        let mut page_cache = SearchPageCache::with_limits(4, budget);
         let mut prewarm_finished_doc_ids = HashSet::new();
 
         assert!(matches!(
@@ -865,39 +835,36 @@ mod tests {
                 PrewarmJob { pdf: pdf.clone() },
                 &mut request_rx,
                 &mut pending,
-                &mut text_cache,
-                &mut geometry_cache,
+                &mut page_cache,
                 &mut prewarm_finished_doc_ids,
             ),
             PrewarmControl::Finished
         ));
-        assert_eq!(pdf.positioned_calls(), vec![1, 1]);
+        assert_eq!(pdf.text_page_calls(), vec![1, 1]);
 
         assert!(matches!(
             run_prewarm_job(
                 PrewarmJob { pdf: pdf.clone() },
                 &mut request_rx,
                 &mut pending,
-                &mut text_cache,
-                &mut geometry_cache,
+                &mut page_cache,
                 &mut prewarm_finished_doc_ids,
             ),
             PrewarmControl::Finished
         ));
-        assert_eq!(pdf.positioned_calls(), vec![1, 1]);
+        assert_eq!(pdf.text_page_calls(), vec![1, 1]);
     }
 
     #[test]
     fn interrupted_prewarm_can_resume_after_priority_work() {
-        let pdf = Arc::new(CountingPositionedStubPdf::new(
+        let pdf = Arc::new(CountingTextPageStubPdf::new(
             303,
             vec![text_page("alpha"), text_page("beta")],
         ));
         let (request_tx, request_rx) = unbounded_channel();
         let mut request_rx = request_rx;
         let mut pending = PendingWorkerWork::default();
-        let mut text_cache = SearchTextCache::with_limits(4, usize::MAX);
-        let mut geometry_cache = SearchGeometryCache::with_limits(4, usize::MAX);
+        let mut page_cache = SearchPageCache::with_limits(4, usize::MAX);
         let mut prewarm_finished_doc_ids = HashSet::new();
 
         request_tx
@@ -913,8 +880,7 @@ mod tests {
             PrewarmJob { pdf: pdf.clone() },
             &mut request_rx,
             &mut pending,
-            &mut text_cache,
-            &mut geometry_cache,
+            &mut page_cache,
             &mut prewarm_finished_doc_ids,
         ) {
             PrewarmControl::Interrupted(job) => job,
@@ -923,7 +889,7 @@ mod tests {
         };
 
         assert!(pending.query.is_some());
-        assert_eq!(pdf.positioned_calls(), vec![0, 0]);
+        assert_eq!(pdf.text_page_calls(), vec![0, 0]);
 
         pending.query = None;
         assert!(matches!(
@@ -931,13 +897,61 @@ mod tests {
                 interrupted,
                 &mut request_rx,
                 &mut pending,
-                &mut text_cache,
-                &mut geometry_cache,
+                &mut page_cache,
                 &mut prewarm_finished_doc_ids,
             ),
             PrewarmControl::Finished
         ));
-        assert_eq!(pdf.positioned_calls(), vec![1, 1]);
+        assert_eq!(pdf.text_page_calls(), vec![1, 1]);
+    }
+
+    #[test]
+    fn search_continues_after_page_text_extraction_failure() {
+        let pdf = Arc::new(FailingPageStubPdf::new(
+            vec![text_page("alpha"), text_page("broken"), text_page("beta")],
+            1,
+        )) as SharedPdfBackend;
+        let (_request_tx, request_rx) = unbounded_channel();
+        let mut request_rx = request_rx;
+        let (event_tx, mut event_rx) = unbounded_channel();
+        let mut pending = PendingWorkerWork::default();
+        let mut page_cache = SearchPageCache::with_limits(4, usize::MAX);
+
+        let control = run_job(
+            SearchJob {
+                generation: 1,
+                pdf,
+                query: "beta".to_string(),
+                matcher: matcher_for_kind(SearchMatcherKind::ContainsInsensitive),
+            },
+            &mut request_rx,
+            &event_tx,
+            &mut pending,
+            &mut page_cache,
+        );
+
+        assert!(matches!(control, super::WorkerControl::Continue));
+        let mut events = Vec::new();
+        while let Ok(event) = event_rx.try_recv() {
+            events.push(event);
+        }
+        assert!(events.iter().any(|event| matches!(
+            event,
+            SearchEvent::PageSkipped {
+                page: 1,
+                message,
+                ..
+            } if message.contains("page text unavailable")
+        )));
+        let completed = events
+            .iter()
+            .find_map(|event| match event {
+                SearchEvent::Completed { hits, .. } => Some(hits),
+                _ => None,
+            })
+            .expect("search should complete after skipping failed page");
+        assert_eq!(completed.len(), 1);
+        assert_eq!(completed[0].page, 2);
     }
 
     fn text_page(text: &str) -> TextPage {

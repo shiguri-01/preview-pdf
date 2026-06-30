@@ -5,7 +5,7 @@ use crossterm::event::{Event, KeyEventKind};
 use crate::backend::PdfBackend;
 use crate::config::RenderPolicy;
 use crate::error::AppResult;
-use crate::perf::{PerfStats, RedrawReason};
+use crate::metrics::{PerfStats, RedrawReason};
 use crate::presenter::PanOffset;
 use crate::render::worker::{RenderWorker, RenderWorkerResult};
 

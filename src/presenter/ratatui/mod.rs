@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 
 use crate::backend::RgbaFrame;
 use crate::error::AppResult;
-use crate::perf::PerfStats;
+use crate::metrics::PerfStats;
 use crate::render::cache::RenderedPageKey;
 use crate::work::WorkClass;
 

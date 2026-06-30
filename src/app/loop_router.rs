@@ -7,8 +7,8 @@ use crate::error::{AppError, AppResult};
 use crate::event::{
     AppEvent, DocumentReloadReason, DocumentReloadRequest, DocumentReloadResult, DomainEvent,
 };
+use crate::metrics::RedrawReason;
 use crate::palette::PaletteKind;
-use crate::perf::RedrawReason;
 use crate::presenter::PresenterBackgroundEvent;
 use crate::render::worker::RenderWorker;
 
@@ -16,10 +16,10 @@ use super::actors::RenderCompleteContext;
 use super::core::App;
 use super::loop_effects::LoopEffects;
 use super::loop_runtime::{
-    ActiveDocument, LoopControl, LoopRuntime, SessionRestore, WaitEvent, terminate_process_now,
+    ActiveDocument, LoopControl, LoopRuntime, WaitEvent, terminate_process_now,
 };
 use super::state::{Mode, notice_action_for_error};
-use super::terminal_session::TerminalSurface;
+use super::terminal_session::{TerminalSession, TerminalSurface};
 
 const FILE_RELOAD_RETRY_DELAYS: [Duration; 5] = [
     Duration::from_millis(250),
@@ -66,7 +66,7 @@ impl App {
         document: &mut ActiveDocument,
     ) -> AppResult<LoopControl>
     where
-        S: TerminalSurface + SessionRestore,
+        S: TerminalSession,
     {
         // Wake events are not guaranteed to arrive before the next input event, so the
         // loop checks for timed-out sequences at the start of every iteration as well.
@@ -176,7 +176,7 @@ impl App {
         effects: LoopEffects,
     ) -> AppResult<LoopControl>
     where
-        S: TerminalSurface + SessionRestore,
+        S: TerminalSession,
     {
         let (commands, events, redraws) = effects.into_parts();
         for reason in redraws {
@@ -241,7 +241,7 @@ impl App {
         document: &mut ActiveDocument,
     ) -> AppResult<LoopControl>
     where
-        S: TerminalSurface + SessionRestore,
+        S: TerminalSession,
     {
         let request = self.resolve_command_request(&runtime.session, request);
         if matches!(request.command, Command::ReloadDocument) {

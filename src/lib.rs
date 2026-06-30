@@ -3,6 +3,7 @@ pub mod backend;
 pub(crate) mod cache;
 pub mod config;
 pub mod error;
+pub mod metrics;
 pub mod perf;
 pub mod presenter;
 

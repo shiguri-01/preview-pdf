@@ -471,7 +471,7 @@ mod tests {
     use crate::app::{NoticeLevel, RenderRuntime};
     use crate::backend::RgbaFrame;
     use crate::error::{AppError, AppResult};
-    use crate::perf::PerfStats;
+    use crate::metrics::PerfStats;
     use crate::presenter::{
         ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOutcome,
         PresenterRenderSlot, PresenterSlot,

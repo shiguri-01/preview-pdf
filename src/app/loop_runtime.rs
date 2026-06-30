@@ -13,9 +13,8 @@ use crate::render::worker::RenderWorker;
 
 use super::actors::{InputActor, RenderActor, UiActor};
 use super::event_bus::EventBusRuntime;
-use super::perf_runner::HeadlessTerminalSession;
 use super::render_ops::{CurrentInterestKeys, PrefetchDispatchContext, RequiredRenderPages};
-use super::terminal_session::InteractiveTerminalSession;
+use super::terminal_session::TerminalSession;
 use super::view_ops::InitialPreviewPlan;
 
 pub(super) struct LoopRuntime<S> {
@@ -78,25 +77,9 @@ pub(super) enum LoopControl {
     Break,
 }
 
-pub(super) trait SessionRestore {
-    fn restore(&mut self) -> std::io::Result<()>;
-}
-
-impl SessionRestore for InteractiveTerminalSession {
-    fn restore(&mut self) -> std::io::Result<()> {
-        InteractiveTerminalSession::restore(self)
-    }
-}
-
-impl SessionRestore for HeadlessTerminalSession {
-    fn restore(&mut self) -> std::io::Result<()> {
-        HeadlessTerminalSession::restore(self)
-    }
-}
-
 pub(super) fn terminate_process_now<S>(runtime: &mut LoopRuntime<S>) -> !
 where
-    S: super::terminal_session::TerminalSurface + SessionRestore,
+    S: TerminalSession,
 {
     runtime.loop_event_runtime.shutdown();
     if let Err(err) = runtime.session.restore() {

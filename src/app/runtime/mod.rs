@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::backend::{PdfBackend, RgbaFrame};
 use crate::error::{AppError, AppResult};
-use crate::perf::PerfStats;
+use crate::metrics::PerfStats;
 use crate::presenter::ImagePresenter;
 use crate::render::cache::{RenderedPageCache, RenderedPageKey};
 use crate::render::scheduler::{

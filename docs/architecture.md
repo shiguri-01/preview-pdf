@@ -1,9 +1,9 @@
 # Architecture
 
 `pvf` is a Rust CLI/TUI PDF viewer. The runtime is organized around one
-interactive `App`, a typed event loop, static command and palette registries,
-internal extensions, asynchronous render and encode workers, and a backend
-abstraction for PDF data.
+interactive `App`, a typed event loop with driver-controlled execution,
+static command and palette registries, internal extensions, asynchronous
+render and encode workers, and a backend abstraction for PDF data.
 
 ## Runtime Flow
 
@@ -45,6 +45,10 @@ can operate on resolved policies rather than re-reading config or CLI state.
   caching, encode workers, slot drawing, and presenter feedback.
 - [src/backend/](../src/backend/) owns the PDF backend trait and default backend implementation.
 - [src/ui/](../src/ui/) owns layout, chrome, overlays, help, theme, and frame composition.
+- [src/perf/](../src/perf/) owns headless performance diagnostics, scenario
+  drivers, and JSON report construction.
+- [src/metrics.rs](../src/metrics.rs) owns low-level runtime and presenter
+  metric primitives shared by diagnostics and runtime instrumentation.
 
 ## Dependency Direction
 
@@ -67,6 +71,11 @@ data crosses from extensions to palettes through `ExtensionUiSnapshot`.
 
 Render workers and presenter encode workers communicate with the loop through
 typed request and completion values. They do not mutate app state directly.
+
+Performance diagnostics drive the same event loop through the app-owned loop
+driver contract. The `perf` subsystem owns headless scenarios and reports;
+`app` owns terminal/session coordination and does not depend on performance
+diagnostic scenario types.
 
 Rationale: the central `App` boundary keeps mutable runtime state in one place,
 while commands, palettes, extensions, and workers remain testable through typed
@@ -144,6 +153,12 @@ plugin system.
 Render and presenter:
 Raw page rasterization and terminal protocol encoding are separated because
 their cache identities, stale-result rules, and performance costs differ.
+
+Performance diagnostics:
+Headless diagnostics are modeled as loop drivers so they exercise the same
+runtime path as the interactive viewer. Low-level metrics live outside `perf`
+because render, presenter, and app instrumentation can record them without
+depending on diagnostic report ownership.
 
 Backend:
 The backend trait isolates PDF opening, rasterization, text extraction, and

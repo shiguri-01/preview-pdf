@@ -462,7 +462,8 @@ Owned by:
 - [benches/perf.rs](../benches/perf.rs)
 - [benches/fixtures/](../benches/fixtures/)
 - [src/perf/](../src/perf/)
-- [src/app/perf_runner.rs](../src/app/perf_runner.rs)
+- [src/app/loop_driver.rs](../src/app/loop_driver.rs)
+- [src/metrics.rs](../src/metrics.rs)
 
 Test coverage:
 - [src/perf/](../src/perf/) tests for scenario parsing, validation, summary shape, and report

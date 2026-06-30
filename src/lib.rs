@@ -2,6 +2,7 @@ pub mod app;
 pub mod backend;
 pub mod config;
 pub mod error;
+pub mod metrics;
 pub mod perf;
 pub mod presenter;
 

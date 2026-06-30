@@ -18,6 +18,10 @@ pub(crate) trait TerminalSurface {
         F: FnOnce(&mut Frame<'_>);
 }
 
+pub(crate) trait TerminalSession: TerminalSurface {
+    fn restore(&mut self) -> io::Result<()>;
+}
+
 pub(crate) struct InteractiveTerminalSession {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     active: bool,
@@ -84,6 +88,12 @@ impl TerminalSurface for InteractiveTerminalSession {
         F: FnOnce(&mut Frame<'_>),
     {
         self.terminal.draw(render).map(|_| ())
+    }
+}
+
+impl TerminalSession for InteractiveTerminalSession {
+    fn restore(&mut self) -> io::Result<()> {
+        InteractiveTerminalSession::restore(self)
     }
 }
 

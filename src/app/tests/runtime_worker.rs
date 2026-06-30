@@ -14,7 +14,7 @@ use crate::backend::test_support::{build_pdf, unique_temp_path};
 use crate::backend::{OutlineNode, PdfBackend, PdfDoc, PdfRect, RgbaFrame, SharedPdfBackend};
 use crate::error::{AppError, AppResult};
 use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
-use crate::perf::PerfStats;
+use crate::metrics::PerfStats;
 use crate::presenter::{
     ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
     PresenterRenderOutcome, PresenterRenderSlot, PresenterSlot, Viewport,

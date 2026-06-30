@@ -5,14 +5,14 @@ use std::time::{Duration, Instant};
 use ratatui::backend::TestBackend;
 use ratatui::layout::Size;
 use ratatui::{Frame, Terminal};
-use tokio::sync::mpsc::UnboundedSender;
 
-use crate::command::{Command, CommandInvocationSource, CommandRequest};
-use crate::event::DomainEvent;
-use crate::perf::{PerfScenarioId, PerfScenarioParameters};
-
-use super::state::AppState;
-use super::terminal_session::TerminalSurface;
+use crate::app::{
+    LoopDriver, LoopDriverDecision, LoopDriverHandle, LoopMetricsSnapshot, LoopObservation,
+    TerminalSession, TerminalSurface, binding_request,
+};
+use crate::command::Command;
+use crate::error::{AppError, AppResult};
+use crate::perf::{PerfIterationSnapshot, PerfScenarioId, PerfScenarioParameters};
 
 pub(crate) const PERF_HEADLESS_WIDTH: u16 = 120;
 pub(crate) const PERF_HEADLESS_HEIGHT: u16 = 40;
@@ -29,6 +29,12 @@ impl HeadlessTerminalSession {
 
     pub(crate) fn restore(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+impl TerminalSession for HeadlessTerminalSession {
+    fn restore(&mut self) -> io::Result<()> {
+        HeadlessTerminalSession::restore(self)
     }
 }
 
@@ -91,121 +97,145 @@ impl PerfLoopDriver {
             .unwrap_or_default()
     }
 
-    pub(crate) fn advance(
+    fn start_measured_window(&mut self) {
+        self.measured_started_at.get_or_insert_with(Instant::now);
+    }
+}
+
+impl LoopDriver for PerfLoopDriver {
+    type Output = PerfIterationSnapshot;
+
+    fn on_iteration(
         &mut self,
-        state: &AppState,
-        page_count: usize,
-        system_idle: bool,
-        loop_event_tx: &UnboundedSender<DomainEvent>,
-    ) -> bool {
-        if !system_idle {
+        observation: LoopObservation,
+        handle: &mut LoopDriverHandle<'_>,
+    ) -> AppResult<LoopDriverDecision> {
+        if !observation.system_idle {
             self.idle_started_at = None;
-            return false;
+            return Ok(LoopDriverDecision::Continue);
         }
 
         match self.scenario {
-            PerfScenarioId::ColdFirstPage => true,
+            PerfScenarioId::ColdFirstPage => Ok(LoopDriverDecision::Finish),
             PerfScenarioId::SteadyNextPage => {
-                let last_page = page_count.saturating_sub(1);
-                if state.current_page >= last_page
+                let last_page = observation.page_count.saturating_sub(1);
+                if observation.current_page >= last_page
                     || self.command_count >= self.parameters.page_steps
                 {
                     self.start_measured_window();
-                    return true;
+                    return Ok(LoopDriverDecision::Finish);
                 }
                 self.start_measured_window();
-                let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
-                    Command::NextPage,
-                    CommandInvocationSource::Binding,
-                )));
+                handle.enqueue_command(binding_request(Command::NextPage))?;
                 self.command_count += 1;
-                false
+                Ok(LoopDriverDecision::Continue)
             }
             PerfScenarioId::SteadyPrevPage => {
-                let last_page = page_count.saturating_sub(1);
+                let last_page = observation.page_count.saturating_sub(1);
                 if !self.positioned_backward_start {
-                    if state.current_page < last_page {
-                        let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
-                            Command::LastPage,
-                            CommandInvocationSource::Binding,
-                        )));
+                    if observation.current_page < last_page {
+                        handle.enqueue_command(binding_request(Command::LastPage))?;
                         self.positioned_backward_start = true;
-                        return false;
+                        return Ok(LoopDriverDecision::Continue);
                     }
                     self.positioned_backward_start = true;
                 }
 
-                if state.current_page == 0 || self.command_count >= self.parameters.page_steps {
+                if observation.current_page == 0 || self.command_count >= self.parameters.page_steps
+                {
                     self.start_measured_window();
-                    return true;
+                    return Ok(LoopDriverDecision::Finish);
                 }
 
                 self.start_measured_window();
-                let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
-                    Command::PrevPage,
-                    CommandInvocationSource::Binding,
-                )));
+                handle.enqueue_command(binding_request(Command::PrevPage))?;
                 self.command_count += 1;
-                false
+                Ok(LoopDriverDecision::Continue)
             }
             PerfScenarioId::RapidNextPage => {
                 if !self.initial_idle_seen {
                     self.initial_idle_seen = true;
                     self.start_measured_window();
-                    let last_page = page_count.saturating_sub(1);
+                    let last_page = observation.page_count.saturating_sub(1);
                     let steps = self
                         .parameters
                         .page_steps
-                        .min(last_page.saturating_sub(state.current_page));
-                    for _ in 0..steps {
-                        let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
-                            Command::NextPage,
-                            CommandInvocationSource::Binding,
-                        )));
-                    }
+                        .min(last_page.saturating_sub(observation.current_page));
+                    handle
+                        .enqueue_commands((0..steps).map(|_| binding_request(Command::NextPage)))?;
                     self.command_count += steps;
                     self.rapid_commands_sent = true;
-                    return steps == 0;
+                    return Ok(if steps == 0 {
+                        LoopDriverDecision::Finish
+                    } else {
+                        LoopDriverDecision::Continue
+                    });
                 }
-                self.rapid_commands_sent
+                Ok(if self.rapid_commands_sent {
+                    LoopDriverDecision::Finish
+                } else {
+                    LoopDriverDecision::Continue
+                })
             }
             PerfScenarioId::ZoomStep => {
                 if !self.initial_idle_seen {
                     self.initial_idle_seen = true;
                     self.start_measured_window();
-                    let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
-                        Command::ZoomIn,
-                        CommandInvocationSource::Binding,
-                    )));
+                    handle.enqueue_command(binding_request(Command::ZoomIn))?;
                     self.command_count += 1;
                     self.zoomed_in = true;
-                    return false;
+                    return Ok(LoopDriverDecision::Continue);
                 }
                 if self.zoomed_in && !self.zoomed_out {
-                    let _ = loop_event_tx.send(DomainEvent::Command(CommandRequest::new(
-                        Command::ZoomOut,
-                        CommandInvocationSource::Binding,
-                    )));
+                    handle.enqueue_command(binding_request(Command::ZoomOut))?;
                     self.command_count += 1;
                     self.zoomed_out = true;
-                    return false;
+                    return Ok(LoopDriverDecision::Continue);
                 }
-                self.zoomed_out
+                Ok(if self.zoomed_out {
+                    LoopDriverDecision::Finish
+                } else {
+                    LoopDriverDecision::Continue
+                })
             }
             PerfScenarioId::IdleSettledRedraw => {
                 let Some(started_at) = self.idle_started_at else {
                     let started_at = Instant::now();
                     self.idle_started_at = Some(started_at);
                     self.measured_started_at = Some(started_at);
-                    return false;
+                    return Ok(LoopDriverDecision::Continue);
                 };
-                started_at.elapsed().as_millis() >= u128::from(self.parameters.idle_duration_ms)
+                Ok(
+                    if started_at.elapsed().as_millis()
+                        >= u128::from(self.parameters.idle_duration_ms)
+                    {
+                        LoopDriverDecision::Finish
+                    } else {
+                        LoopDriverDecision::Continue
+                    },
+                )
             }
         }
     }
 
-    fn start_measured_window(&mut self) {
-        self.measured_started_at.get_or_insert_with(Instant::now);
+    fn on_finish(
+        &mut self,
+        observation: LoopObservation,
+        metrics: LoopMetricsSnapshot,
+    ) -> AppResult<Self::Output> {
+        Ok(PerfIterationSnapshot {
+            runtime: metrics.runtime,
+            presenter: metrics.presenter,
+            wall_time: self.measured_elapsed(),
+            final_page: observation.current_page,
+            visited_steps: self.visited_steps(),
+        })
+    }
+
+    fn on_loop_break(&mut self) -> AppResult<Self::Output> {
+        Err(AppError::unsupported(
+            "perf run ended before producing a report",
+        ))
     }
 }
 
@@ -222,9 +252,26 @@ mod tests {
     use ratatui::widgets::Paragraph;
     use tokio::sync::mpsc::unbounded_channel;
 
+    use crate::app::{
+        LoopDriver, LoopDriverDecision, LoopDriverHandle, LoopObservation, TerminalSurface,
+    };
+    use crate::event::DomainEvent;
     use crate::perf::{PerfScenarioId, PerfScenarioParameters};
 
-    use super::{HeadlessTerminalSession, PerfLoopDriver, TerminalSurface};
+    use super::{HeadlessTerminalSession, PerfLoopDriver};
+
+    fn observation(current_page: usize, page_count: usize, system_idle: bool) -> LoopObservation {
+        LoopObservation {
+            page_count,
+            current_page,
+            current_cached: system_idle,
+            render_in_flight: 0,
+            presenter_pending: false,
+            redraw_pending: false,
+            event_queue_empty: true,
+            system_idle,
+        }
+    }
 
     #[test]
     fn headless_terminal_session_supports_terminal_surface_contract() {
@@ -251,20 +298,30 @@ mod tests {
             },
             std::time::Instant::now(),
         );
-        let state = crate::app::state::AppState::default();
 
         assert!(driver.measured_started_at.is_none());
-        assert!(!driver.advance(&state, 3, false, &tx));
+        let mut handle = LoopDriverHandle::new(&tx);
+        assert!(matches!(
+            driver
+                .on_iteration(observation(0, 3, false), &mut handle)
+                .expect("driver should advance"),
+            LoopDriverDecision::Continue
+        ));
         assert!(driver.measured_started_at.is_none());
 
-        assert!(!driver.advance(&state, 3, true, &tx));
+        assert!(matches!(
+            driver
+                .on_iteration(observation(0, 3, true), &mut handle)
+                .expect("driver should advance"),
+            LoopDriverDecision::Continue
+        ));
         assert!(driver.measured_started_at.is_some());
         assert_eq!(driver.visited_steps(), 2);
     }
 
     #[test]
     fn steady_prev_starts_measured_window_after_last_page_positioning() {
-        let (tx, _rx) = unbounded_channel();
+        let (tx, mut rx) = unbounded_channel();
         let mut driver = PerfLoopDriver::new(
             PerfScenarioId::SteadyPrevPage,
             PerfScenarioParameters {
@@ -273,13 +330,26 @@ mod tests {
             },
             std::time::Instant::now(),
         );
-        let mut state = crate::app::state::AppState::default();
+        let mut handle = LoopDriverHandle::new(&tx);
 
-        assert!(!driver.advance(&state, 3, true, &tx));
+        assert!(matches!(
+            driver
+                .on_iteration(observation(0, 3, true), &mut handle)
+                .expect("driver should advance"),
+            LoopDriverDecision::Continue
+        ));
         assert!(driver.measured_started_at.is_none());
+        assert!(matches!(
+            rx.try_recv().expect("last page command should be queued"),
+            DomainEvent::Command(_)
+        ));
 
-        state.current_page = 2;
-        assert!(!driver.advance(&state, 3, true, &tx));
+        assert!(matches!(
+            driver
+                .on_iteration(observation(2, 3, true), &mut handle)
+                .expect("driver should advance"),
+            LoopDriverDecision::Continue
+        ));
         assert!(driver.measured_started_at.is_some());
         assert_eq!(driver.visited_steps(), 1);
     }

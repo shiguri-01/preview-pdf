@@ -1,6 +1,6 @@
 use crate::command::CommandRequest;
 use crate::event::DomainEvent;
-use crate::perf::RedrawReason;
+use crate::metrics::RedrawReason;
 
 #[derive(Default)]
 pub(super) struct LoopEffects {

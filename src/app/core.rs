@@ -220,6 +220,14 @@ impl App {
         self.watch_policy.enabled = watch;
     }
 
+    pub(crate) fn enable_metrics_collection(&mut self) -> AppResult<()> {
+        self.render.runtime.perf_stats.reset();
+        self.render.presenter.initialize_headless_for_perf()?;
+        self.render.runtime.perf_stats.enable_sample_collection();
+        self.render.presenter.enable_perf_sample_collection();
+        Ok(())
+    }
+
     pub(crate) fn run_options(&self) -> RunOptions {
         self.run_options
     }

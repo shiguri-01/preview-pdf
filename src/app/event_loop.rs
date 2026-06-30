@@ -7,22 +7,20 @@ use tokio::time::{self, MissedTickBehavior};
 use crate::backend::{PdfBackend, SharedPdfBackend};
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
-use crate::perf::{PerfIterationSnapshot, PerfScenarioId, PerfScenarioParameters};
 use crate::presenter::ImagePresenter;
 use crate::render::worker::RenderWorker;
 
 use super::actors::{InputActor, RenderActor, UiActor};
 use super::core::{App, RunOptions};
 use super::event_bus::EventBusRuntime;
-use super::loop_runtime::{
-    ActiveDocument, LoopControl, LoopRuntime, LoopStep, SessionRestore, WaitEvent,
+use super::loop_driver::{
+    InteractiveLoopDriver, LoopDriver, LoopDriverDecision, LoopDriverHandle, LoopEventMode,
+    LoopMetricsSnapshot, LoopObservation,
 };
-use super::perf_runner::{
-    HeadlessTerminalSession, PERF_HEADLESS_HEIGHT, PERF_HEADLESS_WIDTH, PerfLoopDriver,
-};
+use super::loop_runtime::{ActiveDocument, LoopControl, LoopRuntime, LoopStep, WaitEvent};
 use super::render_ops::PrefetchDispatchPlan;
 use super::scale::select_input_poll_timeout;
-use super::terminal_session::{InteractiveTerminalSession, TerminalSurface};
+use super::terminal_session::{InteractiveTerminalSession, TerminalSession, TerminalSurface};
 
 impl App {
     pub async fn run(&mut self, pdf: SharedPdfBackend) -> AppResult<()> {
@@ -34,15 +32,39 @@ impl App {
         pdf: SharedPdfBackend,
         options: RunOptions,
     ) -> AppResult<()> {
+        let session = InteractiveTerminalSession::enter()?;
+        self.run_loop(
+            pdf,
+            session,
+            LoopEventMode::Interactive {
+                watch: options.watch,
+            },
+            InteractiveLoopDriver,
+        )
+        .await
+    }
+
+    pub(crate) async fn run_loop<S, D>(
+        &mut self,
+        pdf: SharedPdfBackend,
+        session: S,
+        event_mode: LoopEventMode,
+        mut driver: D,
+    ) -> AppResult<D::Output>
+    where
+        S: TerminalSession,
+        D: LoopDriver,
+    {
         let page_count = pdf.page_count();
         if page_count == 0 {
             return Err(AppError::invalid_argument("pdf has no pages"));
         }
 
         let mut document = ActiveDocument::new(pdf);
-        let session = InteractiveTerminalSession::enter()?;
-        let (loop_event_tx, loop_event_rx, loop_event_runtime) =
-            EventBusRuntime::spawn_interactive();
+        let (loop_event_tx, loop_event_rx, loop_event_runtime) = match event_mode {
+            LoopEventMode::Interactive { .. } => EventBusRuntime::spawn_interactive(),
+            LoopEventMode::Headless => EventBusRuntime::spawn_headless(),
+        };
         let mut runtime = self.initialize_loop_runtime(
             Arc::clone(&document.pdf),
             page_count,
@@ -51,61 +73,33 @@ impl App {
             loop_event_rx,
             loop_event_runtime,
         )?;
-        runtime
-            .loop_event_runtime
-            .start_input(runtime.loop_event_tx.clone());
-        if options.watch {
-            runtime.loop_event_runtime.start_file_watch(
-                document.path.clone(),
-                self.watch_policy.poll_interval,
-                self.watch_policy.settle_delay,
-                runtime.loop_event_tx.clone(),
-            );
-        }
-        let result = self.run_interactive_loop(&mut runtime, &mut document).await;
-        runtime.loop_event_runtime.shutdown();
-        let restore_result = runtime.session.restore();
-        result?;
-        restore_result
-            .map_err(|source| AppError::io_with_context(source, "restoring terminal session"))?;
-        Ok(())
-    }
-
-    pub async fn run_perf(
-        &mut self,
-        pdf: SharedPdfBackend,
-        scenario: PerfScenarioId,
-        parameters: PerfScenarioParameters,
-        cold_started_at: Instant,
-    ) -> AppResult<PerfIterationSnapshot> {
-        let page_count = pdf.page_count();
-        if page_count == 0 {
-            return Err(AppError::invalid_argument("pdf has no pages"));
+        if let LoopEventMode::Interactive { watch } = event_mode {
+            runtime
+                .loop_event_runtime
+                .start_input(runtime.loop_event_tx.clone());
+            if watch {
+                runtime.loop_event_runtime.start_file_watch(
+                    document.path.clone(),
+                    self.watch_policy.poll_interval,
+                    self.watch_policy.settle_delay,
+                    runtime.loop_event_tx.clone(),
+                );
+            }
         }
 
-        self.render.runtime.perf_stats.reset();
-        self.render.presenter.initialize_headless_for_perf()?;
-        self.render.runtime.perf_stats.enable_sample_collection();
-        self.render.presenter.enable_perf_sample_collection();
-        let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;
-        let (loop_event_tx, loop_event_rx, loop_event_runtime) = EventBusRuntime::spawn_headless();
-        let mut runtime = self.initialize_loop_runtime(
-            Arc::clone(&pdf),
-            page_count,
-            session,
-            loop_event_tx,
-            loop_event_rx,
-            loop_event_runtime,
-        )?;
         let result = self
-            .run_perf_loop(&mut runtime, pdf, scenario, parameters, cold_started_at)
+            .run_driver_loop(&mut runtime, &mut document, &mut driver)
             .await;
         runtime.loop_event_runtime.shutdown();
         let restore_result = runtime.session.restore();
-        let snapshot = result?;
-        restore_result
-            .map_err(|source| AppError::io_with_context(source, "restoring terminal session"))?;
-        Ok(snapshot)
+        match (result, restore_result) {
+            (Ok(output), Ok(())) => Ok(output),
+            (Ok(_), Err(source)) => Err(AppError::io_with_context(
+                source,
+                "restoring terminal session",
+            )),
+            (Err(err), _) => Err(err),
+        }
     }
 
     fn initialize_loop_runtime<S>(
@@ -175,67 +169,62 @@ impl App {
         })
     }
 
-    async fn run_interactive_loop(
+    async fn run_driver_loop<S, D>(
         &mut self,
-        runtime: &mut LoopRuntime<InteractiveTerminalSession>,
+        runtime: &mut LoopRuntime<S>,
         document: &mut ActiveDocument,
-    ) -> AppResult<()> {
+        driver: &mut D,
+    ) -> AppResult<D::Output>
+    where
+        S: TerminalSession,
+        D: LoopDriver,
+    {
         loop {
             let step = self.process_loop_iteration(runtime, document.pdf.as_ref())?;
+            let observation = self.loop_observation(runtime, &step);
+            let mut handle = LoopDriverHandle::new(&runtime.loop_event_tx);
+            match driver.on_iteration(observation, &mut handle)? {
+                LoopDriverDecision::Continue => {}
+                LoopDriverDecision::Finish => {
+                    return driver.on_finish(observation, self.loop_metrics_snapshot());
+                }
+            }
+
             match self
                 .wait_and_handle_next_event(runtime, &step, document)
                 .await?
             {
                 LoopControl::Continue => {}
-                LoopControl::Break => return Ok(()),
+                LoopControl::Break => return driver.on_loop_break(),
             }
         }
     }
 
-    async fn run_perf_loop(
-        &mut self,
-        runtime: &mut LoopRuntime<HeadlessTerminalSession>,
-        pdf: SharedPdfBackend,
-        scenario: PerfScenarioId,
-        parameters: PerfScenarioParameters,
-        cold_started_at: Instant,
-    ) -> AppResult<PerfIterationSnapshot> {
-        let mut perf_driver = PerfLoopDriver::new(scenario, parameters, cold_started_at);
-        let mut document = ActiveDocument::new(pdf);
+    fn loop_observation<S>(&self, runtime: &LoopRuntime<S>, step: &LoopStep) -> LoopObservation {
+        let render_in_flight = runtime.render_worker.in_flight_len();
+        let presenter_pending = self.render.presenter.has_pending_work();
+        let redraw_pending = runtime.ui_actor.needs_redraw();
+        let event_queue_empty = runtime.loop_event_rx.is_empty();
+        LoopObservation {
+            page_count: runtime.page_count,
+            current_page: self.state.current_page,
+            current_cached: step.current_cached,
+            render_in_flight,
+            presenter_pending,
+            redraw_pending,
+            event_queue_empty,
+            system_idle: step.current_cached
+                && render_in_flight == 0
+                && !presenter_pending
+                && !redraw_pending
+                && event_queue_empty,
+        }
+    }
 
-        loop {
-            let step = self.process_loop_iteration(runtime, document.pdf.as_ref())?;
-            let system_idle = step.current_cached
-                && runtime.render_worker.in_flight_len() == 0
-                && !self.render.presenter.has_pending_work()
-                && !runtime.ui_actor.needs_redraw()
-                && runtime.loop_event_rx.is_empty();
-            if perf_driver.advance(
-                &self.state,
-                runtime.page_count,
-                system_idle,
-                &runtime.loop_event_tx,
-            ) {
-                return Ok(PerfIterationSnapshot {
-                    runtime: self.render.runtime.perf_stats.clone(),
-                    presenter: self.render.presenter.perf_snapshot().unwrap_or_default(),
-                    wall_time: perf_driver.measured_elapsed(),
-                    final_page: self.state.current_page,
-                    visited_steps: perf_driver.visited_steps(),
-                });
-            }
-
-            match self
-                .wait_and_handle_next_event(runtime, &step, &mut document)
-                .await?
-            {
-                LoopControl::Continue => {}
-                LoopControl::Break => {
-                    return Err(AppError::unsupported(
-                        "perf run ended before producing a report",
-                    ));
-                }
-            }
+    fn loop_metrics_snapshot(&self) -> LoopMetricsSnapshot {
+        LoopMetricsSnapshot {
+            runtime: self.render.runtime.perf_stats.clone(),
+            presenter: self.render.presenter.perf_snapshot().unwrap_or_default(),
         }
     }
 
@@ -292,7 +281,7 @@ impl App {
         document: &mut ActiveDocument,
     ) -> AppResult<LoopControl>
     where
-        S: TerminalSurface + SessionRestore,
+        S: TerminalSession,
     {
         let render_busy = runtime.render_worker.in_flight_len() > 0;
         let presenter_busy = self.render.presenter.has_pending_work();
@@ -490,7 +479,7 @@ mod tests {
     use crate::app::App;
     use crate::app::core::InteractionSubsystem;
     use crate::app::loop_runtime::ActiveDocument;
-    use crate::app::terminal_session::TerminalSurface;
+    use crate::app::terminal_session::{TerminalSession, TerminalSurface};
     use crate::backend::test_support::{build_pdf, unique_temp_path};
     use crate::backend::{PdfDoc, SharedPdfBackend};
     use crate::command::{
@@ -594,7 +583,7 @@ mod tests {
         }
     }
 
-    impl super::SessionRestore for StubSession {
+    impl TerminalSession for StubSession {
         fn restore(&mut self) -> io::Result<()> {
             Ok(())
         }

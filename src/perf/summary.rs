@@ -1,9 +1,10 @@
 use std::time::Duration;
 
 use super::{
-    CacheSummary, MetricSummary, PerfAggregateReport, PerfIterationReport, PerfStats,
-    PhaseMetricsSummary, QueueSummary, RedrawSummary, ScalarSummary,
+    CacheSummary, MetricSummary, PerfAggregateReport, PerfIterationReport, PhaseMetricsSummary,
+    QueueSummary, RedrawSummary, ScalarSummary,
 };
+use crate::metrics::PerfStats;
 
 pub(super) fn merge_stats<'a>(stats: impl Iterator<Item = &'a PerfStats>) -> PerfStats {
     let mut merged = PerfStats::default();
@@ -34,33 +35,15 @@ pub(super) fn merge_stats<'a>(stats: impl Iterator<Item = &'a PerfStats>) -> Per
         merged.redraw_by_reason.timer += stat.redraw_by_reason.timer;
         merged.redraw_by_reason.input_error += stat.redraw_by_reason.input_error;
         merged.redraw_by_reason.state_changed += stat.redraw_by_reason.state_changed;
-        merged
-            .render_samples_ms
-            .extend_from_slice(stat.render_samples_ms());
-        merged
-            .encode_samples_ms
-            .extend_from_slice(stat.encode_samples_ms());
-        merged
-            .blit_samples_ms
-            .extend_from_slice(stat.blit_samples_ms());
-        merged
-            .render_queue_wait_samples_ms
-            .extend_from_slice(stat.render_queue_wait_samples_ms());
-        merged
-            .encode_queue_wait_samples_ms
-            .extend_from_slice(stat.encode_queue_wait_samples_ms());
-        merged
-            .render_queue_depth_samples
-            .extend_from_slice(stat.render_queue_depth_samples());
-        merged
-            .render_in_flight_samples
-            .extend_from_slice(stat.render_in_flight_samples());
-        merged
-            .encode_queue_depth_samples
-            .extend_from_slice(stat.encode_queue_depth_samples());
-        merged
-            .encode_in_flight_samples
-            .extend_from_slice(stat.encode_in_flight_samples());
+        merged.extend_render_samples_ms(stat.render_samples_ms());
+        merged.extend_encode_samples_ms(stat.encode_samples_ms());
+        merged.extend_blit_samples_ms(stat.blit_samples_ms());
+        merged.extend_render_queue_wait_samples_ms(stat.render_queue_wait_samples_ms());
+        merged.extend_encode_queue_wait_samples_ms(stat.encode_queue_wait_samples_ms());
+        merged.extend_render_queue_depth_samples(stat.render_queue_depth_samples());
+        merged.extend_render_in_flight_samples(stat.render_in_flight_samples());
+        merged.extend_encode_queue_depth_samples(stat.encode_queue_depth_samples());
+        merged.extend_encode_in_flight_samples(stat.encode_in_flight_samples());
     }
     if stat_count > 0 {
         merged.cache_hit_rate_l1 /= stat_count as f64;
@@ -234,7 +217,7 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    use crate::perf::{PerfStats, RedrawReason};
+    use crate::metrics::{PerfStats, RedrawReason};
 
     #[test]
     fn summarizes_metrics_and_scalars() {

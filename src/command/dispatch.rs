@@ -144,10 +144,6 @@ pub fn dispatch_with_view_policy(
     })
 }
 
-pub fn drain_background_events(app: &mut AppState, extension_host: &mut ExtensionHost) -> bool {
-    extension_host.drain_background(app)
-}
-
 fn collect_transition_events(
     app: &mut AppState,
     extension_host: &ExtensionHost,
@@ -313,10 +309,17 @@ mod tests {
         )
     }
 
+    fn test_extension_host() -> ExtensionHost {
+        let mut host = ExtensionHost::new();
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        host.start_workers(event_tx);
+        host
+    }
+
     fn new_zoom_test_fixture() -> (SharedPdfBackend, ExtensionHost, VecDeque<PaletteRequest>) {
         (
             Arc::new(StubPdf::new(3)) as SharedPdfBackend,
-            ExtensionHost::default(),
+            test_extension_host(),
             VecDeque::new(),
         )
     }
@@ -325,7 +328,7 @@ mod tests {
     fn dispatch_quit_requests_quit_and_emits_command_executed() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -353,7 +356,7 @@ mod tests {
     fn dispatch_next_page_emits_page_changed_and_command_executed() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -693,7 +696,7 @@ mod tests {
     fn dispatch_open_palette_emits_command_executed_only() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -727,7 +730,7 @@ mod tests {
             ..AppState::default()
         };
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
         let extensions = host.ui_snapshot();
@@ -778,7 +781,7 @@ mod tests {
             ..AppState::default()
         };
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
         let extensions = host.ui_snapshot();
@@ -826,7 +829,7 @@ mod tests {
     fn dispatch_rejects_palette_command_without_active_palette() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
         let mut palette_requests = VecDeque::new();
@@ -860,7 +863,7 @@ mod tests {
     fn dispatch_open_help_changes_mode_and_emits_mode_event() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -900,7 +903,7 @@ mod tests {
             ..AppState::default()
         };
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -937,7 +940,7 @@ mod tests {
     fn dispatch_help_scroll_commands_require_help_mode() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -969,7 +972,7 @@ mod tests {
             ..AppState::default()
         };
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let down = dispatch(
@@ -1017,7 +1020,7 @@ mod tests {
     fn dispatch_cancel_clears_active_search() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         host.command_ports()
@@ -1052,7 +1055,7 @@ mod tests {
     fn collect_transition_events_emits_search_when_page_is_unchanged() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         host.command_ports()
             .search
             .submit(
@@ -1092,7 +1095,7 @@ mod tests {
             ..AppState::default()
         };
         let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -1129,7 +1132,7 @@ mod tests {
             ..AppState::default()
         };
         let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -1154,7 +1157,7 @@ mod tests {
     fn dispatch_page_layout_spread_cover_keeps_cover_policy() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -1188,7 +1191,7 @@ mod tests {
             ..ViewPolicy::default()
         };
         let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
         let mut palette_requests = VecDeque::new();
@@ -1224,7 +1227,7 @@ mod tests {
             current_page: 4,
             ..AppState::default()
         };
-        let host = ExtensionHost::default();
+        let host = test_extension_host();
         let prev_mode = app.mode;
         let events = collect_transition_events(
             &mut app,
@@ -1252,7 +1255,7 @@ mod tests {
     #[test]
     fn collect_transition_events_emits_outline_reason_when_page_is_unchanged() {
         let mut app = AppState::default();
-        let host = ExtensionHost::default();
+        let host = test_extension_host();
         let prev_mode = app.mode;
         let events = collect_transition_events(
             &mut app,
@@ -1281,7 +1284,7 @@ mod tests {
     fn dispatch_rejects_internal_command_from_binding() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(
@@ -1308,7 +1311,7 @@ mod tests {
     fn dispatch_rejects_unavailable_command_from_binding() {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         let result = dispatch(

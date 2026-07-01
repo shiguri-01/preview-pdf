@@ -21,11 +21,6 @@ pub trait Extension {
         let _ = (state, event, app);
     }
 
-    fn on_background(state: &mut Self::State, app: &mut AppState) -> bool {
-        let _ = (state, app);
-        false
-    }
-
     fn on_document_reloaded(state: &mut Self::State, app: &mut AppState, pdf: SharedPdfBackend) {
         let _ = (state, app, pdf);
     }

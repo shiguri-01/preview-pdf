@@ -969,6 +969,8 @@ mod tests {
 
             let mut app = AppState::default();
             let mut extension_host = ExtensionHost::default();
+            let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+            extension_host.start_workers(event_tx);
             let palette_registry = PaletteRegistry::default();
             let mut palette_manager = PaletteManager::default();
             let mut ctx = CommandExecContext {

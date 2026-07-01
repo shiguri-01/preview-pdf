@@ -7,13 +7,14 @@ use crate::error::AppResult;
 use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
 use crate::palette::{PaletteKind, PaletteOpenPayload};
 
-use super::engine::{SearchEngine, SearchEvent, SearchPageHit};
+use super::engine::{SearchEngine, SearchEpoch, SearchEvent, SearchPageHit};
 use super::matcher::matcher_for_kind;
 
 #[derive(Default)]
 pub struct SearchRuntime {
     state: SearchState,
-    engine: SearchEngine,
+    engine: Option<SearchEngine>,
+    next_epoch: u64,
 }
 
 pub struct SearchCommandPort<'a> {
@@ -72,6 +73,36 @@ pub struct SearchUiSnapshot {
 }
 
 impl SearchRuntime {
+    pub fn start_worker(
+        &mut self,
+        event_tx: tokio::sync::mpsc::UnboundedSender<crate::extension::ExtensionWorkerEvent>,
+    ) {
+        self.next_epoch = self.next_epoch.saturating_add(1);
+        let epoch = SearchEpoch(self.next_epoch);
+        self.engine = Some(SearchEngine::new(epoch, event_tx));
+        self.state.epoch = epoch;
+    }
+
+    fn take_engine(&mut self) -> SearchEngine {
+        self.engine
+            .take()
+            .expect("search worker should be started before search runtime use")
+    }
+
+    fn restore_engine(&mut self, engine: SearchEngine) {
+        self.engine = Some(engine);
+    }
+
+    fn advance_epoch(&mut self) {
+        self.next_epoch = self.next_epoch.saturating_add(1);
+        let epoch = SearchEpoch(self.next_epoch);
+        self.state.epoch = epoch;
+        self.state.generation = 0;
+        let mut engine = self.take_engine();
+        engine.advance_epoch(epoch);
+        self.restore_engine(engine);
+    }
+
     pub fn open_palette(&mut self) -> PaletteRequest {
         self.state.open_palette()
     }
@@ -83,8 +114,10 @@ impl SearchRuntime {
         query: String,
         matcher: SearchMatcherKind,
     ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.state
-            .submit(app, pdf, &mut self.engine, query, matcher)
+        let mut engine = self.take_engine();
+        let result = self.state.submit(app, pdf, &mut engine, query, matcher);
+        self.restore_engine(engine);
+        result
     }
 
     pub fn open_results_palette(&mut self) -> Option<PaletteRequest> {
@@ -101,7 +134,10 @@ impl SearchRuntime {
     }
 
     pub fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
-        self.state.cancel(pdf, &mut self.engine)
+        let mut engine = self.take_engine();
+        let result = self.state.cancel(pdf, &mut engine);
+        self.restore_engine(engine);
+        result
     }
 
     pub fn next_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
@@ -112,12 +148,17 @@ impl SearchRuntime {
         self.state.prev_hit(app)
     }
 
-    pub fn on_background(&mut self, app: &mut AppState) -> bool {
-        self.state.on_background(app, &mut self.engine)
+    pub fn handle_worker_event(&mut self, app: &mut AppState, event: SearchEvent) -> bool {
+        let mut engine = self.take_engine();
+        let changed = self.state.handle_worker_event(app, &mut engine, event);
+        self.restore_engine(engine);
+        changed
     }
 
     pub fn prewarm(&mut self, pdf: SharedPdfBackend) {
-        self.engine.prewarm(pdf);
+        let mut engine = self.take_engine();
+        engine.prewarm(pdf);
+        self.restore_engine(engine);
     }
 
     pub fn resolve_priority_geometry(
@@ -130,14 +171,11 @@ impl SearchRuntime {
         }
         let pages = self.state.geometry_priority_pages(visible_pages, false);
         let matcher = matcher_for_kind(self.state.matcher);
-        self.engine.resolve_geometry(
-            pdf,
-            self.state.generation,
-            self.state.query.clone(),
-            matcher,
-            pages,
-            true,
-        );
+        let generation = self.state.generation;
+        let query = self.state.query.clone();
+        let mut engine = self.take_engine();
+        engine.resolve_geometry(pdf, generation, query, matcher, pages, true);
+        self.restore_engine(engine);
     }
 
     pub fn matcher(&self) -> SearchMatcherKind {
@@ -179,12 +217,14 @@ impl SearchRuntime {
         let active_search = self
             .is_active()
             .then(|| (self.query().to_string(), self.matcher()));
-        *self = Self::default();
+        self.state = SearchState::default();
+        self.advance_epoch();
         self.prewarm(Arc::clone(&pdf));
         if let Some((query, matcher)) = active_search
             && let Err(err) = self.submit(app, Arc::clone(&pdf), query, matcher)
         {
-            *self = Self::default();
+            self.state = SearchState::default();
+            self.advance_epoch();
             self.prewarm(pdf);
             app.set_warning_notice(format!("Could not restore search after reload: {err}"));
         }
@@ -202,6 +242,7 @@ pub struct SearchPaletteEntry {
 
 #[derive(Clone)]
 pub struct SearchState {
+    epoch: SearchEpoch,
     query: String,
     matcher: SearchMatcherKind,
     generation: u64,
@@ -225,6 +266,7 @@ pub struct SearchState {
 impl Default for SearchState {
     fn default() -> Self {
         Self {
+            epoch: SearchEpoch(0),
             query: String::new(),
             matcher: SearchMatcherKind::ContainsInsensitive,
             generation: 0,
@@ -353,99 +395,101 @@ impl SearchState {
         Ok(true)
     }
 
-    pub fn on_background(&mut self, app: &mut AppState, search_engine: &mut SearchEngine) -> bool {
-        let events = search_engine.drain_events();
-        if events.is_empty() {
-            return false;
-        }
+    pub fn handle_worker_event(
+        &mut self,
+        app: &mut AppState,
+        search_engine: &mut SearchEngine,
+        event: SearchEvent,
+    ) -> bool {
         // If search is inactive (e.g. canceled), drain pending worker events without
         // changing state/message. This avoids "search complete (0 hits)" flash after cancel.
         if self.query.is_empty() {
             return false;
         }
 
-        let mut changed = false;
-        for event in events {
-            match event {
-                SearchEvent::Snapshot(snapshot) => {
-                    if snapshot.generation != self.generation {
-                        continue;
-                    }
-                    self.scanned_pages_progress = snapshot.scanned_pages;
-                    self.total_pages = snapshot.total_pages;
-                    self.hit_pages_progress = snapshot.hit_pages;
-                    self.in_progress = true;
-                    changed = true;
+        match event {
+            SearchEvent::Snapshot(snapshot) => {
+                if !self.event_is_current(snapshot.epoch, snapshot.generation) {
+                    return false;
                 }
-                SearchEvent::Completed {
-                    generation,
-                    hits,
-                    highlight_unavailable,
-                } => {
-                    if generation != self.generation {
-                        continue;
-                    }
-                    self.in_progress = false;
-                    self.scanned_pages_progress = self.total_pages.max(self.scanned_pages_progress);
-                    self.hit_pages_progress = hits.len();
-                    self.current_hit = None;
-                    self.palette_entries = build_palette_entries(&hits);
-                    self.hits = hits;
-                    let pages = self.geometry_priority_pages([Some(app.current_page), None], true);
-                    if !pages.is_empty()
-                        && let Some(pdf) = &self.active_pdf
-                    {
-                        let matcher = matcher_for_kind(self.matcher);
-                        search_engine.resolve_geometry(
-                            Arc::clone(pdf),
-                            self.generation,
-                            self.query.clone(),
-                            matcher,
-                            pages,
-                            false,
-                        );
-                    }
+                self.scanned_pages_progress = snapshot.scanned_pages;
+                self.total_pages = snapshot.total_pages;
+                self.hit_pages_progress = snapshot.hit_pages;
+                self.in_progress = true;
+                true
+            }
+            SearchEvent::Completed {
+                epoch,
+                generation,
+                hits,
+                highlight_unavailable,
+            } => {
+                if !self.event_is_current(epoch, generation) {
+                    return false;
+                }
+                self.in_progress = false;
+                self.scanned_pages_progress = self.total_pages.max(self.scanned_pages_progress);
+                self.hit_pages_progress = hits.len();
+                self.current_hit = None;
+                self.palette_entries = build_palette_entries(&hits);
+                self.hits = hits;
+                let pages = self.geometry_priority_pages([Some(app.current_page), None], true);
+                if !pages.is_empty()
+                    && let Some(pdf) = &self.active_pdf
+                {
+                    let matcher = matcher_for_kind(self.matcher);
+                    search_engine.resolve_geometry(
+                        Arc::clone(pdf),
+                        self.generation,
+                        self.query.clone(),
+                        matcher,
+                        pages,
+                        false,
+                    );
+                }
+                if highlight_unavailable {
+                    app.apply_notice_action(NoticeAction::warning(
+                        Self::HIGHLIGHT_UNAVAILABLE_NOTICE,
+                    ));
+                }
+                true
+            }
+            SearchEvent::GeometryResolved {
+                epoch,
+                generation,
+                page,
+                occurrences,
+                highlight_unavailable,
+            } => {
+                if !self.event_is_current(epoch, generation) {
+                    return false;
+                }
+                if let Some(hit) = self.hits.iter_mut().find(|hit| hit.page == page) {
+                    hit.occurrences = occurrences;
+                    self.palette_entries = build_palette_entries(&self.hits);
                     if highlight_unavailable {
                         app.apply_notice_action(NoticeAction::warning(
                             Self::HIGHLIGHT_UNAVAILABLE_NOTICE,
                         ));
                     }
-                    changed = true;
-                }
-                SearchEvent::GeometryResolved {
-                    generation,
-                    page,
-                    occurrences,
-                    highlight_unavailable,
-                } => {
-                    if generation != self.generation {
-                        continue;
-                    }
-                    if let Some(hit) = self.hits.iter_mut().find(|hit| hit.page == page) {
-                        hit.occurrences = occurrences;
-                        self.palette_entries = build_palette_entries(&self.hits);
-                        if highlight_unavailable {
-                            app.apply_notice_action(NoticeAction::warning(
-                                Self::HIGHLIGHT_UNAVAILABLE_NOTICE,
-                            ));
-                        }
-                        changed = true;
-                    }
-                }
-                SearchEvent::PageSkipped {
-                    generation,
-                    page: _,
-                    message: _,
-                } => {
-                    if generation != self.generation {
-                        continue;
-                    }
-                    app.apply_notice_action(NoticeAction::warning(Self::PAGE_SKIPPED_NOTICE));
-                    changed = true;
+                    true
+                } else {
+                    false
                 }
             }
+            SearchEvent::PageSkipped {
+                epoch,
+                generation,
+                page: _,
+                message: _,
+            } => {
+                if !self.event_is_current(epoch, generation) {
+                    return false;
+                }
+                app.apply_notice_action(NoticeAction::warning(Self::PAGE_SKIPPED_NOTICE));
+                true
+            }
         }
-        changed
     }
 
     pub fn matcher(&self) -> SearchMatcherKind {
@@ -591,6 +635,10 @@ impl SearchState {
         self.last_error = None;
         self.active_pdf = None;
     }
+
+    fn event_is_current(&self, epoch: SearchEpoch, generation: u64) -> bool {
+        self.epoch == epoch && self.generation == generation
+    }
 }
 
 fn push_unique_page(pages: &mut Vec<usize>, page: usize) {
@@ -630,10 +678,25 @@ mod tests {
     use crate::app::{AppState, NoticeAction, NoticeLevel, PageLayoutMode, PaletteRequest};
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{CommandOutcome, SearchMatcherKind};
+    use crate::extension::ExtensionWorkerEvent;
     use crate::palette::{PaletteKind, PaletteOpenPayload};
-    use crate::search::engine::{SearchEngine, SearchPageHit};
+    use crate::search::engine::{SearchEngine, SearchEpoch, SearchEvent, SearchPageHit};
 
     use super::SearchState;
+
+    const TEST_EPOCH: SearchEpoch = SearchEpoch(1);
+
+    fn test_engine() -> SearchEngine {
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel::<ExtensionWorkerEvent>();
+        SearchEngine::new(TEST_EPOCH, event_tx)
+    }
+
+    fn test_state() -> SearchState {
+        SearchState {
+            epoch: TEST_EPOCH,
+            ..SearchState::default()
+        }
+    }
 
     struct StubPdf {
         path: PathBuf,
@@ -744,10 +807,10 @@ mod tests {
 
     #[test]
     fn submit_search_marks_search_active() {
-        let mut state = SearchState::default();
+        let mut state = test_state();
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(5)) as SharedPdfBackend;
-        let mut engine = SearchEngine::new();
+        let mut engine = test_engine();
 
         let (outcome, _) = state
             .submit(
@@ -790,7 +853,7 @@ mod tests {
 
     #[test]
     fn open_results_palette_requires_active_search() {
-        let mut state = SearchState::default();
+        let mut state = test_state();
 
         assert_eq!(state.open_results_palette(), None);
     }
@@ -816,7 +879,7 @@ mod tests {
         let mut state = SearchState::default();
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
-        let mut engine = SearchEngine::new();
+        let mut engine = test_engine();
 
         state
             .submit(
@@ -847,10 +910,10 @@ mod tests {
 
     #[test]
     fn cancel_clears_active_search_state() {
-        let mut state = SearchState::default();
+        let mut state = test_state();
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
-        let mut engine = SearchEngine::new();
+        let mut engine = test_engine();
 
         state
             .submit(
@@ -936,11 +999,11 @@ mod tests {
     }
 
     #[test]
-    fn on_background_ignores_synthetic_events_after_cancel() {
-        let mut state = SearchState::default();
+    fn worker_event_after_cancel_does_not_change_state_or_notice() {
+        let mut state = test_state();
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
-        let mut engine = SearchEngine::new();
+        let mut engine = test_engine();
 
         state
             .submit(
@@ -956,20 +1019,27 @@ mod tests {
             .cancel(Arc::clone(&pdf), &mut engine)
             .expect("cancel should succeed");
 
-        for _ in 0..20 {
-            let changed = state.on_background(&mut app, &mut engine);
-            assert!(!changed);
-            assert_eq!(app.notice, None);
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        let changed = state.handle_worker_event(
+            &mut app,
+            &mut engine,
+            SearchEvent::Completed {
+                epoch: TEST_EPOCH,
+                generation: 2,
+                hits: Vec::new(),
+                highlight_unavailable: false,
+            },
+        );
+
+        assert!(!changed);
+        assert_eq!(app.notice, None);
     }
 
     #[test]
-    fn on_background_warns_when_highlight_is_unavailable() {
-        let mut state = SearchState::default();
+    fn worker_completion_warns_when_highlight_is_unavailable() {
+        let mut state = test_state();
         let mut app = AppState::default();
         let pdf = Arc::new(HighlightUnavailableStubPdf::new("alpha beta")) as SharedPdfBackend;
-        let mut engine = SearchEngine::new();
+        let mut engine = test_engine();
 
         state
             .submit(
@@ -981,19 +1051,18 @@ mod tests {
             )
             .expect("submit should succeed");
 
-        let timeout = std::time::Duration::from_secs(3);
-        let start = std::time::Instant::now();
-        while state.in_progress {
-            let _ = state.on_background(&mut app, &mut engine);
-            assert!(
-                start.elapsed() <= timeout,
-                "timed out waiting for search completion"
-            );
-            if state.in_progress {
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        }
+        let changed = state.handle_worker_event(
+            &mut app,
+            &mut engine,
+            SearchEvent::Completed {
+                epoch: TEST_EPOCH,
+                generation: 1,
+                hits: vec![page_hit(0)],
+                highlight_unavailable: true,
+            },
+        );
 
+        assert!(changed);
         assert_eq!(
             state.status_bar_segment(),
             Some("SEARCH 1 hits".to_string())
@@ -1001,6 +1070,39 @@ mod tests {
         let notice = app.notice.expect("warning notice should be set");
         assert_eq!(notice.level, NoticeLevel::Warning);
         assert_eq!(notice.message, SearchState::HIGHLIGHT_UNAVAILABLE_NOTICE);
+    }
+
+    #[test]
+    fn worker_event_with_stale_epoch_is_ignored() {
+        let mut state = test_state();
+        let mut app = AppState::default();
+        let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
+        let mut engine = test_engine();
+        state
+            .submit(
+                &mut app,
+                Arc::clone(&pdf),
+                &mut engine,
+                "needle".to_string(),
+                SearchMatcherKind::ContainsInsensitive,
+            )
+            .expect("submit should succeed");
+
+        let changed = state.handle_worker_event(
+            &mut app,
+            &mut engine,
+            SearchEvent::Completed {
+                epoch: SearchEpoch(TEST_EPOCH.0 + 1),
+                generation: 1,
+                hits: vec![page_hit(0)],
+                highlight_unavailable: true,
+            },
+        );
+
+        assert!(!changed);
+        assert!(state.in_progress);
+        assert_eq!(state.hit_pages_progress, 0);
+        assert!(app.notice.is_none());
     }
 
     #[test]

@@ -4,6 +4,7 @@ use std::fmt;
 use crate::app::Mode;
 use crate::backend::SharedPdfBackend;
 use crate::command::{CommandId, CommandOutcome, CommandRequest};
+use crate::extension::ExtensionWorkerEvent;
 use crate::presenter::PresenterBackgroundEvent;
 use crate::render::worker::RenderWorkerResult;
 
@@ -121,6 +122,7 @@ pub(crate) enum DomainEvent {
     App(AppEvent),
     ReloadDocument(DocumentReloadRequest),
     DocumentReloaded(DocumentReloadResult),
+    ExtensionWorker(Vec<ExtensionWorkerEvent>),
     RenderComplete(RenderWorkerResult),
     EncodeComplete(PresenterBackgroundEvent),
     PrefetchTick,

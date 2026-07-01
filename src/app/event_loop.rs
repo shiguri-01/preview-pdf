@@ -1,12 +1,15 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{
+    UnboundedReceiver, UnboundedSender, error::TryRecvError, unbounded_channel,
+};
 use tokio::time::{self, MissedTickBehavior};
 
 use crate::backend::{PdfBackend, SharedPdfBackend};
 use crate::error::{AppError, AppResult};
 use crate::event::DomainEvent;
+use crate::extension::ExtensionWorkerEvent;
 use crate::presenter::ImagePresenter;
 use crate::render::worker::RenderWorker;
 
@@ -21,6 +24,8 @@ use super::loop_runtime::{ActiveDocument, LoopControl, LoopRuntime, LoopStep, Wa
 use super::render_ops::PrefetchDispatchPlan;
 use super::scale::select_input_poll_timeout;
 use super::terminal_session::{InteractiveTerminalSession, TerminalSession, TerminalSurface};
+
+const EXTENSION_WORKER_BATCH_LIMIT: usize = 128;
 
 impl App {
     pub async fn run(&mut self, pdf: SharedPdfBackend) -> AppResult<()> {
@@ -140,6 +145,9 @@ impl App {
             self.compute_current_scale(pdf.as_ref(), visible_pages.anchor_page, viewport);
         let mut render_actor =
             RenderActor::new(visible_pages.anchor_page, self.state.zoom, tracked_scale);
+        let (extension_worker_tx, extension_worker_rx) = unbounded_channel();
+        self.interaction
+            .start_extension_workers(extension_worker_tx);
         self.render.runtime.reset_prefetch(
             pdf.as_ref(),
             visible_pages.anchor_page,
@@ -163,6 +171,7 @@ impl App {
             redraw_tick,
             loop_event_tx,
             loop_event_rx,
+            extension_worker_rx,
             loop_event_runtime,
             reload_in_flight: false,
             pending_reload: None,
@@ -206,7 +215,8 @@ impl App {
         let render_in_flight = runtime.render_worker.in_flight_len();
         let presenter_pending = self.render.presenter.has_pending_work();
         let redraw_pending = runtime.ui_actor.needs_redraw();
-        let event_queue_empty = runtime.loop_event_rx.is_empty();
+        let event_queue_empty =
+            runtime.loop_event_rx.is_empty() && runtime.extension_worker_rx.is_empty();
         LoopObservation {
             page_count: runtime.page_count,
             current_page: self.state.current_page,
@@ -301,11 +311,14 @@ impl App {
             runtime.input_poll_timeout_busy,
         );
         let waited = wait_next_event(
-            &mut runtime.loop_event_rx,
-            &mut runtime.render_worker,
-            &mut *self.render.presenter,
-            &mut runtime.prefetch_tick,
-            &mut runtime.redraw_tick,
+            WaitEventSources {
+                loop_event_rx: &mut runtime.loop_event_rx,
+                extension_worker_rx: &mut runtime.extension_worker_rx,
+                render_worker: &mut runtime.render_worker,
+                presenter: &mut *self.render.presenter,
+                prefetch_tick: &mut runtime.prefetch_tick,
+                redraw_tick: &mut runtime.redraw_tick,
+            },
             wait_for_pending_redraw,
             wake_timeout,
         )
@@ -395,15 +408,28 @@ impl App {
     }
 }
 
+struct WaitEventSources<'a> {
+    loop_event_rx: &'a mut UnboundedReceiver<DomainEvent>,
+    extension_worker_rx: &'a mut UnboundedReceiver<ExtensionWorkerEvent>,
+    render_worker: &'a mut RenderWorker,
+    presenter: &'a mut dyn ImagePresenter,
+    prefetch_tick: &'a mut time::Interval,
+    redraw_tick: &'a mut time::Interval,
+}
+
 async fn wait_next_event(
-    loop_event_rx: &mut UnboundedReceiver<DomainEvent>,
-    render_worker: &mut RenderWorker,
-    presenter: &mut dyn ImagePresenter,
-    prefetch_tick: &mut time::Interval,
-    redraw_tick: &mut time::Interval,
+    sources: WaitEventSources<'_>,
     wait_for_pending_redraw: bool,
     wake_timeout: Duration,
 ) -> WaitEvent {
+    let WaitEventSources {
+        loop_event_rx,
+        extension_worker_rx,
+        render_worker,
+        presenter,
+        prefetch_tick,
+        redraw_tick,
+    } = sources;
     if presenter.has_pending_work() {
         tokio::select! {
             biased;
@@ -417,6 +443,12 @@ async fn wait_next_event(
                 match maybe_render {
                     Some(result) => WaitEvent::Event(DomainEvent::RenderComplete(result)),
                     None => WaitEvent::Closed,
+                }
+            },
+            maybe_extension = extension_worker_rx.recv() => {
+                match maybe_extension {
+                    Some(event) => WaitEvent::Event(DomainEvent::ExtensionWorker(drain_extension_worker_batch(extension_worker_rx, event))),
+                    None => WaitEvent::Event(DomainEvent::Wake),
                 }
             },
             maybe_presenter = presenter.recv_background_event() => {
@@ -450,6 +482,12 @@ async fn wait_next_event(
                     None => WaitEvent::Closed,
                 }
             },
+            maybe_extension = extension_worker_rx.recv() => {
+                match maybe_extension {
+                    Some(event) => WaitEvent::Event(DomainEvent::ExtensionWorker(drain_extension_worker_batch(extension_worker_rx, event))),
+                    None => WaitEvent::Event(DomainEvent::Wake),
+                }
+            },
             _ = prefetch_tick.tick() => {
                 WaitEvent::Event(DomainEvent::PrefetchTick)
             },
@@ -461,6 +499,21 @@ async fn wait_next_event(
             }
         }
     }
+}
+
+fn drain_extension_worker_batch(
+    extension_worker_rx: &mut UnboundedReceiver<ExtensionWorkerEvent>,
+    first: ExtensionWorkerEvent,
+) -> Vec<ExtensionWorkerEvent> {
+    let mut events = Vec::with_capacity(EXTENSION_WORKER_BATCH_LIMIT.min(8));
+    events.push(first);
+    while events.len() < EXTENSION_WORKER_BATCH_LIMIT {
+        match extension_worker_rx.try_recv() {
+            Ok(event) => events.push(event),
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+        }
+    }
+    events
 }
 
 struct RestoringSession<S: TerminalSession> {
@@ -524,7 +577,7 @@ mod tests {
     use tokio::runtime::Builder;
     use tokio::sync::mpsc::unbounded_channel;
 
-    use super::{WaitEvent, wait_next_event};
+    use super::{WaitEvent, WaitEventSources, wait_next_event};
     use crate::app::App;
     use crate::app::core::InteractionSubsystem;
     use crate::app::loop_runtime::ActiveDocument;
@@ -867,16 +920,20 @@ mod tests {
             None,
         ]);
         let (_tx, mut loop_event_rx) = unbounded_channel();
+        let (_extension_tx, mut extension_worker_rx) = unbounded_channel();
         runtime.block_on(async {
             let mut prefetch_tick = tokio::time::interval(Duration::from_secs(60));
             let mut redraw_tick = tokio::time::interval(Duration::from_secs(60));
 
             let first = wait_next_event(
-                &mut loop_event_rx,
-                &mut render_worker,
-                &mut presenter,
-                &mut prefetch_tick,
-                &mut redraw_tick,
+                WaitEventSources {
+                    loop_event_rx: &mut loop_event_rx,
+                    extension_worker_rx: &mut extension_worker_rx,
+                    render_worker: &mut render_worker,
+                    presenter: &mut presenter,
+                    prefetch_tick: &mut prefetch_tick,
+                    redraw_tick: &mut redraw_tick,
+                },
                 false,
                 Duration::from_secs(60),
             )
@@ -891,11 +948,14 @@ mod tests {
             ));
 
             let second = wait_next_event(
-                &mut loop_event_rx,
-                &mut render_worker,
-                &mut presenter,
-                &mut prefetch_tick,
-                &mut redraw_tick,
+                WaitEventSources {
+                    loop_event_rx: &mut loop_event_rx,
+                    extension_worker_rx: &mut extension_worker_rx,
+                    render_worker: &mut render_worker,
+                    presenter: &mut presenter,
+                    prefetch_tick: &mut prefetch_tick,
+                    redraw_tick: &mut redraw_tick,
+                },
                 false,
                 Duration::from_secs(60),
             )

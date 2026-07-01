@@ -334,7 +334,7 @@ Test coverage:
 
 Orientation:
 - Built-in extensions are internal runtime features that need their own state,
-  event observation, background progress, status-bar output, or palette-facing
+  event observation, status-bar output, worker results, or palette-facing
   snapshots.
 
 Contract:
@@ -347,15 +347,17 @@ Contract:
 - The first claimed input hook result wins.
 - Event hooks observe typed `AppEvent` values emitted by command dispatch and
   runtime flow.
-- Background hooks report whether visible or behavioral state changed.
+- Extension-owned worker output is routed through the app loop before it mutates
+  extension-owned state.
 - Document reload behavior is handled through extension lifecycle hooks. Each
   extension explicitly decides whether to reset, preserve, or rehydrate its
   state for the new document.
 - Extension UI data exposed to palettes crosses through `ExtensionUiSnapshot`.
 
 Compatibility:
-- Hook order, event propagation, background draining, and status-bar projection
-  can affect user-visible behavior and should change only with tests.
+- Hook order, event propagation, worker result handling, and status-bar
+  projection can affect user-visible behavior and should change only with
+  tests.
 - This is not a dynamic plugin API; do not document it as one.
 
 Owned by:
@@ -387,8 +389,7 @@ Contract:
 - Active PDF rendering and active terminal encoding may run to completion even
   when queued metadata is canceled; receivers decide whether results still
   apply.
-- Search worker events are applied by generation so stale search results do not
-  update active search state.
+- Stale search results must not update active search state.
 - Encode completions carry enough identity for presenter cache and generation
   checks.
 
@@ -421,7 +422,7 @@ Test coverage:
 - Render worker and scheduler tests in [src/render/](../src/render/).
 - Presenter cache and encode tests in [src/presenter/](../src/presenter/).
 - Runtime worker tests in [src/app/tests/](../src/app/tests/).
-- Search generation tests in [src/search/](../src/search/).
+- Search stale-result tests in [src/search/](../src/search/).
 
 ## Caches
 

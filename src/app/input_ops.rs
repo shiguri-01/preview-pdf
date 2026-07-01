@@ -3,13 +3,13 @@ use crossterm::event::KeyEvent;
 use crate::backend::SharedPdfBackend;
 use crate::command::{
     Command, CommandDispatchContext, CommandDispatchResult, CommandInvocationSource,
-    CommandRequest, dispatch_with_view_policy, drain_background_events,
+    CommandRequest, dispatch_with_view_policy,
 };
 use crate::condition::RuntimeConditionContext;
 use crate::config::ViewPolicy;
 use crate::error::AppResult;
 use crate::event::AppEvent;
-use crate::extension::ExtensionUiSnapshot;
+use crate::extension::{ExtensionUiSnapshot, ExtensionWorkerEvent};
 use crate::input::sequence::{KeyBindingContext, SequenceResolution};
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::PaletteView;
@@ -81,8 +81,22 @@ impl InteractionSubsystem {
         }
     }
 
-    pub(crate) fn drain_background_events(&mut self, state: &mut AppState) -> bool {
-        drain_background_events(state, &mut self.extensions.host)
+    pub(crate) fn start_extension_workers(
+        &mut self,
+        event_tx: tokio::sync::mpsc::UnboundedSender<ExtensionWorkerEvent>,
+    ) {
+        self.extensions.host.start_workers(event_tx);
+    }
+
+    pub(crate) fn handle_extension_worker_events(
+        &mut self,
+        state: &mut AppState,
+        events: Vec<ExtensionWorkerEvent>,
+    ) -> bool {
+        self.extensions
+            .host
+            .handle_worker_events(events, state)
+            .changed
     }
 
     pub(crate) fn prepare_extensions_for_document(&mut self, pdf: SharedPdfBackend) {

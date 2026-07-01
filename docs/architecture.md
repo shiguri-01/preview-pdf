@@ -65,6 +65,8 @@ request behavior by returning typed effects or commands instead of taking
 `AppState` directly. Surface-local operations such as palette submit, palette
 selection, palette input editing, palette input history recall, and help
 scrolling enter the same command dispatch path as normal-mode keymap entries.
+Palette open requests carry only common initialization. Provider-owned UI data
+crosses through snapshots instead of being embedded in open requests.
 
 Extensions own extension-local state and observe `AppEvent` values.
 `ExtensionHost` owns concrete extension state, hook routing, and shared
@@ -87,13 +89,14 @@ contracts.
 
 `AppState` is the primary owner of viewer state: current page, mode, zoom, pan,
 notices, debug status, and view policy. `App` owns `AppState` plus the runtime
-objects that act on it: command execution context, palette manager, extension
-host, render runtime, presenter, input sequence resolver, and watch state.
+objects that act on it: command execution context, palette session controller,
+extension host, render runtime, presenter, input sequence resolver, and watch
+state.
 
 Subsystem-local mutable state stays with the subsystem that owns its invariants:
 
 - search, history, and outline state live in `ExtensionHost`
-- active palette session state lives in `PaletteManager`
+- active palette session state lives in the palette session controller
 - L1 rendered-page cache state lives in `render`
 - L2 terminal-frame cache and encode generation state live in `presenter`
 - input sequence buffers live in `input`
@@ -143,9 +146,10 @@ tests guard registry consistency.
 
 Palette providers:
 Providers own candidate generation, completion semantics, and submit semantics
-for their palette kind, while `PaletteManager` owns common session state and
-operation methods. Key routing remains outside providers and produces commands;
-the active palette is the command target for palette operations.
+for their palette kind, while the palette session controller owns common
+session state and operation methods. Key routing remains outside providers and
+produces commands; the active palette is the command target for palette
+operations.
 
 Extensions:
 Built-in features that need background state, event observation, status-bar

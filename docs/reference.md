@@ -278,15 +278,20 @@ Orientation:
 
 Contract:
 - A palette session has a kind, session id, input state, candidate list,
-  visible candidate indexes, selection, optional open payload, and optional
-  assistive text.
-- Palette providers own candidate generation, input mode, initial input,
-  completion effects, submit effects, assistive text, and provider-specific
-  selection defaults.
-- `PaletteManager` owns common open, cancel, palette input operations, palette
-  input history recall for palettes that support it, selection, completion,
-  submit, and session-id validation behavior.
-- Candidate search text is independent from rendered row text.
+  visible candidate indexes, selection, and optional assistive text.
+- Palette open requests may seed only common input state: initial input text and
+  an optional provider-scoped candidate id for initial selection.
+  Provider-specific state does not travel through palette open requests.
+- Palette providers own candidate generation, input mode, completion effects,
+  submit effects, assistive text, and provider-specific selection defaults.
+- `PaletteSessionController` owns common open, cancel, palette input
+  operations, palette input history recall for palettes that support it,
+  selection, completion, submit, and session-id validation behavior.
+- Palette candidates expose a provider-scoped id plus semantic `label` and
+  `detail` text. Renderers decide how those areas map to physical layout.
+- Candidate match text is derived from matchable row cells. Display and matching
+  share the same formatting path for structured values such as page labels; the
+  exact row contents belong to provider code and tests.
 - Provider submit effects describe palette-local meaning: close, reopen, or
   dispatch a typed command with optional history recording and a post action.
   The palette submit command handler converts those provider effects into
@@ -317,18 +322,20 @@ Compatibility:
   Docs should explain provider responsibilities and notable cross-palette rules.
 
 Owned by:
-- [src/palette/manager.rs](../src/palette/manager.rs)
+- [src/palette/candidate.rs](../src/palette/candidate.rs)
+- [src/palette/row.rs](../src/palette/row.rs)
+- [src/palette/session_controller.rs](../src/palette/session_controller.rs)
+- [src/palette/provider.rs](../src/palette/provider.rs)
 - [src/palette/registry.rs](../src/palette/registry.rs)
-- [src/palette/types.rs](../src/palette/types.rs)
 - [src/palette/providers/](../src/palette/providers/)
 - [src/search/palette.rs](../src/search/palette.rs)
 - [src/history/palette.rs](../src/history/palette.rs)
 - [src/outline/palette.rs](../src/outline/palette.rs)
 
 Test coverage:
-- Palette manager and provider tests in [src/palette/](../src/palette/),
-  [src/search/](../src/search/), [src/history/](../src/history/), and
-  [src/outline/](../src/outline/).
+- Palette session controller and provider tests in
+  [src/palette/](../src/palette/), [src/search/](../src/search/),
+  [src/history/](../src/history/), and [src/outline/](../src/outline/).
 
 ## Extensions
 

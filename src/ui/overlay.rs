@@ -165,7 +165,7 @@ fn build_palette_item_line(item: &PaletteItemView, width: usize) -> Line<'static
     }
 
     let rendered = render_palette_row(item, content_width);
-    spans.extend(rendered.left.spans);
+    spans.extend(rendered.label.spans);
     if rendered.gap > 0 {
         if item.selected {
             spans.push(Span::styled(
@@ -176,7 +176,7 @@ fn build_palette_item_line(item: &PaletteItemView, width: usize) -> Line<'static
             spans.push(Span::raw(" ".repeat(rendered.gap)));
         }
     }
-    spans.extend(rendered.right.spans);
+    spans.extend(rendered.detail.spans);
     if rendered.trailing_padding > 0 {
         if item.selected {
             spans.push(Span::styled(
@@ -206,9 +206,9 @@ impl RenderedTextParts {
 }
 
 struct RenderedPaletteRow {
-    left: RenderedTextParts,
+    label: RenderedTextParts,
     gap: usize,
-    right: RenderedTextParts,
+    detail: RenderedTextParts,
     trailing_padding: usize,
 }
 
@@ -230,21 +230,21 @@ fn render_palette_row(item: &PaletteItemView, content_width: usize) -> RenderedP
     let plan = plan_palette_row(item, content_width);
     match plan {
         PaletteRowPlan::Empty => RenderedPaletteRow {
-            left: RenderedTextParts::empty(),
+            label: RenderedTextParts::empty(),
             gap: 0,
-            right: RenderedTextParts::empty(),
+            detail: RenderedTextParts::empty(),
             trailing_padding: 0,
         },
         PaletteRowPlan::Single {
             text_width,
             trailing_padding,
         } => {
-            let left = render_palette_text_parts(&item.left, text_width, item.selected);
+            let left = render_palette_text_parts(&item.label, text_width, item.selected);
             let gap = text_width.saturating_sub(left.width);
             RenderedPaletteRow {
-                left,
+                label: left,
                 gap,
-                right: RenderedTextParts::empty(),
+                detail: RenderedTextParts::empty(),
                 trailing_padding,
             }
         }
@@ -254,15 +254,15 @@ fn render_palette_row(item: &PaletteItemView, content_width: usize) -> RenderedP
             gap,
             trailing_padding,
         } => {
-            let left = render_palette_text_parts(&item.left, left_width, item.selected);
-            let right = render_palette_text_parts(&item.right, right_width, item.selected);
+            let left = render_palette_text_parts(&item.label, left_width, item.selected);
+            let right = render_palette_text_parts(&item.detail, right_width, item.selected);
             let gap = gap
                 .saturating_add(left_width.saturating_sub(left.width))
                 .saturating_add(right_width.saturating_sub(right.width));
             RenderedPaletteRow {
-                left,
+                label: left,
                 gap,
-                right,
+                detail: right,
                 trailing_padding,
             }
         }
@@ -280,10 +280,10 @@ fn plan_palette_row(item: &PaletteItemView, content_width: usize) -> PaletteRowP
         return PaletteRowPlan::Empty;
     }
 
-    let left_width = measure_palette_text_width(&item.left);
-    let right_width = measure_palette_text_width(&item.right);
+    let left_width = measure_palette_text_width(&item.label);
+    let right_width = measure_palette_text_width(&item.detail);
 
-    if item.right.is_empty() {
+    if item.detail.is_empty() {
         return PaletteRowPlan::Single {
             text_width,
             trailing_padding,
@@ -607,8 +607,8 @@ mod tests {
             cursor,
             assistive_text: None,
             items: vec![PaletteItemView {
-                left: Vec::new(),
-                right: Vec::new(),
+                label: Vec::new(),
+                detail: Vec::new(),
                 selected: true,
             }],
             selected_idx: 0,
@@ -687,11 +687,11 @@ mod tests {
     fn palette_item_line_uses_single_space_before_detail() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                left: vec![crate::palette::PaletteTextPart {
+                label: vec![crate::palette::PaletteTextPart {
                     text: "goto-page".to_string(),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
-                right: vec![crate::palette::PaletteTextPart {
+                detail: vec![crate::palette::PaletteTextPart {
                     text: "Jump".to_string(),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
@@ -710,11 +710,11 @@ mod tests {
     fn palette_item_line_keeps_right_fragment_when_left_is_long() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                left: vec![crate::palette::PaletteTextPart {
+                label: vec![crate::palette::PaletteTextPart {
                     text: "very long outline title".to_string(),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
-                right: vec![crate::palette::PaletteTextPart {
+                detail: vec![crate::palette::PaletteTextPart {
                     text: "p.12".to_string(),
                     tone: crate::palette::PaletteTextTone::Secondary,
                 }],
@@ -732,11 +732,11 @@ mod tests {
     fn palette_item_line_hides_right_fragment_when_space_is_tight() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                left: vec![crate::palette::PaletteTextPart {
+                label: vec![crate::palette::PaletteTextPart {
                     text: "outline".to_string(),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
-                right: vec![crate::palette::PaletteTextPart {
+                detail: vec![crate::palette::PaletteTextPart {
                     text: "p.12".to_string(),
                     tone: crate::palette::PaletteTextTone::Secondary,
                 }],
@@ -754,11 +754,11 @@ mod tests {
     fn palette_item_line_fills_full_row_width() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                left: vec![crate::palette::PaletteTextPart {
+                label: vec![crate::palette::PaletteTextPart {
                     text: "open".to_string(),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
-                right: vec![crate::palette::PaletteTextPart {
+                detail: vec![crate::palette::PaletteTextPart {
                     text: "Command".to_string(),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
@@ -774,11 +774,11 @@ mod tests {
     fn palette_item_line_fills_full_row_width_when_wide_text_truncates_in_split_layout() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                left: vec![crate::palette::PaletteTextPart {
+                label: vec![crate::palette::PaletteTextPart {
                     text: "界".repeat(10),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
-                right: vec![crate::palette::PaletteTextPart {
+                detail: vec![crate::palette::PaletteTextPart {
                     text: "p.9".to_string(),
                     tone: crate::palette::PaletteTextTone::Secondary,
                 }],
@@ -794,11 +794,11 @@ mod tests {
     fn palette_item_line_preserves_column_gap_when_left_and_right_exactly_fill_text_width() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                left: vec![crate::palette::PaletteTextPart {
+                label: vec![crate::palette::PaletteTextPart {
                     text: "abcdefgh".to_string(),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
-                right: vec![crate::palette::PaletteTextPart {
+                detail: vec![crate::palette::PaletteTextPart {
                     text: "p.12".to_string(),
                     tone: crate::palette::PaletteTextTone::Secondary,
                 }],
@@ -817,7 +817,7 @@ mod tests {
     fn palette_item_line_selected_uses_uniform_style() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                left: vec![
+                label: vec![
                     crate::palette::PaletteTextPart {
                         text: "open".to_string(),
                         tone: crate::palette::PaletteTextTone::Primary,
@@ -827,7 +827,7 @@ mod tests {
                         tone: crate::palette::PaletteTextTone::Secondary,
                     },
                 ],
-                right: vec![crate::palette::PaletteTextPart {
+                detail: vec![crate::palette::PaletteTextPart {
                     text: "Command".to_string(),
                     tone: crate::palette::PaletteTextTone::Secondary,
                 }],
@@ -844,11 +844,11 @@ mod tests {
     fn palette_item_line_reserves_trailing_padding() {
         let line = build_palette_item_line(
             &PaletteItemView {
-                left: vec![crate::palette::PaletteTextPart {
+                label: vec![crate::palette::PaletteTextPart {
                     text: "open".to_string(),
                     tone: crate::palette::PaletteTextTone::Primary,
                 }],
-                right: Vec::new(),
+                detail: Vec::new(),
                 selected: false,
             },
             12,

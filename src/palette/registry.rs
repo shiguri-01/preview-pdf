@@ -156,16 +156,6 @@ impl<'a> PaletteProviderRef<'a> {
             Self::Outline(provider) => provider.initial_selected_candidate(ctx, candidates),
         }
     }
-
-    pub fn initial_input(&self, open_payload: Option<&super::PaletteOpenPayload>) -> String {
-        match self {
-            Self::Command(provider) => provider.initial_input(open_payload),
-            Self::Search(provider) => provider.initial_input(open_payload),
-            Self::SearchResults(provider) => provider.initial_input(open_payload),
-            Self::History(provider) => provider.initial_input(open_payload),
-            Self::Outline(provider) => provider.initial_input(open_payload),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -184,7 +174,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
-            open_payload: None,
         };
 
         assert_eq!(

@@ -13,9 +13,9 @@ use crate::input::shortcut::{
     ShortcutKey, format_shortcut_alternatives_tight, format_shortcut_key,
 };
 use crate::palette::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteOpenPayload,
-    PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect,
-    PaletteTabEffect, PaletteTextPart,
+    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteOpenOptions,
+    PalettePostAction, PaletteProvider, PaletteRow, PaletteSubmitEffect, PaletteTabEffect,
+    PaletteTextPart,
 };
 
 pub struct CommandPaletteProvider;
@@ -57,13 +57,7 @@ impl PaletteProvider for CommandPaletteProvider {
                         let command_ctx = post_submit_command_policy_context(ctx);
                         is_command_visible_in_palette(*spec, &command_ctx)
                     })
-                    .map(|spec| PaletteCandidate {
-                        id: spec.id.to_string(),
-                        left: format_left(spec.id, spec.args),
-                        right: vec![PaletteTextPart::secondary(spec.title)],
-                        search_texts: format_search_texts(spec.id, spec.title, spec.args),
-                        payload: PalettePayload::Opaque(spec.id.to_string()),
-                    })
+                    .map(|spec| command_candidate(spec.id, spec.args, spec.title))
                     .collect::<Vec<_>>();
                 rank_command_candidates(ctx.input, &mut candidates);
                 Ok(candidates)
@@ -102,7 +96,7 @@ impl PaletteProvider for CommandPaletteProvider {
 
         // 2. A candidate is selected → use it.
         if let Some(candidate) = selected
-            && let Some(spec) = find_command_spec(&candidate.id)
+            && let Some(spec) = find_command_spec(candidate.id().as_str())
         {
             if !command_requires_argument_input(spec) {
                 // No args needed: dispatch immediately.
@@ -117,7 +111,7 @@ impl PaletteProvider for CommandPaletteProvider {
                 // Args required: reopen with command name pre-filled.
                 return Ok(PaletteSubmitEffect::Reopen {
                     kind: self.kind(),
-                    payload: Some(PaletteOpenPayload::CommandInput(format!("{} ", spec.id))),
+                    options: PaletteOpenOptions::input(format!("{} ", spec.id)),
                 });
             }
         }
@@ -129,7 +123,7 @@ impl PaletteProvider for CommandPaletteProvider {
         // 3. Fallback: reopen preserving current input.
         Ok(PaletteSubmitEffect::Reopen {
             kind: self.kind(),
-            payload: Some(PaletteOpenPayload::CommandInput(ctx.input.to_string())),
+            options: PaletteOpenOptions::input(ctx.input.to_string()),
         })
     }
 
@@ -150,10 +144,7 @@ impl PaletteProvider for CommandPaletteProvider {
             });
         }
 
-        let value = match &candidate.payload {
-            PalettePayload::Opaque(value) => value.clone(),
-            PalettePayload::None => candidate.plain_left_text(),
-        };
+        let value = candidate.id().as_str().to_string();
 
         Ok(PaletteTabEffect::SetInput {
             // Keep completion uniform so the next keystroke can always start an argument.
@@ -250,7 +241,7 @@ struct CommandInputAnalysis<'a> {
     active_argument: Option<ActiveArgument<'a>>,
 }
 
-fn format_left(command_id: &str, args: &[crate::command::ArgSpec]) -> Vec<PaletteTextPart> {
+fn format_label(command_id: &str, args: &[crate::command::ArgSpec]) -> Vec<PaletteTextPart> {
     let usage = usage_text(args);
     let mut parts = vec![PaletteTextPart::primary(command_id)];
     if !usage.is_empty() {
@@ -294,14 +285,21 @@ fn ui_type_label(kind: ArgKind) -> &'static str {
     }
 }
 
+fn command_candidate(
+    command_id: &str,
+    args: &[crate::command::ArgSpec],
+    title: &str,
+) -> PaletteCandidate {
+    PaletteRow::new(command_id)
+        .label_matchable_parts(format_label(command_id, args))
+        .detail_matchable_text(title)
+        .into_candidate()
+}
+
 fn enum_value_candidate(value: &str) -> PaletteCandidate {
-    PaletteCandidate {
-        id: value.to_string(),
-        left: vec![PaletteTextPart::primary(value)],
-        right: Vec::new(),
-        search_texts: vec![PaletteSearchText::new(value)],
-        payload: PalettePayload::Opaque(value.to_string()),
-    }
+    PaletteRow::new(value)
+        .label_matchable_text(value)
+        .into_candidate()
 }
 
 fn analyze_command_input(input: &str) -> CommandInputAnalysis<'_> {
@@ -366,10 +364,7 @@ fn selected_enum_value<'a>(
     analysis
         .active_argument
         .is_some_and(ActiveArgument::is_enum)
-        .then_some(match &candidate.payload {
-            PalettePayload::Opaque(value) => value.as_str(),
-            PalettePayload::None => "",
-        })
+        .then_some(candidate.id().as_str())
         .filter(|value| !value.is_empty())
 }
 
@@ -417,7 +412,7 @@ fn submit_selected_enum_candidate(
         })),
         Err(_) => Ok(Some(PaletteSubmitEffect::Reopen {
             kind: PaletteKind::Command,
-            payload: Some(PaletteOpenPayload::CommandInput(synthesized)),
+            options: PaletteOpenOptions::input(synthesized),
         })),
     }
 }
@@ -456,7 +451,12 @@ fn rank_command_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) 
                 .score
                 .cmp(&left_meta.score)
                 .then_with(|| left_meta.tie_len.cmp(&right_meta.tie_len))
-                .then_with(|| left_candidate.id.cmp(&right_candidate.id))
+                .then_with(|| {
+                    left_candidate
+                        .id()
+                        .as_str()
+                        .cmp(right_candidate.id().as_str())
+                })
         },
     );
 
@@ -484,8 +484,8 @@ fn filter_enum_candidates(input: &str, candidates: &mut Vec<PaletteCandidate>) {
 }
 
 fn score_command_candidate(query: &str, candidate: &PaletteCandidate) -> Option<CandidateScore> {
-    let id = candidate.id.to_ascii_lowercase();
-    let search_text = candidate.search_text().to_ascii_lowercase();
+    let id = candidate.id().as_str().to_ascii_lowercase();
+    let search_text = candidate.match_text().to_ascii_lowercase();
 
     let id_score = score_id(query, &id);
     let search_text_score = score_search_text(query, &search_text);
@@ -572,35 +572,36 @@ fn is_subsequence(query: &str, text: &str) -> bool {
     false
 }
 
-fn format_search_texts(
-    command_id: &str,
-    title: &str,
-    args: &[crate::command::ArgSpec],
-) -> Vec<PaletteSearchText> {
-    let usage = usage_text(args);
-    let mut parts = vec![PaletteSearchText::new(title)];
-    if !usage.is_empty() {
-        parts.push(PaletteSearchText::new(usage));
-    }
-    parts.push(PaletteSearchText::new(command_id));
-    parts
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::app::AppState;
     use crate::app::Mode;
     use crate::command::Command;
     use crate::extension::ExtensionUiSnapshot;
-    use crate::input::InputHistoryRecord;
+    use crate::input::{InputHistoryRecord, InputHistorySnapshot};
     use crate::palette::{
-        PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenPayload, PalettePostAction,
-        PaletteProvider, PaletteSubmitEffect, PaletteTabEffect,
+        PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenOptions, PalettePostAction,
+        PaletteProvider, PaletteRegistry, PaletteSessionController, PaletteSubmitEffect,
+        PaletteTabEffect,
     };
 
     use super::{CommandPaletteProvider, post_submit_command_policy_context};
 
     fn ids(list: &[crate::palette::PaletteCandidate]) -> Vec<String> {
-        list.iter().map(|candidate| candidate.id.clone()).collect()
+        list.iter()
+            .map(|candidate| candidate.id().as_str().to_string())
+            .collect()
+    }
+
+    fn history_snapshot(entries: &[&str]) -> InputHistorySnapshot {
+        InputHistorySnapshot::from_entries(entries)
+    }
+
+    fn label_text(item: &crate::palette::PaletteItemView) -> String {
+        item.label
+            .iter()
+            .map(|part| part.text.as_str())
+            .collect::<String>()
     }
 
     fn extension_snapshot(search_active: bool) -> ExtensionUiSnapshot {
@@ -625,7 +626,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
-            open_payload: None,
         };
         provider.list(&ctx).expect("list should be built")
     }
@@ -642,7 +642,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
-            open_payload: None,
         };
 
         let command_ctx = post_submit_command_policy_context(&ctx);
@@ -663,12 +662,11 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
-            open_payload: None,
         };
         let candidates = provider.list(&ctx).expect("list should be built");
         let selected = candidates
             .iter()
-            .find(|candidate| candidate.id == selected_id)
+            .find(|candidate| candidate.id().as_str() == selected_id)
             .expect("selected candidate should exist");
         provider
             .on_submit(&ctx, Some(selected))
@@ -684,12 +682,11 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
-            open_payload: None,
         };
         let candidates = provider.list(&ctx).expect("list should be built");
         let selected = candidates
             .iter()
-            .find(|candidate| candidate.id == selected_id)
+            .find(|candidate| candidate.id().as_str() == selected_id)
             .expect("selected candidate should exist");
         provider
             .on_tab(&ctx, Some(selected))
@@ -705,9 +702,136 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input,
-            open_payload: None,
         };
         provider.assistive_text(&ctx, None)
+    }
+
+    #[test]
+    fn session_selection_resets_when_command_input_filters_candidates() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                PaletteOpenOptions::default(),
+                None,
+            )
+            .expect("command palette should open");
+
+        let initial_view = session.view().expect("palette should be visible");
+        assert!(initial_view.items.len() > 1);
+
+        assert!(session.select_next_item());
+        let selected_view = session.view().expect("palette should be visible");
+        assert_eq!(selected_view.selected_idx, 1);
+
+        session
+            .insert_text(&registry, &app, &extensions, "p")
+            .expect("typing should succeed");
+        let filtered_view = session.view().expect("palette should be visible");
+        assert_eq!(filtered_view.selected_idx, 0);
+        assert_eq!(filtered_view.input, "p");
+    }
+
+    #[test]
+    fn session_recalls_command_input_history_and_restores_draft() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                PaletteOpenOptions::default(),
+                Some(history_snapshot(&["next-page", "prev-page"])),
+            )
+            .expect("command palette should open");
+
+        assert!(session.select_next_item());
+
+        session
+            .insert_text(&registry, &app, &extensions, "z")
+            .expect("typing should succeed");
+
+        session
+            .recall_history(&registry, &app, &extensions, true)
+            .expect("history recall should succeed");
+        let older_view = session.view().expect("palette should be visible");
+        assert_eq!(older_view.input, "prev-page");
+        assert_eq!(older_view.selected_idx, 0);
+        assert_eq!(
+            older_view.items.first().map(label_text),
+            Some("prev-page".to_string())
+        );
+
+        session
+            .recall_history(&registry, &app, &extensions, true)
+            .expect("history recall should succeed");
+        let oldest_view = session.view().expect("palette should be visible");
+        assert_eq!(oldest_view.input, "next-page");
+        assert_eq!(oldest_view.selected_idx, 0);
+        assert_eq!(
+            oldest_view.items.first().map(label_text),
+            Some("next-page".to_string())
+        );
+
+        session
+            .recall_history(&registry, &app, &extensions, false)
+            .expect("history recall should succeed");
+        let newer_view = session.view().expect("palette should be visible");
+        assert_eq!(newer_view.input, "prev-page");
+
+        session
+            .recall_history(&registry, &app, &extensions, false)
+            .expect("draft restore should succeed");
+        let restored_view = session.view().expect("palette should be visible");
+        assert_eq!(restored_view.input, "z");
+    }
+
+    #[test]
+    fn tab_completion_resets_command_history_navigation_state() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                PaletteOpenOptions::default(),
+                Some(history_snapshot(&["next-page", "prev-page"])),
+            )
+            .expect("command palette should open");
+
+        session
+            .recall_history(&registry, &app, &extensions, true)
+            .expect("history recall should succeed");
+        session
+            .complete(&registry, &app, &extensions)
+            .expect("tab completion should succeed");
+
+        let completed_view = session.view().expect("palette should be visible");
+        assert_eq!(completed_view.input, "prev-page ");
+
+        session
+            .recall_history(&registry, &app, &extensions, false)
+            .expect("down after tab should be handled");
+
+        let after_down_view = session.view().expect("palette should be visible");
+        assert_eq!(after_down_view.input, "prev-page ");
     }
 
     #[test]
@@ -720,29 +844,44 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
-            open_payload: None,
         };
 
         let list = provider.list(&ctx).expect("list should be built");
         assert!(
             !list
                 .iter()
-                .any(|candidate| candidate.id == "next-search-hit")
+                .any(|candidate| candidate.id().as_str() == "next-search-hit")
         );
         assert!(
             !list
                 .iter()
-                .any(|candidate| candidate.id == "search-results")
+                .any(|candidate| candidate.id().as_str() == "search-results")
         );
         assert!(
             !list
                 .iter()
-                .any(|candidate| candidate.id == "prev-search-hit")
+                .any(|candidate| candidate.id().as_str() == "prev-search-hit")
         );
-        assert!(!list.iter().any(|candidate| candidate.id == "open-palette"));
-        assert!(!list.iter().any(|candidate| candidate.id == "submit-search"));
-        assert!(!list.iter().any(|candidate| candidate.id == "search-goto"));
-        assert!(!list.iter().any(|candidate| candidate.id == "history-goto"));
+        assert!(
+            !list
+                .iter()
+                .any(|candidate| candidate.id().as_str() == "open-palette")
+        );
+        assert!(
+            !list
+                .iter()
+                .any(|candidate| candidate.id().as_str() == "submit-search")
+        );
+        assert!(
+            !list
+                .iter()
+                .any(|candidate| candidate.id().as_str() == "search-goto")
+        );
+        assert!(
+            !list
+                .iter()
+                .any(|candidate| candidate.id().as_str() == "history-goto")
+        );
     }
 
     #[test]
@@ -755,21 +894,20 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "",
-            open_payload: None,
         };
 
         let list = provider.list(&ctx).expect("list should be built");
         assert!(
             list.iter()
-                .any(|candidate| candidate.id == "next-search-hit")
+                .any(|candidate| candidate.id().as_str() == "next-search-hit")
         );
         assert!(
             list.iter()
-                .any(|candidate| candidate.id == "search-results")
+                .any(|candidate| candidate.id().as_str() == "search-results")
         );
         assert!(
             list.iter()
-                .any(|candidate| candidate.id == "prev-search-hit")
+                .any(|candidate| candidate.id().as_str() == "prev-search-hit")
         );
     }
 
@@ -844,7 +982,7 @@ mod tests {
     fn scoring_prioritizes_exact_id_match() {
         let list = command_list_for_input("quit", false);
         assert_eq!(
-            list.first().map(|candidate| candidate.id.as_str()),
+            list.first().map(|candidate| candidate.id().as_str()),
             Some("quit")
         );
     }
@@ -868,7 +1006,7 @@ mod tests {
     fn scoring_supports_hyphen_acronym_query() {
         let list = command_list_for_input("nsh", true);
         assert_eq!(
-            list.first().map(|candidate| candidate.id.as_str()),
+            list.first().map(|candidate| candidate.id().as_str()),
             Some("next-search-hit")
         );
     }
@@ -922,7 +1060,7 @@ mod tests {
             effect,
             PaletteSubmitEffect::Reopen {
                 kind: PaletteKind::Command,
-                payload: Some(PaletteOpenPayload::CommandInput("zoom ".to_string())),
+                options: PaletteOpenOptions::input("zoom "),
             }
         );
     }
@@ -950,7 +1088,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "quit",
-            open_payload: None,
         };
 
         let effect = provider
@@ -977,7 +1114,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "layout-spread",
-            open_payload: None,
         };
 
         let effect = provider
@@ -1124,7 +1260,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "submit-search hello",
-            open_payload: None,
         };
 
         let err = provider
@@ -1146,7 +1281,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Command,
             input: "first-page hoge",
-            open_payload: None,
         };
 
         let err = provider

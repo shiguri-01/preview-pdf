@@ -6,7 +6,7 @@ use crate::backend::SharedPdfBackend;
 use crate::event::AppEvent;
 use crate::extension::Extension;
 use crate::input::{AppInputEvent, InputHookResult};
-pub use palette::HistoryPaletteProvider;
+pub use palette::{HistoryPaletteProvider, HistoryUiSnapshot};
 pub use state::{HistoryCommandPort, HistoryState};
 
 pub struct HistoryExtension;

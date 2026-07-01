@@ -1,17 +1,25 @@
+mod candidate;
+mod effect;
 mod kind;
-mod manager;
 mod matcher;
+mod provider;
 pub mod providers;
 mod registry;
-mod types;
+mod request;
+mod row;
+mod session_controller;
+mod text;
+mod view;
 
+pub use candidate::{PaletteCandidate, PaletteCandidateId};
+pub use effect::{PalettePostAction, PaletteSubmitEffect, PaletteTabEffect};
 pub use kind::PaletteKind;
-pub use manager::PaletteManager;
-pub use registry::PaletteRegistry;
 #[cfg(test)]
-pub use types::PaletteAppSnapshot;
-pub use types::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView, PaletteOpenPayload,
-    PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect,
-    PaletteTabEffect, PaletteTextPart, PaletteTextTone, PaletteView,
-};
+pub use provider::PaletteAppSnapshot;
+pub use provider::{PaletteContext, PaletteInputMode, PaletteProvider};
+pub use registry::PaletteRegistry;
+pub use request::PaletteOpenOptions;
+pub use row::{PageIndex, PaletteRow};
+pub use session_controller::PaletteSessionController;
+pub use text::{PaletteTextPart, PaletteTextTone};
+pub use view::{PaletteItemView, PaletteView};

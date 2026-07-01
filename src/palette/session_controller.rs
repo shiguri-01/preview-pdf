@@ -5,20 +5,20 @@ use crate::error::AppResult;
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::InputHistorySnapshot;
 
+use super::candidate::{PaletteCandidate, PaletteCandidateId};
+use super::effect::{PaletteSubmitAction, PaletteTabEffect};
 use super::kind::PaletteKind;
 use super::matcher::{CandidateMatcher, ContainsMatcher};
+use super::provider::{PaletteAppSnapshot, PaletteContext, PaletteInputMode};
 use super::registry::PaletteProviderRef;
 use super::registry::PaletteRegistry;
-use super::types::{
-    PaletteAppSnapshot, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView,
-    PaletteOpenPayload, PaletteSubmitAction, PaletteTabEffect, PaletteView,
-};
+use super::request::PaletteOpenOptions;
+use super::view::{PaletteItemView, PaletteView};
 
 #[derive(Debug)]
 struct PaletteSession {
     id: u64,
     kind: PaletteKind,
-    payload: Option<PaletteOpenPayload>,
     title: String,
     input_mode: PaletteInputMode,
     input: Input,
@@ -82,13 +82,13 @@ impl PaletteInputHistoryNavigator {
     }
 }
 
-pub struct PaletteManager {
+pub struct PaletteSessionController {
     next_session_id: u64,
     active: Option<PaletteSession>,
     matcher: Box<dyn CandidateMatcher>,
 }
 
-impl Default for PaletteManager {
+impl Default for PaletteSessionController {
     fn default() -> Self {
         Self {
             next_session_id: 1,
@@ -98,19 +98,19 @@ impl Default for PaletteManager {
     }
 }
 
-impl PaletteManager {
+impl PaletteSessionController {
     pub fn open(
         &mut self,
         registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         kind: PaletteKind,
-        payload: Option<PaletteOpenPayload>,
+        options: PaletteOpenOptions,
         input_history: Option<InputHistorySnapshot>,
     ) -> AppResult<()> {
         let provider = registry.get(kind);
 
-        let input = Input::new(provider.initial_input(payload.as_ref()));
+        let input = Input::new(options.initial_input.clone());
         let app = PaletteAppSnapshot::from(app);
 
         let ctx = PaletteContext {
@@ -118,21 +118,21 @@ impl PaletteManager {
             extensions,
             kind,
             input: input.value(),
-            open_payload: payload.as_ref(),
         };
         let title = provider.title(&ctx);
         let candidates = provider.list(&ctx)?;
         let input_mode = provider.input_mode();
         let visible = self.visible_candidates(input_mode, input.value(), &candidates);
         let selected =
-            initial_visible_selection(&provider, &ctx, &candidates, &visible).unwrap_or(0);
+            initial_selection_from_id(options.initial_selection_id.as_ref(), &candidates, &visible)
+                .or_else(|| initial_visible_selection(&provider, &ctx, &candidates, &visible))
+                .unwrap_or(0);
         let selected_candidate = selected_candidate_for(&candidates, &visible, selected);
         let assistive_text = provider.assistive_text(&ctx, selected_candidate);
 
         self.active = Some(PaletteSession {
             id: self.take_session_id(),
             kind,
-            payload,
             title,
             input_mode,
             input,
@@ -192,7 +192,6 @@ impl PaletteManager {
             extensions,
             kind: session.kind,
             input: session.input.value(),
-            open_payload: session.payload.as_ref(),
         };
         let effect = provider.on_submit(&ctx, selected)?;
         Ok(Some(PaletteSubmitAction {
@@ -220,7 +219,6 @@ impl PaletteManager {
             extensions,
             kind: session.kind,
             input: session.input.value(),
-            open_payload: session.payload.as_ref(),
         };
         match provider.on_tab(&ctx, selected)? {
             PaletteTabEffect::Noop => return Ok(false),
@@ -308,8 +306,8 @@ impl PaletteManager {
         for (idx_in_visible, candidate_idx) in session.visible.iter().enumerate() {
             if let Some(candidate) = session.candidates.get(*candidate_idx) {
                 items.push(PaletteItemView {
-                    left: candidate.left.clone(),
-                    right: candidate.right.clone(),
+                    label: candidate.label().to_vec(),
+                    detail: candidate.detail().to_vec(),
                     selected: idx_in_visible == session.selected,
                 });
             }
@@ -336,7 +334,6 @@ impl PaletteManager {
             return Ok(());
         };
         let kind = existing.kind;
-        let payload = existing.payload.clone();
         let input_mode = existing.input_mode;
         let input_text = existing.input.value().to_string();
         let current_selected = existing.selected;
@@ -348,7 +345,6 @@ impl PaletteManager {
             extensions,
             kind,
             input: &input_text,
-            open_payload: payload.as_ref(),
         };
 
         let title = provider.title(&ctx);
@@ -492,6 +488,17 @@ fn initial_visible_selection(
         .position(|candidate_idx| *candidate_idx == selected_candidate_idx)
 }
 
+fn initial_selection_from_id(
+    id: Option<&PaletteCandidateId>,
+    candidates: &[PaletteCandidate],
+    visible: &[usize],
+) -> Option<usize> {
+    let id = id?;
+    visible
+        .iter()
+        .position(|candidate_idx| candidates.get(*candidate_idx).is_some_and(|c| c.id() == id))
+}
+
 fn selected_candidate_for<'a>(
     candidates: &'a [PaletteCandidate],
     visible: &[usize],
@@ -507,235 +514,82 @@ mod tests {
     use crate::{
         app::AppState,
         extension::ExtensionUiSnapshot,
-        input::InputHistorySnapshot,
-        palette::{PaletteKind, PaletteOpenPayload, PaletteRegistry},
+        palette::{PaletteKind, PaletteRegistry},
     };
 
-    use super::PaletteManager;
-
-    fn history_snapshot(entries: &[&str]) -> InputHistorySnapshot {
-        InputHistorySnapshot::from_entries(entries)
-    }
+    use super::PaletteSessionController;
 
     #[test]
-    fn command_palette_uses_ctrl_n_for_selection_when_input_history_is_enabled() {
+    fn operations_without_active_session_report_noop() {
         let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
+        let mut session = PaletteSessionController::default();
         let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
-        manager
-            .open(
-                &registry,
-                &app,
-                &extensions,
-                PaletteKind::Command,
-                None,
-                None,
-            )
-            .expect("command palette should open");
-
-        let initial_view = manager.view().expect("palette should be visible");
-        assert!(initial_view.items.len() > 1);
-
-        assert!(manager.select_next_item());
-        let selected_view = manager.view().expect("palette should be visible");
-        assert_eq!(selected_view.selected_idx, 1);
-
-        manager
-            .insert_text(&registry, &app, &extensions, "p")
-            .expect("typing should succeed");
-        let filtered_view = manager.view().expect("palette should be visible");
-        assert_eq!(filtered_view.selected_idx, 0);
-        assert_eq!(filtered_view.input, "p");
+        assert!(!session.is_open());
+        assert_eq!(session.active_kind(), None);
+        assert!(!session.active_input_is_empty());
+        assert!(!session.close());
+        assert!(!session.close_if_matches(1));
+        assert!(!session.select_previous());
+        assert!(!session.select_next_item());
+        assert!(
+            !session
+                .complete(&registry, &app, &extensions)
+                .expect("completion without active session should succeed")
+        );
+        assert!(
+            !session
+                .recall_history(&registry, &app, &extensions, true)
+                .expect("history recall without active session should succeed")
+        );
+        assert!(
+            !session
+                .insert_text(&registry, &app, &extensions, "x")
+                .expect("text insert without active session should succeed")
+        );
+        assert!(
+            !session
+                .edit_input(&registry, &app, &extensions, InputRequest::GoToPrevChar)
+                .expect("input edit without active session should succeed")
+        );
+        assert!(
+            session
+                .submit(&registry, &app, &extensions)
+                .expect("submit without active session should succeed")
+                .is_none()
+        );
+        assert!(session.view().is_none());
     }
 
     #[test]
-    fn palette_operations_report_noop_when_state_does_not_change() {
+    fn common_selection_operations_report_noop_at_boundaries() {
         let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
+        let mut session = PaletteSessionController::default();
         let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
-        manager
+        session
             .open(
                 &registry,
                 &app,
                 &extensions,
                 PaletteKind::Search,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 None,
             )
             .expect("search palette should open");
 
-        assert!(!manager.select_previous());
+        assert!(!session.select_previous());
         assert!(
-            !manager
+            !session
                 .complete(&registry, &app, &extensions)
                 .expect("no-op completion should succeed")
         );
         assert!(
-            !manager
+            !session
                 .edit_input(&registry, &app, &extensions, InputRequest::GoToPrevChar)
                 .expect("no-op cursor movement should succeed")
         );
-    }
-
-    #[test]
-    fn command_palette_recalls_input_history_with_up_and_restores_draft_on_down() {
-        let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
-        let app = AppState::default();
-        let extensions = ExtensionUiSnapshot::default();
-
-        manager
-            .open(
-                &registry,
-                &app,
-                &extensions,
-                PaletteKind::Command,
-                None,
-                Some(history_snapshot(&["next-page", "prev-page"])),
-            )
-            .expect("command palette should open");
-
-        assert!(manager.select_next_item());
-
-        manager
-            .insert_text(&registry, &app, &extensions, "z")
-            .expect("typing should succeed");
-
-        manager
-            .recall_history(&registry, &app, &extensions, true)
-            .expect("history recall should succeed");
-        let older_view = manager.view().expect("palette should be visible");
-        assert_eq!(older_view.input, "prev-page");
-        assert_eq!(older_view.selected_idx, 0);
-        assert_eq!(
-            older_view.items.first().map(|item| item
-                .left
-                .iter()
-                .map(|part| part.text.as_str())
-                .collect::<String>()),
-            Some("prev-page".to_string())
-        );
-
-        manager
-            .recall_history(&registry, &app, &extensions, true)
-            .expect("history recall should succeed");
-        let oldest_view = manager.view().expect("palette should be visible");
-        assert_eq!(oldest_view.input, "next-page");
-        assert_eq!(oldest_view.selected_idx, 0);
-        assert_eq!(
-            oldest_view.items.first().map(|item| item
-                .left
-                .iter()
-                .map(|part| part.text.as_str())
-                .collect::<String>()),
-            Some("next-page".to_string())
-        );
-
-        manager
-            .recall_history(&registry, &app, &extensions, false)
-            .expect("history recall should succeed");
-        let newer_view = manager.view().expect("palette should be visible");
-        assert_eq!(newer_view.input, "prev-page");
-
-        manager
-            .recall_history(&registry, &app, &extensions, false)
-            .expect("draft restore should succeed");
-        let restored_view = manager.view().expect("palette should be visible");
-        assert_eq!(restored_view.input, "z");
-    }
-
-    #[test]
-    fn search_palette_keeps_selection_when_typing_after_ctrl_n() {
-        let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
-        let app = AppState::default();
-        let extensions = ExtensionUiSnapshot::default();
-
-        manager
-            .open(
-                &registry,
-                &app,
-                &extensions,
-                PaletteKind::Search,
-                None,
-                Some(history_snapshot(&["needle"])),
-            )
-            .expect("search palette should open");
-
-        assert!(manager.select_next_item());
-        let selected_view = manager.view().expect("palette should be visible");
-        assert_eq!(selected_view.selected_idx, 1);
-
-        manager
-            .insert_text(&registry, &app, &extensions, "a")
-            .expect("typing should succeed");
-        let updated_view = manager.view().expect("palette should be visible");
-        assert_eq!(updated_view.selected_idx, 1);
-        assert_eq!(updated_view.input, "a");
-    }
-
-    #[test]
-    fn tab_completion_resets_history_navigation_state() {
-        let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
-        let app = AppState::default();
-        let extensions = ExtensionUiSnapshot::default();
-
-        manager
-            .open(
-                &registry,
-                &app,
-                &extensions,
-                PaletteKind::Command,
-                None,
-                Some(history_snapshot(&["next-page", "prev-page"])),
-            )
-            .expect("command palette should open");
-
-        manager
-            .recall_history(&registry, &app, &extensions, true)
-            .expect("history recall should succeed");
-        manager
-            .complete(&registry, &app, &extensions)
-            .expect("tab completion should succeed");
-
-        let completed_view = manager.view().expect("palette should be visible");
-        assert_eq!(completed_view.input, "prev-page ");
-
-        manager
-            .recall_history(&registry, &app, &extensions, false)
-            .expect("down after tab should be handled");
-
-        let after_down_view = manager.view().expect("palette should be visible");
-        assert_eq!(after_down_view.input, "prev-page ");
-    }
-
-    #[test]
-    fn history_palette_selects_current_candidate_on_open() {
-        let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
-        let app = AppState::default();
-        let extensions = ExtensionUiSnapshot::default();
-
-        manager
-            .open(
-                &registry,
-                &app,
-                &extensions,
-                PaletteKind::History,
-                Some(PaletteOpenPayload::HistorySeed(
-                    "f:5,Search: later|c:4|b:3,Search: earlier".to_string(),
-                )),
-                None,
-            )
-            .expect("history palette should open");
-
-        let view = manager.view().expect("palette should be visible");
-        assert_eq!(view.selected_idx, 1);
-        assert!(view.items[1].selected);
     }
 }

@@ -6,9 +6,8 @@ use crate::input::shortcut::{
     ShortcutKey, format_shortcut_alternatives_tight, format_shortcut_key,
 };
 use crate::palette::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteOpenPayload,
-    PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect,
-    PaletteTextPart,
+    PageIndex, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteOpenOptions,
+    PalettePostAction, PaletteProvider, PaletteRow, PaletteSubmitEffect, PaletteTextPart,
 };
 
 use super::state::SearchPaletteEntry;
@@ -33,51 +32,14 @@ impl PaletteProvider for SearchPaletteProvider {
         false
     }
 
-    fn initial_selected_candidate(
-        &self,
-        ctx: &PaletteContext<'_>,
-        candidates: &[PaletteCandidate],
-    ) -> Option<usize> {
-        let PaletteOpenPayload::Search { matcher, .. } = ctx.open_payload? else {
-            return None;
-        };
-
-        candidates
-            .iter()
-            .position(|candidate| match &candidate.payload {
-                PalettePayload::Opaque(id) => SearchMatcherKind::parse(id) == Some(*matcher),
-                PalettePayload::None => false,
-            })
-    }
-
     fn list(&self, _ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
         Ok(vec![
-            PaletteCandidate {
-                id: SearchMatcherKind::ContainsInsensitive.id().to_string(),
-                left: vec![PaletteTextPart::primary("Contains (case insensitive)")],
-                right: Vec::new(),
-                search_texts: vec![
-                    PaletteSearchText::new("contains insensitive"),
-                    PaletteSearchText::new("contains case insensitive"),
-                    PaletteSearchText::new(SearchMatcherKind::ContainsInsensitive.id()),
-                ],
-                payload: PalettePayload::Opaque(
-                    SearchMatcherKind::ContainsInsensitive.id().to_string(),
-                ),
-            },
-            PaletteCandidate {
-                id: SearchMatcherKind::ContainsSensitive.id().to_string(),
-                left: vec![PaletteTextPart::primary("Contains (case sensitive)")],
-                right: Vec::new(),
-                search_texts: vec![
-                    PaletteSearchText::new("contains sensitive"),
-                    PaletteSearchText::new("contains case sensitive"),
-                    PaletteSearchText::new(SearchMatcherKind::ContainsSensitive.id()),
-                ],
-                payload: PalettePayload::Opaque(
-                    SearchMatcherKind::ContainsSensitive.id().to_string(),
-                ),
-            },
+            PaletteRow::new(SearchMatcherKind::ContainsInsensitive.id())
+                .label_matchable_text("Contains (case insensitive)")
+                .into_candidate(),
+            PaletteRow::new(SearchMatcherKind::ContainsSensitive.id())
+                .label_matchable_text("Contains (case sensitive)")
+                .into_candidate(),
         ])
     }
 
@@ -90,15 +52,12 @@ impl PaletteProvider for SearchPaletteProvider {
         if query.is_empty() {
             return Ok(PaletteSubmitEffect::Reopen {
                 kind: self.kind(),
-                payload: None,
+                options: PaletteOpenOptions::default(),
             });
         }
 
         let matcher = selected
-            .and_then(|c| match &c.payload {
-                PalettePayload::Opaque(id) => SearchMatcherKind::parse(id),
-                PalettePayload::None => None,
-            })
+            .and_then(|c| SearchMatcherKind::parse(c.id().as_str()))
             .unwrap_or(SearchMatcherKind::ContainsInsensitive);
 
         Ok(PaletteSubmitEffect::Dispatch {
@@ -160,15 +119,12 @@ impl PaletteProvider for SearchResultsPaletteProvider {
         } else {
             None
         };
-        candidates
-            .iter()
-            .position(|candidate| match &candidate.payload {
-                PalettePayload::Opaque(page) => page
-                    .parse::<usize>()
-                    .ok()
-                    .is_some_and(|page| page == primary_page || Some(page) == trailing_page),
-                PalettePayload::None => false,
+        candidates.iter().position(|candidate| {
+            search_result_entry_for_candidate(ctx, candidate).is_some_and(|entry| {
+                let page = entry.page + 1;
+                page == primary_page || Some(page) == trailing_page
             })
+        })
     }
 
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
@@ -206,16 +162,14 @@ impl PaletteProvider for SearchResultsPaletteProvider {
         let Some(candidate) = selected else {
             return Ok(PaletteSubmitEffect::Close);
         };
-        let page = match &candidate.payload {
-            PalettePayload::Opaque(value) => value.parse::<usize>().ok(),
-            PalettePayload::None => None,
-        };
-        let Some(page) = page else {
+        let Some(entry) = search_result_entry_for_candidate(_ctx, candidate) else {
             return Ok(PaletteSubmitEffect::Close);
         };
 
         Ok(PaletteSubmitEffect::Dispatch {
-            command: Command::SearchResultGoto { page },
+            command: Command::SearchResultGoto {
+                page: entry.page + 1,
+            },
             history_record: None,
             next: PalettePostAction::Close,
         })
@@ -298,94 +252,82 @@ fn snippet_parts(entry: &SearchPaletteEntry) -> Vec<PaletteTextPart> {
 }
 
 fn result_candidate(entry: &SearchPaletteEntry) -> PaletteCandidate {
-    let page = page_label(entry.page);
-    PaletteCandidate {
-        id: format!("result-{}", entry.index),
-        left: {
-            let mut parts = vec![
-                PaletteTextPart::primary(entry.index.to_string()),
-                PaletteTextPart::primary("  "),
-            ];
-            parts.extend(snippet_parts(entry));
-            parts
-        },
-        right: vec![PaletteTextPart::secondary(page.clone())],
-        search_texts: vec![
-            PaletteSearchText::new(entry.index.to_string()),
-            PaletteSearchText::new(entry.snippet.clone()),
-            PaletteSearchText::new(page.clone()),
-            PaletteSearchText::new(format!("page {}", entry.page + 1)),
-            PaletteSearchText::new((entry.page + 1).to_string()),
-        ],
-        payload: PalettePayload::Opaque((entry.page + 1).to_string()),
-    }
+    let mut parts = vec![
+        PaletteTextPart::primary(entry.index.to_string()),
+        PaletteTextPart::primary("  "),
+    ];
+    parts.extend(snippet_parts(entry));
+    PaletteRow::new(format!("result-{}", entry.index))
+        .label_matchable_parts(parts)
+        .detail_page(PageIndex::zero_based(entry.page))
+        .into_candidate()
+}
+
+fn search_result_entry_for_candidate<'a>(
+    ctx: &'a PaletteContext<'_>,
+    candidate: &PaletteCandidate,
+) -> Option<&'a SearchPaletteEntry> {
+    let index = candidate
+        .id()
+        .as_str()
+        .strip_prefix("result-")?
+        .parse::<usize>()
+        .ok()?;
+    ctx.extensions
+        .search
+        .results_entries
+        .iter()
+        .find(|entry| entry.index == index)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        app::AppState,
         app::{PageLayoutMode, SpreadCoverPolicy},
-        command::SearchMatcherKind,
         extension::ExtensionUiSnapshot,
+        input::InputHistorySnapshot,
         palette::{
-            PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenPayload, PaletteProvider,
+            PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenOptions, PaletteProvider,
+            PaletteRegistry, PaletteSessionController,
         },
         search::state::SearchPaletteEntry,
     };
 
-    use super::{SearchPaletteProvider, SearchResultsPaletteProvider};
+    use super::SearchResultsPaletteProvider;
 
-    #[test]
-    fn search_payload_prefills_query_input() {
-        let provider = SearchPaletteProvider;
-        let open_payload = PaletteOpenPayload::Search {
-            query: "needle".to_string(),
-            matcher: SearchMatcherKind::ContainsSensitive,
-        };
-
-        assert_eq!(provider.initial_input(Some(&open_payload)), "needle");
+    fn history_snapshot(entries: &[&str]) -> InputHistorySnapshot {
+        InputHistorySnapshot::from_entries(entries)
     }
 
     #[test]
-    fn search_payload_selects_current_matcher() {
-        let provider = SearchPaletteProvider;
-        let app = PaletteAppSnapshot::default();
+    fn search_session_keeps_selected_matcher_when_typing_query() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
-        let open_payload = PaletteOpenPayload::Search {
-            query: "needle".to_string(),
-            matcher: SearchMatcherKind::ContainsSensitive,
-        };
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::Search,
-            input: "needle",
-            open_payload: Some(&open_payload),
-        };
-        let candidates = provider.list(&ctx).expect("search list should build");
 
-        assert_eq!(
-            provider.initial_selected_candidate(&ctx, &candidates),
-            Some(1)
-        );
-    }
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Search,
+                PaletteOpenOptions::default(),
+                Some(history_snapshot(&["needle"])),
+            )
+            .expect("search palette should open");
 
-    #[test]
-    fn non_search_payload_keeps_default_selection() {
-        let provider = SearchPaletteProvider;
-        let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::default();
-        let open_payload = PaletteOpenPayload::CommandInput("needle".to_string());
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::Search,
-            input: "needle",
-            open_payload: Some(&open_payload),
-        };
-        let candidates = provider.list(&ctx).expect("search list should build");
+        assert!(session.select_next_item());
+        let selected_view = session.view().expect("palette should be visible");
+        assert_eq!(selected_view.selected_idx, 1);
 
-        assert_eq!(provider.initial_selected_candidate(&ctx, &candidates), None);
+        session
+            .insert_text(&registry, &app, &extensions, "a")
+            .expect("typing should succeed");
+        let updated_view = session.view().expect("palette should be visible");
+        assert_eq!(updated_view.selected_idx, 1);
+        assert_eq!(updated_view.input, "a");
     }
 
     #[test]
@@ -411,16 +353,15 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::SearchResults,
             input: "",
-            open_payload: None,
         };
 
         let list = provider.list(&ctx).expect("results list should build");
         assert_eq!(list.len(), 1);
-        assert_eq!(list[0].left[0].text, "1");
-        assert_eq!(list[0].left[2].text, "…foo ");
-        assert_eq!(list[0].left[3].text, "needle");
-        assert_eq!(list[0].left[4].text, " bar…");
-        assert_eq!(list[0].right[0].text, "p.5");
+        assert_eq!(list[0].label()[0].text, "1");
+        assert_eq!(list[0].label()[2].text, "…foo ");
+        assert_eq!(list[0].label()[3].text, "needle");
+        assert_eq!(list[0].label()[4].text, " bar…");
+        assert_eq!(list[0].detail()[0].text, "p.5");
     }
 
     #[test]
@@ -460,7 +401,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::SearchResults,
             input: "",
-            open_payload: None,
         };
         let candidates = provider.list(&ctx).expect("results list should build");
 
@@ -507,7 +447,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::SearchResults,
             input: "",
-            open_payload: None,
         };
         let candidates = provider.list(&ctx).expect("results list should build");
 
@@ -527,7 +466,6 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::SearchResults,
             input: "",
-            open_payload: None,
         };
 
         assert_eq!(

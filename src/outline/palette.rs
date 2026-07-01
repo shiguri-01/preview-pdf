@@ -2,11 +2,9 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::input::shortcut::format_shortcut_key;
 use crate::palette::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePayload,
-    PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect, PaletteTextPart,
+    PageIndex, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePostAction,
+    PaletteProvider, PaletteRow, PaletteSubmitEffect,
 };
-
-const PAYLOAD_SEP: char = '\u{1f}';
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutlinePaletteEntry {
@@ -52,10 +50,7 @@ impl PaletteProvider for OutlinePaletteProvider {
             // That makes inputs like `p.1` behave like normal text and match `p.10` / `p.123`.
             if text_contains(&entry.title, &query) {
                 text_matches.push((entry.page, index, candidate));
-            } else if text_contains(&format_outline_page_detail(entry.page), &query)
-                || text_contains(&format!("page {}", entry.page + 1), &query)
-                || text_contains(&(entry.page + 1).to_string(), &query)
-            {
+            } else if text_contains(&format_outline_page_detail(entry.page), &query) {
                 page_text_matches.push((entry.page, index, candidate));
             }
         }
@@ -78,19 +73,22 @@ impl PaletteProvider for OutlinePaletteProvider {
 
     fn on_submit(
         &self,
-        _ctx: &PaletteContext<'_>,
+        ctx: &PaletteContext<'_>,
         selected: Option<&PaletteCandidate>,
     ) -> AppResult<PaletteSubmitEffect> {
         let Some(candidate) = selected else {
             return Ok(PaletteSubmitEffect::Close);
         };
 
-        let Some((page, title)) = decode_payload(&candidate.payload) else {
+        let Some(entry) = outline_entry_for_candidate(ctx, candidate) else {
             return Ok(PaletteSubmitEffect::Close);
         };
 
         Ok(PaletteSubmitEffect::Dispatch {
-            command: Command::OutlineGoto { page, title },
+            command: Command::OutlineGoto {
+                page: entry.page,
+                title: entry.title.clone(),
+            },
             history_record: None,
             next: PalettePostAction::Close,
         })
@@ -112,80 +110,47 @@ impl PaletteProvider for OutlinePaletteProvider {
     }
 }
 
-fn encode_payload(page: usize, title: &str) -> String {
-    format!("{page}{PAYLOAD_SEP}{title}")
-}
-
 fn outline_candidate(index: usize, entry: &OutlinePaletteEntry) -> PaletteCandidate {
-    PaletteCandidate {
-        id: format!("outline-{index}"),
-        left: vec![PaletteTextPart::primary(format!(
-            "{}{}",
-            "  ".repeat(entry.depth),
-            entry.title
-        ))],
-        right: vec![PaletteTextPart::secondary(format_outline_page_detail(
-            entry.page,
-        ))],
-        search_texts: vec![
-            PaletteSearchText::new(entry.title.clone()),
-            PaletteSearchText::new(format!("page {}", entry.page + 1)),
-            PaletteSearchText::new(format_outline_page_detail(entry.page)),
-            PaletteSearchText::new((entry.page + 1).to_string()),
-        ],
-        payload: PalettePayload::Opaque(encode_payload(entry.page, &entry.title)),
-    }
+    PaletteRow::new(format!("outline-{index}"))
+        .label_decoration("  ".repeat(entry.depth))
+        .label_matchable_text(entry.title.clone())
+        .detail_page(PageIndex::zero_based(entry.page))
+        .into_candidate()
 }
 
 fn format_outline_page_detail(page: usize) -> String {
-    format!("p.{}", page + 1)
+    PageIndex::zero_based(page).label()
 }
 
 fn text_contains(text: &str, query: &str) -> bool {
     text.to_lowercase().contains(query)
 }
 
-fn decode_payload(payload: &PalettePayload) -> Option<(usize, String)> {
-    let PalettePayload::Opaque(payload) = payload else {
-        return None;
-    };
-    let (page, title) = payload.split_once(PAYLOAD_SEP)?;
-    Some((page.parse().ok()?, title.to_string()))
+fn outline_entry_for_candidate<'a>(
+    ctx: &'a PaletteContext<'_>,
+    candidate: &PaletteCandidate,
+) -> Option<&'a OutlinePaletteEntry> {
+    let index = candidate
+        .id()
+        .as_str()
+        .strip_prefix("outline-")?
+        .parse::<usize>()
+        .ok()?;
+    ctx.extensions.outline.entries.get(index)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
         extension::ExtensionUiSnapshot,
-        palette::{
-            PaletteAppSnapshot, PaletteContext, PaletteKind, PalettePayload, PaletteProvider,
-        },
+        palette::{PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteProvider},
     };
 
-    use super::{
-        OutlinePaletteEntry, OutlinePaletteProvider, decode_payload, encode_payload,
-        format_outline_page_detail,
-    };
+    use super::{OutlinePaletteEntry, OutlinePaletteProvider, format_outline_page_detail};
 
     #[test]
     fn page_detail_uses_loading_overlay_format() {
         assert_eq!(format_outline_page_detail(11), "p.12");
-    }
-
-    #[test]
-    fn payload_round_trip_preserves_page_and_title() {
-        let encoded = encode_payload(11, "Section 2");
-        let decoded =
-            decode_payload(&PalettePayload::Opaque(encoded)).expect("payload should decode");
-        assert_eq!(decoded, (11, "Section 2".to_string()));
-    }
-
-    #[test]
-    fn payload_round_trip_preserves_separator_in_title() {
-        let encoded = encode_payload(11, "Section\u{1f}2");
-        let decoded =
-            decode_payload(&PalettePayload::Opaque(encoded)).expect("payload should decode");
-        assert_eq!(decoded, (11, "Section\u{1f}2".to_string()));
     }
 
     #[test]
@@ -207,13 +172,12 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "",
-            open_payload: None,
         };
 
         let items = provider.list(&ctx).expect("outline list should build");
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].right.len(), 1);
-        assert_eq!(items[0].right[0].text, "p.12");
+        assert_eq!(items[0].detail().len(), 1);
+        assert_eq!(items[0].detail()[0].text, "p.12");
     }
 
     #[test]
@@ -247,18 +211,17 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "3",
-            open_payload: None,
         };
 
         let items = provider.list(&ctx).expect("outline list should build");
         let titles = items
             .iter()
-            .map(|item| item.left[0].text.trim().to_string())
+            .map(|item| item.plain_label_text().trim().to_string())
             .collect::<Vec<_>>();
 
         assert_eq!(
             titles,
-            vec!["Chapter 3 overview".to_string(), "Contents".to_string(),]
+            vec!["Chapter 3 overview".to_string(), "Contents".to_string()]
         );
     }
 
@@ -288,13 +251,12 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "p.1",
-            open_payload: None,
         };
 
         let items = provider.list(&ctx).expect("outline list should build");
         let titles = items
             .iter()
-            .map(|item| item.left[0].text.trim().to_string())
+            .map(|item| item.plain_label_text().trim().to_string())
             .collect::<Vec<_>>();
 
         assert_eq!(
@@ -322,11 +284,10 @@ mod tests {
             extensions: &extensions,
             kind: PaletteKind::Outline,
             input: "ÜBER",
-            open_payload: None,
         };
 
         let items = provider.list(&ctx).expect("outline list should build");
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].left[0].text.trim(), "Überblick");
+        assert_eq!(items[0].plain_label_text().trim(), "Überblick");
     }
 }

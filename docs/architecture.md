@@ -96,7 +96,7 @@ state.
 Subsystem-local mutable state stays with the subsystem that owns its invariants:
 
 - search, history, and outline state live in `ExtensionHost`
-- active palette session state lives in `PaletteSessionController`
+- active palette session state lives in the palette session controller
 - L1 rendered-page cache state lives in `render`
 - L2 terminal-frame cache and encode generation state live in `presenter`
 - input sequence buffers live in `input`
@@ -146,9 +146,10 @@ tests guard registry consistency.
 
 Palette providers:
 Providers own candidate generation, completion semantics, and submit semantics
-for their palette kind, while `PaletteSessionController` owns common session
-state and operation methods. Key routing remains outside providers and produces
-commands; the active palette is the command target for palette operations.
+for their palette kind, while the palette session controller owns common
+session state and operation methods. Key routing remains outside providers and
+produces commands; the active palette is the command target for palette
+operations.
 
 Extensions:
 Built-in features that need background state, event observation, status-bar

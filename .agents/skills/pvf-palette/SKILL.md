@@ -1,75 +1,65 @@
 ---
 name: pvf-palette
-description: Add, edit, rename, or review pvf palette behavior. Use when changing PaletteKind, PaletteProvider implementations, palette payloads, palette candidate rows, command-palette visibility, input modes, selection behavior, tab or submit behavior, palette-scoped key behavior, or palette rendering contracts.
+description: Add, edit, rename, or review pvf palette behavior. Use when changing PaletteKind, PaletteProvider implementations, palette open options, provider snapshots, candidate rows, command-palette visibility, input modes, selection behavior, tab or submit behavior, palette-scoped key behavior, or palette rendering contracts.
 ---
 
 # PVF Palette
 
-Use this skill for changes centered on pvf palette UI and interaction behavior.
+Use this skill for pvf palette behavior and palette subsystem boundaries.
 
-## Start
+## First Decision
 
-Read only the relevant `docs/reference.md` Palette section before changing
-palette contracts or built-in palette behavior.
-Read only the relevant `docs/reference.md` Commands section when palette
-submission dispatches commands or changes command palette behavior.
-Read only the relevant `docs/reference.md` Extensions section when palette data
-comes from extension-owned state.
-Read the relevant part of `docs/architecture.md` when palette ownership,
-snapshots, or subsystem boundaries change.
-Read the relevant section of `docs/testing.md` before placing new palette
-tests.
+Before touching code, decide whether the task changes the user's interaction.
 
-## User-Facing Design First
+- If yes, write the user-facing interaction contract first. Do not start
+  implementation until the user goal, operation, display, and feedback are clear
+  enough to test.
+- If no, keep the work internal: preserve behavior, avoid UX speculation, and
+  use existing tests as the contract.
 
-Before editing implementation code, write a short working contract:
+User-facing interaction contract means the concrete workflow: what the user is
+trying to accomplish, the intuitive operation to get there, the shortest
+keyboard path, what is shown or not shown, where it appears, title, initial
+input, selected row, row text, assistive text, empty state, notices, Tab, Enter,
+Escape, selection movement, text editing, history navigation, no matches,
+unavailable state, repeated use, close, reopen, and recovery from mistakes.
 
-- What is the user trying to accomplish?
-- What would the user intuitively do to open this palette, search within it, choose an item, and recover from a mistake?
-- What exact title, input seed, selected row, row text, assistive text, notice, or empty-state text will the user see?
-- What is the shortest successful keyboard path?
-- What command requests are produced by tab, enter, escape, selection movement,
-  palette input editing, and history navigation?
-- What happens for empty input, no matches, unavailable state, repeated use,
-  completion, submit, close, and history navigation?
-- Which existing palette should this feel consistent with?
+## Context
 
-Do not start implementation until the interaction is clear enough to test.
+- Palette contract: `docs/reference.md` Palette section.
+- Ownership or snapshot boundary: relevant `docs/architecture.md` section.
+- Command-palette dispatch or visibility: `docs/reference.md` Commands section.
+- Test placement question: `docs/testing.md`.
 
-## Implementation Checks
+For implementation, start from the owning code:
 
-- Keep palette kind parsing, open payloads, registry resolution, and provider behavior aligned.
-- Choose the input mode based on who owns input meaning: generic filtering, free text, or custom provider logic.
-- Keep rendered row text separate from searchable text.
-- Make row labels and assistive text scannable for users; avoid exposing internal ids unless the user intentionally types them.
-- Preserve session and selection behavior when changing open, reopen,
-  completion, submit, palette input editing, or input-change flows.
-- Do not make palette providers own raw key events. Palette-scoped keys should
-  resolve through the scoped input sequence registry and produce command
-  requests such as palette submit, palette completion, palette selection,
-  palette input editing, palette input history recall, or close.
-- Treat input history as a palette input capability, not as a
-  provider-specific palette action.
-- If a palette needs app data, add read-only snapshot data instead of passing mutable app state into a provider.
-- If a palette reads extension data, expose only the needed UI snapshot fields.
-- If submit dispatches a command, ensure the command source, invocation policy, and history recording are intentional.
-- Keep provider submit effects palette-local. `PaletteSubmitEffect` may describe
-  close, reopen, or command dispatch intent, but the palette submit command
-  handler converts it into command runtime effects; providers should not write
-  command follow-up queues or input history directly.
-- For command-palette candidate visibility, use command policy metadata and the
-  shared runtime condition context. Do not maintain a provider-local command
-  visibility list or a separate enabled-state vocabulary.
+- Common active-session behavior: `src/palette/session_controller.rs`.
+- Provider contract and context: `src/palette/provider.rs`.
+- Candidate ids, text, row construction, and matching text:
+  `src/palette/candidate.rs`, `src/palette/text.rs`, `src/palette/row.rs`.
+- Registry wiring only: `src/palette/registry.rs`.
+- Built-in providers: `src/palette/providers/command.rs`,
+  `src/search/palette.rs`, `src/history/palette.rs`,
+  `src/outline/palette.rs`.
+
+## Rules
+
+- Providers own candidate generation, input mode, completion, submit,
+  assistive text, and provider-specific initial selection.
+- `PaletteSessionController` owns open/close, session id validation, input
+  editing, filtering, selection, completion routing, submit routing, and input
+  history navigation.
+- Open requests carry only common initialization (`PaletteOpenOptions`).
+  Provider-owned UI data crosses through app/extension snapshots.
+- Build candidates through `PaletteRow`; displayed text and match text should
+  share the same formatting path.
+- Use typed effects and commands. Providers must not mutate app state, key
+  routing, follow-up queues, or input history directly.
 
 ## Tests And Docs
 
-- Add or update provider tests for candidates, matching, selected item,
-  assistive text, initial input, completion, and submit behavior.
-- Add manager, palette input, command-dispatch, or rendering tests when palette
-  session, input history, cursor, selection, submit, or row layout behavior
-  changes.
-- Update `docs/reference.md` for palette contract or built-in palette behavior
-  changes.
-- Update command or extension sections only when those contracts change too.
-- Update `docs/architecture.md` only when ownership or boundary rationale
-  changes.
+- Put provider-specific behavior tests next to that provider.
+- Keep `session_controller` tests about provider-neutral session behavior.
+- Use command-dispatch, input, or rendering tests only for those boundaries.
+- Update docs only for stable contracts, ownership, or compatibility policy.
+  Put executable behavior in tests and local details in code.

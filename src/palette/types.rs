@@ -483,7 +483,7 @@ mod tests {
     use super::{PageIndex, PaletteRow, PaletteTextPart, PaletteTextTone};
 
     #[test]
-    fn plain_text_joins_left_and_right_segments() {
+    fn plain_text_joins_label_and_detail_segments() {
         let candidate = PaletteRow::new("id")
             .label_matchable_parts(vec![
                 PaletteTextPart::primary("open"),

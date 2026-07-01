@@ -241,7 +241,7 @@ struct CommandInputAnalysis<'a> {
     active_argument: Option<ActiveArgument<'a>>,
 }
 
-fn format_left(command_id: &str, args: &[crate::command::ArgSpec]) -> Vec<PaletteTextPart> {
+fn format_label(command_id: &str, args: &[crate::command::ArgSpec]) -> Vec<PaletteTextPart> {
     let usage = usage_text(args);
     let mut parts = vec![PaletteTextPart::primary(command_id)];
     if !usage.is_empty() {
@@ -291,7 +291,7 @@ fn command_candidate(
     title: &str,
 ) -> PaletteCandidate {
     PaletteRow::new(command_id)
-        .label_matchable_parts(format_left(command_id, args))
+        .label_matchable_parts(format_label(command_id, args))
         .detail_matchable_text(title)
         .into_candidate()
 }

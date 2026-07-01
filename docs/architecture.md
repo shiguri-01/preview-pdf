@@ -65,8 +65,8 @@ request behavior by returning typed effects or commands instead of taking
 `AppState` directly. Surface-local operations such as palette submit, palette
 selection, palette input editing, palette input history recall, and help
 scrolling enter the same command dispatch path as normal-mode keymap entries.
-Palette open requests carry only common initialization options; provider-owned
-data such as history rows and search results crosses through UI snapshots.
+Palette open requests carry only common initialization. Provider-owned UI data
+crosses through snapshots instead of being embedded in open requests.
 
 Extensions own extension-local state and observe `AppEvent` values.
 `ExtensionHost` owns concrete extension state, hook routing, and shared

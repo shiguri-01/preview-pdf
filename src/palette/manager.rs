@@ -5,14 +5,15 @@ use crate::error::AppResult;
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::InputHistorySnapshot;
 
+use super::candidate::{PaletteCandidate, PaletteCandidateId};
+use super::effect::{PaletteSubmitAction, PaletteTabEffect};
 use super::kind::PaletteKind;
 use super::matcher::{CandidateMatcher, ContainsMatcher};
+use super::provider::{PaletteAppSnapshot, PaletteContext, PaletteInputMode};
 use super::registry::PaletteProviderRef;
 use super::registry::PaletteRegistry;
-use super::types::{
-    PaletteAppSnapshot, PaletteCandidate, PaletteCandidateId, PaletteContext, PaletteInputMode,
-    PaletteItemView, PaletteOpenOptions, PaletteSubmitAction, PaletteTabEffect, PaletteView,
-};
+use super::request::PaletteOpenOptions;
+use super::view::{PaletteItemView, PaletteView};
 
 #[derive(Debug)]
 struct PaletteSession {

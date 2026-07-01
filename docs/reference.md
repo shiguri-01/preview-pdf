@@ -322,9 +322,11 @@ Compatibility:
   Docs should explain provider responsibilities and notable cross-palette rules.
 
 Owned by:
+- [src/palette/candidate.rs](../src/palette/candidate.rs)
+- [src/palette/row.rs](../src/palette/row.rs)
 - [src/palette/manager.rs](../src/palette/manager.rs)
+- [src/palette/provider.rs](../src/palette/provider.rs)
 - [src/palette/registry.rs](../src/palette/registry.rs)
-- [src/palette/types.rs](../src/palette/types.rs)
 - [src/palette/providers/](../src/palette/providers/)
 - [src/search/palette.rs](../src/search/palette.rs)
 - [src/history/palette.rs](../src/history/palette.rs)

@@ -405,4 +405,39 @@ mod tests {
             "p.5"
         );
     }
+
+    #[test]
+    fn initial_selection_uses_current_entry() {
+        let provider = HistoryPaletteProvider;
+        let extensions = ExtensionUiSnapshot {
+            history: HistoryUiSnapshot {
+                entries: vec![
+                    entry(
+                        "future",
+                        1,
+                        5,
+                        HistoryPaletteReason::Search("later".to_string()),
+                        false,
+                    ),
+                    entry("current", 0, 4, HistoryPaletteReason::PageOnly, true),
+                    entry(
+                        "back",
+                        -1,
+                        3,
+                        HistoryPaletteReason::Search("earlier".to_string()),
+                        false,
+                    ),
+                ]
+                .into(),
+            },
+            ..ExtensionUiSnapshot::default()
+        };
+        let ctx = context(&extensions, "");
+        let candidates = provider.list(&ctx).expect("history list should build");
+
+        assert_eq!(
+            provider.initial_selected_candidate(&ctx, &candidates),
+            Some(1)
+        );
+    }
 }

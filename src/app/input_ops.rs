@@ -68,8 +68,8 @@ impl InteractionSubsystem {
         state: &AppState,
         extensions: &'a ExtensionUiSnapshot,
     ) -> KeyBindingContext<'a> {
-        let active_palette = self.palette.manager.active_kind();
-        let palette_input_empty = self.palette.manager.active_input_is_empty();
+        let active_palette = self.palette.session.active_kind();
+        let palette_input_empty = self.palette.session.active_input_is_empty();
 
         KeyBindingContext {
             runtime: RuntimeConditionContext::with_palette_input_empty(
@@ -108,7 +108,7 @@ impl InteractionSubsystem {
     }
 
     pub(crate) fn palette_view(&self) -> Option<PaletteView> {
-        self.palette.manager.view()
+        self.palette.session.view()
     }
 
     pub(crate) fn pending_sequence_status(&self) -> Option<String> {
@@ -139,7 +139,7 @@ impl InteractionSubsystem {
             match request {
                 PaletteRequest::Open { kind, options } => {
                     let extensions = self.extensions.host.ui_snapshot(state);
-                    match self.palette.manager.open(
+                    match self.palette.session.open(
                         &self.palette.registry,
                         state,
                         &extensions,
@@ -157,7 +157,7 @@ impl InteractionSubsystem {
                     }
                 }
                 PaletteRequest::Close => {
-                    if self.palette.manager.close() {
+                    if self.palette.session.close() {
                         changed |= state.mode != Mode::Normal;
                         state.mode = Mode::Normal;
                     }
@@ -187,7 +187,7 @@ impl InteractionSubsystem {
                 pdf,
                 extension_host: &mut self.extensions.host,
                 palette_registry: &self.palette.registry,
-                palette_manager: &mut self.palette.manager,
+                palette_session: &mut self.palette.session,
                 palette_requests: &mut self.palette.pending_requests,
                 input_history: &mut self.history,
             },

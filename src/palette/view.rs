@@ -16,6 +16,6 @@ pub struct PaletteView {
     pub cursor: usize,
     pub assistive_text: Option<String>,
     pub items: Vec<PaletteItemView>,
-    /// Index of the selected item within `items` (manager-authoritative).
+    /// Index of the selected item within `items` (session-controller-authoritative).
     pub selected_idx: usize,
 }

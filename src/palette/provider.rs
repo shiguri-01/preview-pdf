@@ -82,7 +82,7 @@ pub trait PaletteProvider: Send + Sync {
     }
     /// Returns the initially selected candidate index within `candidates`.
     ///
-    /// Defaults to `None`, which keeps the manager's normal first-item selection.
+    /// Defaults to `None`, which keeps the session controller's normal first-item selection.
     fn initial_selected_candidate(
         &self,
         _ctx: &PaletteContext<'_>,

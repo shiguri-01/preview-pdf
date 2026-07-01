@@ -863,7 +863,7 @@ mod tests {
     use crate::app::AppState;
     use crate::backend::{OutlineNode, PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::extension::ExtensionHost;
-    use crate::palette::{PaletteManager, PaletteRegistry};
+    use crate::palette::{PaletteRegistry, PaletteSessionController};
 
     use super::{
         CommandExecContext, CommandId, command_registry, execute_registered_command,
@@ -970,14 +970,14 @@ mod tests {
             let mut app = AppState::default();
             let mut extension_host = ExtensionHost::default();
             let palette_registry = PaletteRegistry::default();
-            let mut palette_manager = PaletteManager::default();
+            let mut palette_session = PaletteSessionController::default();
             let mut ctx = CommandExecContext {
                 app: &mut app,
                 view_policy: crate::config::ViewPolicy::default(),
                 pdf: test_pdf(),
                 extension_host: &mut extension_host,
                 palette_registry: &palette_registry,
-                palette_manager: &mut palette_manager,
+                palette_session: &mut palette_session,
             };
 
             execute_registered_command(&mut ctx, command)

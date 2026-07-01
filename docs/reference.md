@@ -284,9 +284,9 @@ Contract:
   Provider-specific state does not travel through palette open requests.
 - Palette providers own candidate generation, input mode, completion effects,
   submit effects, assistive text, and provider-specific selection defaults.
-- `PaletteManager` owns common open, cancel, palette input operations, palette
-  input history recall for palettes that support it, selection, completion,
-  submit, and session-id validation behavior.
+- `PaletteSessionController` owns common open, cancel, palette input
+  operations, palette input history recall for palettes that support it,
+  selection, completion, submit, and session-id validation behavior.
 - Palette candidates expose a provider-scoped id plus semantic `label` and
   `detail` text. Renderers decide how those areas map to physical layout.
 - Candidate match text is derived from matchable row cells. Display and matching
@@ -324,7 +324,7 @@ Compatibility:
 Owned by:
 - [src/palette/candidate.rs](../src/palette/candidate.rs)
 - [src/palette/row.rs](../src/palette/row.rs)
-- [src/palette/manager.rs](../src/palette/manager.rs)
+- [src/palette/session_controller.rs](../src/palette/session_controller.rs)
 - [src/palette/provider.rs](../src/palette/provider.rs)
 - [src/palette/registry.rs](../src/palette/registry.rs)
 - [src/palette/providers/](../src/palette/providers/)
@@ -333,9 +333,9 @@ Owned by:
 - [src/outline/palette.rs](../src/outline/palette.rs)
 
 Test coverage:
-- Palette manager and provider tests in [src/palette/](../src/palette/),
-  [src/search/](../src/search/), [src/history/](../src/history/), and
-  [src/outline/](../src/outline/).
+- Palette session controller and provider tests in
+  [src/palette/](../src/palette/), [src/search/](../src/search/),
+  [src/history/](../src/history/), and [src/outline/](../src/outline/).
 
 ## Extensions
 

@@ -283,13 +283,52 @@ fn search_result_entry_for_candidate<'a>(
 #[cfg(test)]
 mod tests {
     use crate::{
+        app::AppState,
         app::{PageLayoutMode, SpreadCoverPolicy},
         extension::ExtensionUiSnapshot,
-        palette::{PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteProvider},
+        input::InputHistorySnapshot,
+        palette::{
+            PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenOptions, PaletteProvider,
+            PaletteRegistry, PaletteSessionController,
+        },
         search::state::SearchPaletteEntry,
     };
 
     use super::SearchResultsPaletteProvider;
+
+    fn history_snapshot(entries: &[&str]) -> InputHistorySnapshot {
+        InputHistorySnapshot::from_entries(entries)
+    }
+
+    #[test]
+    fn search_session_keeps_selected_matcher_when_typing_query() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Search,
+                PaletteOpenOptions::default(),
+                Some(history_snapshot(&["needle"])),
+            )
+            .expect("search palette should open");
+
+        assert!(session.select_next_item());
+        let selected_view = session.view().expect("palette should be visible");
+        assert_eq!(selected_view.selected_idx, 1);
+
+        session
+            .insert_text(&registry, &app, &extensions, "a")
+            .expect("typing should succeed");
+        let updated_view = session.view().expect("palette should be visible");
+        assert_eq!(updated_view.selected_idx, 1);
+        assert_eq!(updated_view.input, "a");
+    }
 
     #[test]
     fn results_list_shows_index_snippet_and_page() {

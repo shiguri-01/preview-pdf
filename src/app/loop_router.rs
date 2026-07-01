@@ -165,7 +165,7 @@ impl App {
     fn input_focus(&self) -> (Mode, Option<PaletteKind>) {
         (
             self.state.mode,
-            self.interaction.palette.manager.active_kind(),
+            self.interaction.palette.session.active_kind(),
         )
     }
 

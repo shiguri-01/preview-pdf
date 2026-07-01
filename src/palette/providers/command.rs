@@ -574,13 +574,15 @@ fn is_subsequence(query: &str, text: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::app::AppState;
     use crate::app::Mode;
     use crate::command::Command;
     use crate::extension::ExtensionUiSnapshot;
-    use crate::input::InputHistoryRecord;
+    use crate::input::{InputHistoryRecord, InputHistorySnapshot};
     use crate::palette::{
         PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenOptions, PalettePostAction,
-        PaletteProvider, PaletteSubmitEffect, PaletteTabEffect,
+        PaletteProvider, PaletteRegistry, PaletteSessionController, PaletteSubmitEffect,
+        PaletteTabEffect,
     };
 
     use super::{CommandPaletteProvider, post_submit_command_policy_context};
@@ -589,6 +591,17 @@ mod tests {
         list.iter()
             .map(|candidate| candidate.id().as_str().to_string())
             .collect()
+    }
+
+    fn history_snapshot(entries: &[&str]) -> InputHistorySnapshot {
+        InputHistorySnapshot::from_entries(entries)
+    }
+
+    fn label_text(item: &crate::palette::PaletteItemView) -> String {
+        item.label
+            .iter()
+            .map(|part| part.text.as_str())
+            .collect::<String>()
     }
 
     fn extension_snapshot(search_active: bool) -> ExtensionUiSnapshot {
@@ -691,6 +704,134 @@ mod tests {
             input,
         };
         provider.assistive_text(&ctx, None)
+    }
+
+    #[test]
+    fn session_selection_resets_when_command_input_filters_candidates() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                PaletteOpenOptions::default(),
+                None,
+            )
+            .expect("command palette should open");
+
+        let initial_view = session.view().expect("palette should be visible");
+        assert!(initial_view.items.len() > 1);
+
+        assert!(session.select_next_item());
+        let selected_view = session.view().expect("palette should be visible");
+        assert_eq!(selected_view.selected_idx, 1);
+
+        session
+            .insert_text(&registry, &app, &extensions, "p")
+            .expect("typing should succeed");
+        let filtered_view = session.view().expect("palette should be visible");
+        assert_eq!(filtered_view.selected_idx, 0);
+        assert_eq!(filtered_view.input, "p");
+    }
+
+    #[test]
+    fn session_recalls_command_input_history_and_restores_draft() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                PaletteOpenOptions::default(),
+                Some(history_snapshot(&["next-page", "prev-page"])),
+            )
+            .expect("command palette should open");
+
+        assert!(session.select_next_item());
+
+        session
+            .insert_text(&registry, &app, &extensions, "z")
+            .expect("typing should succeed");
+
+        session
+            .recall_history(&registry, &app, &extensions, true)
+            .expect("history recall should succeed");
+        let older_view = session.view().expect("palette should be visible");
+        assert_eq!(older_view.input, "prev-page");
+        assert_eq!(older_view.selected_idx, 0);
+        assert_eq!(
+            older_view.items.first().map(label_text),
+            Some("prev-page".to_string())
+        );
+
+        session
+            .recall_history(&registry, &app, &extensions, true)
+            .expect("history recall should succeed");
+        let oldest_view = session.view().expect("palette should be visible");
+        assert_eq!(oldest_view.input, "next-page");
+        assert_eq!(oldest_view.selected_idx, 0);
+        assert_eq!(
+            oldest_view.items.first().map(label_text),
+            Some("next-page".to_string())
+        );
+
+        session
+            .recall_history(&registry, &app, &extensions, false)
+            .expect("history recall should succeed");
+        let newer_view = session.view().expect("palette should be visible");
+        assert_eq!(newer_view.input, "prev-page");
+
+        session
+            .recall_history(&registry, &app, &extensions, false)
+            .expect("draft restore should succeed");
+        let restored_view = session.view().expect("palette should be visible");
+        assert_eq!(restored_view.input, "z");
+    }
+
+    #[test]
+    fn tab_completion_resets_command_history_navigation_state() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::Command,
+                PaletteOpenOptions::default(),
+                Some(history_snapshot(&["next-page", "prev-page"])),
+            )
+            .expect("command palette should open");
+
+        session
+            .recall_history(&registry, &app, &extensions, true)
+            .expect("history recall should succeed");
+        session
+            .complete(&registry, &app, &extensions)
+            .expect("tab completion should succeed");
+
+        let completed_view = session.view().expect("palette should be visible");
+        assert_eq!(completed_view.input, "prev-page ");
+
+        session
+            .recall_history(&registry, &app, &extensions, false)
+            .expect("down after tab should be handled");
+
+        let after_down_view = session.view().expect("palette should be visible");
+        assert_eq!(after_down_view.input, "prev-page ");
     }
 
     #[test]

@@ -19,7 +19,7 @@ impl CandidateMatcher for ContainsMatcher {
         let mut contains = Vec::new();
 
         for (idx, candidate) in candidates.iter().enumerate() {
-            let text = candidate.search_text().to_ascii_lowercase();
+            let text = candidate.match_text().to_ascii_lowercase();
             if text.starts_with(&query) {
                 prefix.push(idx);
             } else if text.contains(&query) {
@@ -34,25 +34,14 @@ impl CandidateMatcher for ContainsMatcher {
 
 #[cfg(test)]
 mod tests {
-    use crate::palette::{
-        PaletteCandidate, PalettePayload, PaletteSearchText, PaletteTextPart, PaletteTextTone,
-    };
+    use crate::palette::{PaletteCandidate, PaletteRow, PaletteTextPart, PaletteTextTone};
 
     use super::{CandidateMatcher, ContainsMatcher};
 
     fn candidate(label: &str) -> PaletteCandidate {
-        PaletteCandidate {
-            id: label.to_string(),
-            left: vec![PaletteTextPart {
-                text: label.to_string(),
-                tone: PaletteTextTone::Primary,
-            }],
-            right: Vec::new(),
-            search_texts: vec![PaletteSearchText {
-                text: label.to_string(),
-            }],
-            payload: PalettePayload::None,
-        }
+        PaletteRow::new(label)
+            .label_matchable_text(label)
+            .into_candidate()
     }
 
     #[test]
@@ -65,21 +54,15 @@ mod tests {
     }
 
     #[test]
-    fn contains_matcher_uses_structured_search_texts() {
+    fn contains_matcher_uses_structured_match_texts() {
         let matcher = ContainsMatcher;
         let all = vec![
-            PaletteCandidate {
-                id: "alpha".to_string(),
-                left: vec![PaletteTextPart {
-                    text: "visible".to_string(),
-                    tone: PaletteTextTone::Primary,
-                }],
-                right: Vec::new(),
-                search_texts: vec![PaletteSearchText {
+            PaletteRow::new("alpha")
+                .label_matchable_parts(vec![PaletteTextPart {
                     text: "structured-match".to_string(),
-                }],
-                payload: PalettePayload::None,
-            },
+                    tone: PaletteTextTone::Primary,
+                }])
+                .into_candidate(),
             candidate("beta"),
         ];
 

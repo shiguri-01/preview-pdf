@@ -57,7 +57,7 @@ impl InteractionSubsystem {
             }
         }
 
-        let extensions = self.extensions.host.ui_snapshot();
+        let extensions = self.extensions.host.ui_snapshot(state);
         let ctx = self.key_binding_context(state, &extensions);
         let resolution = self.sequences.resolver.handle_key_in_context(ctx, key);
         Self::sequence_outcome(resolution, CommandInvocationSource::Binding, false)
@@ -119,7 +119,7 @@ impl InteractionSubsystem {
     }
 
     pub(crate) fn flush_sequence_timeout(&mut self, state: &AppState) -> KeyEventOutcome {
-        let extensions = self.extensions.host.ui_snapshot();
+        let extensions = self.extensions.host.ui_snapshot(state);
         let ctx = self.key_binding_context(state, &extensions);
         let resolution = self.sequences.resolver.flush_timeout(ctx);
         Self::sequence_outcome(resolution, CommandInvocationSource::Binding, true)
@@ -137,14 +137,14 @@ impl InteractionSubsystem {
         let mut changed = false;
         while let Some(request) = self.palette.pending_requests.pop_front() {
             match request {
-                PaletteRequest::Open { kind, payload } => {
-                    let extensions = self.extensions.host.ui_snapshot();
+                PaletteRequest::Open { kind, options } => {
+                    let extensions = self.extensions.host.ui_snapshot(state);
                     match self.palette.manager.open(
                         &self.palette.registry,
                         state,
                         &extensions,
                         kind,
-                        payload,
+                        options,
                         self.history.snapshot_for_palette(kind),
                     ) {
                         Ok(()) => {
@@ -201,7 +201,7 @@ impl InteractionSubsystem {
     }
 
     fn reconcile_sequences(&mut self, state: &AppState) {
-        let extensions = self.extensions.host.ui_snapshot();
+        let extensions = self.extensions.host.ui_snapshot(state);
         let ctx = self.key_binding_context(state, &extensions);
         self.sequences.resolver.reconcile(ctx);
     }
@@ -456,7 +456,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             });
         assert!(interaction.apply_palette_requests(&mut state));
         assert_eq!(state.mode, Mode::Palette);
@@ -494,7 +494,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             });
         assert!(interaction.apply_palette_requests(&mut state));
         assert_eq!(state.mode, Mode::Palette);
@@ -532,7 +532,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             });
         assert!(interaction.apply_palette_requests(&mut state));
 
@@ -558,7 +558,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Outline,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             });
         assert!(interaction.apply_palette_requests(&mut state));
 
@@ -973,7 +973,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             });
         assert!(interaction.apply_palette_requests(&mut state));
         assert_eq!(state.mode, Mode::Palette);
@@ -1016,7 +1016,7 @@ mod tests {
             .pending_requests
             .push_back(PaletteRequest::Open {
                 kind: PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             });
         interaction
             .palette

@@ -2,7 +2,7 @@ use crate::app::Mode;
 use crate::app::PaletteRequest;
 use crate::command::{CommandInvocationSource, CommandOutcome, CommandRequest};
 use crate::error::AppResult;
-use crate::palette::{PaletteKind, PaletteOpenPayload, PalettePostAction, PaletteSubmitEffect};
+use crate::palette::{PaletteKind, PaletteOpenOptions, PalettePostAction, PaletteSubmitEffect};
 
 use super::super::dispatch::CommandExecContext;
 use super::super::effects::CommandExecution;
@@ -10,9 +10,9 @@ use super::super::effects::CommandExecution;
 pub(in crate::command) fn open_palette(
     _ctx: &mut CommandExecContext<'_>,
     kind: PaletteKind,
-    payload: Option<PaletteOpenPayload>,
+    options: PaletteOpenOptions,
 ) -> AppResult<CommandExecution> {
-    Ok(CommandExecution::applied().with_palette_request(PaletteRequest::Open { kind, payload }))
+    Ok(CommandExecution::applied().with_palette_request(PaletteRequest::Open { kind, options }))
 }
 
 pub(in crate::command) fn close_palette(
@@ -27,7 +27,7 @@ pub(in crate::command) fn palette_submit(
     let Some(kind) = ctx.palette_manager.active_kind() else {
         return Ok(CommandExecution::noop());
     };
-    let extensions = ctx.extension_host.ui_snapshot();
+    let extensions = ctx.extension_host.ui_snapshot(ctx.app);
     let Some(action) = ctx
         .palette_manager
         .submit(ctx.palette_registry, ctx.app, &extensions)?
@@ -42,8 +42,8 @@ pub(in crate::command) fn palette_submit(
     let mut execution = CommandExecution::applied();
     match action.effect {
         PaletteSubmitEffect::Close => {}
-        PaletteSubmitEffect::Reopen { kind, payload } => {
-            execution = execution.with_palette_request(PaletteRequest::Open { kind, payload });
+        PaletteSubmitEffect::Reopen { kind, options } => {
+            execution = execution.with_palette_request(PaletteRequest::Open { kind, options });
         }
         PaletteSubmitEffect::Dispatch {
             command,
@@ -63,9 +63,9 @@ pub(in crate::command) fn palette_submit(
             execution = execution.with_follow_up(CommandRequest::new(command, source));
             match next {
                 PalettePostAction::Close => {}
-                PalettePostAction::Reopen { kind, payload } => {
+                PalettePostAction::Reopen { kind, options } => {
                     execution =
-                        execution.with_palette_request(PaletteRequest::Open { kind, payload });
+                        execution.with_palette_request(PaletteRequest::Open { kind, options });
                 }
             }
         }
@@ -76,7 +76,7 @@ pub(in crate::command) fn palette_submit(
 pub(in crate::command) fn palette_complete(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let extensions = ctx.extension_host.ui_snapshot();
+    let extensions = ctx.extension_host.ui_snapshot(ctx.app);
     let changed = ctx
         .palette_manager
         .complete(ctx.palette_registry, ctx.app, &extensions)?;

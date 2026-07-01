@@ -282,7 +282,7 @@ mod tests {
         validate_command_for_policy(
             &Command::OpenPalette {
                 kind: crate::palette::PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             },
             &keymap_ctx,
         )

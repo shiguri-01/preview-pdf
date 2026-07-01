@@ -1,6 +1,6 @@
 use crate::condition::{ConditionExpr, RuntimeCondition};
 use crate::error::{AppError, AppResult};
-use crate::palette::{PaletteKind, PaletteOpenPayload};
+use crate::palette::{PaletteKind, PaletteOpenOptions};
 
 use super::dispatch::CommandExecContext;
 use super::effects::CommandExecution;
@@ -438,7 +438,7 @@ define_commands! {
     }
     OpenPalette(
         kind: PaletteKind,
-        payload: Option<PaletteOpenPayload>,
+        options: PaletteOpenOptions,
     ) {
         id: "open-palette",
         title: "Open Palette",

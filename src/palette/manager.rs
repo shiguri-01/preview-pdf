@@ -10,15 +10,14 @@ use super::matcher::{CandidateMatcher, ContainsMatcher};
 use super::registry::PaletteProviderRef;
 use super::registry::PaletteRegistry;
 use super::types::{
-    PaletteAppSnapshot, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView,
-    PaletteOpenPayload, PaletteSubmitAction, PaletteTabEffect, PaletteView,
+    PaletteAppSnapshot, PaletteCandidate, PaletteCandidateId, PaletteContext, PaletteInputMode,
+    PaletteItemView, PaletteOpenOptions, PaletteSubmitAction, PaletteTabEffect, PaletteView,
 };
 
 #[derive(Debug)]
 struct PaletteSession {
     id: u64,
     kind: PaletteKind,
-    payload: Option<PaletteOpenPayload>,
     title: String,
     input_mode: PaletteInputMode,
     input: Input,
@@ -105,12 +104,12 @@ impl PaletteManager {
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         kind: PaletteKind,
-        payload: Option<PaletteOpenPayload>,
+        options: PaletteOpenOptions,
         input_history: Option<InputHistorySnapshot>,
     ) -> AppResult<()> {
         let provider = registry.get(kind);
 
-        let input = Input::new(provider.initial_input(payload.as_ref()));
+        let input = Input::new(options.initial_input.clone());
         let app = PaletteAppSnapshot::from(app);
 
         let ctx = PaletteContext {
@@ -118,21 +117,21 @@ impl PaletteManager {
             extensions,
             kind,
             input: input.value(),
-            open_payload: payload.as_ref(),
         };
         let title = provider.title(&ctx);
         let candidates = provider.list(&ctx)?;
         let input_mode = provider.input_mode();
         let visible = self.visible_candidates(input_mode, input.value(), &candidates);
         let selected =
-            initial_visible_selection(&provider, &ctx, &candidates, &visible).unwrap_or(0);
+            initial_selection_from_id(options.initial_selection_id.as_ref(), &candidates, &visible)
+                .or_else(|| initial_visible_selection(&provider, &ctx, &candidates, &visible))
+                .unwrap_or(0);
         let selected_candidate = selected_candidate_for(&candidates, &visible, selected);
         let assistive_text = provider.assistive_text(&ctx, selected_candidate);
 
         self.active = Some(PaletteSession {
             id: self.take_session_id(),
             kind,
-            payload,
             title,
             input_mode,
             input,
@@ -192,7 +191,6 @@ impl PaletteManager {
             extensions,
             kind: session.kind,
             input: session.input.value(),
-            open_payload: session.payload.as_ref(),
         };
         let effect = provider.on_submit(&ctx, selected)?;
         Ok(Some(PaletteSubmitAction {
@@ -220,7 +218,6 @@ impl PaletteManager {
             extensions,
             kind: session.kind,
             input: session.input.value(),
-            open_payload: session.payload.as_ref(),
         };
         match provider.on_tab(&ctx, selected)? {
             PaletteTabEffect::Noop => return Ok(false),
@@ -308,8 +305,8 @@ impl PaletteManager {
         for (idx_in_visible, candidate_idx) in session.visible.iter().enumerate() {
             if let Some(candidate) = session.candidates.get(*candidate_idx) {
                 items.push(PaletteItemView {
-                    left: candidate.left.clone(),
-                    right: candidate.right.clone(),
+                    label: candidate.label().to_vec(),
+                    detail: candidate.detail().to_vec(),
                     selected: idx_in_visible == session.selected,
                 });
             }
@@ -336,7 +333,6 @@ impl PaletteManager {
             return Ok(());
         };
         let kind = existing.kind;
-        let payload = existing.payload.clone();
         let input_mode = existing.input_mode;
         let input_text = existing.input.value().to_string();
         let current_selected = existing.selected;
@@ -348,7 +344,6 @@ impl PaletteManager {
             extensions,
             kind,
             input: &input_text,
-            open_payload: payload.as_ref(),
         };
 
         let title = provider.title(&ctx);
@@ -492,6 +487,17 @@ fn initial_visible_selection(
         .position(|candidate_idx| *candidate_idx == selected_candidate_idx)
 }
 
+fn initial_selection_from_id(
+    id: Option<&PaletteCandidateId>,
+    candidates: &[PaletteCandidate],
+    visible: &[usize],
+) -> Option<usize> {
+    let id = id?;
+    visible
+        .iter()
+        .position(|candidate_idx| candidates.get(*candidate_idx).is_some_and(|c| c.id() == id))
+}
+
 fn selected_candidate_for<'a>(
     candidates: &'a [PaletteCandidate],
     visible: &[usize],
@@ -507,8 +513,9 @@ mod tests {
     use crate::{
         app::AppState,
         extension::ExtensionUiSnapshot,
+        history::palette::{HistoryPaletteEntry, HistoryPaletteReason, HistoryUiSnapshot},
         input::InputHistorySnapshot,
-        palette::{PaletteKind, PaletteOpenPayload, PaletteRegistry},
+        palette::{PageIndex, PaletteCandidateId, PaletteKind, PaletteRegistry},
     };
 
     use super::PaletteManager;
@@ -530,7 +537,7 @@ mod tests {
                 &app,
                 &extensions,
                 PaletteKind::Command,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 None,
             )
             .expect("command palette should open");
@@ -563,7 +570,7 @@ mod tests {
                 &app,
                 &extensions,
                 PaletteKind::Search,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 None,
             )
             .expect("search palette should open");
@@ -594,7 +601,7 @@ mod tests {
                 &app,
                 &extensions,
                 PaletteKind::Command,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 Some(history_snapshot(&["next-page", "prev-page"])),
             )
             .expect("command palette should open");
@@ -613,7 +620,7 @@ mod tests {
         assert_eq!(older_view.selected_idx, 0);
         assert_eq!(
             older_view.items.first().map(|item| item
-                .left
+                .label
                 .iter()
                 .map(|part| part.text.as_str())
                 .collect::<String>()),
@@ -628,7 +635,7 @@ mod tests {
         assert_eq!(oldest_view.selected_idx, 0);
         assert_eq!(
             oldest_view.items.first().map(|item| item
-                .left
+                .label
                 .iter()
                 .map(|part| part.text.as_str())
                 .collect::<String>()),
@@ -661,7 +668,7 @@ mod tests {
                 &app,
                 &extensions,
                 PaletteKind::Search,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 Some(history_snapshot(&["needle"])),
             )
             .expect("search palette should open");
@@ -691,7 +698,7 @@ mod tests {
                 &app,
                 &extensions,
                 PaletteKind::Command,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 Some(history_snapshot(&["next-page", "prev-page"])),
             )
             .expect("command palette should open");
@@ -719,7 +726,35 @@ mod tests {
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
         let app = AppState::default();
-        let extensions = ExtensionUiSnapshot::default();
+        let extensions = ExtensionUiSnapshot {
+            history: HistoryUiSnapshot {
+                entries: vec![
+                    HistoryPaletteEntry {
+                        id: PaletteCandidateId::new("future"),
+                        display_index: 1,
+                        page: PageIndex::zero_based(5),
+                        reason: HistoryPaletteReason::Search("later".to_string()),
+                        is_current: false,
+                    },
+                    HistoryPaletteEntry {
+                        id: PaletteCandidateId::new("current"),
+                        display_index: 0,
+                        page: PageIndex::zero_based(4),
+                        reason: HistoryPaletteReason::PageOnly,
+                        is_current: true,
+                    },
+                    HistoryPaletteEntry {
+                        id: PaletteCandidateId::new("back"),
+                        display_index: -1,
+                        page: PageIndex::zero_based(3),
+                        reason: HistoryPaletteReason::Search("earlier".to_string()),
+                        is_current: false,
+                    },
+                ]
+                .into(),
+            },
+            ..ExtensionUiSnapshot::default()
+        };
 
         manager
             .open(
@@ -727,9 +762,7 @@ mod tests {
                 &app,
                 &extensions,
                 PaletteKind::History,
-                Some(PaletteOpenPayload::HistorySeed(
-                    "f:5,Search: later|c:4|b:3,Search: earlier".to_string(),
-                )),
+                crate::palette::PaletteOpenOptions::default(),
                 None,
             )
             .expect("history palette should open");

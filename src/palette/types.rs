@@ -1,6 +1,6 @@
 use super::kind::PaletteKind;
 use crate::app::{AppState, Mode, PageLayoutMode, SpreadCoverPolicy};
-use crate::command::{Command, SearchMatcherKind};
+use crate::command::Command;
 use crate::error::AppResult;
 use crate::extension::ExtensionUiSnapshot;
 use crate::input::InputHistoryRecord;
@@ -13,9 +13,53 @@ pub enum PaletteInputMode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PalettePayload {
-    None,
-    Opaque(String),
+pub struct PaletteCandidateId(String);
+
+impl PaletteCandidateId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for PaletteCandidateId {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<String> for PaletteCandidateId {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PaletteOpenOptions {
+    pub initial_input: String,
+    pub initial_selection_id: Option<PaletteCandidateId>,
+}
+
+impl PaletteOpenOptions {
+    pub fn input(input: impl Into<String>) -> Self {
+        Self {
+            initial_input: input.into(),
+            initial_selection_id: None,
+        }
+    }
+
+    pub fn input_with_selection(
+        input: impl Into<String>,
+        selection_id: impl Into<PaletteCandidateId>,
+    ) -> Self {
+        Self {
+            initial_input: input.into(),
+            initial_selection_id: Some(selection_id.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,64 +111,206 @@ impl PaletteTextPart {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteCandidate {
-    pub id: String,
-    pub left: Vec<PaletteTextPart>,
-    pub right: Vec<PaletteTextPart>,
-    pub search_texts: Vec<PaletteSearchText>,
-    pub payload: PalettePayload,
+    id: PaletteCandidateId,
+    label: Vec<PaletteTextPart>,
+    detail: Vec<PaletteTextPart>,
+    match_texts: Vec<PaletteSearchText>,
 }
 
 impl PaletteCandidate {
-    pub fn plain_left_text(&self) -> String {
-        join_palette_text_parts(&self.left)
+    pub fn id(&self) -> &PaletteCandidateId {
+        &self.id
     }
 
-    pub fn plain_right_text(&self) -> String {
-        join_palette_text_parts(&self.right)
+    pub fn label(&self) -> &[PaletteTextPart] {
+        &self.label
+    }
+
+    pub fn detail(&self) -> &[PaletteTextPart] {
+        &self.detail
+    }
+
+    pub fn match_texts(&self) -> &[PaletteSearchText] {
+        &self.match_texts
+    }
+
+    pub fn plain_label_text(&self) -> String {
+        join_palette_text_parts(&self.label)
+    }
+
+    pub fn plain_detail_text(&self) -> String {
+        join_palette_text_parts(&self.detail)
     }
 
     pub fn plain_text(&self) -> String {
-        let left = self.plain_left_text();
-        let right = self.plain_right_text();
-        if left.is_empty() {
-            right
-        } else if right.is_empty() {
-            left
+        let label = self.plain_label_text();
+        let detail = self.plain_detail_text();
+        if label.is_empty() {
+            detail
+        } else if detail.is_empty() {
+            label
         } else {
-            format!("{left} {right}")
+            format!("{label} {detail}")
         }
     }
 
-    pub fn search_text(&self) -> String {
-        let search = join_palette_search_text_parts(&self.search_texts);
-        if search.is_empty() {
+    pub fn match_text(&self) -> String {
+        let text = join_palette_search_text_parts(&self.match_texts);
+        if text.is_empty() {
             self.plain_text()
         } else {
-            search
+            text
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PaletteOpenPayload {
-    CommandInput(String),
-    HistorySeed(String),
-    OutlineQuery(String),
-    SearchResultsQuery(String),
-    Search {
-        query: String,
-        matcher: SearchMatcherKind,
-    },
+pub struct PageIndex {
+    zero_based: usize,
 }
 
-impl PaletteOpenPayload {
-    pub fn initial_input(&self) -> Option<&str> {
+impl PageIndex {
+    pub fn zero_based(page: usize) -> Self {
+        Self { zero_based: page }
+    }
+
+    pub fn zero_based_value(&self) -> usize {
+        self.zero_based
+    }
+
+    pub fn display_number(&self) -> usize {
+        self.zero_based + 1
+    }
+
+    pub fn label(&self) -> String {
+        format!("p.{}", self.display_number())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PaletteCellValue {
+    Text(String),
+    Parts(Vec<PaletteTextPart>),
+    Page(PageIndex),
+}
+
+impl PaletteCellValue {
+    fn display_text(&self) -> String {
         match self {
-            Self::CommandInput(input) => Some(input.as_str()),
-            Self::HistorySeed(_) => None,
-            Self::OutlineQuery(query) => Some(query.as_str()),
-            Self::SearchResultsQuery(query) => Some(query.as_str()),
-            Self::Search { query, .. } => Some(query.as_str()),
+            Self::Text(text) => text.clone(),
+            Self::Parts(parts) => join_palette_text_parts(parts),
+            Self::Page(page) => page.label(),
+        }
+    }
+
+    fn into_parts(self, tone: PaletteTextTone) -> Vec<PaletteTextPart> {
+        match self {
+            Self::Text(text) => vec![PaletteTextPart { text, tone }],
+            Self::Parts(parts) => parts,
+            Self::Page(page) => vec![PaletteTextPart {
+                text: page.label(),
+                tone,
+            }],
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteCell {
+    value: PaletteCellValue,
+    tone: PaletteTextTone,
+    matchable: bool,
+}
+
+impl PaletteCell {
+    pub fn matchable(value: PaletteCellValue, tone: PaletteTextTone) -> Self {
+        Self {
+            value,
+            tone,
+            matchable: true,
+        }
+    }
+
+    pub fn decoration(value: impl Into<String>, tone: PaletteTextTone) -> Self {
+        Self {
+            value: PaletteCellValue::Text(value.into()),
+            tone,
+            matchable: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaletteRow {
+    id: PaletteCandidateId,
+    label: Vec<PaletteCell>,
+    detail: Vec<PaletteCell>,
+}
+
+impl PaletteRow {
+    pub fn new(id: impl Into<PaletteCandidateId>) -> Self {
+        Self {
+            id: id.into(),
+            label: Vec::new(),
+            detail: Vec::new(),
+        }
+    }
+
+    pub fn label_cell(mut self, cell: PaletteCell) -> Self {
+        self.label.push(cell);
+        self
+    }
+
+    pub fn detail_cell(mut self, cell: PaletteCell) -> Self {
+        self.detail.push(cell);
+        self
+    }
+
+    pub fn label_matchable_text(self, text: impl Into<String>) -> Self {
+        self.label_cell(PaletteCell::matchable(
+            PaletteCellValue::Text(text.into()),
+            PaletteTextTone::Primary,
+        ))
+    }
+
+    pub fn label_matchable_parts(self, parts: Vec<PaletteTextPart>) -> Self {
+        self.label_cell(PaletteCell::matchable(
+            PaletteCellValue::Parts(parts),
+            PaletteTextTone::Primary,
+        ))
+    }
+
+    pub fn label_decoration(self, text: impl Into<String>) -> Self {
+        self.label_cell(PaletteCell::decoration(text, PaletteTextTone::Primary))
+    }
+
+    pub fn detail_matchable_text(self, text: impl Into<String>) -> Self {
+        self.detail_cell(PaletteCell::matchable(
+            PaletteCellValue::Text(text.into()),
+            PaletteTextTone::Secondary,
+        ))
+    }
+
+    pub fn detail_page(self, page: PageIndex) -> Self {
+        self.detail_cell(PaletteCell::matchable(
+            PaletteCellValue::Page(page),
+            PaletteTextTone::Secondary,
+        ))
+    }
+
+    pub fn into_candidate(self) -> PaletteCandidate {
+        let match_texts = self
+            .label
+            .iter()
+            .chain(self.detail.iter())
+            .filter(|cell| cell.matchable)
+            .map(|cell| PaletteSearchText::new(cell.value.display_text()))
+            .collect();
+        PaletteCandidate {
+            id: self.id,
+            label: render_cells(self.label),
+            detail: render_cells(self.detail),
+            match_texts,
         }
     }
 }
@@ -134,7 +320,7 @@ pub enum PalettePostAction {
     Close,
     Reopen {
         kind: PaletteKind,
-        payload: Option<PaletteOpenPayload>,
+        options: PaletteOpenOptions,
     },
 }
 
@@ -143,7 +329,7 @@ pub enum PaletteSubmitEffect {
     Close,
     Reopen {
         kind: PaletteKind,
-        payload: Option<PaletteOpenPayload>,
+        options: PaletteOpenOptions,
     },
     Dispatch {
         command: Command,
@@ -196,7 +382,6 @@ pub struct PaletteContext<'a> {
     pub extensions: &'a ExtensionUiSnapshot,
     pub kind: PaletteKind,
     pub input: &'a str,
-    pub open_payload: Option<&'a PaletteOpenPayload>,
 }
 
 pub trait PaletteProvider: Send + Sync {
@@ -240,22 +425,12 @@ pub trait PaletteProvider: Send + Sync {
     ) -> Option<usize> {
         None
     }
-    /// Returns the initial input text when the palette opens.
-    ///
-    /// Defaults to the open payload's input text. Override to decouple open payload data from
-    /// the visible input field.
-    fn initial_input(&self, open_payload: Option<&PaletteOpenPayload>) -> String {
-        open_payload
-            .and_then(PaletteOpenPayload::initial_input)
-            .unwrap_or("")
-            .to_string()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteItemView {
-    pub left: Vec<PaletteTextPart>,
-    pub right: Vec<PaletteTextPart>,
+    pub label: Vec<PaletteTextPart>,
+    pub detail: Vec<PaletteTextPart>,
     pub selected: bool,
 }
 
@@ -296,80 +471,66 @@ fn join_palette_search_text_parts(parts: &[PaletteSearchText]) -> String {
     text
 }
 
+fn render_cells(cells: Vec<PaletteCell>) -> Vec<PaletteTextPart> {
+    cells
+        .into_iter()
+        .flat_map(|cell| cell.value.into_parts(cell.tone))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        PaletteCandidate, PalettePayload, PaletteSearchText, PaletteTextPart, PaletteTextTone,
-    };
-
-    fn candidate(
-        left: Vec<PaletteTextPart>,
-        right: Vec<PaletteTextPart>,
-        search_texts: Vec<PaletteSearchText>,
-    ) -> PaletteCandidate {
-        PaletteCandidate {
-            id: "id".to_string(),
-            left,
-            right,
-            search_texts,
-            payload: PalettePayload::None,
-        }
-    }
+    use super::{PageIndex, PaletteRow, PaletteTextPart, PaletteTextTone};
 
     #[test]
     fn plain_text_joins_left_and_right_segments() {
-        let candidate = candidate(
-            vec![
+        let candidate = PaletteRow::new("id")
+            .label_matchable_parts(vec![
                 PaletteTextPart::primary("open"),
                 PaletteTextPart::secondary(" now"),
-            ],
-            vec![PaletteTextPart::secondary("Command")],
-            Vec::new(),
-        );
+            ])
+            .detail_matchable_text("Command")
+            .into_candidate();
 
-        assert_eq!(candidate.plain_left_text(), "open now");
-        assert_eq!(candidate.plain_right_text(), "Command");
+        assert_eq!(candidate.plain_label_text(), "open now");
+        assert_eq!(candidate.plain_detail_text(), "Command");
         assert_eq!(candidate.plain_text(), "open now Command");
     }
 
     #[test]
     fn plain_text_preserves_internal_spacing_in_parts() {
-        let candidate = candidate(
-            vec![
+        let candidate = PaletteRow::new("id")
+            .label_matchable_parts(vec![
                 PaletteTextPart::primary("open"),
                 PaletteTextPart::primary(" "),
-            ],
-            vec![PaletteTextPart::secondary("Command")],
-            Vec::new(),
-        );
+            ])
+            .detail_matchable_text("Command")
+            .into_candidate();
 
-        assert_eq!(candidate.plain_left_text(), "open ");
+        assert_eq!(candidate.plain_label_text(), "open ");
         assert_eq!(candidate.plain_text(), "open  Command");
     }
 
     #[test]
-    fn search_text_falls_back_to_plain_text_when_empty() {
-        let candidate = candidate(
-            vec![PaletteTextPart::primary("page")],
-            vec![PaletteTextPart::secondary("12")],
-            Vec::new(),
-        );
+    fn match_text_comes_from_matchable_cells() {
+        let candidate = PaletteRow::new("id")
+            .label_matchable_text("page")
+            .label_decoration(" ")
+            .detail_page(PageIndex::zero_based(11))
+            .into_candidate();
 
-        assert_eq!(candidate.search_text(), "page 12");
+        assert_eq!(candidate.match_text(), "page p.12");
     }
 
     #[test]
-    fn search_text_joins_search_segments_with_spaces() {
-        let candidate = candidate(
-            vec![PaletteTextPart::primary("page")],
-            Vec::new(),
-            vec![
-                PaletteSearchText::new("page 12"),
-                PaletteSearchText::new("current"),
-            ],
-        );
+    fn plain_text_uses_rendered_page_label() {
+        let candidate = PaletteRow::new("id")
+            .label_matchable_text("current")
+            .detail_page(PageIndex::zero_based(11))
+            .into_candidate();
 
-        assert_eq!(candidate.search_text(), "page 12 current");
+        assert_eq!(candidate.plain_text(), "current p.12");
+        assert_eq!(candidate.match_text(), "current p.12");
     }
 
     #[test]

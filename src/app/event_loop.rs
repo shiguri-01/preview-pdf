@@ -1137,7 +1137,7 @@ mod tests {
             .pending_requests
             .push_back(crate::app::PaletteRequest::Open {
                 kind: crate::palette::PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             });
         assert!(app.interaction.apply_palette_requests(&mut app.state));
         assert_eq!(app.state.mode, crate::app::Mode::Palette);

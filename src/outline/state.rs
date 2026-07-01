@@ -4,7 +4,7 @@ use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::backend::{OutlineNode, PdfBackend, SharedPdfBackend};
 use crate::command::CommandOutcome;
 use crate::error::{AppError, AppResult};
-use crate::palette::PaletteKind;
+use crate::palette::{PaletteKind, PaletteOpenOptions};
 
 use super::palette::OutlinePaletteEntry;
 
@@ -51,7 +51,7 @@ impl OutlineState {
         self.ensure_loaded(pdf.as_ref())?;
         Ok(PaletteRequest::Open {
             kind: PaletteKind::Outline,
-            payload: None,
+            options: PaletteOpenOptions::default(),
         })
     }
 

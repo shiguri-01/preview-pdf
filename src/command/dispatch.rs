@@ -75,7 +75,7 @@ pub fn dispatch_with_view_policy(
         input_history,
     } = dispatch_ctx;
     let command_id = cmd.command_id();
-    let extensions = extension_host.ui_snapshot();
+    let extensions = extension_host.ui_snapshot(app);
     let active_palette = palette_manager.active_kind();
     let palette_input_empty = palette_manager.active_input_is_empty();
     let ctx = CommandPolicyContext {
@@ -700,7 +700,7 @@ mod tests {
             &mut app,
             Command::OpenPalette {
                 kind: PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             },
             CommandInvocationSource::Binding,
             pdf,
@@ -730,14 +730,14 @@ mod tests {
         let mut host = ExtensionHost::default();
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
-        let extensions = host.ui_snapshot();
+        let extensions = host.ui_snapshot(&app);
         manager
             .open(
                 &registry,
                 &app,
                 &extensions,
                 PaletteKind::Command,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 None,
             )
             .expect("command palette should open");
@@ -781,14 +781,14 @@ mod tests {
         let mut host = ExtensionHost::default();
         let registry = PaletteRegistry::default();
         let mut manager = PaletteManager::default();
-        let extensions = host.ui_snapshot();
+        let extensions = host.ui_snapshot(&app);
         manager
             .open(
                 &registry,
                 &app,
                 &extensions,
                 PaletteKind::Search,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 None,
             )
             .expect("search palette should open");
@@ -1029,7 +1029,7 @@ mod tests {
                 SearchMatcherKind::ContainsInsensitive,
             )
             .expect("submit-search should succeed");
-        assert!(host.ui_snapshot().search.active);
+        assert!(host.ui_snapshot(&app).search.active);
 
         let result = dispatch(
             &mut app,
@@ -1043,7 +1043,7 @@ mod tests {
 
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(result.emitted_events.len(), 1);
-        assert!(!host.ui_snapshot().search.active);
+        assert!(!host.ui_snapshot(&app).search.active);
         assert_eq!(app.notice, None);
         assert!(palette_requests.is_empty());
     }

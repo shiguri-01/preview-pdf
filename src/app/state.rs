@@ -1,5 +1,5 @@
 use crate::error::AppError;
-use crate::palette::{PaletteKind, PaletteOpenPayload};
+use crate::palette::{PaletteKind, PaletteOpenOptions};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PageLayoutMode {
@@ -82,7 +82,7 @@ pub enum Mode {
 pub enum PaletteRequest {
     Open {
         kind: PaletteKind,
-        payload: Option<PaletteOpenPayload>,
+        options: PaletteOpenOptions,
     },
     Close,
 }

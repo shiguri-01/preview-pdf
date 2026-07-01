@@ -278,15 +278,21 @@ Orientation:
 
 Contract:
 - A palette session has a kind, session id, input state, candidate list,
-  visible candidate indexes, selection, optional open payload, and optional
+  visible candidate indexes, selection, open options consumed at open time, and optional
   assistive text.
-- Palette providers own candidate generation, input mode, initial input,
-  completion effects, submit effects, assistive text, and provider-specific
-  selection defaults.
+- Palette open options carry only common initialization data: initial input text
+  and an optional candidate id to select when it is visible. Provider-specific
+  state does not travel through palette open requests.
+- Palette providers own candidate generation, input mode, completion effects,
+  submit effects, assistive text, and provider-specific selection defaults.
 - `PaletteManager` owns common open, cancel, palette input operations, palette
   input history recall for palettes that support it, selection, completion,
   submit, and session-id validation behavior.
-- Candidate search text is independent from rendered row text.
+- Palette candidates expose semantic `label` and `detail` text. Renderers decide
+  how those areas map to physical columns.
+- Candidate match text is generated from matchable row cells so displayed text
+  and input matching use the same formatting source. Structured values such as
+  page indexes format through shared cell value types.
 - Provider submit effects describe palette-local meaning: close, reopen, or
   dispatch a typed command with optional history recording and a post action.
   The palette submit command handler converts those provider effects into

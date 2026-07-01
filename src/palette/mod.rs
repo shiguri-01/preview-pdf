@@ -11,7 +11,7 @@ pub use registry::PaletteRegistry;
 #[cfg(test)]
 pub use types::PaletteAppSnapshot;
 pub use types::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteItemView, PaletteOpenPayload,
-    PalettePayload, PalettePostAction, PaletteProvider, PaletteSearchText, PaletteSubmitEffect,
-    PaletteTabEffect, PaletteTextPart, PaletteTextTone, PaletteView,
+    PageIndex, PaletteCandidate, PaletteCandidateId, PaletteContext, PaletteInputMode,
+    PaletteItemView, PaletteOpenOptions, PalettePostAction, PaletteProvider, PaletteRow,
+    PaletteSubmitEffect, PaletteTabEffect, PaletteTextPart, PaletteTextTone, PaletteView,
 };

@@ -83,14 +83,8 @@ impl SearchRuntime {
         self.state.epoch = epoch;
     }
 
-    fn take_engine(&mut self) -> SearchEngine {
-        self.engine
-            .take()
-            .expect("search worker should be started before search runtime use")
-    }
-
-    fn restore_engine(&mut self, engine: SearchEngine) {
-        self.engine = Some(engine);
+    fn engine_mut(&mut self) -> &mut SearchEngine {
+        started_engine(&mut self.engine)
     }
 
     fn advance_epoch(&mut self) {
@@ -98,9 +92,7 @@ impl SearchRuntime {
         let epoch = SearchEpoch(self.next_epoch);
         self.state.epoch = epoch;
         self.state.generation = 0;
-        let mut engine = self.take_engine();
-        engine.advance_epoch(epoch);
-        self.restore_engine(engine);
+        self.engine_mut().advance_epoch(epoch);
     }
 
     pub fn open_palette(&mut self) -> PaletteRequest {
@@ -114,10 +106,8 @@ impl SearchRuntime {
         query: String,
         matcher: SearchMatcherKind,
     ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        let mut engine = self.take_engine();
-        let result = self.state.submit(app, pdf, &mut engine, query, matcher);
-        self.restore_engine(engine);
-        result
+        let Self { state, engine, .. } = self;
+        state.submit(app, pdf, started_engine(engine), query, matcher)
     }
 
     pub fn open_results_palette(&mut self) -> Option<PaletteRequest> {
@@ -134,10 +124,8 @@ impl SearchRuntime {
     }
 
     pub fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
-        let mut engine = self.take_engine();
-        let result = self.state.cancel(pdf, &mut engine);
-        self.restore_engine(engine);
-        result
+        let Self { state, engine, .. } = self;
+        state.cancel(pdf, started_engine(engine))
     }
 
     pub fn next_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
@@ -149,16 +137,12 @@ impl SearchRuntime {
     }
 
     pub fn handle_worker_event(&mut self, app: &mut AppState, event: SearchEvent) -> bool {
-        let mut engine = self.take_engine();
-        let changed = self.state.handle_worker_event(app, &mut engine, event);
-        self.restore_engine(engine);
-        changed
+        let Self { state, engine, .. } = self;
+        state.handle_worker_event(app, started_engine(engine), event)
     }
 
     pub fn prewarm(&mut self, pdf: SharedPdfBackend) {
-        let mut engine = self.take_engine();
-        engine.prewarm(pdf);
-        self.restore_engine(engine);
+        self.engine_mut().prewarm(pdf);
     }
 
     pub fn resolve_priority_geometry(
@@ -173,9 +157,8 @@ impl SearchRuntime {
         let matcher = matcher_for_kind(self.state.matcher);
         let generation = self.state.generation;
         let query = self.state.query.clone();
-        let mut engine = self.take_engine();
-        engine.resolve_geometry(pdf, generation, query, matcher, pages, true);
-        self.restore_engine(engine);
+        self.engine_mut()
+            .resolve_geometry(pdf, generation, query, matcher, pages, true);
     }
 
     pub fn matcher(&self) -> SearchMatcherKind {
@@ -229,6 +212,12 @@ impl SearchRuntime {
             app.set_warning_notice(format!("Could not restore search after reload: {err}"));
         }
     }
+}
+
+fn started_engine(engine: &mut Option<SearchEngine>) -> &mut SearchEngine {
+    engine
+        .as_mut()
+        .expect("search worker should be started before search runtime use")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

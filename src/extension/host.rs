@@ -7,7 +7,9 @@ use crate::highlight::HighlightOverlaySnapshot;
 use crate::history::{HistoryCommandPort, HistoryExtension, HistoryState};
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::outline::{OutlineCommandPort, OutlineExtension, OutlineState, OutlineUiSnapshot};
-use crate::search::{SearchCommandPort, SearchExtension, SearchRuntime, SearchUiSnapshot};
+use crate::search::{
+    SearchCommandPort, SearchEvent, SearchExtension, SearchRuntime, SearchUiSnapshot,
+};
 
 use super::traits::Extension;
 
@@ -26,6 +28,16 @@ pub(crate) struct ExtensionCommandPorts<'a> {
     pub search: SearchCommandPort<'a>,
     pub history: HistoryCommandPort<'a>,
     pub outline: OutlineCommandPort<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ExtensionWorkerEvent {
+    Search(SearchEvent),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct ExtensionEventOutcome {
+    pub changed: bool,
 }
 
 pub struct ExtensionHost {
@@ -75,10 +87,27 @@ impl ExtensionHost {
         OutlineExtension::handle_event(&mut self.outline, event, app);
     }
 
-    pub fn drain_background(&mut self, app: &mut AppState) -> bool {
-        let search_changed = SearchExtension::drain_background(&mut self.search, app);
-        let history_changed = HistoryExtension::on_background(&mut self.history, app);
-        search_changed || history_changed
+    pub(crate) fn start_workers(
+        &mut self,
+        event_tx: tokio::sync::mpsc::UnboundedSender<ExtensionWorkerEvent>,
+    ) {
+        self.search.start_worker(event_tx);
+    }
+
+    pub(crate) fn handle_worker_events(
+        &mut self,
+        events: Vec<ExtensionWorkerEvent>,
+        app: &mut AppState,
+    ) -> ExtensionEventOutcome {
+        let mut changed = false;
+        for event in events {
+            match event {
+                ExtensionWorkerEvent::Search(event) => {
+                    changed |= self.search.handle_worker_event(app, event);
+                }
+            }
+        }
+        ExtensionEventOutcome { changed }
     }
 
     pub fn on_document_opened(&mut self, pdf: SharedPdfBackend) {
@@ -200,16 +229,23 @@ mod tests {
         }
     }
 
+    fn test_extension_host() -> ExtensionHost {
+        let mut host = ExtensionHost::new();
+        let (event_tx, _event_rx) = tokio::sync::mpsc::unbounded_channel();
+        host.start_workers(event_tx);
+        host
+    }
+
     #[test]
     fn status_bar_segments_is_empty_without_active_extensions() {
-        let host = ExtensionHost::default();
+        let host = test_extension_host();
         let app = crate::app::AppState::default();
         assert!(host.status_bar_segments(&app).is_empty());
     }
 
     #[test]
     fn status_bar_segments_includes_search_when_query_is_active() {
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut app = crate::app::AppState::default();
         let pdf = StubPdf::new(4);
 
@@ -230,7 +266,7 @@ mod tests {
 
     #[test]
     fn cancel_search_clears_active_query() {
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut app = crate::app::AppState::default();
         let pdf = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
 
@@ -256,7 +292,7 @@ mod tests {
 
     #[test]
     fn document_reload_preserves_active_search() {
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut app = crate::app::AppState::default();
         let first = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
         let second = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
@@ -284,7 +320,7 @@ mod tests {
 
     #[test]
     fn document_reload_resets_history_navigation() {
-        let mut host = ExtensionHost::default();
+        let mut host = test_extension_host();
         let mut app = crate::app::AppState {
             current_page: 3,
             ..crate::app::AppState::default()

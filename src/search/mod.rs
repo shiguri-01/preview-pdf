@@ -7,17 +7,12 @@ pub(crate) mod worker;
 use crate::app::AppState;
 use crate::event::AppEvent;
 use crate::extension::Extension;
+pub use engine::SearchEvent;
 pub use palette::SearchPaletteProvider;
 pub use palette::SearchResultsPaletteProvider;
 pub use state::{SearchCommandPort, SearchRuntime, SearchUiSnapshot};
 
 pub struct SearchExtension;
-
-impl SearchExtension {
-    pub fn drain_background(state: &mut SearchRuntime, app: &mut AppState) -> bool {
-        state.on_background(app)
-    }
-}
 
 impl Extension for SearchExtension {
     type State = SearchRuntime;

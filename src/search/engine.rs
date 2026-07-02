@@ -1,21 +1,24 @@
 use std::sync::Arc;
 
 use tokio::runtime::{Builder, Handle, Runtime};
-use tokio::sync::mpsc::{
-    UnboundedReceiver, UnboundedSender, error::TryRecvError, unbounded_channel,
-};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
 use crate::backend::{PdfRect, SharedPdfBackend, TextPage};
 use crate::error::{AppError, AppResult};
+use crate::extension::ExtensionWorkerEvent;
 
 use super::matcher::SearchMatcher;
 use super::worker::{
     GeometryJob, GeometryPriority, PrewarmJob, SearchJob, WorkerRequest, worker_main,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SearchEpoch(pub(crate) u64);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchSnapshot {
+    pub epoch: SearchEpoch,
     pub generation: u64,
     pub scanned_pages: usize,
     pub total_pages: usize,
@@ -27,17 +30,20 @@ pub struct SearchSnapshot {
 pub enum SearchEvent {
     Snapshot(SearchSnapshot),
     Completed {
+        epoch: SearchEpoch,
         generation: u64,
         hits: Vec<SearchPageHit>,
         highlight_unavailable: bool,
     },
     GeometryResolved {
+        epoch: SearchEpoch,
         generation: u64,
         page: usize,
         occurrences: Vec<SearchOccurrence>,
         highlight_unavailable: bool,
     },
     PageSkipped {
+        epoch: SearchEpoch,
         generation: u64,
         page: usize,
         message: String,
@@ -62,7 +68,7 @@ pub struct SearchPageHit {
 
 pub struct SearchEngine {
     request_tx: UnboundedSender<WorkerRequest>,
-    event_rx: UnboundedReceiver<SearchEvent>,
+    epoch: SearchEpoch,
     next_generation: u64,
     _runtime: SearchWorkerRuntime,
     worker: Option<JoinHandle<()>>,
@@ -102,26 +108,27 @@ impl SearchWorkerRuntime {
     }
 }
 
-impl Default for SearchEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SearchEngine {
-    pub fn new() -> Self {
+    pub fn new(epoch: SearchEpoch, event_tx: UnboundedSender<ExtensionWorkerEvent>) -> Self {
         let (request_tx, request_rx) = unbounded_channel();
-        let (event_tx, event_rx) = unbounded_channel();
         let runtime = SearchWorkerRuntime::new();
-        let worker = runtime.spawn_blocking(move || worker_main(request_rx, event_tx));
+        let worker = runtime.spawn_blocking({
+            let event_tx = event_tx.clone();
+            move || worker_main(request_rx, event_tx)
+        });
 
         Self {
             request_tx,
-            event_rx,
+            epoch,
             next_generation: 0,
             _runtime: runtime,
             worker: Some(worker),
         }
+    }
+
+    pub fn advance_epoch(&mut self, epoch: SearchEpoch) {
+        self.epoch = epoch;
+        self.next_generation = 0;
     }
 
     pub fn submit(
@@ -134,6 +141,7 @@ impl SearchEngine {
 
         let generation = self.next_generation;
         let job = SearchJob {
+            epoch: self.epoch,
             generation,
             pdf,
             query: query.into(),
@@ -178,26 +186,13 @@ impl SearchEngine {
             .request_tx
             .send(WorkerRequest::ResolveGeometry(GeometryJob {
                 generation,
+                epoch: self.epoch,
                 pdf,
                 query: query.into(),
                 matcher,
                 pages,
                 priority,
             }));
-    }
-
-    pub fn drain_events(&mut self) -> Vec<SearchEvent> {
-        let mut drained = Vec::new();
-
-        loop {
-            match self.event_rx.try_recv() {
-                Ok(event) => drained.push(event),
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break,
-            }
-        }
-
-        drained
     }
 }
 

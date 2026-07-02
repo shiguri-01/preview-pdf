@@ -153,9 +153,6 @@ impl RenderActor {
         if state.current_page != previous_page {
             changed = true;
         }
-        if interaction.drain_background_events(state) {
-            changed = true;
-        }
         if render.presenter.drain_background_events() {
             changed = true;
         }

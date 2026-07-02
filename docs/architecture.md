@@ -16,8 +16,8 @@ Startup begins in [src/main.rs](../src/main.rs).
    extension policies.
 5. The terminal session starts the event loop.
 6. The loop receives typed `DomainEvent` values, routes input and worker
-   completions, dispatches commands, drains extension background work, schedules
-   render and presenter work, and asks the UI to draw frames.
+   completions, dispatches commands, schedules render and presenter work, and
+   asks the UI to draw frames.
 
 Rationale: startup keeps option resolution outside the event loop so the loop
 can operate on resolved policies rather than re-reading config or CLI state.
@@ -71,8 +71,9 @@ Extensions own extension-local state and observe `AppEvent` values.
 snapshots. Feature behavior stays with the feature modules. Shared UI data
 crosses from extensions to palettes through `ExtensionUiSnapshot`.
 
-Render workers and presenter encode workers communicate with the loop through
-typed request and completion values. They do not mutate app state directly.
+Render workers, presenter encode workers, and extension-owned workers
+communicate with the loop through typed request and completion values. They do
+not mutate app state directly.
 
 Performance diagnostics drive the same event loop through the app-owned loop
 driver contract. The `perf` subsystem owns headless scenarios and reports;
@@ -122,13 +123,9 @@ Terminal input enters as `DomainEvent::Input`.
    requests, and lifecycle requests to extensions and other loop effects.
    Binding commands and internal follow-up commands use distinct invocation
    sources.
-7. Render workers return `DomainEvent::RenderComplete`; presenter encode
-   workers return `DomainEvent::EncodeComplete`.
-8. UI redraws happen when input, command effects, extension background work, or
-   worker completions make visible state change.
-
-Search worker events are drained by the search extension during background
-handling rather than entering the loop as `DomainEvent` values.
+7. Worker completions return to the loop as typed events.
+8. UI redraws happen when input, command effects, or worker completions make
+   visible state change.
 
 Rationale: the loop uses typed event values instead of ad hoc callbacks so
 worker results, command outcomes, extension reactions, and UI redraw decisions
@@ -148,10 +145,10 @@ operation methods. Key routing remains outside providers and produces commands;
 the active palette is the command target for palette operations.
 
 Extensions:
-Built-in features that need background state, event observation, status-bar
-segments, palette-facing snapshots, or render projections live behind
-`ExtensionHost`. The host owns hook order and snapshot composition. They are
-internal modules, not a dynamic plugin system.
+Built-in features that need local state, event observation, worker results,
+status-bar segments, palette-facing snapshots, or render projections live
+behind `ExtensionHost`. The host owns hook order and snapshot composition. They
+are internal modules, not a dynamic plugin system.
 
 Render and presenter:
 Raw page rasterization and terminal protocol encoding are separated because

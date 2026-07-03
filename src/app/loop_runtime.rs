@@ -7,6 +7,7 @@ use tokio::time;
 use crate::backend::SharedPdfBackend;
 use crate::event::DocumentReloadRequest;
 use crate::event::DomainEvent;
+use crate::extension::ExtensionWorkerEvent;
 use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::RenderTask;
 use crate::render::worker::RenderWorker;
@@ -31,6 +32,7 @@ pub(super) struct LoopRuntime<S> {
     pub(super) redraw_tick: time::Interval,
     pub(super) loop_event_tx: UnboundedSender<DomainEvent>,
     pub(super) loop_event_rx: UnboundedReceiver<DomainEvent>,
+    pub(super) extension_worker_rx: UnboundedReceiver<ExtensionWorkerEvent>,
     pub(super) loop_event_runtime: EventBusRuntime,
     pub(super) reload_in_flight: bool,
     pub(super) pending_reload: Option<DocumentReloadRequest>,

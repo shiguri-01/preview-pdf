@@ -10,10 +10,7 @@ mod tests;
 mod types;
 
 pub use catalog::{Command, CommandId, CommandRequest};
-pub use dispatch::{
-    CommandDispatchContext, CommandDispatchResult, dispatch_with_view_policy,
-    drain_background_events,
-};
+pub use dispatch::{CommandDispatchContext, CommandDispatchResult, dispatch_with_view_policy};
 pub use effects::CommandLifecycleEffect;
 pub(crate) use parse::first_token;
 pub use parse::{parse_command_text, parse_invocable_command_text};

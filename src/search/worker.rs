@@ -6,12 +6,14 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError}
 
 use crate::backend::{SharedPdfBackend, TextGlyph, TextPage};
 use crate::cache::{BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy};
+use crate::extension::ExtensionWorkerEvent;
 
-use super::engine::{SearchEvent, SearchPageHit, SearchSnapshot};
+use super::engine::{SearchEpoch, SearchEvent, SearchPageHit, SearchSnapshot};
 use super::matcher::{SearchMatcher, apply_hit_snippet, occurrence_highlight_unavailable};
 
 #[derive(Clone)]
 pub(crate) struct SearchJob {
+    pub(crate) epoch: SearchEpoch,
     pub(crate) generation: u64,
     pub(crate) pdf: SharedPdfBackend,
     pub(crate) query: String,
@@ -25,6 +27,7 @@ pub(crate) struct PrewarmJob {
 
 #[derive(Clone)]
 pub(crate) struct GeometryJob {
+    pub(crate) epoch: SearchEpoch,
     pub(crate) generation: u64,
     pub(crate) pdf: SharedPdfBackend,
     pub(crate) query: String,
@@ -141,7 +144,7 @@ fn estimate_text_page_bytes(text_page: &TextPage) -> usize {
 
 pub(crate) fn worker_main(
     mut request_rx: UnboundedReceiver<WorkerRequest>,
-    event_tx: UnboundedSender<SearchEvent>,
+    event_tx: UnboundedSender<ExtensionWorkerEvent>,
 ) {
     let mut pending = PendingWorkerWork::default();
     let mut page_cache = SearchPageCache::new();
@@ -297,25 +300,30 @@ fn run_prewarm_job(
 fn run_job(
     job: SearchJob,
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
-    event_tx: &UnboundedSender<SearchEvent>,
+    event_tx: &UnboundedSender<ExtensionWorkerEvent>,
     pending: &mut PendingWorkerWork,
     page_cache: &mut SearchPageCache,
 ) -> WorkerControl {
     let query = job.matcher.prepare_query(job.query.trim());
     if query.is_empty() {
         let snapshot = SearchSnapshot {
+            epoch: job.epoch,
             generation: job.generation,
             scanned_pages: 0,
             total_pages: 0,
             hit_pages: 0,
             done: true,
         };
-        let _ = event_tx.send(SearchEvent::Snapshot(snapshot));
-        let _ = event_tx.send(SearchEvent::Completed {
-            generation: job.generation,
-            hits: Vec::new(),
-            highlight_unavailable: false,
-        });
+        send_search_event(event_tx, SearchEvent::Snapshot(snapshot));
+        send_search_event(
+            event_tx,
+            SearchEvent::Completed {
+                epoch: job.epoch,
+                generation: job.generation,
+                hits: Vec::new(),
+                highlight_unavailable: false,
+            },
+        );
         return WorkerControl::Continue;
     }
 
@@ -347,11 +355,15 @@ fn run_job(
         let text_page = match text_page {
             Ok(text_page) => Some(text_page),
             Err(err) => {
-                let _ = event_tx.send(SearchEvent::PageSkipped {
-                    generation: job.generation,
-                    page,
-                    message: err.to_string(),
-                });
+                send_search_event(
+                    event_tx,
+                    SearchEvent::PageSkipped {
+                        epoch: job.epoch,
+                        generation: job.generation,
+                        page,
+                        message: err.to_string(),
+                    },
+                );
                 None
             }
         };
@@ -371,27 +383,32 @@ fn run_job(
 
         let scanned_pages = page + 1;
         let snapshot = SearchSnapshot {
+            epoch: job.epoch,
             generation: job.generation,
             scanned_pages,
             total_pages,
             hit_pages: hits.len(),
             done: scanned_pages == total_pages,
         };
-        let _ = event_tx.send(SearchEvent::Snapshot(snapshot));
+        send_search_event(event_tx, SearchEvent::Snapshot(snapshot));
     }
 
-    let _ = event_tx.send(SearchEvent::Completed {
-        generation: job.generation,
-        hits,
-        highlight_unavailable,
-    });
+    send_search_event(
+        event_tx,
+        SearchEvent::Completed {
+            epoch: job.epoch,
+            generation: job.generation,
+            hits,
+            highlight_unavailable,
+        },
+    );
     WorkerControl::Continue
 }
 
 fn run_geometry_job(
     job: GeometryJob,
     request_rx: &mut UnboundedReceiver<WorkerRequest>,
-    event_tx: &UnboundedSender<SearchEvent>,
+    event_tx: &UnboundedSender<ExtensionWorkerEvent>,
     pending: &mut PendingWorkerWork,
     page_cache: &mut SearchPageCache,
 ) -> WorkerControl {
@@ -444,15 +461,23 @@ fn run_geometry_job(
             }
             apply_hit_snippet(occurrence, &text_page.glyphs);
         }
-        let _ = event_tx.send(SearchEvent::GeometryResolved {
-            generation: job.generation,
-            page,
-            occurrences,
-            highlight_unavailable,
-        });
+        send_search_event(
+            event_tx,
+            SearchEvent::GeometryResolved {
+                epoch: job.epoch,
+                generation: job.generation,
+                page,
+                occurrences,
+                highlight_unavailable,
+            },
+        );
     }
 
     WorkerControl::Continue
+}
+
+fn send_search_event(event_tx: &UnboundedSender<ExtensionWorkerEvent>, event: SearchEvent) {
+    let _ = event_tx.send(ExtensionWorkerEvent::Search(event));
 }
 
 fn flush_requests(
@@ -499,7 +524,8 @@ mod tests {
     };
     use crate::command::SearchMatcherKind;
     use crate::error::{AppError, AppResult};
-    use crate::search::engine::SearchEvent;
+    use crate::extension::ExtensionWorkerEvent;
+    use crate::search::engine::{SearchEpoch, SearchEvent};
     use crate::search::matcher::matcher_for_kind;
 
     struct CountingTextPageStubPdf {
@@ -793,6 +819,7 @@ mod tests {
 
         request_tx
             .send(WorkerRequest::Query(SearchJob {
+                epoch: SearchEpoch(1),
                 generation: 1,
                 pdf: pdf.clone(),
                 query: "alpha".to_string(),
@@ -843,6 +870,7 @@ mod tests {
 
         let control = run_job(
             SearchJob {
+                epoch: SearchEpoch(1),
                 generation: 1,
                 pdf,
                 query: "beta".to_string(),
@@ -857,7 +885,7 @@ mod tests {
         assert!(matches!(control, super::WorkerControl::Continue));
         let mut events = Vec::new();
         while let Ok(event) = event_rx.try_recv() {
-            events.push(event);
+            events.push(search_event(event));
         }
         assert!(events.iter().any(|event| matches!(
             event,
@@ -876,6 +904,12 @@ mod tests {
             .expect("search should complete after skipping failed page");
         assert_eq!(completed.len(), 1);
         assert_eq!(completed[0].page, 2);
+    }
+
+    fn search_event(event: ExtensionWorkerEvent) -> SearchEvent {
+        match event {
+            ExtensionWorkerEvent::Search(event) => event,
+        }
     }
 
     fn text_page(text: &str) -> TextPage {

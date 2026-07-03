@@ -120,6 +120,14 @@ impl App {
                     self.request_redraw(runtime, RedrawReason::AppEvent);
                 }
             }
+            WaitEvent::Event(DomainEvent::ExtensionWorker(events)) => {
+                if self
+                    .interaction
+                    .handle_extension_worker_events(&mut self.state, events)
+                {
+                    self.request_redraw(runtime, RedrawReason::AppEvent);
+                }
+            }
             WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
                 if runtime.render_actor.handle_render_complete(
                     &mut self.render,

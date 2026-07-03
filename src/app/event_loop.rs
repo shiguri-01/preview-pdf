@@ -431,6 +431,8 @@ async fn wait_next_event(
         redraw_tick,
     } = sources;
     let presenter_pending = presenter.has_pending_work();
+    let extension_worker_available =
+        !extension_worker_rx.is_closed() || !extension_worker_rx.is_empty();
     tokio::select! {
         biased;
         maybe_loop = loop_event_rx.recv() => {
@@ -445,7 +447,7 @@ async fn wait_next_event(
                 None => WaitEvent::Closed,
             }
         },
-        maybe_extension = extension_worker_rx.recv() => {
+        maybe_extension = extension_worker_rx.recv(), if extension_worker_available => {
             match maybe_extension {
                 Some(event) => WaitEvent::Event(DomainEvent::ExtensionWorker(drain_extension_worker_batch(extension_worker_rx, event))),
                 None => WaitEvent::Event(DomainEvent::Wake),
@@ -564,6 +566,7 @@ mod tests {
     use crate::event::{
         DocumentReloadReason, DocumentReloadRequest, DocumentReloadResult, DomainEvent,
     };
+    use crate::extension::ExtensionWorkerEvent;
     use crate::input::sequence::SequenceRegistry;
     use crate::input::shortcut::ShortcutKey;
     use crate::presenter::PresenterKind;
@@ -574,6 +577,7 @@ mod tests {
     use crate::render::cache::RenderedPageKey;
     use crate::render::worker::RenderWorker;
     use crate::render::worker::RenderWorkerResult;
+    use crate::search::engine::{SearchEpoch, SearchEvent, SearchSnapshot};
     use crate::work::WorkClass;
 
     #[derive(Default)]
@@ -929,6 +933,99 @@ mod tests {
             )
             .await;
             assert!(matches!(second, WaitEvent::Event(DomainEvent::Wake)));
+        });
+    }
+
+    #[test]
+    fn wait_next_event_drains_buffered_extension_events_after_sender_closes() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let mut render_worker = idle_render_worker();
+        let mut presenter = StubPresenter::default();
+        let (_loop_tx, mut loop_event_rx) = unbounded_channel();
+        let (extension_tx, mut extension_worker_rx) = unbounded_channel();
+        let event = SearchEvent::Snapshot(SearchSnapshot {
+            epoch: SearchEpoch(1),
+            generation: 1,
+            scanned_pages: 1,
+            total_pages: 2,
+            hit_pages: 1,
+            done: false,
+        });
+        extension_tx
+            .send(ExtensionWorkerEvent::Search(event.clone()))
+            .expect("buffered worker event should send");
+        drop(extension_tx);
+
+        runtime.block_on(async {
+            let mut prefetch_tick = tokio::time::interval(Duration::from_secs(60));
+            let mut redraw_tick = tokio::time::interval(Duration::from_secs(60));
+
+            let waited = wait_next_event(
+                WaitEventSources {
+                    loop_event_rx: &mut loop_event_rx,
+                    extension_worker_rx: &mut extension_worker_rx,
+                    render_worker: &mut render_worker,
+                    presenter: &mut presenter,
+                    prefetch_tick: &mut prefetch_tick,
+                    redraw_tick: &mut redraw_tick,
+                },
+                false,
+                Duration::from_secs(60),
+            )
+            .await;
+
+            match waited {
+                WaitEvent::Event(DomainEvent::ExtensionWorker(events)) => {
+                    assert_eq!(events, vec![ExtensionWorkerEvent::Search(event)]);
+                }
+                _ => panic!("expected buffered extension worker event"),
+            }
+        });
+    }
+
+    #[test]
+    fn wait_next_event_does_not_let_closed_extension_channel_mask_loop_events() {
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("tokio runtime should build");
+        let mut render_worker = idle_render_worker();
+        let mut presenter = StubPresenter::default();
+        let (loop_tx, mut loop_event_rx) = unbounded_channel();
+        let (extension_tx, mut extension_worker_rx) = unbounded_channel();
+        drop(extension_tx);
+        let request = CommandRequest::new(Command::OpenHelp, CommandInvocationSource::Binding);
+        loop_tx
+            .send(DomainEvent::Command(request.clone()))
+            .expect("loop event should send");
+
+        runtime.block_on(async {
+            let mut prefetch_tick = tokio::time::interval(Duration::from_secs(60));
+            let mut redraw_tick = tokio::time::interval(Duration::from_secs(60));
+
+            let waited = wait_next_event(
+                WaitEventSources {
+                    loop_event_rx: &mut loop_event_rx,
+                    extension_worker_rx: &mut extension_worker_rx,
+                    render_worker: &mut render_worker,
+                    presenter: &mut presenter,
+                    prefetch_tick: &mut prefetch_tick,
+                    redraw_tick: &mut redraw_tick,
+                },
+                false,
+                Duration::from_secs(60),
+            )
+            .await;
+
+            match waited {
+                WaitEvent::Event(DomainEvent::Command(received)) => {
+                    assert_eq!(received, request);
+                }
+                _ => panic!("expected loop command event"),
+            }
         });
     }
 

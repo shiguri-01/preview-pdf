@@ -4,7 +4,8 @@ use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::command::CommandOutcome;
 use crate::error::{AppError, AppResult};
 use crate::event::{AppEvent, HistoryOp, NavReason, PageGotoKind};
-use crate::palette::{PaletteKind, PaletteOpenPayload};
+use crate::history::palette::{HistoryPaletteEntry, HistoryPaletteReason, HistoryUiSnapshot};
+use crate::palette::{PageIndex, PaletteCandidateId, PaletteKind, PaletteOpenOptions};
 
 const HISTORY_CAPACITY: usize = 64;
 
@@ -132,10 +133,34 @@ impl HistoryState {
     }
 
     pub fn open_palette(&self, app: &AppState) -> PaletteRequest {
-        let seed = self.serialize_seed(app.current_page);
+        let _ = app;
         PaletteRequest::Open {
             kind: PaletteKind::History,
-            payload: Some(PaletteOpenPayload::HistorySeed(seed)),
+            options: PaletteOpenOptions::default(),
+        }
+    }
+
+    pub fn ui_snapshot(&self, app: &AppState) -> HistoryUiSnapshot {
+        let mut entries = Vec::new();
+        for (i, entry) in self.forward_stack.iter().rev().enumerate().rev() {
+            entries.push(history_palette_entry(entry, (i as isize) + 1, false));
+        }
+        entries.push(HistoryPaletteEntry {
+            id: PaletteCandidateId::new(format!("current-{}", app.current_page)),
+            display_index: 0,
+            page: PageIndex::zero_based(app.current_page),
+            reason: self
+                .current_reason
+                .as_ref()
+                .map(history_palette_reason)
+                .unwrap_or(HistoryPaletteReason::PageOnly),
+            is_current: true,
+        });
+        for (i, entry) in self.back_stack.iter().rev().enumerate() {
+            entries.push(history_palette_entry(entry, -((i as isize) + 1), false));
+        }
+        HistoryUiSnapshot {
+            entries: entries.into(),
         }
     }
 
@@ -186,39 +211,6 @@ impl HistoryState {
         self.forward_stack.push_back(entry);
     }
 
-    fn serialize_seed(&self, current_page: usize) -> String {
-        let mut buf = String::new();
-        buf.push_str("b:");
-        for (i, entry) in self.back_stack.iter().enumerate() {
-            if i > 0 {
-                buf.push(';');
-            }
-            buf.push_str(&entry.page.to_string());
-            if let Some(reason) = entry.reason.as_ref() {
-                buf.push(',');
-                buf.push_str(&format_reason(reason));
-            }
-        }
-        buf.push_str("|c:");
-        buf.push_str(&current_page.to_string());
-        if let Some(reason) = self.current_reason.as_ref() {
-            buf.push(',');
-            buf.push_str(&format_reason(reason));
-        }
-        buf.push_str("|f:");
-        for (i, entry) in self.forward_stack.iter().rev().enumerate() {
-            if i > 0 {
-                buf.push(';');
-            }
-            buf.push_str(&entry.page.to_string());
-            if let Some(reason) = entry.reason.as_ref() {
-                buf.push(',');
-                buf.push_str(&format_reason(reason));
-            }
-        }
-        buf
-    }
-
     fn materialize_departed_page(&mut self, page: usize, include_unreasoned: bool) {
         let departed_reason = self.current_reason.clone();
         if departed_reason.is_none() && !include_unreasoned {
@@ -256,38 +248,43 @@ impl HistoryState {
     }
 }
 
-fn format_reason(reason: &NavReason) -> String {
-    match reason {
-        NavReason::Step => "Step".to_string(),
-        NavReason::PageGoto(kind) => match kind {
-            PageGotoKind::First => "Goto:first-page".to_string(),
-            PageGotoKind::Last => "Goto:last-page".to_string(),
-            PageGotoKind::Specific => "Goto:goto-page".to_string(),
-        },
-        NavReason::Search { query } if query.is_empty() => "Search".to_string(),
-        NavReason::Search { query } => format!("Search:~{}", encode_seed_component(query)),
-        NavReason::History(op) => match op {
-            HistoryOp::Back => "History:back".to_string(),
-            HistoryOp::Forward => "History:forward".to_string(),
-            HistoryOp::Goto => "History:goto".to_string(),
-        },
-        NavReason::Outline { title } => format!("Outline:~{}", encode_seed_component(title)),
-        NavReason::LayoutNormalize => "LayoutNormalize".to_string(),
+fn history_palette_entry(
+    entry: &HistoryEntry,
+    display_index: isize,
+    is_current: bool,
+) -> HistoryPaletteEntry {
+    HistoryPaletteEntry {
+        id: PaletteCandidateId::new(format!("history-{}-{display_index}", entry.page)),
+        display_index,
+        page: PageIndex::zero_based(entry.page),
+        reason: entry
+            .reason
+            .as_ref()
+            .map(history_palette_reason)
+            .unwrap_or(HistoryPaletteReason::PageOnly),
+        is_current,
     }
 }
 
-fn encode_seed_component(value: &str) -> String {
-    const UNRESERVED: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~";
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if UNRESERVED.contains(&byte) {
-            encoded.push(char::from(byte));
-        } else {
-            encoded.push('%');
-            encoded.push_str(&format!("{byte:02X}"));
-        }
+fn history_palette_reason(reason: &NavReason) -> HistoryPaletteReason {
+    match reason {
+        NavReason::Step => HistoryPaletteReason::PageOnly,
+        NavReason::PageGoto(kind) => match kind {
+            PageGotoKind::First => HistoryPaletteReason::Goto("first-page".to_string()),
+            PageGotoKind::Last => HistoryPaletteReason::Goto("last-page".to_string()),
+            PageGotoKind::Specific => HistoryPaletteReason::PageOnly,
+        },
+        NavReason::Search { query } if query.is_empty() => HistoryPaletteReason::PageOnly,
+        NavReason::Search { query } => HistoryPaletteReason::Search(query.clone()),
+        NavReason::History(op) => match op {
+            HistoryOp::Back | HistoryOp::Forward | HistoryOp::Goto => {
+                HistoryPaletteReason::PageOnly
+            }
+        },
+        NavReason::Outline { title } if title.is_empty() => HistoryPaletteReason::PageOnly,
+        NavReason::Outline { title } => HistoryPaletteReason::Outline(title.clone()),
+        NavReason::LayoutNormalize => HistoryPaletteReason::PageOnly,
     }
-    encoded
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -312,9 +309,7 @@ mod tests {
     use super::{HistoryEntry, HistoryState};
     use crate::app::{AppState, PageLayoutMode};
     use crate::event::{AppEvent, NavReason, PageGotoKind};
-    use crate::extension::ExtensionUiSnapshot;
-    use crate::history::palette::HistoryPaletteProvider;
-    use crate::palette::{PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteProvider};
+    use crate::history::palette::HistoryPaletteReason;
 
     #[test]
     fn destination_reason_is_stored_on_the_destination_page() {
@@ -444,35 +439,24 @@ mod tests {
     }
 
     #[test]
-    fn serialize_seed_escapes_outline_titles() {
+    fn ui_snapshot_preserves_outline_titles_without_encoding() {
         let state = HistoryState {
             current_reason: Some(NavReason::Outline {
                 title: "A | B; C".to_string(),
             }),
             ..HistoryState::default()
         };
-        let seed = state.serialize_seed(6);
-        assert!(seed.contains("%7C"));
-        assert!(seed.contains("%3B"));
-
-        let provider = HistoryPaletteProvider;
-        let app = PaletteAppSnapshot {
+        let app = AppState {
             current_page: 6,
-            ..PaletteAppSnapshot::default()
-        };
-        let extensions = ExtensionUiSnapshot::default();
-        let payload = crate::palette::PaletteOpenPayload::HistorySeed(seed);
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::History,
-            input: "",
-            open_payload: Some(&payload),
+            ..AppState::default()
         };
 
-        let items = provider.list(&ctx).expect("history list should build");
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].left[3].text, "A | B; C");
+        let snapshot = state.ui_snapshot(&app);
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(
+            snapshot.entries[0].reason,
+            HistoryPaletteReason::Outline("A | B; C".to_string())
+        );
     }
 
     #[test]

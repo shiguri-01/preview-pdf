@@ -1,7 +1,7 @@
 use std::num::IntErrorKind;
 
 use crate::error::{AppError, AppResult};
-use crate::palette::{PaletteKind, PaletteOpenPayload};
+use crate::palette::{PaletteKind, PaletteOpenOptions};
 
 use super::catalog::{self, Command};
 use super::spec::{CommandPolicyContext, find_command_spec, validate_command_id_for_policy};
@@ -78,26 +78,12 @@ pub(super) fn parse_open_palette(args_text: &str) -> AppResult<Command> {
 
     let kind =
         PaletteKind::parse(kind_text).ok_or(AppError::invalid_argument("unknown palette kind"))?;
-    let payload = parse_open_palette_payload(kind, input);
+    let options = PaletteOpenOptions {
+        initial_input: input.to_string(),
+        initial_selection_id: None,
+    };
 
-    Ok(Command::OpenPalette { kind, payload })
-}
-
-fn parse_open_palette_payload(kind: PaletteKind, input: &str) -> Option<PaletteOpenPayload> {
-    if input.is_empty() {
-        return None;
-    }
-
-    Some(match kind {
-        PaletteKind::Command => PaletteOpenPayload::CommandInput(input.to_string()),
-        PaletteKind::Search => PaletteOpenPayload::Search {
-            query: input.to_string(),
-            matcher: SearchMatcherKind::ContainsInsensitive,
-        },
-        PaletteKind::SearchResults => PaletteOpenPayload::SearchResultsQuery(input.to_string()),
-        PaletteKind::History => PaletteOpenPayload::HistorySeed(input.to_string()),
-        PaletteKind::Outline => PaletteOpenPayload::OutlineQuery(input.to_string()),
-    })
+    Ok(Command::OpenPalette { kind, options })
 }
 
 pub(super) fn parse_text_insert(args_text: &str) -> AppResult<Command> {
@@ -369,7 +355,7 @@ mod tests {
         ArgHint, ArgKind, ArgSpec, Command, CommandExposure, PanAmount, PanDirection,
         SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg, all_command_specs,
     };
-    use crate::palette::{PaletteKind, PaletteOpenPayload};
+    use crate::palette::{PaletteKind, PaletteOpenOptions};
 
     #[test]
     fn parses_basic_commands() {
@@ -389,7 +375,7 @@ mod tests {
             parse_command_text("open-palette command").expect("parse should succeed"),
             Command::OpenPalette {
                 kind: PaletteKind::Command,
-                payload: None,
+                options: PaletteOpenOptions::default(),
             }
         );
         assert_eq!(
@@ -397,33 +383,28 @@ mod tests {
                 .expect("parse should succeed"),
             Command::OpenPalette {
                 kind: PaletteKind::History,
-                payload: Some(PaletteOpenPayload::HistorySeed(
-                    "b:11|c:12|f:13".to_string(),
-                )),
+                options: PaletteOpenOptions::input("b:11|c:12|f:13"),
             }
         );
         assert_eq!(
             parse_command_text("open-palette search needle").expect("parse should succeed"),
             Command::OpenPalette {
                 kind: PaletteKind::Search,
-                payload: Some(PaletteOpenPayload::Search {
-                    query: "needle".to_string(),
-                    matcher: SearchMatcherKind::ContainsInsensitive,
-                }),
+                options: PaletteOpenOptions::input("needle"),
             }
         );
         assert_eq!(
             parse_command_text("open-palette outline appendix").expect("parse should succeed"),
             Command::OpenPalette {
                 kind: PaletteKind::Outline,
-                payload: Some(PaletteOpenPayload::OutlineQuery("appendix".to_string())),
+                options: PaletteOpenOptions::input("appendix"),
             }
         );
         assert_eq!(
             parse_command_text("open-palette search-results needle").expect("parse should succeed"),
             Command::OpenPalette {
                 kind: PaletteKind::SearchResults,
-                payload: Some(PaletteOpenPayload::SearchResultsQuery("needle".to_string())),
+                options: PaletteOpenOptions::input("needle"),
             }
         );
     }

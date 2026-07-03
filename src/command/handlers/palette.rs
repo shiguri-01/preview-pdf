@@ -2,7 +2,7 @@ use crate::app::Mode;
 use crate::app::PaletteRequest;
 use crate::command::{CommandInvocationSource, CommandOutcome, CommandRequest};
 use crate::error::AppResult;
-use crate::palette::{PaletteKind, PaletteOpenPayload, PalettePostAction, PaletteSubmitEffect};
+use crate::palette::{PaletteKind, PaletteOpenOptions, PalettePostAction, PaletteSubmitEffect};
 
 use super::super::dispatch::CommandExecContext;
 use super::super::effects::CommandExecution;
@@ -10,9 +10,9 @@ use super::super::effects::CommandExecution;
 pub(in crate::command) fn open_palette(
     _ctx: &mut CommandExecContext<'_>,
     kind: PaletteKind,
-    payload: Option<PaletteOpenPayload>,
+    options: PaletteOpenOptions,
 ) -> AppResult<CommandExecution> {
-    Ok(CommandExecution::applied().with_palette_request(PaletteRequest::Open { kind, payload }))
+    Ok(CommandExecution::applied().with_palette_request(PaletteRequest::Open { kind, options }))
 }
 
 pub(in crate::command) fn close_palette(
@@ -24,17 +24,17 @@ pub(in crate::command) fn close_palette(
 pub(in crate::command) fn palette_submit(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let Some(kind) = ctx.palette_manager.active_kind() else {
+    let Some(kind) = ctx.palette_session.active_kind() else {
         return Ok(CommandExecution::noop());
     };
-    let extensions = ctx.extension_host.ui_snapshot();
+    let extensions = ctx.extension_host.ui_snapshot(ctx.app);
     let Some(action) = ctx
-        .palette_manager
+        .palette_session
         .submit(ctx.palette_registry, ctx.app, &extensions)?
     else {
         return Ok(CommandExecution::noop());
     };
-    if !ctx.palette_manager.close_if_matches(action.session_id) {
+    if !ctx.palette_session.close_if_matches(action.session_id) {
         return Ok(CommandExecution::noop());
     }
     ctx.app.mode = Mode::Normal;
@@ -42,8 +42,8 @@ pub(in crate::command) fn palette_submit(
     let mut execution = CommandExecution::applied();
     match action.effect {
         PaletteSubmitEffect::Close => {}
-        PaletteSubmitEffect::Reopen { kind, payload } => {
-            execution = execution.with_palette_request(PaletteRequest::Open { kind, payload });
+        PaletteSubmitEffect::Reopen { kind, options } => {
+            execution = execution.with_palette_request(PaletteRequest::Open { kind, options });
         }
         PaletteSubmitEffect::Dispatch {
             command,
@@ -63,9 +63,9 @@ pub(in crate::command) fn palette_submit(
             execution = execution.with_follow_up(CommandRequest::new(command, source));
             match next {
                 PalettePostAction::Close => {}
-                PalettePostAction::Reopen { kind, payload } => {
+                PalettePostAction::Reopen { kind, options } => {
                     execution =
-                        execution.with_palette_request(PaletteRequest::Open { kind, payload });
+                        execution.with_palette_request(PaletteRequest::Open { kind, options });
                 }
             }
         }
@@ -76,9 +76,9 @@ pub(in crate::command) fn palette_submit(
 pub(in crate::command) fn palette_complete(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let extensions = ctx.extension_host.ui_snapshot();
+    let extensions = ctx.extension_host.ui_snapshot(ctx.app);
     let changed = ctx
-        .palette_manager
+        .palette_session
         .complete(ctx.palette_registry, ctx.app, &extensions)?;
     Ok(CommandExecution::from_notice_result((
         if changed {
@@ -93,7 +93,7 @@ pub(in crate::command) fn palette_complete(
 pub(in crate::command) fn palette_select_next(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let changed = ctx.palette_manager.select_next_item();
+    let changed = ctx.palette_session.select_next_item();
     Ok(CommandExecution::from_notice_result((
         if changed {
             CommandOutcome::Applied
@@ -107,7 +107,7 @@ pub(in crate::command) fn palette_select_next(
 pub(in crate::command) fn palette_select_prev(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let changed = ctx.palette_manager.select_previous();
+    let changed = ctx.palette_session.select_previous();
     Ok(CommandExecution::from_notice_result((
         if changed {
             CommandOutcome::Applied

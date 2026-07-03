@@ -10,7 +10,7 @@ use crate::error::AppResult;
 use crate::extension::ExtensionHost;
 use crate::input::InputHistoryService;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, SequenceResolver};
-use crate::palette::{PaletteManager, PaletteRegistry};
+use crate::palette::{PaletteRegistry, PaletteSessionController};
 use crate::presenter::{ImagePresenter, PresenterKind, create_presenter_with_cache_limits};
 
 use super::runtime::RenderRuntime;
@@ -42,7 +42,7 @@ pub struct ExtensionSubsystem {
 #[derive(Default)]
 pub struct PaletteSubsystem {
     pub registry: PaletteRegistry,
-    pub manager: PaletteManager,
+    pub session: PaletteSessionController,
     pub pending_requests: VecDeque<PaletteRequest>,
 }
 

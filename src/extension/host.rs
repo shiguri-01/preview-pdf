@@ -4,7 +4,7 @@ use crate::app::AppState;
 use crate::backend::SharedPdfBackend;
 use crate::event::AppEvent;
 use crate::highlight::HighlightOverlaySnapshot;
-use crate::history::{HistoryCommandPort, HistoryExtension, HistoryState};
+use crate::history::{HistoryCommandPort, HistoryExtension, HistoryState, HistoryUiSnapshot};
 use crate::input::{AppInputEvent, InputHookResult};
 use crate::outline::{OutlineCommandPort, OutlineExtension, OutlineState, OutlineUiSnapshot};
 use crate::search::{SearchCommandPort, SearchExtension, SearchRuntime, SearchUiSnapshot};
@@ -14,6 +14,7 @@ use super::traits::Extension;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtensionUiSnapshot {
     pub search: SearchUiSnapshot,
+    pub history: HistoryUiSnapshot,
     pub outline: OutlineUiSnapshot,
 }
 
@@ -115,9 +116,10 @@ impl ExtensionHost {
         segments
     }
 
-    pub fn ui_snapshot(&self) -> ExtensionUiSnapshot {
+    pub fn ui_snapshot(&self, app: &AppState) -> ExtensionUiSnapshot {
         ExtensionUiSnapshot {
             search: self.search.ui_snapshot(),
+            history: self.history.ui_snapshot(app),
             outline: self.outline.ui_snapshot(),
         }
     }
@@ -243,7 +245,7 @@ mod tests {
                 SearchMatcherKind::ContainsInsensitive,
             )
             .expect("submit-search should succeed");
-        assert!(host.ui_snapshot().search.active);
+        assert!(host.ui_snapshot(&app).search.active);
 
         let canceled = host
             .command_ports()
@@ -251,7 +253,7 @@ mod tests {
             .cancel(pdf)
             .expect("cancel should succeed");
         assert!(canceled);
-        assert!(!host.ui_snapshot().search.active);
+        assert!(!host.ui_snapshot(&app).search.active);
     }
 
     #[test]
@@ -273,7 +275,7 @@ mod tests {
 
         host.on_document_reloaded(&mut app, second);
 
-        assert!(host.ui_snapshot().search.active);
+        assert!(host.ui_snapshot(&app).search.active);
         assert_eq!(host.search().query(), "needle");
         assert_eq!(
             host.search().matcher(),

@@ -7,7 +7,7 @@ use crate::error::AppResult;
 use crate::event::{AppEvent, HistoryOp, NavReason, PageGotoKind};
 use crate::extension::ExtensionHost;
 use crate::input::InputHistoryService;
-use crate::palette::{PaletteManager, PaletteRegistry};
+use crate::palette::{PaletteRegistry, PaletteSessionController};
 
 use super::catalog::{Command, CommandRequest, execute_registered_command};
 use crate::condition::RuntimeConditionContext;
@@ -28,7 +28,7 @@ pub struct CommandDispatchContext<'a> {
     pub pdf: SharedPdfBackend,
     pub extension_host: &'a mut ExtensionHost,
     pub palette_registry: &'a PaletteRegistry,
-    pub palette_manager: &'a mut PaletteManager,
+    pub palette_session: &'a mut PaletteSessionController,
     pub palette_requests: &'a mut VecDeque<PaletteRequest>,
     pub input_history: &'a mut InputHistoryService,
 }
@@ -39,7 +39,7 @@ pub(super) struct CommandExecContext<'a> {
     pub pdf: SharedPdfBackend,
     pub extension_host: &'a mut ExtensionHost,
     pub palette_registry: &'a PaletteRegistry,
-    pub palette_manager: &'a mut PaletteManager,
+    pub palette_session: &'a mut PaletteSessionController,
 }
 
 impl CommandExecContext<'_> {
@@ -70,14 +70,14 @@ pub fn dispatch_with_view_policy(
         pdf,
         extension_host,
         palette_registry,
-        palette_manager,
+        palette_session,
         palette_requests,
         input_history,
     } = dispatch_ctx;
     let command_id = cmd.command_id();
-    let extensions = extension_host.ui_snapshot();
-    let active_palette = palette_manager.active_kind();
-    let palette_input_empty = palette_manager.active_input_is_empty();
+    let extensions = extension_host.ui_snapshot(app);
+    let active_palette = palette_session.active_kind();
+    let palette_input_empty = palette_session.active_input_is_empty();
     let ctx = CommandPolicyContext {
         source,
         runtime: RuntimeConditionContext::with_palette_input_empty(
@@ -111,7 +111,7 @@ pub fn dispatch_with_view_policy(
             pdf,
             extension_host: &mut *extension_host,
             palette_registry,
-            palette_manager: &mut *palette_manager,
+            palette_session: &mut *palette_session,
         },
         cmd,
     )?;
@@ -221,7 +221,7 @@ mod tests {
     use crate::event::{AppEvent, NavReason};
     use crate::extension::ExtensionHost;
     use crate::input::InputHistoryService;
-    use crate::palette::{PaletteKind, PaletteManager, PaletteRegistry};
+    use crate::palette::{PaletteKind, PaletteRegistry, PaletteSessionController};
 
     use super::{
         CommandDispatchContext, CommandDispatchResult, collect_transition_events,
@@ -291,7 +291,7 @@ mod tests {
         palette_requests: &mut VecDeque<PaletteRequest>,
     ) -> crate::error::AppResult<CommandDispatchResult> {
         let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
+        let mut session = PaletteSessionController::default();
         let mut history = InputHistoryService::default();
         dispatch_with_view_policy(
             app,
@@ -302,7 +302,7 @@ mod tests {
                 pdf,
                 extension_host,
                 palette_registry: &registry,
-                palette_manager: &mut manager,
+                palette_session: &mut session,
                 palette_requests,
                 input_history: &mut history,
             },
@@ -703,7 +703,7 @@ mod tests {
             &mut app,
             Command::OpenPalette {
                 kind: PaletteKind::Command,
-                payload: None,
+                options: crate::palette::PaletteOpenOptions::default(),
             },
             CommandInvocationSource::Binding,
             pdf,
@@ -732,15 +732,15 @@ mod tests {
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
-        let extensions = host.ui_snapshot();
-        manager
+        let mut session = PaletteSessionController::default();
+        let extensions = host.ui_snapshot(&app);
+        session
             .open(
                 &registry,
                 &app,
                 &extensions,
                 PaletteKind::Command,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 None,
             )
             .expect("command palette should open");
@@ -756,7 +756,7 @@ mod tests {
                 pdf,
                 extension_host: &mut host,
                 palette_registry: &registry,
-                palette_manager: &mut manager,
+                palette_session: &mut session,
                 palette_requests: &mut palette_requests,
                 input_history: &mut history,
             },
@@ -765,7 +765,7 @@ mod tests {
 
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(app.mode, Mode::Normal);
-        assert!(!manager.is_open());
+        assert!(!session.is_open());
         assert!(matches!(
             result.follow_up_commands.as_slice(),
             [request]
@@ -783,19 +783,19 @@ mod tests {
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
-        let extensions = host.ui_snapshot();
-        manager
+        let mut session = PaletteSessionController::default();
+        let extensions = host.ui_snapshot(&app);
+        session
             .open(
                 &registry,
                 &app,
                 &extensions,
                 PaletteKind::Search,
-                None,
+                crate::palette::PaletteOpenOptions::default(),
                 None,
             )
             .expect("search palette should open");
-        manager
+        session
             .insert_text(&registry, &app, &extensions, "needle")
             .expect("search input should be inserted");
         let mut palette_requests = VecDeque::new();
@@ -810,7 +810,7 @@ mod tests {
                 pdf,
                 extension_host: &mut host,
                 palette_registry: &registry,
-                palette_manager: &mut manager,
+                palette_session: &mut session,
                 palette_requests: &mut palette_requests,
                 input_history: &mut history,
             },
@@ -831,7 +831,7 @@ mod tests {
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
+        let mut session = PaletteSessionController::default();
         let mut palette_requests = VecDeque::new();
         let mut history = InputHistoryService::default();
 
@@ -844,7 +844,7 @@ mod tests {
                 pdf,
                 extension_host: &mut host,
                 palette_registry: &registry,
-                palette_manager: &mut manager,
+                palette_session: &mut session,
                 palette_requests: &mut palette_requests,
                 input_history: &mut history,
             },
@@ -1032,7 +1032,7 @@ mod tests {
                 SearchMatcherKind::ContainsInsensitive,
             )
             .expect("submit-search should succeed");
-        assert!(host.ui_snapshot().search.active);
+        assert!(host.ui_snapshot(&app).search.active);
 
         let result = dispatch(
             &mut app,
@@ -1046,7 +1046,7 @@ mod tests {
 
         assert_eq!(result.outcome, CommandOutcome::Applied);
         assert_eq!(result.emitted_events.len(), 1);
-        assert!(!host.ui_snapshot().search.active);
+        assert!(!host.ui_snapshot(&app).search.active);
         assert_eq!(app.notice, None);
         assert!(palette_requests.is_empty());
     }
@@ -1193,7 +1193,7 @@ mod tests {
         let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
-        let mut manager = PaletteManager::default();
+        let mut session = PaletteSessionController::default();
         let mut palette_requests = VecDeque::new();
         let mut history = InputHistoryService::default();
 
@@ -1209,7 +1209,7 @@ mod tests {
                 pdf,
                 extension_host: &mut host,
                 palette_registry: &registry,
-                palette_manager: &mut manager,
+                palette_session: &mut session,
                 palette_requests: &mut palette_requests,
                 input_history: &mut history,
             },

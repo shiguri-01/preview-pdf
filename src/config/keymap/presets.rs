@@ -61,7 +61,7 @@ fn register_surface_open_bindings(registry: &mut SequenceRegistry) {
         &[ShortcutKey::char(':')],
         Command::OpenPalette {
             kind: PaletteKind::Command,
-            payload: None,
+            options: crate::palette::PaletteOpenOptions::default(),
         },
     );
     register_exact_binding(

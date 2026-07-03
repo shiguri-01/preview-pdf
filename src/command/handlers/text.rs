@@ -10,8 +10,8 @@ pub(in crate::command) fn text_insert(
     ctx: &mut CommandExecContext<'_>,
     text: String,
 ) -> AppResult<CommandExecution> {
-    let extensions = ctx.extension_host.ui_snapshot();
-    text_execution(ctx.palette_manager.insert_text(
+    let extensions = ctx.extension_host.ui_snapshot(ctx.app);
+    text_execution(ctx.palette_session.insert_text(
         ctx.palette_registry,
         ctx.app,
         &extensions,
@@ -101,8 +101,8 @@ fn text_edit(
     ctx: &mut CommandExecContext<'_>,
     request: InputRequest,
 ) -> AppResult<CommandExecution> {
-    let extensions = ctx.extension_host.ui_snapshot();
-    text_execution(ctx.palette_manager.edit_input(
+    let extensions = ctx.extension_host.ui_snapshot(ctx.app);
+    text_execution(ctx.palette_session.edit_input(
         ctx.palette_registry,
         ctx.app,
         &extensions,
@@ -113,8 +113,8 @@ fn text_edit(
 pub(in crate::command) fn palette_input_history_older(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let extensions = ctx.extension_host.ui_snapshot();
-    text_execution(ctx.palette_manager.recall_history(
+    let extensions = ctx.extension_host.ui_snapshot(ctx.app);
+    text_execution(ctx.palette_session.recall_history(
         ctx.palette_registry,
         ctx.app,
         &extensions,
@@ -125,8 +125,8 @@ pub(in crate::command) fn palette_input_history_older(
 pub(in crate::command) fn palette_input_history_newer(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let extensions = ctx.extension_host.ui_snapshot();
-    text_execution(ctx.palette_manager.recall_history(
+    let extensions = ctx.extension_host.ui_snapshot(ctx.app);
+    text_execution(ctx.palette_session.recall_history(
         ctx.palette_registry,
         ctx.app,
         &extensions,

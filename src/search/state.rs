@@ -5,7 +5,7 @@ use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
 use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
-use crate::palette::{PaletteKind, PaletteOpenPayload};
+use crate::palette::{PaletteKind, PaletteOpenOptions};
 
 use super::engine::{SearchEngine, SearchEpoch, SearchEvent, SearchPageHit};
 use super::matcher::matcher_for_kind;
@@ -277,17 +277,14 @@ impl SearchState {
     const PAGE_SKIPPED_NOTICE: &str = "some pages could not be searched";
 
     pub fn open_palette(&mut self) -> PaletteRequest {
-        let payload = if self.query.is_empty() {
-            None
+        let options = if self.query.is_empty() {
+            PaletteOpenOptions::default()
         } else {
-            Some(PaletteOpenPayload::Search {
-                query: self.query.clone(),
-                matcher: self.matcher,
-            })
+            PaletteOpenOptions::input_with_selection(self.query.clone(), self.matcher.id())
         };
         PaletteRequest::Open {
             kind: PaletteKind::Search,
-            payload,
+            options,
         }
     }
 
@@ -297,7 +294,7 @@ impl SearchState {
         }
         Some(PaletteRequest::Open {
             kind: PaletteKind::SearchResults,
-            payload: None,
+            options: PaletteOpenOptions::default(),
         })
     }
 
@@ -668,7 +665,7 @@ mod tests {
     use crate::backend::{PdfBackend, RgbaFrame, SharedPdfBackend, TextPage};
     use crate::command::{CommandOutcome, SearchMatcherKind};
     use crate::extension::ExtensionWorkerEvent;
-    use crate::palette::{PaletteKind, PaletteOpenPayload};
+    use crate::palette::{PaletteCandidateId, PaletteKind, PaletteOpenOptions};
     use crate::search::engine::{SearchEngine, SearchEpoch, SearchEvent, SearchPageHit};
 
     use super::SearchState;
@@ -822,7 +819,7 @@ mod tests {
     }
 
     #[test]
-    fn open_palette_includes_query_and_matcher_in_payload() {
+    fn open_palette_includes_query_and_matcher_in_options() {
         let mut state = SearchState {
             query: "needle".to_string(),
             matcher: SearchMatcherKind::ContainsSensitive,
@@ -832,10 +829,10 @@ mod tests {
             state.open_palette(),
             PaletteRequest::Open {
                 kind: PaletteKind::Search,
-                payload: Some(PaletteOpenPayload::Search {
-                    query: "needle".to_string(),
-                    matcher: SearchMatcherKind::ContainsSensitive,
-                }),
+                options: PaletteOpenOptions {
+                    initial_input: "needle".to_string(),
+                    initial_selection_id: Some(PaletteCandidateId::new("contains-sensitive")),
+                },
             }
         );
     }
@@ -858,7 +855,7 @@ mod tests {
             state.open_results_palette(),
             Some(PaletteRequest::Open {
                 kind: PaletteKind::SearchResults,
-                payload: None,
+                options: PaletteOpenOptions::default(),
             })
         );
     }

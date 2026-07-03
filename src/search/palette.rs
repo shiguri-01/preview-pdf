@@ -320,13 +320,13 @@ mod tests {
 
         assert!(session.select_next_item());
         let selected_view = session.view().expect("palette should be visible");
-        assert_eq!(selected_view.selected_idx, 1);
+        assert_eq!(selected_view.selected_idx, Some(1));
 
         session
             .insert_text(&registry, &app, &extensions, "a")
             .expect("typing should succeed");
         let updated_view = session.view().expect("palette should be visible");
-        assert_eq!(updated_view.selected_idx, 1);
+        assert_eq!(updated_view.selected_idx, Some(1));
         assert_eq!(updated_view.input, "a");
     }
 

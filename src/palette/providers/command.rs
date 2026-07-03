@@ -729,13 +729,13 @@ mod tests {
 
         assert!(session.select_next_item());
         let selected_view = session.view().expect("palette should be visible");
-        assert_eq!(selected_view.selected_idx, 1);
+        assert_eq!(selected_view.selected_idx, Some(1));
 
         session
             .insert_text(&registry, &app, &extensions, "p")
             .expect("typing should succeed");
         let filtered_view = session.view().expect("palette should be visible");
-        assert_eq!(filtered_view.selected_idx, 0);
+        assert_eq!(filtered_view.selected_idx, Some(0));
         assert_eq!(filtered_view.input, "p");
     }
 
@@ -768,7 +768,7 @@ mod tests {
             .expect("history recall should succeed");
         let older_view = session.view().expect("palette should be visible");
         assert_eq!(older_view.input, "prev-page");
-        assert_eq!(older_view.selected_idx, 0);
+        assert_eq!(older_view.selected_idx, Some(0));
         assert_eq!(
             older_view.items.first().map(label_text),
             Some("prev-page".to_string())
@@ -779,7 +779,7 @@ mod tests {
             .expect("history recall should succeed");
         let oldest_view = session.view().expect("palette should be visible");
         assert_eq!(oldest_view.input, "next-page");
-        assert_eq!(oldest_view.selected_idx, 0);
+        assert_eq!(oldest_view.selected_idx, Some(0));
         assert_eq!(
             oldest_view.items.first().map(label_text),
             Some("next-page".to_string())

@@ -63,7 +63,7 @@ impl PaletteProvider for HistoryPaletteProvider {
     }
 
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
-        let query = ctx.input.trim().to_ascii_lowercase();
+        let query = ctx.input.trim().to_lowercase();
         if query.is_empty() {
             return Ok(build_history_candidates(
                 ctx.extensions.history.entries.as_ref(),
@@ -207,16 +207,13 @@ impl HistoryPaletteReason {
 
         if self
             .display_text(page_1indexed)
-            .to_ascii_lowercase()
+            .to_lowercase()
             .contains(query)
         {
             return Some(HistoryMatchBucket::Reason);
         }
 
-        if page_text(page_1indexed)
-            .to_ascii_lowercase()
-            .contains(query)
-        {
+        if page_text(page_1indexed).to_lowercase().contains(query) {
             return Some(HistoryMatchBucket::Page);
         }
 
@@ -344,6 +341,29 @@ mod tests {
             .map(|item| item.label()[0].text.as_str())
             .collect();
         assert_eq!(labels, vec!["1", "0", "-2"]);
+    }
+
+    #[test]
+    fn list_matches_unicode_case_in_reasons() {
+        let provider = HistoryPaletteProvider;
+        let extensions = ExtensionUiSnapshot {
+            history: HistoryUiSnapshot {
+                entries: vec![entry(
+                    "outline",
+                    0,
+                    2,
+                    HistoryPaletteReason::Outline("Überblick".to_string()),
+                    true,
+                )]
+                .into(),
+            },
+            ..ExtensionUiSnapshot::default()
+        };
+        let ctx = context(&extensions, "über");
+
+        let items = provider.list(&ctx).expect("history list should build");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id().as_str(), "outline");
     }
 
     #[test]

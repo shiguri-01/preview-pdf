@@ -318,7 +318,7 @@ impl PaletteSessionController {
             input: session.input.value().to_string(),
             cursor: session.input.visual_cursor(),
             assistive_text: session.assistive_text.clone(),
-            selected_idx: session.selected,
+            selected_idx: (!items.is_empty()).then_some(session.selected),
             items,
         })
     }
@@ -591,5 +591,28 @@ mod tests {
                 .edit_input(&registry, &app, &extensions, InputRequest::GoToPrevChar)
                 .expect("no-op cursor movement should succeed")
         );
+    }
+
+    #[test]
+    fn view_reports_no_selection_when_provider_has_no_candidates() {
+        let registry = PaletteRegistry::default();
+        let mut session = PaletteSessionController::default();
+        let app = AppState::default();
+        let extensions = ExtensionUiSnapshot::default();
+
+        session
+            .open(
+                &registry,
+                &app,
+                &extensions,
+                PaletteKind::SearchResults,
+                crate::palette::PaletteOpenOptions::default(),
+                None,
+            )
+            .expect("search results palette should open");
+
+        let view = session.view().expect("palette should be visible");
+        assert!(view.items.is_empty());
+        assert_eq!(view.selected_idx, None);
     }
 }

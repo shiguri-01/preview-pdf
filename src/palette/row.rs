@@ -137,7 +137,11 @@ impl PaletteRow {
             .iter()
             .chain(self.detail.iter())
             .filter(|cell| cell.matchable)
-            .map(|cell| PaletteSearchText::new(cell.value.display_text()))
+            .filter_map(|cell| {
+                let text = cell.value.display_text();
+                let text = text.trim();
+                (!text.is_empty()).then(|| PaletteSearchText::new(text.to_string()))
+            })
             .collect();
         PaletteCandidate::from_row(
             self.id,
@@ -187,6 +191,20 @@ mod tests {
 
         assert_eq!(candidate.plain_label_text(), "open ");
         assert_eq!(candidate.plain_text(), "open  Command");
+    }
+
+    #[test]
+    fn match_text_trims_render_only_cell_spacing() {
+        let candidate = PaletteRow::new("id")
+            .label_matchable_parts(vec![
+                PaletteTextPart::primary("open"),
+                PaletteTextPart::primary(" "),
+            ])
+            .detail_matchable_text(" Command ")
+            .into_candidate();
+
+        assert_eq!(candidate.plain_text(), "open   Command ");
+        assert_eq!(candidate.match_text(), "open Command");
     }
 
     #[test]

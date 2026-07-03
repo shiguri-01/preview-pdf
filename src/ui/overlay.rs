@@ -134,7 +134,14 @@ pub fn draw_palette_overlay(frame: &mut Frame<'_>, area: Rect, view: &PaletteVie
     if !view.items.is_empty() {
         let max_items = (list_area.height as usize).saturating_sub(overhead_lines);
         if max_items > 0 {
-            let selected_idx = view.selected_idx.min(view.items.len().saturating_sub(1));
+            debug_assert!(
+                view.selected_idx.is_some(),
+                "non-empty palette view must have a selected item"
+            );
+            let selected_idx = view
+                .selected_idx
+                .unwrap_or(0)
+                .min(view.items.len().saturating_sub(1));
 
             // Simple scroll logic: ensure selected_idx is within [start, start + max_items)
             let start_idx = if view.items.len() <= max_items || selected_idx < max_items / 2 {
@@ -611,7 +618,7 @@ mod tests {
                 detail: Vec::new(),
                 selected: true,
             }],
-            selected_idx: 0,
+            selected_idx: Some(0),
         }
     }
 

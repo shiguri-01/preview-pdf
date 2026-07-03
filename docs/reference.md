@@ -323,7 +323,11 @@ Compatibility:
 
 Owned by:
 - [src/palette/candidate.rs](../src/palette/candidate.rs)
+- [src/palette/text.rs](../src/palette/text.rs)
 - [src/palette/row.rs](../src/palette/row.rs)
+- [src/palette/effect.rs](../src/palette/effect.rs)
+- [src/palette/request.rs](../src/palette/request.rs)
+- [src/palette/view.rs](../src/palette/view.rs)
 - [src/palette/session_controller.rs](../src/palette/session_controller.rs)
 - [src/palette/provider.rs](../src/palette/provider.rs)
 - [src/palette/registry.rs](../src/palette/registry.rs)

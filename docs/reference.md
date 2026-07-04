@@ -1,40 +1,14 @@
 # Reference
 
 This file indexes stable developer-facing contracts. It is not a full
-specification and does not own complete inventories. Each section names what
-must remain true, what needs compatibility care, where the full detail lives in
-code, and what test areas should protect it.
+specification and does not own complete inventories. Use it to find what must
+remain true, what needs compatibility care, and where the owning code lives.
 
-Reference material should preserve useful overview without pretending to be the
-implementation. A compact category list, lifecycle sketch, or representative
-example is fine when it helps contributors reason about a change. A complete
-command list, keymap table, provider list, config field list, or cache algorithm
-belongs in the owning code unless generated docs or explicit drift tests keep it
-current.
-
-Use this section shape for new stable-contract sections:
-
-```text
-## <Area>
-
-Contract:
-- Stable behavior that must remain true, or that must change only intentionally.
-
-Compatibility:
-- What kinds of changes require migration care, deprecation, or explicit review.
-
-Owned by:
-- Code entry points that own the complete inventory or implementation detail.
-
-Test coverage:
-- Test areas expected to protect the contract.
-```
-
-Use `Observable behavior:` only when user-visible or cross-subsystem effects
-need to be separated from private implementation detail.
-
-Use `Orientation:` sparingly when a short map makes the contract easier to use
-in review. Keep it descriptive rather than exhaustive.
+Entries should make review obligations explicit without copying implementation
+detail. Use `Contract:`, `Compatibility:`, and `Owned by:` so each entry says
+what must remain true, what kind of change needs care, and where the complete
+detail is maintained. Add orientation or observable behavior only when review
+would be ambiguous without it.
 
 ## CLI
 
@@ -57,11 +31,6 @@ Compatibility:
 Owned by:
 - [src/cli.rs](../src/cli.rs)
 - [src/config/](../src/config/)
-
-Test coverage:
-- CLI parser tests in [src/cli.rs](../src/cli.rs).
-- Process-level integration tests if exit codes or stderr/stdout behavior need
-  protection.
 
 ## Configuration
 
@@ -92,15 +61,8 @@ Compatibility:
   parsing code, and tests.
 
 Owned by:
-- [src/config/types.rs](../src/config/types.rs)
-- [src/config/file.rs](../src/config/file.rs)
-- [src/config/options.rs](../src/config/options.rs)
-- [src/config/policy.rs](../src/config/policy.rs)
+- [src/config/](../src/config/)
 - [src/cli.rs](../src/cli.rs)
-
-Test coverage:
-- Config file parser and resolver tests in [src/config/](../src/config/).
-- CLI config selection tests in [src/cli.rs](../src/cli.rs).
 
 ## Commands
 
@@ -118,30 +80,12 @@ Contract:
 - Typed commands must have matching registry metadata.
 - Command roles distinguish user intent commands, surface controls, and
   internal effects.
-- Public commands may appear in user-facing command surfaces when their
-  invocation policy and `enabled_when` runtime condition allow it.
-- Internal commands are runtime plumbing and must not appear in the command
-  palette.
-- Binding-only commands can be invoked from the keymap but not from direct
-  command palette input.
-- Internal-only commands can be invoked only as internal follow-ups that
-  complete another user action.
-- `enabled_when` checks are separate from invocation policy.
-- Target resolution is separate from invocation policy and `enabled_when`.
-  Palette binding-only commands, including palette input editing, require an
-  active palette. Help binding-only commands require active help.
-- `enabled_when` may depend on runtime app state such as active search, help
-  mode, palette kind, or palette input history availability. Target
-  requirements are not duplicated in `enabled_when`.
-- Palette input history availability means an active palette whose kind supports
-  input history; the owning predicate lives with `PaletteKind`.
+- Public exposure, binding invocation, internal follow-ups, target
+  requirements, and runtime enablement are separate policy concerns. Do not
+  collapse them into one visibility check.
 - Command-palette listing, help display, typed command submission, and dispatch
   use command policy functions to decide how exposure, invocation policy,
   target, and `enabled_when` apply to that surface.
-- Command-palette listing shows public user-intent commands only when the
-  command-palette input source is allowed, target requirements are satisfied,
-  and `enabled_when` is satisfied for the normal-mode context in which the
-  submitted command will run.
 - Typed command submission is separate from listing: a known typed command is
   parsed and then validated by dispatch policy, so "not listed" does not mean
   "unknown".
@@ -161,18 +105,9 @@ Contract:
   example, quit is an applied command with a quit lifecycle effect.
 - Dispatch applies command effects in one place, then emits transition events
   and the final command execution event.
-- Command dispatch emits command execution events after validation and dispatch
-  complete, including rejected commands.
-- Command dispatch may return follow-up command requests, for example when a
-  palette submit completes a user intent or internal effect command.
-
-Known follow-ups:
-- Search command intent: `search` is the public search entry point today and
-  starts a valid search flow by opening the search palette. Direct query
-  submission still happens through the internal `submit-search` command after
-  palette submit. When this area is redesigned, keep `search` as the
-  user-intent command and make the palette an input-collection path for that
-  command instead of exposing `submit-search` as a user-facing command.
+- Command dispatch emits execution events after validation and dispatch
+  complete, including rejected commands. Follow-up command requests are
+  explicit command effects.
 
 Compatibility:
 - Public command ids, argument compatibility, and user-facing parser behavior
@@ -183,16 +118,8 @@ Compatibility:
   the catalog; use docs for policy, categories, and review cues.
 
 Owned by:
-- [src/command/catalog.rs](../src/command/catalog.rs)
-- [src/command/parse.rs](../src/command/parse.rs)
-- [src/command/spec.rs](../src/command/spec.rs)
-- [src/command/dispatch.rs](../src/command/dispatch.rs)
-- [src/command/handlers/](../src/command/handlers/)
+- [src/command/](../src/command/)
 - [src/condition.rs](../src/condition.rs)
-
-Test coverage:
-- Command registry, parser, validation, and dispatch tests in [src/command/](../src/command/).
-- Command-palette provider tests where command metadata affects palette UI.
 
 ## Keymap
 
@@ -205,29 +132,14 @@ Contract:
 - Printable keymap entries are defined by resulting characters, not by physical keys.
 - Runtime `Meta` key events are normalized to the `Alt`/`<m-...>` shortcut
   representation. Unbound Alt-only chords are not treated as printable input.
-- Configured keymap entries use the same key labels shown in help, such as
-  `gg`, `<c-o>`, `<down>`, and `[count]G`.
 - `keymap_preset` selects the starting keymap. Supported values are `default`
   and `none`.
-- Configured keymap entries use one `when` selector, one `key` sequence, and one
-  `command` value. `when` names where the binding is active; `key` names the
-  sequence; `command` names the command to dispatch, or `false` to unbind.
-- When multiple configured keymap entries use the same `when` selector and `key`
-  sequence, the later entry replaces the earlier entry.
-- Key binding conditions are normalized before priority is calculated. Implied
-  conditions are added once, so adding a condition already implied by another
-  condition does not increase priority; for example, `palette.command` and
-  `palette` plus `palette.command` have the same normalized priority.
-- When multiple enabled key bindings match the same key sequence, the binding
-  with the highest normalized condition priority wins. If matching bindings
-  have the same priority, the later registered binding wins; preset bindings
-  are registered before configured bindings.
-- Supported `when` selectors are `normal`, `normal.search-active`,
-  `normal.search-inactive`, `help`, `palette`, `palette.command`,
-  `palette.search`, `palette.search-results`, `palette.history`,
-  `palette.outline`, `palette.with-input-history`, and
-  `palette.no-input-history`, `palette.input-empty`, and
-  `palette.input-not-empty`.
+- Configured keymap entries use the same key labels shown in help and resolve
+  to typed command requests.
+- Later configured bindings replace earlier bindings with the same condition
+  selector and key sequence.
+- Key binding conditions are normalized before priority is calculated; matching
+  uses the normalized runtime condition state.
 - Keymap `enabled_when` uses the same runtime condition vocabulary as
   command `enabled_when`; do not add a separate keymap-only condition enum.
 - Every key input and sequence timeout resolves against the current runtime
@@ -239,15 +151,8 @@ Contract:
   commands.
 - All keymap entries dispatch with the binding invocation source, reference known
   command ids, and satisfy command invocation policy.
-- Configured keymap entries may target normal, help, and palette conditions.
-  Palette-target commands require a palette `when` selector; help-target
-  commands require `when = "help"`. Dispatch still validates the resolved
-  command before applying behavior.
-- Palette keys dispatch hidden palette binding-only commands such as
-  submit, complete, selection movement, input editing, and palette input
-  history recall.
-- Help keys dispatch hidden help binding-only commands such as close and
-  scroll.
+- Surface-local keys, including palette and help keys, dispatch binding-only
+  commands through the same command policy path as normal-mode bindings.
 - When a multi-key sequence is already pending, `<esc>` clears the pending
   sequence instead of dispatching another command.
 
@@ -259,13 +164,8 @@ Compatibility:
 
 Owned by:
 - [src/config/keymap/](../src/config/keymap/)
-- [src/input/sequence.rs](../src/input/sequence.rs)
-- [src/input/shortcut.rs](../src/input/shortcut.rs)
+- [src/input/](../src/input/)
 - [src/ui/help.rs](../src/ui/help.rs)
-
-Test coverage:
-- Sequence and keymap tests in [src/input/](../src/input/).
-- Command/keymap consistency tests under the command module.
 
 ## Palette
 
@@ -303,15 +203,9 @@ Contract:
   provider-specific palette action.
 
 Observable behavior:
-- Escape dispatches the palette close command when a palette is active.
-- Control-p/control-n dispatch palette selection commands.
-- Up/down dispatch palette input history commands for palettes that support
-  history; otherwise they dispatch palette selection commands.
-- Tab dispatches palette completion.
-- Enter dispatches palette submit.
-- Palette input editing preserves common line-editing behavior through
-  conditionally enabled `text.*` binding-only commands, including cursor
-  movement, word movement, word/line deletion, and yank.
+- Common palette controls for close, selection, completion, submit, input
+  editing, and optional input-history recall are user-visible compatibility
+  points.
 - Empty candidate lists can still represent valid interactive states when the
   provider supports that behavior.
 
@@ -322,24 +216,10 @@ Compatibility:
   Docs should explain provider responsibilities and notable cross-palette rules.
 
 Owned by:
-- [src/palette/candidate.rs](../src/palette/candidate.rs)
-- [src/palette/text.rs](../src/palette/text.rs)
-- [src/palette/row.rs](../src/palette/row.rs)
-- [src/palette/effect.rs](../src/palette/effect.rs)
-- [src/palette/request.rs](../src/palette/request.rs)
-- [src/palette/view.rs](../src/palette/view.rs)
-- [src/palette/session_controller.rs](../src/palette/session_controller.rs)
-- [src/palette/provider.rs](../src/palette/provider.rs)
-- [src/palette/registry.rs](../src/palette/registry.rs)
-- [src/palette/providers/](../src/palette/providers/)
-- [src/search/palette.rs](../src/search/palette.rs)
-- [src/history/palette.rs](../src/history/palette.rs)
-- [src/outline/palette.rs](../src/outline/palette.rs)
-
-Test coverage:
-- Palette session controller and provider tests in
-  [src/palette/](../src/palette/), [src/search/](../src/search/),
-  [src/history/](../src/history/), and [src/outline/](../src/outline/).
+- [src/palette/](../src/palette/)
+- [src/search/](../src/search/)
+- [src/history/](../src/history/)
+- [src/outline/](../src/outline/)
 
 ## Extensions
 
@@ -372,17 +252,11 @@ Compatibility:
 - This is not a dynamic plugin API; do not document it as one.
 
 Owned by:
-- [src/extension/traits.rs](../src/extension/traits.rs)
-- [src/extension/host.rs](../src/extension/host.rs)
+- [src/extension/](../src/extension/)
 - [src/search/](../src/search/)
 - [src/history/](../src/history/)
 - [src/outline/](../src/outline/)
 - [src/event.rs](../src/event.rs)
-
-Test coverage:
-- Extension host tests when adding or changing hook order or event propagation.
-- Feature tests in search, history, and outline modules for extension-owned
-  behavior.
 
 ## Rendering And Workers
 
@@ -420,20 +294,10 @@ Compatibility:
   not in docs.
 
 Owned by:
-- [src/render/scheduler.rs](../src/render/scheduler.rs)
-- [src/render/prefetch.rs](../src/render/prefetch.rs)
-- [src/render/worker.rs](../src/render/worker.rs)
-- [src/presenter/encode.rs](../src/presenter/encode.rs)
-- [src/presenter/l2_cache.rs](../src/presenter/l2_cache.rs)
-- [src/app/render_ops.rs](../src/app/render_ops.rs)
-- [src/search/engine.rs](../src/search/engine.rs)
-- [src/search/state.rs](../src/search/state.rs)
-
-Test coverage:
-- Render worker and scheduler tests in [src/render/](../src/render/).
-- Presenter cache and encode tests in [src/presenter/](../src/presenter/).
-- Runtime worker tests in [src/app/tests/](../src/app/tests/).
-- Search stale-result tests in [src/search/](../src/search/).
+- [src/render/](../src/render/)
+- [src/presenter/](../src/presenter/)
+- [src/app/](../src/app/) for runtime acceptance and reload effects.
+- [src/search/](../src/search/) for search worker generation.
 
 ## Caches
 
@@ -451,14 +315,8 @@ Compatibility:
   such as stale fallback, blank-frame avoidance, or document identity changes.
 
 Owned by:
-- [src/render/cache.rs](../src/render/cache.rs)
-- [src/presenter/l2_cache.rs](../src/presenter/l2_cache.rs)
-- [src/app/runtime/prepare.rs](../src/app/runtime/prepare.rs)
-- [src/app/runtime/spread_canvas.rs](../src/app/runtime/spread_canvas.rs)
-
-Test coverage:
-- Cache unit tests and presenter/runtime tests that assert observable fallback
-  or identity behavior.
+- [src/render/](../src/render/)
+- [src/presenter/](../src/presenter/)
 
 ## Performance Diagnostics
 
@@ -476,13 +334,6 @@ Compatibility:
   intentionally.
 
 Owned by:
-- [benches/perf.rs](../benches/perf.rs)
-- [benches/fixtures/](../benches/fixtures/)
+- [benches/](../benches/)
 - [src/perf/](../src/perf/)
-- [src/app/loop_driver.rs](../src/app/loop_driver.rs)
 - [src/metrics.rs](../src/metrics.rs)
-
-Test coverage:
-- [src/perf/](../src/perf/) tests for scenario parsing, validation, summary shape, and report
-  serialization.
-- Bench runs and diagnostics for performance observation.

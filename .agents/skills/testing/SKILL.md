@@ -1,52 +1,44 @@
 ---
 name: testing
-description: Add, update, place, or review pvf tests and validation. Use when writing regression tests, deciding test layer, adding module contract tests, changing test policy, or choosing validation commands.
+description: Add, update, place, or review pvf tests and validation. Use when writing regression tests, protecting behavior changes, choosing unit/module/integration test boundaries, reviewing test quality, changing test policy, or deciding validation commands.
 ---
 
 # Testing
 
-Use this skill for test-related work in pvf.
+Tests are executable specifications for the behavior they cover. Code owns
+implementation detail; docs own durable orientation and policy. Write tests to
+protect observable behavior, compatibility rules, edge cases, and meaningful
+cross-owner consistency.
 
-## Start
+## Before editing
 
-Read the relevant section of `docs/testing.md` before non-trivial test changes,
-moving tests, adding a new test layer, or changing test policy.
-Read only the relevant section of `docs/reference.md` when the test protects a
-stable contract.
-Read only the relevant section of `docs/architecture.md` when the test depends
-on subsystem boundaries, runtime flow, workers, or ownership.
+Read the code boundary under test first. Read `docs/testing.md` when adding or
+moving tests, changing validation policy, or choosing a test layer. For a tiny
+local edit that follows an obvious existing pattern, the nearby tests may be
+enough.
+
+Use `docs/reference.md` and `docs/architecture.md` selectively. Check the
+relevant section when the code or task suggests a stable developer-facing
+contract, runtime ownership boundary, worker interaction, or subsystem
+boundary may be involved. Otherwise, rely on the local code and existing tests.
 
 ## Change Triage
 
-Classify the change first:
-
-- Bug fix: add a regression test first, or record why that is not useful.
-- Stable behavior change: update the relevant contract test and `docs/reference.md`.
-- Architecture boundary change: update `docs/architecture.md` and protect the
-  behavior that must not regress.
-- Internal refactor: preserve existing contract tests; add characterization
-  tests only where coverage is weak.
-- Inventory change: update the owning Rust catalog or type, then guard
-  meaningful consistency rather than duplicating the inventory in tests.
-
-## Test Placement
-
-Choose the narrowest useful test boundary:
-
-- Use in-file `#[cfg(test)]` tests for private helpers, local state transitions,
-  parser edge cases, matching, cache eviction, and layout calculations.
-- Use `src/<module>/tests/` for public-facing module contracts that should
-  survive internal refactors.
-- Use repository-level `tests/` only for process-level CLI behavior, exit
-  codes, config discovery, user-visible output, or headless runtime behavior.
-- Keep performance diagnostics out of correctness tests except for JSON shape,
-  scenario metadata, parsing, and validation rules.
+Before writing tests, classify what must be protected: a regression, a stable
+contract, an architecture boundary, refactor characterization, or cross-owner
+consistency. Use `docs/testing.md` for project policy when that choice affects
+placement, validation, or documentation updates.
 
 ## Quality Checks
 
-Prefer tests that would fail for the intended bug or contract drift. Test names
-should read like the behavior being protected, not like the function being
-called.
+Prefer tests that would fail for the intended bug or contract drift. Name the
+specified behavior, not the function being called.
+
+When a test is the detailed specification, make the asserted rule visible in
+the test body: cover the important success path, the boundary or rejection case,
+and the observable effect that a maintainer must preserve. Prefer one focused
+scenario with clear inputs and assertions over a broad case that only proves the
+code was exercised.
 
 Assert behavior through the boundary under test. Unit tests may inspect private
 helpers, but module contract tests should avoid incidental internal state and
@@ -56,33 +48,25 @@ other observable results.
 
 Keep setup small enough that the behavior under test is easy to see.
 
-Use consistency tests for repo-owned registries and catalogs when drift is the
-risk: command metadata, command parser and dispatch routing, built-in keymaps,
-palette provider registration, extension host composition, config parsing, and
-performance diagnostic report shape. Do not duplicate a full inventory unless
-the assertion protects a meaningful cross-module invariant.
-
 For async, worker, ordering, cancellation, search generation, render stale
 results, and presenter encode results, avoid sleeps and real-time assumptions.
 Prefer explicit identities, generations, queues, drain points, and deterministic
 completion inputs.
 
-If a proposed test mostly mirrors an implementation table or provides overview,
-prefer a consistency invariant or a docs update instead.
+Do not let task history or obsolete implementation context shape the test. The
+test should specify the current behavior directly; it should not encode "new
+versus old" reasoning unless compatibility across versions is the behavior.
+
+Use consistency tests for repo-owned registries and catalogs when drift is the
+risk: command metadata, parser and dispatch routing, keymaps, palette provider
+registration, extension host composition, config parsing, and diagnostic report
+shape. Do not mirror a full inventory unless the assertion protects a real
+cross-owner invariant. If the value is orientation, update docs instead.
 
 ## Validation
 
-During iteration, run the smallest useful targeted test.
-
-Before finishing behavior changes, run:
-
-```bash
-cargo fmt --check
-cargo test
-cargo check
-cargo clippy --all-targets --all-features -- -D warnings
-```
-
-For docs-only or skill-only changes, run checks that match the changed surface,
-such as `git diff --check` and searches for stale paths. Record why broader
-Cargo validation was not run.
+Run the smallest useful targeted check during iteration. Before finishing, use
+the validation path from `docs/testing.md` or the repo instructions that matches
+the changed surface, and record when broader validation is intentionally skipped.
+`cargo test` accepts one test-name filter; multiple test-name filters in one
+command fail as unexpected arguments.

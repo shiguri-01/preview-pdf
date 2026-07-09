@@ -10,7 +10,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError}
 use tokio::task::JoinHandle;
 
 use crate::backend::RgbaFrame;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::metrics::PerfStats;
 use crate::render::cache::RenderedPageKey;
 use crate::work::WorkClass;
@@ -26,8 +26,9 @@ use super::l2_cache::{
 };
 use super::terminal_cell::{picker_with_resolved_cell_size, protocol_type_label};
 use super::traits::{
-    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterRenderOutcome,
-    PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot, PresenterSlotOutcome, Viewport,
+    GraphicsProtocol, ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps,
+    PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot,
+    PresenterSlotOutcome, Viewport,
 };
 
 pub(super) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
@@ -36,6 +37,7 @@ pub(super) struct PresenterConfig {
     pub(super) picker: Picker,
     pub(super) protocol_type: ProtocolType,
     pub(super) protocol_label: &'static str,
+    pub(super) requested_protocol: Option<GraphicsProtocol>,
 }
 
 pub(super) struct PresenterState {
@@ -82,6 +84,14 @@ impl Default for RatatuiImagePresenter {
 
 impl RatatuiImagePresenter {
     pub fn with_cache_limits(l2_max_entries: usize, l2_memory_budget_bytes: usize) -> Self {
+        Self::with_cache_limits_and_graphics_protocol(l2_max_entries, l2_memory_budget_bytes, None)
+    }
+
+    pub(super) fn with_cache_limits_and_graphics_protocol(
+        l2_max_entries: usize,
+        l2_memory_budget_bytes: usize,
+        graphics_protocol: Option<GraphicsProtocol>,
+    ) -> Self {
         let runtime = EncodeWorkerRuntime::new();
         let (current_tx, current_rx, current_worker) =
             spawn_encode_worker(&runtime, EncodeLaneKind::Current);
@@ -92,6 +102,7 @@ impl RatatuiImagePresenter {
                 picker: Picker::halfblocks(),
                 protocol_type: ProtocolType::Halfblocks,
                 protocol_label: "halfblocks",
+                requested_protocol: graphics_protocol,
             },
             state: PresenterState {
                 terminal_initialized: false,
@@ -364,7 +375,20 @@ impl ImagePresenter for RatatuiImagePresenter {
             return Ok(());
         }
 
-        if let Ok(picker) = Picker::from_query_stdio() {
+        if let Some(protocol_type) = self
+            .config
+            .requested_protocol
+            .and_then(forced_protocol_type)
+        {
+            let mut picker = Picker::from_query_stdio().map_err(|err| {
+                AppError::unsupported(format!("failed to initialize graphics protocol: {err}"))
+            })?;
+            picker.set_protocol_type(protocol_type);
+            self.config.protocol_type = protocol_type;
+            self.config.protocol_label = protocol_type_label(protocol_type);
+            self.config.picker = picker_with_resolved_cell_size(picker, protocol_type);
+            self.reset_terminal_state();
+        } else if let Ok(picker) = Picker::from_query_stdio() {
             let protocol_type = picker.protocol_type();
             self.config.protocol_type = protocol_type;
             self.config.protocol_label = protocol_type_label(protocol_type);
@@ -601,6 +625,16 @@ fn preferred_max_render_scale(protocol: ProtocolType) -> f32 {
     match protocol {
         ProtocolType::Kitty | ProtocolType::Iterm2 | ProtocolType::Sixel => 2.5,
         ProtocolType::Halfblocks => 1.0,
+    }
+}
+
+fn forced_protocol_type(protocol: GraphicsProtocol) -> Option<ProtocolType> {
+    match protocol {
+        GraphicsProtocol::Auto => None,
+        GraphicsProtocol::Halfblocks => Some(ProtocolType::Halfblocks),
+        GraphicsProtocol::Sixel => Some(ProtocolType::Sixel),
+        GraphicsProtocol::Kitty => Some(ProtocolType::Kitty),
+        GraphicsProtocol::Iterm2 => Some(ProtocolType::Iterm2),
     }
 }
 

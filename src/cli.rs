@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, ValueEnum};
 use pvf::app::PageLayoutMode;
-use pvf::config::{AppOptions, ConfigFileSelection, ViewOptions, WatchOptions};
+use pvf::config::{AppOptions, ConfigFileSelection, RenderOptions, ViewOptions, WatchOptions};
+use pvf::presenter::GraphicsProtocol;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct CliOptions {
@@ -15,6 +16,27 @@ pub(super) struct CliOptions {
 enum CliPageLayout {
     Single,
     Spread,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum CliGraphicsProtocol {
+    Auto,
+    Halfblocks,
+    Sixel,
+    Kitty,
+    Iterm2,
+}
+
+impl From<CliGraphicsProtocol> for GraphicsProtocol {
+    fn from(value: CliGraphicsProtocol) -> Self {
+        match value {
+            CliGraphicsProtocol::Auto => Self::Auto,
+            CliGraphicsProtocol::Halfblocks => Self::Halfblocks,
+            CliGraphicsProtocol::Sixel => Self::Sixel,
+            CliGraphicsProtocol::Kitty => Self::Kitty,
+            CliGraphicsProtocol::Iterm2 => Self::Iterm2,
+        }
+    }
 }
 
 impl From<CliPageLayout> for PageLayoutMode {
@@ -65,6 +87,13 @@ struct Cli {
     zoom: Option<f32>,
     #[arg(short, long, value_enum, help = "Set the initial page layout")]
     layout: Option<CliPageLayout>,
+    #[arg(
+        long,
+        value_enum,
+        value_name = "PROTOCOL",
+        help = "Set the terminal graphics protocol"
+    )]
+    graphics_protocol: Option<CliGraphicsProtocol>,
     #[arg(value_name = "FILE")]
     pdf_path: PathBuf,
 }
@@ -102,6 +131,10 @@ fn parse_cli(cli: Cli) -> CliOptions {
                 },
                 ..WatchOptions::default()
             },
+            render: RenderOptions {
+                graphics_protocol: cli.graphics_protocol.map(GraphicsProtocol::from),
+                ..RenderOptions::default()
+            },
             ..AppOptions::default()
         },
     }
@@ -114,6 +147,7 @@ mod tests {
     use clap::{Parser, error::ErrorKind};
     use pvf::app::PageLayoutMode;
     use pvf::config::ConfigFileSelection;
+    use pvf::presenter::GraphicsProtocol;
 
     use super::{Cli, parse_cli};
 
@@ -205,6 +239,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_cli_accepts_graphics_protocol_override() {
+        let cli = Cli::try_parse_from(["pvf", "--graphics-protocol", "kitty", "sample.pdf"])
+            .expect("graphics protocol should parse");
+        let options = parse_cli(cli);
+        assert_eq!(
+            options.options.render.graphics_protocol,
+            Some(GraphicsProtocol::Kitty)
+        );
+
+        let cli = Cli::try_parse_from(["pvf", "--graphics-protocol", "auto", "sample.pdf"])
+            .expect("auto graphics protocol should parse");
+        let options = parse_cli(cli);
+        assert_eq!(
+            options.options.render.graphics_protocol,
+            Some(GraphicsProtocol::Auto)
+        );
+    }
+
+    #[test]
     fn parse_cli_accepts_short_initial_view_overrides() {
         let cli = Cli::try_parse_from([
             "pvf",
@@ -246,5 +299,8 @@ mod tests {
         );
         assert!(Cli::try_parse_from(["pvf", "--watch", "--no-watch", "sample.pdf"]).is_err());
         assert!(Cli::try_parse_from(["pvf", "--layout", "grid", "sample.pdf"]).is_err());
+        assert!(
+            Cli::try_parse_from(["pvf", "--graphics-protocol", "unknown", "sample.pdf"]).is_err()
+        );
     }
 }

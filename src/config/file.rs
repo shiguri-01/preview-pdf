@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 use crate::error::{AppError, AppResult};
+use crate::presenter::GraphicsProtocol;
 
 use super::options::{
     AppOptions, CacheOptions, InputOptions, KeymapOptions, RenderOptions, ViewOptions, WatchOptions,
@@ -73,6 +74,7 @@ struct RawConfig {
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
 #[serde(default)]
 struct RawRenderConfig {
+    graphics_protocol: Option<String>,
     worker_threads: Option<usize>,
     input_poll_timeout_idle_ms: Option<u64>,
     input_poll_timeout_busy_ms: Option<u64>,
@@ -133,7 +135,11 @@ struct RawWatchConfig {
 impl RawConfig {
     fn into_options(self) -> AppResult<AppOptions> {
         Ok(AppOptions {
-            render: self.render.map(RenderOptions::from).unwrap_or_default(),
+            render: self
+                .render
+                .map(RenderOptions::try_from)
+                .transpose()?
+                .unwrap_or_default(),
             cache: self.cache.map(CacheOptions::from).unwrap_or_default(),
             view: self
                 .view
@@ -147,9 +153,16 @@ impl RawConfig {
     }
 }
 
-impl From<RawRenderConfig> for RenderOptions {
-    fn from(raw: RawRenderConfig) -> Self {
-        Self {
+impl TryFrom<RawRenderConfig> for RenderOptions {
+    type Error = AppError;
+
+    fn try_from(raw: RawRenderConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
+            graphics_protocol: raw
+                .graphics_protocol
+                .as_deref()
+                .map(parse_graphics_protocol)
+                .transpose()?,
             worker_threads: raw.worker_threads,
             input_poll_timeout_idle_ms: raw.input_poll_timeout_idle_ms,
             input_poll_timeout_busy_ms: raw.input_poll_timeout_busy_ms,
@@ -158,7 +171,7 @@ impl From<RawRenderConfig> for RenderOptions {
             pending_redraw_interval_ms: raw.pending_redraw_interval_ms,
             prefetch_dispatch_budget_per_tick: raw.prefetch_dispatch_budget_per_tick,
             max_render_scale: raw.max_render_scale,
-        }
+        })
     }
 }
 
@@ -274,6 +287,19 @@ fn parse_spread_cover(value: &str) -> AppResult<SpreadCoverPolicy> {
     }
 }
 
+fn parse_graphics_protocol(value: &str) -> AppResult<GraphicsProtocol> {
+    match value {
+        "auto" => Ok(GraphicsProtocol::Auto),
+        "halfblocks" => Ok(GraphicsProtocol::Halfblocks),
+        "sixel" => Ok(GraphicsProtocol::Sixel),
+        "kitty" => Ok(GraphicsProtocol::Kitty),
+        "iterm2" => Ok(GraphicsProtocol::Iterm2),
+        _ => Err(AppError::invalid_argument(format!(
+            "unknown render.graphics_protocol: {value}"
+        ))),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MissingConfigPolicy {
     Default,
@@ -373,6 +399,7 @@ mod tests {
         DEFAULT_SEQUENCE_TIMEOUT, KeyBindingContext, SequenceResolution, SequenceResolver,
     };
     use crate::input::shortcut::ShortcutKey;
+    use crate::presenter::GraphicsProtocol;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::{
@@ -416,6 +443,7 @@ mod tests {
             pending_redraw_interval_ms = 0
             prefetch_dispatch_budget_per_tick = 0
             max_render_scale = 0.5
+            graphics_protocol = "kitty"
 
             [cache]
             l1_memory_budget_mb = 256
@@ -447,6 +475,10 @@ mod tests {
         assert_eq!(config.render.pending_redraw_interval_ms, 1);
         assert_eq!(config.render.prefetch_dispatch_budget_per_tick, 1);
         assert_eq!(config.render.max_render_scale, 2.5);
+        assert_eq!(
+            config.render.graphics_protocol,
+            Some(GraphicsProtocol::Kitty)
+        );
         assert_eq!(config.cache.l1_memory_budget_mb, 256);
         assert_eq!(config.cache.l2_memory_budget_mb, 64);
         assert_eq!(config.cache.l1_max_entries, 128);
@@ -867,6 +899,71 @@ mod tests {
         assert_eq!(options.input.sequence_timeout_ms, None);
         assert!(options.keymap.bindings.is_empty());
         assert_eq!(options.watch.enabled, None);
+        assert_eq!(options.render.graphics_protocol, None);
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn explicit_config_reads_graphics_protocol() {
+        let path = unique_temp_path("graphics-protocol.toml");
+        fs::write(
+            &path,
+            r#"
+            [render]
+            graphics_protocol = "sixel"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should load");
+        assert_eq!(
+            options.render.graphics_protocol,
+            Some(GraphicsProtocol::Sixel)
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn explicit_config_reads_auto_graphics_protocol() {
+        let path = unique_temp_path("auto-graphics-protocol.toml");
+        fs::write(
+            &path,
+            r#"
+            [render]
+            graphics_protocol = "auto"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let options = load_options_from_explicit_path(&path).expect("config should load");
+        assert_eq!(
+            options.render.graphics_protocol,
+            Some(GraphicsProtocol::Auto)
+        );
+
+        fs::remove_file(&path).expect("config file should be removed");
+    }
+
+    #[test]
+    fn explicit_config_rejects_unknown_graphics_protocol() {
+        let path = unique_temp_path("bad-graphics-protocol.toml");
+        fs::write(
+            &path,
+            r#"
+            [render]
+            graphics_protocol = "graphics-protocol"
+            "#,
+        )
+        .expect("config file should be written");
+
+        let err = load_options_from_explicit_path(&path)
+            .expect_err("unknown graphics protocol should be rejected");
+        assert!(
+            err.to_string()
+                .contains("unknown render.graphics_protocol: graphics-protocol")
+        );
 
         fs::remove_file(&path).expect("config file should be removed");
     }

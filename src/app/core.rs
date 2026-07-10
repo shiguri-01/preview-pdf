@@ -11,7 +11,7 @@ use crate::extension::ExtensionHost;
 use crate::input::InputHistoryService;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, SequenceResolver};
 use crate::palette::{PaletteRegistry, PaletteSessionController};
-use crate::presenter::{ImagePresenter, PresenterKind, create_presenter_with_cache_limits};
+use crate::presenter::{ImagePresenter, PresenterFactoryOptions, PresenterKind, create_presenter};
 
 use super::runtime::RenderRuntime;
 use super::state::{AppState, CacheHandle, PaletteRequest};
@@ -180,9 +180,12 @@ impl App {
         let cache = options.cache;
         let view = options.view;
         let watch = options.watch;
-        let presenter = create_presenter_with_cache_limits(
+        let presenter = create_presenter(
             presenter_kind,
-            Some((cache.l2_max_entries, cache.l2_memory_budget_bytes())),
+            PresenterFactoryOptions {
+                l2_cache_limits: Some((cache.l2_max_entries, cache.l2_memory_budget_bytes())),
+                graphics_protocol: options.render.graphics_protocol,
+            },
         )?;
         let mut state = AppState {
             current_page: view.initial_page_index,
@@ -315,6 +318,7 @@ mod tests {
     fn new_with_options_threads_runtime_policies_to_owners() {
         let options = AppOptions {
             render: RenderOptions {
+                graphics_protocol: None,
                 worker_threads: Some(5),
                 input_poll_timeout_idle_ms: Some(17),
                 input_poll_timeout_busy_ms: Some(9),

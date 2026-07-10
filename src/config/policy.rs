@@ -20,6 +20,7 @@ pub struct ResolvedAppOptions {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderPolicy {
+    pub graphics_protocol: Option<crate::presenter::GraphicsProtocol>,
     pub worker_threads: usize,
     pub max_render_scale: f32,
 }
@@ -28,6 +29,7 @@ impl Default for RenderPolicy {
     fn default() -> Self {
         let render = RenderConfig::default();
         Self {
+            graphics_protocol: render.graphics_protocol,
             worker_threads: render.worker_threads,
             max_render_scale: render.max_render_scale,
         }
@@ -179,6 +181,7 @@ impl From<ResolvedAppOptions> for Config {
     fn from(options: ResolvedAppOptions) -> Self {
         Self {
             render: RenderConfig {
+                graphics_protocol: options.render.graphics_protocol,
                 worker_threads: options.render.worker_threads,
                 input_poll_timeout_idle_ms: options.event_loop.input_poll_timeout_idle.as_millis()
                     as u64,
@@ -298,6 +301,10 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
 
     ResolvedAppOptions {
         render: RenderPolicy {
+            graphics_protocol: options
+                .render
+                .graphics_protocol
+                .or(render_defaults.graphics_protocol),
             worker_threads,
             max_render_scale,
         },
@@ -362,6 +369,7 @@ mod tests {
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 
     use crate::config::{AppOptions, RenderOptions, ViewOptions, WatchOptions};
+    use crate::presenter::GraphicsProtocol;
 
     use super::AppOptionsResolver;
 
@@ -369,6 +377,7 @@ mod tests {
     fn resolver_applies_defaults_and_sanitizes_without_file_source() {
         let options = AppOptions {
             render: RenderOptions {
+                graphics_protocol: None,
                 worker_threads: Some(0),
                 input_poll_timeout_idle_ms: Some(0),
                 input_poll_timeout_busy_ms: Some(0),
@@ -418,6 +427,7 @@ mod tests {
         );
         assert_eq!(resolved.event_loop.prefetch_dispatch_budget_per_tick, 1);
         assert_eq!(resolved.render.max_render_scale, 2.5);
+        assert_eq!(resolved.render.graphics_protocol, None);
         assert_eq!(resolved.view.initial_page_index, 0);
         assert_eq!(resolved.view.initial_zoom, 4.0);
         assert_eq!(resolved.view.initial_layout, PageLayoutMode::Spread);
@@ -432,6 +442,7 @@ mod tests {
     fn resolver_merges_later_options_over_earlier_options() {
         let base = AppOptions {
             render: RenderOptions {
+                graphics_protocol: Some(GraphicsProtocol::Sixel),
                 worker_threads: Some(2),
                 ..RenderOptions::default()
             },
@@ -439,6 +450,7 @@ mod tests {
         };
         let override_options = AppOptions {
             render: RenderOptions {
+                graphics_protocol: Some(GraphicsProtocol::Kitty),
                 worker_threads: Some(4),
                 ..RenderOptions::default()
             },
@@ -463,5 +475,9 @@ mod tests {
 
         assert_eq!(resolved.render.worker_threads, 4);
         assert!(!resolved.watch.enabled);
+        assert_eq!(
+            resolved.render.graphics_protocol,
+            Some(GraphicsProtocol::Kitty)
+        );
     }
 }

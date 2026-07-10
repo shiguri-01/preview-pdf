@@ -9,11 +9,11 @@ mod traits;
 #[cfg(test)]
 mod tests;
 
-pub use factory::{create_presenter, create_presenter_with_cache_limits};
+pub use factory::{PresenterFactoryOptions, create_presenter};
 pub use ratatui::RatatuiImagePresenter;
 pub use traits::{
-    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
-    PresenterHorizontalAlign, PresenterKind, PresenterRenderMode, PresenterRenderOptions,
-    PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot,
-    PresenterSlotOutcome, Viewport,
+    GraphicsProtocol, ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps,
+    PresenterFeedback, PresenterHorizontalAlign, PresenterKind, PresenterRenderMode,
+    PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo,
+    PresenterSlot, PresenterSlotOutcome, Viewport,
 };

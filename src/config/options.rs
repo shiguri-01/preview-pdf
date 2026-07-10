@@ -1,4 +1,5 @@
 use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
+use crate::presenter::GraphicsProtocol;
 
 pub use super::keymap::{KeymapBinding, KeymapOptions, KeymapPreset, KeymapWhen};
 use super::types::Config;
@@ -29,6 +30,7 @@ impl From<Config> for AppOptions {
     fn from(config: Config) -> Self {
         Self {
             render: RenderOptions {
+                graphics_protocol: config.render.graphics_protocol,
                 worker_threads: Some(config.render.worker_threads),
                 input_poll_timeout_idle_ms: Some(config.render.input_poll_timeout_idle_ms),
                 input_poll_timeout_busy_ms: Some(config.render.input_poll_timeout_busy_ms),
@@ -68,6 +70,7 @@ impl From<Config> for AppOptions {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RenderOptions {
+    pub graphics_protocol: Option<GraphicsProtocol>,
     pub worker_threads: Option<usize>,
     pub input_poll_timeout_idle_ms: Option<u64>,
     pub input_poll_timeout_busy_ms: Option<u64>,
@@ -81,6 +84,7 @@ pub struct RenderOptions {
 impl RenderOptions {
     pub(super) fn merge(self, next: Self) -> Self {
         Self {
+            graphics_protocol: next.graphics_protocol.or(self.graphics_protocol),
             worker_threads: next.worker_threads.or(self.worker_threads),
             input_poll_timeout_idle_ms: next
                 .input_poll_timeout_idle_ms

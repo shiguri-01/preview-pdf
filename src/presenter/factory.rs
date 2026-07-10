@@ -1,24 +1,29 @@
 use crate::error::AppResult;
 
+use super::l2_cache::{L2_MAX_ENTRIES, L2_MEMORY_BUDGET_BYTES};
 use super::ratatui::RatatuiImagePresenter;
-use super::traits::{ImagePresenter, PresenterKind};
+use super::traits::{GraphicsProtocol, ImagePresenter, PresenterKind};
 
-pub fn create_presenter(kind: PresenterKind) -> AppResult<Box<dyn ImagePresenter>> {
-    create_presenter_with_cache_limits(kind, None)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PresenterFactoryOptions {
+    pub l2_cache_limits: Option<(usize, usize)>,
+    pub graphics_protocol: Option<GraphicsProtocol>,
 }
 
-pub fn create_presenter_with_cache_limits(
+pub fn create_presenter(
     kind: PresenterKind,
-    l2_cache_limits: Option<(usize, usize)>,
+    options: PresenterFactoryOptions,
 ) -> AppResult<Box<dyn ImagePresenter>> {
     match kind {
         PresenterKind::RatatuiImage => {
-            let presenter = match l2_cache_limits {
-                Some((max_entries, memory_budget_bytes)) => {
-                    RatatuiImagePresenter::with_cache_limits(max_entries, memory_budget_bytes)
-                }
-                None => RatatuiImagePresenter::new(),
-            };
+            let (max_entries, memory_budget_bytes) = options
+                .l2_cache_limits
+                .unwrap_or((L2_MAX_ENTRIES, L2_MEMORY_BUDGET_BYTES));
+            let presenter = RatatuiImagePresenter::with_cache_limits_and_graphics_protocol(
+                max_entries,
+                memory_budget_bytes,
+                options.graphics_protocol,
+            );
             Ok(Box::new(presenter))
         }
     }

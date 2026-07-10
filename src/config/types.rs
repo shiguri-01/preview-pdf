@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 use crate::input::sequence::DEFAULT_SEQUENCE_TIMEOUT;
+use crate::presenter::GraphicsProtocol;
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Config {
@@ -15,6 +16,7 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct RenderConfig {
+    pub graphics_protocol: Option<GraphicsProtocol>,
     pub worker_threads: usize,
     pub input_poll_timeout_idle_ms: u64,
     pub input_poll_timeout_busy_ms: u64,
@@ -28,6 +30,7 @@ pub struct RenderConfig {
 impl Default for RenderConfig {
     fn default() -> Self {
         Self {
+            graphics_protocol: None,
             worker_threads: 3,
             input_poll_timeout_idle_ms: 16,
             input_poll_timeout_busy_ms: 8,

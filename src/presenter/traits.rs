@@ -15,6 +15,16 @@ pub enum PresenterKind {
     RatatuiImage,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GraphicsProtocol {
+    Auto,
+    Halfblocks,
+    Sixel,
+    Kitty,
+    Iterm2,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Viewport {
     pub x: u16,

@@ -14,7 +14,7 @@ use crate::work::WorkClass;
 use super::encode::{
     EncodeLaneKind, EncodeWorkerRequest, enqueue_encode_request, pop_next_encode_task,
 };
-use super::factory::create_presenter;
+use super::factory::{PresenterFactoryOptions, create_presenter};
 use super::l2_cache::{TerminalFrameKey, TerminalFrameState};
 use super::ratatui::RatatuiImagePresenter;
 use super::terminal_cell::cell_size_from_window_metrics;
@@ -60,8 +60,11 @@ fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
 
 #[test]
 fn select_ratatui_presenter() {
-    let presenter = create_presenter(PresenterKind::RatatuiImage)
-        .expect("ratatui presenter should be selectable");
+    let presenter = create_presenter(
+        PresenterKind::RatatuiImage,
+        PresenterFactoryOptions::default(),
+    )
+    .expect("ratatui presenter should be selectable");
     assert_eq!(presenter.capabilities().backend_name, "ratatui-image");
 }
 

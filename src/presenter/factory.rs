@@ -16,20 +16,14 @@ pub fn create_presenter(
 ) -> AppResult<Box<dyn ImagePresenter>> {
     match kind {
         PresenterKind::RatatuiImage => {
-            let presenter = match options.l2_cache_limits {
-                Some((max_entries, memory_budget_bytes)) => {
-                    RatatuiImagePresenter::with_cache_limits_and_graphics_protocol(
-                        max_entries,
-                        memory_budget_bytes,
-                        options.graphics_protocol,
-                    )
-                }
-                None => RatatuiImagePresenter::with_cache_limits_and_graphics_protocol(
-                    L2_MAX_ENTRIES,
-                    L2_MEMORY_BUDGET_BYTES,
-                    options.graphics_protocol,
-                ),
-            };
+            let (max_entries, memory_budget_bytes) = options
+                .l2_cache_limits
+                .unwrap_or((L2_MAX_ENTRIES, L2_MEMORY_BUDGET_BYTES));
+            let presenter = RatatuiImagePresenter::with_cache_limits_and_graphics_protocol(
+                max_entries,
+                memory_budget_bytes,
+                options.graphics_protocol,
+            );
             Ok(Box::new(presenter))
         }
     }

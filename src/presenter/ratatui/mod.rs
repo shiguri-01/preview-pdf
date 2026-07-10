@@ -4,13 +4,14 @@ mod draw;
 mod geometry;
 use ratatui::layout::Rect;
 use ratatui::widgets::Clear;
+use ratatui_image::errors::Errors as RatatuiImageError;
 use ratatui_image::picker::Picker;
 use ratatui_image::picker::ProtocolType;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
 use tokio::task::JoinHandle;
 
 use crate::backend::RgbaFrame;
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 use crate::metrics::PerfStats;
 use crate::render::cache::RenderedPageKey;
 use crate::work::WorkClass;
@@ -68,6 +69,11 @@ struct EncodeChannels {
     _runtime: EncodeWorkerRuntime,
     current: EncodeLane,
     background: EncodeLane,
+}
+
+struct ResolvedTerminalPicker {
+    picker: Picker,
+    protocol_type: ProtocolType,
 }
 
 pub struct RatatuiImagePresenter {
@@ -367,6 +373,13 @@ impl RatatuiImagePresenter {
             worker.abort();
         }
     }
+
+    fn apply_terminal_picker(&mut self, resolved: ResolvedTerminalPicker) {
+        self.config.protocol_type = resolved.protocol_type;
+        self.config.protocol_label = protocol_type_label(resolved.protocol_type);
+        self.config.picker = resolved.picker;
+        self.reset_terminal_state();
+    }
 }
 
 impl ImagePresenter for RatatuiImagePresenter {
@@ -375,26 +388,9 @@ impl ImagePresenter for RatatuiImagePresenter {
             return Ok(());
         }
 
-        if let Some(protocol_type) = self
-            .config
-            .requested_protocol
-            .and_then(forced_protocol_type)
-        {
-            let mut picker = Picker::from_query_stdio().map_err(|err| {
-                AppError::unsupported(format!("failed to initialize graphics protocol: {err}"))
-            })?;
-            picker.set_protocol_type(protocol_type);
-            self.config.protocol_type = protocol_type;
-            self.config.protocol_label = protocol_type_label(protocol_type);
-            self.config.picker = picker_with_resolved_cell_size(picker, protocol_type);
-            self.reset_terminal_state();
-        } else if let Ok(picker) = Picker::from_query_stdio() {
-            let protocol_type = picker.protocol_type();
-            self.config.protocol_type = protocol_type;
-            self.config.protocol_label = protocol_type_label(protocol_type);
-            self.config.picker = picker_with_resolved_cell_size(picker, protocol_type);
-            self.reset_terminal_state();
-        }
+        let resolved =
+            resolve_terminal_picker(self.config.requested_protocol, Picker::from_query_stdio);
+        self.apply_terminal_picker(resolved);
 
         self.state.terminal_initialized = true;
         Ok(())
@@ -628,6 +624,40 @@ fn preferred_max_render_scale(protocol: ProtocolType) -> f32 {
     }
 }
 
+fn resolve_terminal_picker(
+    requested_protocol: Option<GraphicsProtocol>,
+    query_picker: impl FnOnce() -> std::result::Result<Picker, RatatuiImageError>,
+) -> ResolvedTerminalPicker {
+    match requested_protocol.and_then(forced_protocol_type) {
+        Some(protocol_type) => terminal_picker_for_forced_protocol(protocol_type),
+        None => terminal_picker_for_auto_protocol(query_picker),
+    }
+}
+
+fn terminal_picker_for_auto_protocol(
+    query_picker: impl FnOnce() -> std::result::Result<Picker, RatatuiImageError>,
+) -> ResolvedTerminalPicker {
+    // Auto is best-effort: terminal probing improves protocol and sizing when it works,
+    // but a failed probe should still leave the viewer usable.
+    let picker = query_picker().unwrap_or_else(|_| Picker::halfblocks());
+    let protocol_type = picker.protocol_type();
+    ResolvedTerminalPicker {
+        picker: picker_with_resolved_cell_size(picker, protocol_type),
+        protocol_type,
+    }
+}
+
+fn terminal_picker_for_forced_protocol(protocol_type: ProtocolType) -> ResolvedTerminalPicker {
+    // A forced protocol is already the user's choice, so do not run auto-detection here.
+    // Start from a basic picker and keep only non-probing cell-size resolution.
+    let mut picker = Picker::halfblocks();
+    picker.set_protocol_type(protocol_type);
+    ResolvedTerminalPicker {
+        picker: picker_with_resolved_cell_size(picker, protocol_type),
+        protocol_type,
+    }
+}
+
 fn forced_protocol_type(protocol: GraphicsProtocol) -> Option<ProtocolType> {
     match protocol {
         GraphicsProtocol::Auto => None,
@@ -650,7 +680,7 @@ mod tests {
     use crate::backend::RgbaFrame;
     use crate::presenter::l2_cache::TerminalFrameState;
     use crate::presenter::{
-        ImagePresenter, PanOffset, PresenterFeedback, PresenterHorizontalAlign,
+        GraphicsProtocol, ImagePresenter, PanOffset, PresenterFeedback, PresenterHorizontalAlign,
         PresenterRenderMode, PresenterRenderOptions, PresenterRenderSlot, PresenterSlot, Viewport,
     };
     use crate::render::cache::RenderedPageKey;
@@ -694,6 +724,41 @@ mod tests {
                 .is_some(),
             "presenter should have a ready frame for fallback"
         );
+    }
+
+    #[test]
+    fn forced_graphics_protocol_does_not_query_terminal_protocol() {
+        let resolved = super::resolve_terminal_picker(Some(GraphicsProtocol::Kitty), || {
+            panic!("forced graphics protocol should not query terminal protocol")
+        });
+
+        assert_eq!(resolved.protocol_type, super::ProtocolType::Kitty);
+        assert_eq!(resolved.picker.protocol_type(), super::ProtocolType::Kitty);
+    }
+
+    #[test]
+    fn auto_graphics_protocol_uses_halfblocks_when_query_fails() {
+        let resolved = super::resolve_terminal_picker(Some(GraphicsProtocol::Auto), || {
+            Err(super::RatatuiImageError::NoStdinResponse)
+        });
+
+        assert_eq!(resolved.protocol_type, super::ProtocolType::Halfblocks);
+        assert_eq!(
+            resolved.picker.protocol_type(),
+            super::ProtocolType::Halfblocks
+        );
+    }
+
+    #[test]
+    fn auto_graphics_protocol_uses_detected_protocol_when_query_succeeds() {
+        let resolved = super::resolve_terminal_picker(None, || {
+            let mut picker = super::Picker::halfblocks();
+            picker.set_protocol_type(super::ProtocolType::Sixel);
+            Ok(picker)
+        });
+
+        assert_eq!(resolved.protocol_type, super::ProtocolType::Sixel);
+        assert_eq!(resolved.picker.protocol_type(), super::ProtocolType::Sixel);
     }
 
     #[test]

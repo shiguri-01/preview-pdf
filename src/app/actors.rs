@@ -10,10 +10,10 @@ use crate::presenter::PanOffset;
 use crate::render::worker::{RenderWorker, RenderWorkerResult};
 
 use super::core::{InteractionSubsystem, RenderSubsystem};
-use super::loop_effects::LoopEffects;
-use super::loop_runtime::LoopStep;
 use super::nav::NavTracker;
 use super::render_ops::CurrentTaskContext;
+use super::routing_effects::RoutingEffects;
+use super::runtime::IterationStep;
 use super::state::AppState;
 use super::terminal_session::TerminalSurface;
 use super::view_ops::{
@@ -53,9 +53,9 @@ impl InputActor {
         &mut self,
         interaction: &mut InteractionSubsystem,
         state: &mut AppState,
-    ) -> AppResult<LoopEffects> {
+    ) -> AppResult<RoutingEffects> {
         let timeout_outcome = interaction.flush_sequence_timeout(state);
-        let mut effects = LoopEffects::from_commands(timeout_outcome.commands);
+        let mut effects = RoutingEffects::from_commands(timeout_outcome.commands);
         if timeout_outcome.redraw {
             effects.request_redraw(RedrawReason::Input);
         }
@@ -67,12 +67,12 @@ impl InputActor {
         event: Event,
         interaction: &mut InteractionSubsystem,
         state: &mut AppState,
-    ) -> AppResult<LoopEffects> {
+    ) -> AppResult<RoutingEffects> {
         match event {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                 self.last_input_at = Instant::now();
                 let outcome = interaction.handle_key_event(state, key)?;
-                let mut effects = LoopEffects::from_commands(outcome.commands);
+                let mut effects = RoutingEffects::from_commands(outcome.commands);
                 if outcome.redraw {
                     effects.request_redraw(RedrawReason::Input);
                 }
@@ -80,11 +80,11 @@ impl InputActor {
             }
             Event::Resize(_, _) => {
                 self.last_input_at = Instant::now();
-                let mut effects = LoopEffects::none();
+                let mut effects = RoutingEffects::none();
                 effects.request_redraw(RedrawReason::Input);
                 Ok(effects)
             }
-            _ => Ok(LoopEffects::none()),
+            _ => Ok(RoutingEffects::none()),
         }
     }
 }
@@ -173,7 +173,7 @@ impl RenderActor {
         state: &mut AppState,
         pdf: &dyn PdfBackend,
         render_worker: &mut RenderWorker,
-        step: &LoopStep,
+        step: &IterationStep,
     ) {
         render.ensure_current_task_enqueued(
             state,
@@ -312,7 +312,7 @@ impl UiActor {
         render_busy: bool,
         presenter_busy: bool,
         changed: bool,
-        step: &LoopStep,
+        step: &IterationStep,
     ) -> AppResult<()>
     where
         S: TerminalSurface,

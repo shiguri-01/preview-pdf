@@ -14,9 +14,9 @@ use crate::render::worker::RenderWorker;
 
 use super::actors::RenderCompleteContext;
 use super::core::App;
-use super::loop_effects::LoopEffects;
-use super::loop_runtime::{
-    ActiveDocument, LoopControl, LoopRuntime, WaitEvent, terminate_process_now,
+use super::routing_effects::RoutingEffects;
+use super::runtime::{
+    ActiveDocument, AppRuntime, RuntimeControl, RuntimeEvent, terminate_process_now,
 };
 use super::state::{Mode, notice_action_for_error};
 use super::terminal_session::{TerminalSession, TerminalSurface};
@@ -30,11 +30,11 @@ const FILE_RELOAD_RETRY_DELAYS: [Duration; 5] = [
 ];
 
 impl App {
-    pub(super) fn apply_loop_effects<S>(
+    pub(super) fn apply_routing_effects<S>(
         &mut self,
-        runtime: &mut LoopRuntime<S>,
-        effects: LoopEffects,
-    ) -> LoopControl
+        runtime: &mut AppRuntime<S>,
+        effects: RoutingEffects,
+    ) -> RuntimeControl
     where
         S: TerminalSurface,
     {
@@ -44,50 +44,50 @@ impl App {
         }
         for request in commands {
             if runtime
-                .loop_event_tx
+                .event_tx
                 .send(DomainEvent::Command(request))
                 .is_err()
             {
-                return LoopControl::Break;
+                return RuntimeControl::Break;
             }
         }
         for event in events {
-            if runtime.loop_event_tx.send(event).is_err() {
-                return LoopControl::Break;
+            if runtime.event_tx.send(event).is_err() {
+                return RuntimeControl::Break;
             }
         }
-        LoopControl::Continue
+        RuntimeControl::Continue
     }
 
     pub(super) fn handle_waited_event<S>(
         &mut self,
-        waited: WaitEvent,
-        runtime: &mut LoopRuntime<S>,
+        waited: RuntimeEvent,
+        runtime: &mut AppRuntime<S>,
         document: &mut ActiveDocument,
-    ) -> AppResult<LoopControl>
+    ) -> AppResult<RuntimeControl>
     where
         S: TerminalSession,
     {
         // Wake events are not guaranteed to arrive before the next input event, so the
-        // loop checks for timed-out sequences at the start of every iteration as well.
+        // runtime checks for timed-out sequences at the start of every iteration as well.
         let focus_before_timeout = self.input_focus();
         let timeout_effects = runtime
             .input_actor
             .handle_timeout(&mut self.interaction, &mut self.state)?;
         if matches!(
             self.apply_input_effects(runtime, document, timeout_effects)?,
-            LoopControl::Break
+            RuntimeControl::Break
         ) {
-            return Ok(LoopControl::Break);
+            return Ok(RuntimeControl::Break);
         }
-        if matches!(waited, WaitEvent::Event(DomainEvent::Input(_)))
+        if matches!(waited, RuntimeEvent::Event(DomainEvent::Input(_)))
             && self.input_focus() != focus_before_timeout
         {
-            return Ok(LoopControl::Continue);
+            return Ok(RuntimeControl::Continue);
         }
 
         match waited {
-            WaitEvent::Event(DomainEvent::Input(event)) => {
+            RuntimeEvent::Event(DomainEvent::Input(event)) => {
                 let effects = runtime.input_actor.handle_terminal_event(
                     event,
                     &mut self.interaction,
@@ -95,32 +95,32 @@ impl App {
                 )?;
                 if matches!(
                     self.apply_input_effects(runtime, document, effects)?,
-                    LoopControl::Break
+                    RuntimeControl::Break
                 ) {
-                    return Ok(LoopControl::Break);
+                    return Ok(RuntimeControl::Break);
                 }
             }
-            WaitEvent::Event(DomainEvent::InputError(message)) => {
+            RuntimeEvent::Event(DomainEvent::InputError(message)) => {
                 self.state
                     .set_error_notice(format!("input error: {message}"));
                 self.request_redraw(runtime, RedrawReason::InputError);
             }
-            WaitEvent::Event(DomainEvent::Command(request)) => {
+            RuntimeEvent::Event(DomainEvent::Command(request)) => {
                 if matches!(
                     self.handle_command_event(request, runtime, document)?,
-                    LoopControl::Break
+                    RuntimeControl::Break
                 ) {
-                    return Ok(LoopControl::Break);
+                    return Ok(RuntimeControl::Break);
                 }
             }
-            WaitEvent::Event(DomainEvent::App(event)) => {
+            RuntimeEvent::Event(DomainEvent::App(event)) => {
                 let needs_redraw = !matches!(event, AppEvent::CommandExecuted { .. });
                 self.interaction.handle_app_event(&mut self.state, &event);
                 if needs_redraw {
                     self.request_redraw(runtime, RedrawReason::AppEvent);
                 }
             }
-            WaitEvent::Event(DomainEvent::ExtensionWorker(events)) => {
+            RuntimeEvent::Event(DomainEvent::ExtensionWorker(events)) => {
                 if self
                     .interaction
                     .handle_extension_worker_events(&mut self.state, events)
@@ -128,7 +128,7 @@ impl App {
                     self.request_redraw(runtime, RedrawReason::AppEvent);
                 }
             }
-            WaitEvent::Event(DomainEvent::RenderComplete(completed)) => {
+            RuntimeEvent::Event(DomainEvent::RenderComplete(completed)) => {
                 if runtime.render_actor.handle_render_complete(
                     &mut self.render,
                     &mut self.state,
@@ -145,29 +145,29 @@ impl App {
                     self.request_redraw(runtime, RedrawReason::RenderComplete);
                 }
             }
-            WaitEvent::Event(DomainEvent::EncodeComplete(
+            RuntimeEvent::Event(DomainEvent::EncodeComplete(
                 PresenterBackgroundEvent::EncodeComplete { redraw_requested },
             )) => {
                 if redraw_requested {
                     self.request_redraw(runtime, RedrawReason::RenderComplete);
                 }
             }
-            WaitEvent::Event(DomainEvent::PrefetchTick) => {
+            RuntimeEvent::Event(DomainEvent::PrefetchTick) => {
                 runtime.render_actor.mark_prefetch_due();
             }
-            WaitEvent::Event(DomainEvent::RedrawTick) => {
+            RuntimeEvent::Event(DomainEvent::RedrawTick) => {
                 self.request_redraw(runtime, RedrawReason::Timer);
             }
-            WaitEvent::Event(DomainEvent::ReloadDocument(request)) => {
+            RuntimeEvent::Event(DomainEvent::ReloadDocument(request)) => {
                 self.request_document_reload(runtime, document, request);
             }
-            WaitEvent::Event(DomainEvent::DocumentReloaded(result)) => {
+            RuntimeEvent::Event(DomainEvent::DocumentReloaded(result)) => {
                 self.handle_document_reload_result(runtime, document, result)?;
             }
-            WaitEvent::Event(DomainEvent::Wake) => {}
-            WaitEvent::Closed => return Ok(LoopControl::Break),
+            RuntimeEvent::Event(DomainEvent::Wake) => {}
+            RuntimeEvent::Closed => return Ok(RuntimeControl::Break),
         }
-        Ok(LoopControl::Continue)
+        Ok(RuntimeControl::Continue)
     }
 
     fn input_focus(&self) -> (Mode, Option<PaletteKind>) {
@@ -179,10 +179,10 @@ impl App {
 
     fn apply_input_effects<S>(
         &mut self,
-        runtime: &mut LoopRuntime<S>,
+        runtime: &mut AppRuntime<S>,
         document: &mut ActiveDocument,
-        effects: LoopEffects,
-    ) -> AppResult<LoopControl>
+        effects: RoutingEffects,
+    ) -> AppResult<RuntimeControl>
     where
         S: TerminalSession,
     {
@@ -193,17 +193,17 @@ impl App {
         for request in commands {
             if matches!(
                 self.handle_command_event(request, runtime, document)?,
-                LoopControl::Break
+                RuntimeControl::Break
             ) {
-                return Ok(LoopControl::Break);
+                return Ok(RuntimeControl::Break);
             }
         }
         for event in events {
-            if runtime.loop_event_tx.send(event).is_err() {
-                return Ok(LoopControl::Break);
+            if runtime.event_tx.send(event).is_err() {
+                return Ok(RuntimeControl::Break);
             }
         }
-        Ok(LoopControl::Continue)
+        Ok(RuntimeControl::Continue)
     }
 
     pub(super) fn resolve_command_request<S: TerminalSurface>(
@@ -245,9 +245,9 @@ impl App {
     fn handle_command_event<S>(
         &mut self,
         request: CommandRequest,
-        runtime: &mut LoopRuntime<S>,
+        runtime: &mut AppRuntime<S>,
         document: &mut ActiveDocument,
-    ) -> AppResult<LoopControl>
+    ) -> AppResult<RuntimeControl>
     where
         S: TerminalSession,
     {
@@ -259,16 +259,16 @@ impl App {
                 DocumentReloadRequest::new(DocumentReloadReason::Manual),
             );
             if runtime
-                .loop_event_tx
+                .event_tx
                 .send(DomainEvent::App(AppEvent::CommandExecuted {
                     id: request.command.command_id(),
                     outcome: CommandOutcome::Applied,
                 }))
                 .is_err()
             {
-                return Ok(LoopControl::Break);
+                return Ok(RuntimeControl::Break);
             }
-            return Ok(LoopControl::Continue);
+            return Ok(RuntimeControl::Continue);
         }
         let state_before_command = self.state.clone();
         let previous_visible_pages = self
@@ -286,18 +286,18 @@ impl App {
             Err(err) => {
                 self.state.apply_notice_action(notice_action_for_error(err));
                 self.request_redraw(runtime, RedrawReason::Command);
-                return Ok(LoopControl::Continue);
+                return Ok(RuntimeControl::Continue);
             }
         };
-        let mut effects = LoopEffects::from_commands(dispatch.follow_up_commands);
+        let mut effects = RoutingEffects::from_commands(dispatch.follow_up_commands);
         for event in dispatch.emitted_events {
             effects.push_event(DomainEvent::App(event));
         }
         if matches!(
-            self.apply_loop_effects(runtime, effects),
-            LoopControl::Break
+            self.apply_routing_effects(runtime, effects),
+            RuntimeControl::Break
         ) {
-            return Ok(LoopControl::Break);
+            return Ok(RuntimeControl::Break);
         }
         let palette_changed = self.interaction.apply_palette_requests(&mut self.state);
         if palette_changed {
@@ -324,12 +324,12 @@ impl App {
                 }
             }
         }
-        Ok(LoopControl::Continue)
+        Ok(RuntimeControl::Continue)
     }
 
     fn request_document_reload<S>(
         &mut self,
-        runtime: &mut LoopRuntime<S>,
+        runtime: &mut AppRuntime<S>,
         document: &ActiveDocument,
         mut request: DocumentReloadRequest,
     ) where
@@ -351,16 +351,16 @@ impl App {
         }
 
         runtime.reload_in_flight = true;
-        runtime.loop_event_runtime.start_document_reload(
+        runtime.event_bus.start_document_reload(
             document.path.clone(),
             request,
-            runtime.loop_event_tx.clone(),
+            runtime.event_tx.clone(),
         );
     }
 
     fn handle_document_reload_result<S>(
         &mut self,
-        runtime: &mut LoopRuntime<S>,
+        runtime: &mut AppRuntime<S>,
         document: &mut ActiveDocument,
         reload: DocumentReloadResult,
     ) -> AppResult<()>
@@ -402,7 +402,7 @@ impl App {
 
     fn start_pending_document_reload<S>(
         &mut self,
-        runtime: &mut LoopRuntime<S>,
+        runtime: &mut AppRuntime<S>,
         document: &ActiveDocument,
     ) -> bool
     where
@@ -417,7 +417,7 @@ impl App {
 
     fn schedule_file_reload_retry<S>(
         &mut self,
-        runtime: &mut LoopRuntime<S>,
+        runtime: &mut AppRuntime<S>,
         generation: u64,
     ) -> bool
     where
@@ -431,17 +431,17 @@ impl App {
             return false;
         };
         runtime.reload_retry_attempts += 1;
-        runtime.loop_event_runtime.start_delayed_document_reload(
+        runtime.event_bus.start_delayed_document_reload(
             DocumentReloadRequest::retry(DocumentReloadReason::FileChanged, generation),
             *delay,
-            runtime.loop_event_tx.clone(),
+            runtime.event_tx.clone(),
         );
         true
     }
 
     fn apply_document_reload<S>(
         &mut self,
-        runtime: &mut LoopRuntime<S>,
+        runtime: &mut AppRuntime<S>,
         document: &mut ActiveDocument,
         pdf: SharedPdfBackend,
     ) -> AppResult<()>
@@ -489,7 +489,7 @@ impl App {
         Ok(())
     }
 
-    pub(super) fn request_redraw<S>(&mut self, runtime: &mut LoopRuntime<S>, reason: RedrawReason)
+    pub(super) fn request_redraw<S>(&mut self, runtime: &mut AppRuntime<S>, reason: RedrawReason)
     where
         S: TerminalSurface,
     {
@@ -498,3 +498,6 @@ impl App {
             .request_redraw(&mut self.render.runtime.perf_stats, reason);
     }
 }
+
+#[cfg(test)]
+mod tests;

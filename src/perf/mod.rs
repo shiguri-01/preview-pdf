@@ -10,13 +10,15 @@ use summary::{build_aggregate_report, build_iteration_report, merge_stats};
 
 use serde::Serialize;
 
-use crate::app::{App, LoopEventMode};
+use crate::app::{App, RuntimeMode};
 use crate::backend::open_default_backend;
 use crate::error::{AppError, AppResult};
 use crate::metrics::{PerfStats, RedrawReasonCounts};
 use crate::presenter::PresenterKind;
 
-use driver::{HeadlessTerminalSession, PERF_HEADLESS_HEIGHT, PERF_HEADLESS_WIDTH, PerfLoopDriver};
+use driver::{
+    HeadlessTerminalSession, PERF_HEADLESS_HEIGHT, PERF_HEADLESS_WIDTH, PerfRuntimeDriver,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MetricSummary {
@@ -364,9 +366,9 @@ pub async fn run_suite(config: PerfSuiteConfig) -> AppResult<PerfSuiteReport> {
             let mut app = App::new(PresenterKind::RatatuiImage)?;
             app.enable_metrics_collection()?;
             let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;
-            let driver = PerfLoopDriver::new(scenario, parameters.clone(), iteration_started_at);
+            let driver = PerfRuntimeDriver::new(scenario, parameters.clone(), iteration_started_at);
             let snapshot = app
-                .run_loop(pdf, session, LoopEventMode::Headless, driver)
+                .run_event_runtime(pdf, session, RuntimeMode::Headless, driver)
                 .await?;
             if iteration >= config.warmup_iterations {
                 measured.push(snapshot);

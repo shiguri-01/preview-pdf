@@ -85,11 +85,11 @@ fn spawn_input_task(tx: UnboundedSender<DomainEvent>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut input_stream = EventStream::new();
         while let Some(event) = input_stream.next().await {
-            let loop_event = match event {
+            let domain_event = match event {
                 Ok(event) => DomainEvent::Input(event),
                 Err(err) => DomainEvent::InputError(err.to_string()),
             };
-            if tx.send(loop_event).is_err() {
+            if tx.send(domain_event).is_err() {
                 return;
             }
         }

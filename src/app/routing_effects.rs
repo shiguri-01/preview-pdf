@@ -3,13 +3,13 @@ use crate::event::DomainEvent;
 use crate::metrics::RedrawReason;
 
 #[derive(Default)]
-pub(super) struct LoopEffects {
+pub(super) struct RoutingEffects {
     commands: Vec<CommandRequest>,
     events: Vec<DomainEvent>,
     redraws: Vec<RedrawReason>,
 }
 
-impl LoopEffects {
+impl RoutingEffects {
     pub(super) fn none() -> Self {
         Self::default()
     }

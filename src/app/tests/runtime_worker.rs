@@ -7,7 +7,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 
-use super::super::runtime::{
+use super::super::render_runtime::{
     CurrentPagePrepareRequest, FramePrepareOptions, PrefetchEncodeRequest, RenderRuntime,
 };
 use crate::backend::test_support::{build_pdf, unique_temp_path};

@@ -7,8 +7,8 @@ use ratatui::layout::Size;
 use ratatui::{Frame, Terminal};
 
 use crate::app::{
-    LoopDriver, LoopDriverDecision, LoopDriverHandle, LoopMetricsSnapshot, LoopObservation,
-    TerminalSession, TerminalSurface, binding_request,
+    RuntimeDriver, RuntimeDriverDecision, RuntimeDriverHandle, RuntimeMetricsSnapshot,
+    RuntimeObservation, TerminalSession, TerminalSurface, binding_request,
 };
 use crate::command::Command;
 use crate::error::{AppError, AppResult};
@@ -51,7 +51,7 @@ impl TerminalSurface for HeadlessTerminalSession {
     }
 }
 
-pub(crate) struct PerfLoopDriver {
+pub(crate) struct PerfRuntimeDriver {
     scenario: PerfScenarioId,
     parameters: PerfScenarioParameters,
     command_count: usize,
@@ -64,7 +64,7 @@ pub(crate) struct PerfLoopDriver {
     measured_started_at: Option<Instant>,
 }
 
-impl PerfLoopDriver {
+impl PerfRuntimeDriver {
     pub(crate) fn new(
         scenario: PerfScenarioId,
         parameters: PerfScenarioParameters,
@@ -102,33 +102,33 @@ impl PerfLoopDriver {
     }
 }
 
-impl LoopDriver for PerfLoopDriver {
+impl RuntimeDriver for PerfRuntimeDriver {
     type Output = PerfIterationSnapshot;
 
     fn on_iteration(
         &mut self,
-        observation: LoopObservation,
-        handle: &mut LoopDriverHandle<'_>,
-    ) -> AppResult<LoopDriverDecision> {
+        observation: RuntimeObservation,
+        handle: &mut RuntimeDriverHandle<'_>,
+    ) -> AppResult<RuntimeDriverDecision> {
         if !observation.system_idle {
             self.idle_started_at = None;
-            return Ok(LoopDriverDecision::Continue);
+            return Ok(RuntimeDriverDecision::Continue);
         }
 
         match self.scenario {
-            PerfScenarioId::ColdFirstPage => Ok(LoopDriverDecision::Finish),
+            PerfScenarioId::ColdFirstPage => Ok(RuntimeDriverDecision::Finish),
             PerfScenarioId::SteadyNextPage => {
                 let last_page = observation.page_count.saturating_sub(1);
                 if observation.current_page >= last_page
                     || self.command_count >= self.parameters.page_steps
                 {
                     self.start_measured_window();
-                    return Ok(LoopDriverDecision::Finish);
+                    return Ok(RuntimeDriverDecision::Finish);
                 }
                 self.start_measured_window();
                 handle.enqueue_command(binding_request(Command::NextPage))?;
                 self.command_count += 1;
-                Ok(LoopDriverDecision::Continue)
+                Ok(RuntimeDriverDecision::Continue)
             }
             PerfScenarioId::SteadyPrevPage => {
                 let last_page = observation.page_count.saturating_sub(1);
@@ -136,7 +136,7 @@ impl LoopDriver for PerfLoopDriver {
                     if observation.current_page < last_page {
                         handle.enqueue_command(binding_request(Command::LastPage))?;
                         self.positioned_backward_start = true;
-                        return Ok(LoopDriverDecision::Continue);
+                        return Ok(RuntimeDriverDecision::Continue);
                     }
                     self.positioned_backward_start = true;
                 }
@@ -144,13 +144,13 @@ impl LoopDriver for PerfLoopDriver {
                 if observation.current_page == 0 || self.command_count >= self.parameters.page_steps
                 {
                     self.start_measured_window();
-                    return Ok(LoopDriverDecision::Finish);
+                    return Ok(RuntimeDriverDecision::Finish);
                 }
 
                 self.start_measured_window();
                 handle.enqueue_command(binding_request(Command::PrevPage))?;
                 self.command_count += 1;
-                Ok(LoopDriverDecision::Continue)
+                Ok(RuntimeDriverDecision::Continue)
             }
             PerfScenarioId::RapidNextPage => {
                 if !self.initial_idle_seen {
@@ -166,15 +166,15 @@ impl LoopDriver for PerfLoopDriver {
                     self.command_count += steps;
                     self.rapid_commands_sent = true;
                     return Ok(if steps == 0 {
-                        LoopDriverDecision::Finish
+                        RuntimeDriverDecision::Finish
                     } else {
-                        LoopDriverDecision::Continue
+                        RuntimeDriverDecision::Continue
                     });
                 }
                 Ok(if self.rapid_commands_sent {
-                    LoopDriverDecision::Finish
+                    RuntimeDriverDecision::Finish
                 } else {
-                    LoopDriverDecision::Continue
+                    RuntimeDriverDecision::Continue
                 })
             }
             PerfScenarioId::ZoomStep => {
@@ -184,18 +184,18 @@ impl LoopDriver for PerfLoopDriver {
                     handle.enqueue_command(binding_request(Command::ZoomIn))?;
                     self.command_count += 1;
                     self.zoomed_in = true;
-                    return Ok(LoopDriverDecision::Continue);
+                    return Ok(RuntimeDriverDecision::Continue);
                 }
                 if self.zoomed_in && !self.zoomed_out {
                     handle.enqueue_command(binding_request(Command::ZoomOut))?;
                     self.command_count += 1;
                     self.zoomed_out = true;
-                    return Ok(LoopDriverDecision::Continue);
+                    return Ok(RuntimeDriverDecision::Continue);
                 }
                 Ok(if self.zoomed_out {
-                    LoopDriverDecision::Finish
+                    RuntimeDriverDecision::Finish
                 } else {
-                    LoopDriverDecision::Continue
+                    RuntimeDriverDecision::Continue
                 })
             }
             PerfScenarioId::IdleSettledRedraw => {
@@ -203,15 +203,15 @@ impl LoopDriver for PerfLoopDriver {
                     let started_at = Instant::now();
                     self.idle_started_at = Some(started_at);
                     self.measured_started_at = Some(started_at);
-                    return Ok(LoopDriverDecision::Continue);
+                    return Ok(RuntimeDriverDecision::Continue);
                 };
                 Ok(
                     if started_at.elapsed().as_millis()
                         >= u128::from(self.parameters.idle_duration_ms)
                     {
-                        LoopDriverDecision::Finish
+                        RuntimeDriverDecision::Finish
                     } else {
-                        LoopDriverDecision::Continue
+                        RuntimeDriverDecision::Continue
                     },
                 )
             }
@@ -220,8 +220,8 @@ impl LoopDriver for PerfLoopDriver {
 
     fn on_finish(
         &mut self,
-        observation: LoopObservation,
-        metrics: LoopMetricsSnapshot,
+        observation: RuntimeObservation,
+        metrics: RuntimeMetricsSnapshot,
     ) -> AppResult<Self::Output> {
         Ok(PerfIterationSnapshot {
             runtime: metrics.runtime,
@@ -232,7 +232,7 @@ impl LoopDriver for PerfLoopDriver {
         })
     }
 
-    fn on_loop_break(&mut self) -> AppResult<Self::Output> {
+    fn on_break(&mut self) -> AppResult<Self::Output> {
         Err(AppError::unsupported(
             "perf run ended before producing a report",
         ))
@@ -253,15 +253,20 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use crate::app::{
-        LoopDriver, LoopDriverDecision, LoopDriverHandle, LoopObservation, TerminalSurface,
+        RuntimeDriver, RuntimeDriverDecision, RuntimeDriverHandle, RuntimeObservation,
+        TerminalSurface,
     };
     use crate::event::DomainEvent;
     use crate::perf::{PerfScenarioId, PerfScenarioParameters};
 
-    use super::{HeadlessTerminalSession, PerfLoopDriver};
+    use super::{HeadlessTerminalSession, PerfRuntimeDriver};
 
-    fn observation(current_page: usize, page_count: usize, system_idle: bool) -> LoopObservation {
-        LoopObservation {
+    fn observation(
+        current_page: usize,
+        page_count: usize,
+        system_idle: bool,
+    ) -> RuntimeObservation {
+        RuntimeObservation {
             page_count,
             current_page,
             current_cached: system_idle,
@@ -290,7 +295,7 @@ mod tests {
     #[test]
     fn non_cold_scenario_starts_measured_window_after_initial_idle() {
         let (tx, _rx) = unbounded_channel();
-        let mut driver = PerfLoopDriver::new(
+        let mut driver = PerfRuntimeDriver::new(
             PerfScenarioId::RapidNextPage,
             PerfScenarioParameters {
                 page_steps: 2,
@@ -300,12 +305,12 @@ mod tests {
         );
 
         assert!(driver.measured_started_at.is_none());
-        let mut handle = LoopDriverHandle::new(&tx);
+        let mut handle = RuntimeDriverHandle::new(&tx);
         assert!(matches!(
             driver
                 .on_iteration(observation(0, 3, false), &mut handle)
                 .expect("driver should advance"),
-            LoopDriverDecision::Continue
+            RuntimeDriverDecision::Continue
         ));
         assert!(driver.measured_started_at.is_none());
 
@@ -313,7 +318,7 @@ mod tests {
             driver
                 .on_iteration(observation(0, 3, true), &mut handle)
                 .expect("driver should advance"),
-            LoopDriverDecision::Continue
+            RuntimeDriverDecision::Continue
         ));
         assert!(driver.measured_started_at.is_some());
         assert_eq!(driver.visited_steps(), 2);
@@ -322,7 +327,7 @@ mod tests {
     #[test]
     fn steady_prev_starts_measured_window_after_last_page_positioning() {
         let (tx, mut rx) = unbounded_channel();
-        let mut driver = PerfLoopDriver::new(
+        let mut driver = PerfRuntimeDriver::new(
             PerfScenarioId::SteadyPrevPage,
             PerfScenarioParameters {
                 page_steps: 1,
@@ -330,13 +335,13 @@ mod tests {
             },
             std::time::Instant::now(),
         );
-        let mut handle = LoopDriverHandle::new(&tx);
+        let mut handle = RuntimeDriverHandle::new(&tx);
 
         assert!(matches!(
             driver
                 .on_iteration(observation(0, 3, true), &mut handle)
                 .expect("driver should advance"),
-            LoopDriverDecision::Continue
+            RuntimeDriverDecision::Continue
         ));
         assert!(driver.measured_started_at.is_none());
         assert!(matches!(
@@ -348,7 +353,7 @@ mod tests {
             driver
                 .on_iteration(observation(2, 3, true), &mut handle)
                 .expect("driver should advance"),
-            LoopDriverDecision::Continue
+            RuntimeDriverDecision::Continue
         ));
         assert!(driver.measured_started_at.is_some());
         assert_eq!(driver.visited_steps(), 1);

@@ -28,7 +28,7 @@ use viewer_outcome::{
 
 use super::constants::DEFAULT_PAGE_SIZE_PT;
 use super::core::{App, RenderSubsystem};
-use super::runtime::{
+use super::render_runtime::{
     CachePrepareResult, FramePrepareOptions, PageSlotPrepareRequest, SpreadCanvasPrepareRequest,
 };
 use super::scale::{
@@ -41,24 +41,24 @@ const SPREAD_GAP_CELLS: u16 = 2;
 const INITIAL_PREVIEW_SCALE_RATIO: f32 = 0.25;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(super) struct InitialPreviewPlan {
-    pub(super) scale: f32,
-    pub(super) page_keys: Vec<RenderedPageKey>,
-    pub(super) presenter_key: RenderedPageKey,
+pub(in crate::app) struct InitialPreviewPlan {
+    pub(in crate::app) scale: f32,
+    pub(in crate::app) page_keys: Vec<RenderedPageKey>,
+    pub(in crate::app) presenter_key: RenderedPageKey,
 }
 
-pub(super) struct RenderFramePlan {
-    pub(super) palette_view: Option<PaletteView>,
-    pub(super) help_keymap: SequenceRegistrySnapshot,
-    pub(super) status_bar_segments: Vec<String>,
-    pub(super) page_count: usize,
-    pub(super) visible_pages: VisiblePageSlots,
-    pub(super) current_scale: f32,
-    pub(super) initial_preview: Option<InitialPreviewPlan>,
-    pub(super) presenter_key: RenderedPageKey,
-    pub(super) highlight_overlay: HighlightOverlaySnapshot,
-    pub(super) generation: u64,
-    pub(super) nav_streak: usize,
+pub(in crate::app) struct RenderFramePlan {
+    pub(in crate::app) palette_view: Option<PaletteView>,
+    pub(in crate::app) help_keymap: SequenceRegistrySnapshot,
+    pub(in crate::app) status_bar_segments: Vec<String>,
+    pub(in crate::app) page_count: usize,
+    pub(in crate::app) visible_pages: VisiblePageSlots,
+    pub(in crate::app) current_scale: f32,
+    pub(in crate::app) initial_preview: Option<InitialPreviewPlan>,
+    pub(in crate::app) presenter_key: RenderedPageKey,
+    pub(in crate::app) highlight_overlay: HighlightOverlaySnapshot,
+    pub(in crate::app) generation: u64,
+    pub(in crate::app) nav_streak: usize,
 }
 
 struct RenderFrameDrawPlan {
@@ -105,7 +105,7 @@ struct RenderFrameFeedback {
 }
 
 struct FrameCachePreparer<'a> {
-    runtime: &'a mut super::runtime::RenderRuntime,
+    runtime: &'a mut super::render_runtime::RenderRuntime,
     presenter: &'a mut dyn ImagePresenter,
     pdf: &'a dyn PdfBackend,
     cell_px: Option<(u16, u16)>,
@@ -196,7 +196,7 @@ impl RenderFrameDrawPlan {
     }
 }
 
-pub(super) fn current_viewport_for_session<S: TerminalSurface>(
+pub(in crate::app) fn current_viewport_for_session<S: TerminalSurface>(
     session: &S,
     debug_status_visible: bool,
 ) -> Option<Viewport> {
@@ -214,7 +214,7 @@ pub(super) fn current_viewport_for_session<S: TerminalSurface>(
     })
 }
 
-pub(super) fn compute_current_scale_for_state(
+pub(in crate::app) fn compute_current_scale_for_state(
     state: &AppState,
     render: &RenderSubsystem,
     render_policy: &RenderPolicy,
@@ -244,14 +244,14 @@ pub(super) fn compute_current_scale_for_state(
 }
 
 impl App {
-    pub(super) fn current_viewport<S: TerminalSurface>(
+    pub(in crate::app) fn current_viewport<S: TerminalSurface>(
         session: &S,
         debug_status_visible: bool,
     ) -> Option<Viewport> {
         current_viewport_for_session(session, debug_status_visible)
     }
 
-    pub(super) fn compute_current_scale(
+    pub(in crate::app) fn compute_current_scale(
         &self,
         pdf: &dyn PdfBackend,
         page: usize,
@@ -267,7 +267,7 @@ impl App {
         )
     }
 
-    pub(super) fn current_pan(&self) -> PanOffset {
+    pub(in crate::app) fn current_pan(&self) -> PanOffset {
         PanOffset {
             cells_x: self.state.pan_x,
             cells_y: self.state.pan_y,
@@ -428,7 +428,7 @@ impl FrameCachePreparer<'_> {
 }
 
 impl RenderSubsystem {
-    pub(super) fn render_frame(
+    pub(in crate::app) fn render_frame(
         &mut self,
         state: &mut AppState,
         session: &mut impl TerminalSurface,
@@ -696,7 +696,7 @@ fn resolve_layout_dimensions(
     }
 }
 
-pub(super) fn compute_initial_preview_plan(
+pub(in crate::app) fn compute_initial_preview_plan(
     doc_id: u64,
     visible_pages: VisiblePageSlots,
     page_presentation: PageLayoutMode,

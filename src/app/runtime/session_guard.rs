@@ -40,6 +40,8 @@ impl<S: TerminalSession> TerminalSession for RestoringSession<S> {
 
 impl<S: TerminalSession> Drop for RestoringSession<S> {
     fn drop(&mut self) {
-        let _ = self.restore();
+        if let Err(err) = self.restore() {
+            eprintln!("failed to restore terminal session during cleanup: {err}");
+        }
     }
 }

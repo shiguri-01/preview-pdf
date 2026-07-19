@@ -38,7 +38,6 @@ pub(in crate::app) async fn wait_next_event(
     let extension_worker_available =
         !extension_worker_rx.is_closed() || !extension_worker_rx.is_empty();
     tokio::select! {
-        biased;
         maybe_event = event_rx.recv() => {
             match maybe_event {
                 Some(event) => RuntimeEvent::Event(event),
@@ -101,6 +100,7 @@ mod tests {
 
     use tokio::runtime::Builder;
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::time::{self, Instant as TokioInstant};
 
     use super::{RuntimeEventSources, wait_next_event};
     use crate::backend::test_support::{build_pdf, unique_temp_path};
@@ -182,6 +182,13 @@ mod tests {
         RenderWorker::spawn(shared, 1)
     }
 
+    fn delayed_tick() -> time::Interval {
+        time::interval_at(
+            TokioInstant::now() + Duration::from_secs(60),
+            Duration::from_secs(60),
+        )
+    }
+
     #[test]
     fn wait_next_event_maps_presenter_event_then_eof_to_wake() {
         let runtime = Builder::new_current_thread()
@@ -198,8 +205,8 @@ mod tests {
         let (_tx, mut event_rx) = unbounded_channel();
         let (_extension_tx, mut extension_worker_rx) = unbounded_channel();
         runtime.block_on(async {
-            let mut prefetch_tick = tokio::time::interval(Duration::from_secs(60));
-            let mut redraw_tick = tokio::time::interval(Duration::from_secs(60));
+            let mut prefetch_tick = delayed_tick();
+            let mut redraw_tick = delayed_tick();
 
             let first = wait_next_event(
                 RuntimeEventSources {
@@ -264,8 +271,8 @@ mod tests {
         drop(extension_tx);
 
         runtime.block_on(async {
-            let mut prefetch_tick = tokio::time::interval(Duration::from_secs(60));
-            let mut redraw_tick = tokio::time::interval(Duration::from_secs(60));
+            let mut prefetch_tick = delayed_tick();
+            let mut redraw_tick = delayed_tick();
 
             let waited = wait_next_event(
                 RuntimeEventSources {
@@ -307,8 +314,8 @@ mod tests {
             .expect("runtime event should send");
 
         runtime.block_on(async {
-            let mut prefetch_tick = tokio::time::interval(Duration::from_secs(60));
-            let mut redraw_tick = tokio::time::interval(Duration::from_secs(60));
+            let mut prefetch_tick = delayed_tick();
+            let mut redraw_tick = delayed_tick();
 
             let waited = wait_next_event(
                 RuntimeEventSources {

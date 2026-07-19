@@ -13,8 +13,6 @@ use crate::work::WorkClass;
 mod prepare;
 mod spread_canvas;
 
-#[cfg(test)]
-pub(crate) use prepare::CurrentPagePrepareRequest;
 pub(crate) use prepare::{
     CachePrepareResult, FramePrepareOptions, PageSlotPrepareRequest, PrefetchEncodeRequest,
     SpreadCanvasPrepareRequest,
@@ -169,30 +167,41 @@ impl RenderRuntime {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
 
     use super::*;
-    use crate::backend::{OutlineNode, PdfRect};
+    use crate::backend::test_support::{build_pdf, unique_temp_path};
+    use crate::backend::{OutlineNode, PdfDoc, PdfRect};
     use crate::error::AppResult;
     use crate::highlight::{
         HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle,
     };
     use crate::presenter::{
-        ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOutcome,
-        PresenterRenderSlot, PresenterSlot, Viewport,
+        ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
+        PresenterRenderOutcome, PresenterRenderSlot, PresenterSlot, Viewport,
     };
     use crate::render::cache::RenderedPageKey;
+    use crate::render::scheduler::NavDirection;
 
     use super::super::state::VisiblePageSlots;
 
     #[derive(Default)]
     struct TestPresenter {
+        prepare_calls: usize,
+        prefetch_calls: usize,
+        render_calls: usize,
+        last_prepare_overlay_stamp: Option<u64>,
         prepared_viewports: Vec<Viewport>,
         prepared_frame_sizes: Vec<(u32, u32)>,
         prepared_slot_pages: Vec<Option<usize>>,
         last_prepare_pans: Vec<PanOffset>,
+        stats: PerfStats,
     }
 
     impl ImagePresenter for TestPresenter {
@@ -206,8 +215,12 @@ mod tests {
                 let Some(frame) = slot.frame else {
                     continue;
                 };
+                self.prepare_calls += 1;
+                self.last_prepare_overlay_stamp = Some(slot.overlay_stamp);
                 self.prepared_viewports.push(slot.viewport);
                 self.prepared_frame_sizes.push((frame.width, frame.height));
+                self.stats.record_convert(Duration::from_millis(4));
+                self.stats.set_l2_hit_rate(0.5);
             }
             Ok(())
         }
@@ -217,6 +230,8 @@ mod tests {
             _frame: &mut ratatui::Frame<'_>,
             _slots: &[PresenterRenderSlot],
         ) -> AppResult<PresenterRenderOutcome> {
+            self.render_calls += 1;
+            self.stats.record_blit(Duration::from_millis(2));
             Ok(PresenterRenderOutcome {
                 drew_image: true,
                 feedback: PresenterFeedback::None,
@@ -232,6 +247,24 @@ mod tests {
                 cell_px: None,
                 preferred_max_render_scale: 2.5,
             }
+        }
+
+        fn prefetch_encode(
+            &mut self,
+            _cache_key: RenderedPageKey,
+            _frame: &RgbaFrame,
+            _viewport: Viewport,
+            _pan: PanOffset,
+            _overlay_stamp: u64,
+            _class: WorkClass,
+            _generation: u64,
+        ) -> AppResult<()> {
+            self.prefetch_calls += 1;
+            Ok(())
+        }
+
+        fn perf_snapshot(&self) -> Option<PerfStats> {
+            Some(self.stats.clone())
         }
     }
 
@@ -299,6 +332,42 @@ mod tests {
 
         fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
             Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_text_page(&self, _page: usize) -> AppResult<crate::backend::TextPage> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+
+        fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+            Err(AppError::unsupported("not needed in runtime test"))
+        }
+    }
+
+    struct PageDimensionFailingPdf;
+
+    impl PdfBackend for PageDimensionFailingPdf {
+        fn path(&self) -> &std::path::Path {
+            std::path::Path::new("page-dimension-failing.pdf")
+        }
+
+        fn doc_id(&self) -> u64 {
+            7
+        }
+
+        fn page_count(&self) -> usize {
+            1
+        }
+
+        fn page_dimensions(&self, _page: usize) -> AppResult<(f32, f32)> {
+            Err(AppError::invalid_argument("page dimensions unavailable"))
+        }
+
+        fn render_page(&self, _page: usize, _scale: f32) -> AppResult<RgbaFrame> {
+            Ok(RgbaFrame {
+                width: 4,
+                height: 4,
+                pixels: vec![255; 64].into(),
+            })
         }
 
         fn extract_text_page(&self, _page: usize) -> AppResult<crate::backend::TextPage> {
@@ -841,5 +910,376 @@ mod tests {
             }
         );
         assert!(presenter.prepared_slot_pages.is_empty());
+    }
+
+    #[test]
+    fn schedule_navigation_updates_queue_and_cancellation_metrics() {
+        let file = unique_temp_path("runtime_schedule.pdf");
+        fs::write(&file, build_pdf(&["p1", "p2", "p3", "p4"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+
+        let mut runtime = RenderRuntime::default();
+        runtime.schedule_navigation(
+            &doc,
+            1,
+            NavIntent {
+                dir: NavDirection::Forward,
+                streak: 6,
+                generation: 1,
+            },
+            1.0,
+        );
+        assert!(runtime.scheduler.len() >= 4);
+        assert_eq!(runtime.perf_stats.queue_depth, runtime.scheduler.len());
+
+        let canceled_before = runtime.perf_stats.canceled_tasks;
+        runtime.schedule_navigation(
+            &doc,
+            1,
+            NavIntent {
+                dir: NavDirection::Backward,
+                streak: 2,
+                generation: 2,
+            },
+            1.0,
+        );
+        assert!(runtime.perf_stats.canceled_tasks > canceled_before);
+        assert_eq!(runtime.perf_stats.queue_depth, runtime.scheduler.len());
+
+        fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    #[test]
+    fn prepare_current_page_updates_l1_and_presenter_metrics() {
+        let file = unique_temp_path("runtime_render.pdf");
+        fs::write(&file, build_pdf(&["page"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        let mut pan = PanOffset::default();
+        let viewport = Viewport {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+
+        runtime
+            .prepare_current_page(
+                &doc,
+                prepare::CurrentPagePrepareRequest {
+                    viewport,
+                    page: 0,
+                    scale: 1.0,
+                    pan,
+                    options: FramePrepareOptions {
+                        cell_px: None,
+                        crop: false,
+                        overlay: &HighlightOverlaySnapshot::default(),
+                    },
+                },
+            )
+            .and_then(|prepared| {
+                pan = prepared.effective_pan();
+                let slots = prepared.presenter_slots(0);
+                presenter.prepare_slots(&slots)
+            })
+            .expect("first prepare should succeed");
+        runtime
+            .prepare_current_page(
+                &doc,
+                prepare::CurrentPagePrepareRequest {
+                    viewport,
+                    page: 0,
+                    scale: 1.0,
+                    pan,
+                    options: FramePrepareOptions {
+                        cell_px: None,
+                        crop: false,
+                        overlay: &HighlightOverlaySnapshot::default(),
+                    },
+                },
+            )
+            .and_then(|prepared| {
+                pan = prepared.effective_pan();
+                let slots = prepared.presenter_slots(0);
+                presenter.prepare_slots(&slots)
+            })
+            .expect("second prepare should succeed");
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| {
+                presenter
+                    .render(
+                        frame,
+                        Rect::new(0, 0, 80, 24),
+                        PresenterRenderOptions::default(),
+                    )
+                    .expect("presenter render should succeed");
+            })
+            .expect("test terminal draw should succeed");
+        runtime.sync_presenter_metrics(&presenter);
+
+        assert_eq!(presenter.prepare_calls, 2);
+        assert_eq!(presenter.render_calls, 1);
+        assert_eq!(runtime.l1_cache.len(), 1);
+        assert!(runtime.perf_stats.render_samples >= 1);
+        assert!(runtime.perf_stats.cache_hit_rate_l1 > 0.0);
+        assert_eq!(runtime.perf_stats.convert_ms, 4.0);
+        assert_eq!(runtime.perf_stats.blit_ms, 2.0);
+        assert_eq!(runtime.perf_stats.cache_hit_rate_l2, 0.5);
+
+        fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    #[test]
+    fn prepare_current_page_returns_error_when_overlay_geometry_is_unavailable() {
+        let doc = PageDimensionFailingPdf;
+        let mut runtime = RenderRuntime::default();
+        let viewport = Viewport {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+        let overlay = single_page_highlight_overlay();
+
+        let err = match runtime.prepare_current_page(
+            &doc,
+            prepare::CurrentPagePrepareRequest {
+                viewport,
+                page: 0,
+                scale: 1.0,
+                pan: PanOffset::default(),
+                options: FramePrepareOptions {
+                    cell_px: None,
+                    crop: false,
+                    overlay: &overlay,
+                },
+            },
+        ) {
+            Ok(_) => panic!("prepare should fail when overlay geometry cannot be resolved"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("page dimensions unavailable"));
+    }
+
+    #[test]
+    fn page_slots_return_error_when_overlay_geometry_is_unavailable() {
+        let doc = PageDimensionFailingPdf;
+        let mut runtime = RenderRuntime::default();
+        let key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
+        runtime.l1_cache.insert(
+            key,
+            RgbaFrame {
+                width: 4,
+                height: 4,
+                pixels: vec![255; 64].into(),
+            },
+            false,
+        );
+        let overlay = single_page_highlight_overlay();
+
+        let err = match runtime.prepare_page_slots_from_cache(
+            &doc,
+            PageSlotPrepareRequest {
+                page_slots: &[(
+                    Some(key),
+                    Viewport {
+                        x: 0,
+                        y: 0,
+                        width: 80,
+                        height: 24,
+                    },
+                )],
+                pan: PanOffset::default(),
+                options: FramePrepareOptions {
+                    cell_px: None,
+                    crop: false,
+                    overlay: &overlay,
+                },
+            },
+        ) {
+            Ok(_) => {
+                panic!("page slot prepare should fail when overlay geometry cannot be resolved")
+            }
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("page dimensions unavailable"));
+    }
+
+    #[test]
+    fn spread_canvas_returns_error_when_overlay_geometry_is_unavailable() {
+        let doc = PageDimensionFailingPdf;
+        let mut runtime = RenderRuntime::default();
+        let key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
+        runtime.l1_cache.insert(
+            key,
+            RgbaFrame {
+                width: 4,
+                height: 4,
+                pixels: vec![255; 64].into(),
+            },
+            false,
+        );
+        let overlay = single_page_highlight_overlay();
+
+        let err = match runtime.prepare_spread_canvas_from_cache(
+            &doc,
+            SpreadCanvasPrepareRequest {
+                viewport: Viewport {
+                    x: 0,
+                    y: 0,
+                    width: 80,
+                    height: 24,
+                },
+                visible_pages: VisiblePageSlots {
+                    anchor_page: 0,
+                    trailing_page: None,
+                    left_page: Some(0),
+                    right_page: None,
+                },
+                scale: 1.0,
+                pan: PanOffset::default(),
+                cell_px: None,
+                overlay: &overlay,
+                gap_px: 0,
+            },
+        ) {
+            Ok(_) => panic!("spread prepare should fail when overlay geometry cannot be resolved"),
+            Err(err) => err,
+        };
+
+        assert!(err.to_string().contains("page dimensions unavailable"));
+    }
+
+    #[test]
+    fn run_next_prefetch_reduces_queue_depth() {
+        let file = unique_temp_path("runtime_prefetch.pdf");
+        fs::write(&file, build_pdf(&["a", "b", "c"])).expect("test pdf should be created");
+        let doc = PdfDoc::open(&file).expect("pdf should open");
+
+        let mut runtime = RenderRuntime::default();
+        runtime.reset_prefetch(
+            &doc,
+            0,
+            NavIntent {
+                dir: NavDirection::Forward,
+                streak: 3,
+                generation: 1,
+            },
+            1.0,
+        );
+        let queued = runtime.scheduler.len();
+        assert!(queued > 0);
+
+        let task = runtime
+            .run_next_prefetch(&doc)
+            .expect("prefetch should run")
+            .expect("task should exist");
+        assert_eq!(task.doc_id, doc.doc_id());
+        assert_eq!(runtime.perf_stats.queue_depth, queued - 1);
+
+        fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    #[test]
+    fn prefetch_encode_from_cache_invokes_presenter() {
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        let key = RenderedPageKey::new(5, 2, 1.0);
+        runtime.l1_cache.insert(
+            key,
+            RgbaFrame {
+                width: 2,
+                height: 2,
+                pixels: vec![255; 16].into(),
+            },
+            false,
+        );
+        let viewport = Viewport {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+        let pan = PanOffset::default();
+
+        let prefetched = runtime
+            .try_prefetch_encode_from_cache(
+                &mut presenter,
+                PrefetchEncodeRequest {
+                    viewport,
+                    key,
+                    pan,
+                    overlay_stamp: 0,
+                    cell_px: None,
+                    crop: false,
+                    class: WorkClass::DirectionalLead,
+                    generation: 1,
+                },
+            )
+            .expect("prefetch from cache should succeed");
+        assert!(prefetched);
+        assert_eq!(presenter.prefetch_calls, 1);
+    }
+
+    #[test]
+    fn prefetch_encode_from_cache_skips_when_overlay_active() {
+        let mut runtime = RenderRuntime::default();
+        let mut presenter = TestPresenter::default();
+        let key = RenderedPageKey::new(5, 2, 1.0);
+        runtime.l1_cache.insert(
+            key,
+            RgbaFrame {
+                width: 2,
+                height: 2,
+                pixels: vec![255; 16].into(),
+            },
+            false,
+        );
+        let viewport = Viewport {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+        let pan = PanOffset::default();
+
+        let prefetched = runtime
+            .try_prefetch_encode_from_cache(
+                &mut presenter,
+                PrefetchEncodeRequest {
+                    viewport,
+                    key,
+                    pan,
+                    overlay_stamp: 1,
+                    cell_px: None,
+                    crop: false,
+                    class: WorkClass::DirectionalLead,
+                    generation: 1,
+                },
+            )
+            .expect("prefetch from cache should succeed");
+        assert!(!prefetched);
+        assert_eq!(presenter.prefetch_calls, 0);
+    }
+
+    fn single_page_highlight_overlay() -> HighlightOverlaySnapshot {
+        HighlightOverlaySnapshot::new(vec![HighlightSpan {
+            source: HighlightSource::Search,
+            page: 0,
+            rects: vec![PdfRect {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 10.0,
+                y1: 10.0,
+            }],
+            style: HighlightStyle::SEARCH_HIT,
+        }])
     }
 }

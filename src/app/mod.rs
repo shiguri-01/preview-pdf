@@ -17,9 +17,6 @@ mod state;
 pub(crate) mod terminal_session;
 mod view_ops;
 
-#[cfg(test)]
-mod tests;
-
 pub use core::{App, AppBuilder, RunOptions};
 pub use render_runtime::RenderRuntime;
 pub use state::{

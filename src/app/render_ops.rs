@@ -8,7 +8,7 @@ use crate::work::WorkClass;
 use super::actors::{RenderActor, RenderNavSyncParts};
 use super::core::RenderSubsystem;
 use super::frame_ops::{encode_work_class_for_completed_render, prepare_presenter_frame};
-use super::runtime::PrefetchEncodeRequest;
+use super::render_runtime::PrefetchEncodeRequest;
 use super::scale::{scale_eq, zoom_eq};
 use super::state::{AppState, VisiblePageSlots};
 use super::view_ops::{InitialPreviewPlan, compute_initial_preview_plan};

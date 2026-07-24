@@ -30,12 +30,12 @@ pub(crate) struct FramePrepareOptions<'a> {
 
 #[derive(Debug, Clone, Copy)]
 #[cfg(test)]
-pub(crate) struct CurrentPagePrepareRequest<'a> {
-    pub(crate) viewport: Viewport,
-    pub(crate) page: usize,
-    pub(crate) scale: f32,
-    pub(crate) pan: PanOffset,
-    pub(crate) options: FramePrepareOptions<'a>,
+pub(super) struct CurrentPagePrepareRequest<'a> {
+    pub(super) viewport: Viewport,
+    pub(super) page: usize,
+    pub(super) scale: f32,
+    pub(super) pan: PanOffset,
+    pub(super) options: FramePrepareOptions<'a>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -198,7 +198,7 @@ struct SpreadCanvasSlotPage {
 
 impl RenderRuntime {
     #[cfg(test)]
-    pub(crate) fn prepare_current_page(
+    pub(super) fn prepare_current_page(
         &mut self,
         doc: &dyn PdfBackend,
         request: CurrentPagePrepareRequest<'_>,
@@ -213,7 +213,7 @@ impl RenderRuntime {
         };
         let frame = self.resolve_task_frame(doc, &task)?;
         let (frame, overlay_stamp) =
-            decorate_single_page_frame(doc, task.page, &frame, request.options.overlay);
+            decorate_single_page_frame(doc, task.page, &frame, request.options.overlay)?;
         let mut pan = request.pan;
         let (frame, pan_for_presenter) = prepare_presenter_frame(
             &frame,
@@ -406,7 +406,7 @@ impl RenderRuntime {
                 slot.key.page,
                 &slot.frame,
                 request.options.overlay,
-            );
+            )?;
             let mut slot_pan = effective_pan;
             let (frame, pan_for_presenter) = prepare_presenter_frame(
                 &frame,
@@ -442,7 +442,7 @@ impl RenderRuntime {
         let Some(frame) = self.l1_cache.get(&key) else {
             return Ok(None);
         };
-        let (frame, overlay_stamp) = decorate_single_page_frame(doc, page, frame, overlay);
+        let (frame, overlay_stamp) = decorate_single_page_frame(doc, page, frame, overlay)?;
         Ok(Some(CachedDecoratedPage {
             key,
             frame,
@@ -540,14 +540,12 @@ fn decorate_single_page_frame(
     page: usize,
     frame: &RgbaFrame,
     overlay: &HighlightOverlaySnapshot,
-) -> (RgbaFrame, u64) {
+) -> AppResult<(RgbaFrame, u64)> {
     if overlay.is_empty() {
-        return (frame.clone(), 0);
+        return Ok((frame.clone(), 0));
     }
-    match page_render_space(doc, page, frame, 0) {
-        Ok(page_space) => (decorate_frame(frame, overlay, &[page_space]), overlay.stamp),
-        Err(_) => (frame.clone(), 0),
-    }
+    let page_space = page_render_space(doc, page, frame, 0)?;
+    Ok((decorate_frame(frame, overlay, &[page_space]), overlay.stamp))
 }
 
 fn page_render_space(

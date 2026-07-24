@@ -13,7 +13,7 @@ use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, Sequenc
 use crate::palette::{PaletteRegistry, PaletteSessionController};
 use crate::presenter::{ImagePresenter, PresenterFactoryOptions, PresenterKind, create_presenter};
 
-use super::runtime::RenderRuntime;
+use super::render_runtime::RenderRuntime;
 use super::state::{AppState, CacheHandle, PaletteRequest};
 
 pub struct RenderSubsystem {

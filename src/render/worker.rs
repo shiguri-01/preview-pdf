@@ -443,6 +443,51 @@ mod tests {
         fs::remove_file(&file).expect("test pdf should be removed");
     }
 
+    #[test]
+    fn accepts_up_to_configured_inflight_tasks() {
+        let file = unique_temp_path("render_worker_parallel.pdf");
+        fs::write(&file, build_pdf(&["p1", "p2", "p3", "p4"])).expect("test pdf should be created");
+        let doc = Arc::new(PdfDoc::open(&file).expect("pdf should open"));
+        let mut worker = spawn_worker(Arc::clone(&doc), 3);
+
+        assert!(worker.enqueue(render_task(doc.as_ref(), 0, WorkClass::CriticalCurrent, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 1, WorkClass::DirectionalLead, 1)));
+        assert!(worker.enqueue(render_task(doc.as_ref(), 2, WorkClass::Background, 1)));
+        assert!(!worker.enqueue(render_task(doc.as_ref(), 3, WorkClass::Background, 1)));
+        assert_eq!(worker.in_flight_len(), 3);
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while worker.in_flight_len() > 0 && Instant::now() < deadline {
+            let _ = drain_render_results(&mut worker);
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        assert_eq!(worker.in_flight_len(), 0);
+        fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
+    #[test]
+    fn rejects_duplicate_key_while_inflight() {
+        let file = unique_temp_path("render_worker_dedupe.pdf");
+        fs::write(&file, build_pdf(&["p1", "p2"])).expect("test pdf should be created");
+        let doc = Arc::new(PdfDoc::open(&file).expect("pdf should open"));
+        let mut worker = spawn_worker(Arc::clone(&doc), 3);
+        let key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
+
+        assert!(worker.enqueue(render_task(doc.as_ref(), 0, WorkClass::CriticalCurrent, 1)));
+        assert!(worker.has_in_flight(&key));
+        assert!(!worker.enqueue(render_task(doc.as_ref(), 0, WorkClass::DirectionalLead, 1)));
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while worker.in_flight_len() > 0 && Instant::now() < deadline {
+            let _ = drain_render_results(&mut worker);
+            thread::sleep(Duration::from_millis(5));
+        }
+
+        assert_eq!(worker.in_flight_len(), 0);
+        fs::remove_file(&file).expect("test pdf should be removed");
+    }
+
     fn render_task(
         doc: &dyn PdfBackend,
         page: usize,

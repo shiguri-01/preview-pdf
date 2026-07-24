@@ -6,13 +6,13 @@ use crate::event::DomainEvent;
 use crate::metrics::PerfStats;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoopEventMode {
+pub(crate) enum RuntimeMode {
     Interactive { watch: bool },
     Headless,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct LoopObservation {
+pub(crate) struct RuntimeObservation {
     pub(crate) page_count: usize,
     pub(crate) current_page: usize,
     pub(crate) current_cached: bool,
@@ -24,48 +24,48 @@ pub(crate) struct LoopObservation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum LoopDriverDecision {
+pub(crate) enum RuntimeDriverDecision {
     Continue,
     Finish,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct LoopMetricsSnapshot {
+pub(crate) struct RuntimeMetricsSnapshot {
     pub(crate) runtime: PerfStats,
     pub(crate) presenter: PerfStats,
 }
 
-pub(crate) trait LoopDriver {
+pub(crate) trait RuntimeDriver {
     type Output;
 
     fn on_iteration(
         &mut self,
-        observation: LoopObservation,
-        handle: &mut LoopDriverHandle<'_>,
-    ) -> AppResult<LoopDriverDecision>;
+        observation: RuntimeObservation,
+        handle: &mut RuntimeDriverHandle<'_>,
+    ) -> AppResult<RuntimeDriverDecision>;
 
     fn on_finish(
         &mut self,
-        observation: LoopObservation,
-        metrics: LoopMetricsSnapshot,
+        observation: RuntimeObservation,
+        metrics: RuntimeMetricsSnapshot,
     ) -> AppResult<Self::Output>;
 
-    fn on_loop_break(&mut self) -> AppResult<Self::Output>;
+    fn on_break(&mut self) -> AppResult<Self::Output>;
 }
 
-pub(crate) struct LoopDriverHandle<'a> {
-    loop_event_tx: &'a UnboundedSender<DomainEvent>,
+pub(crate) struct RuntimeDriverHandle<'a> {
+    event_tx: &'a UnboundedSender<DomainEvent>,
 }
 
-impl<'a> LoopDriverHandle<'a> {
-    pub(crate) fn new(loop_event_tx: &'a UnboundedSender<DomainEvent>) -> Self {
-        Self { loop_event_tx }
+impl<'a> RuntimeDriverHandle<'a> {
+    pub(crate) fn new(event_tx: &'a UnboundedSender<DomainEvent>) -> Self {
+        Self { event_tx }
     }
 
     pub(crate) fn enqueue_command(&mut self, request: CommandRequest) -> AppResult<()> {
-        self.loop_event_tx
+        self.event_tx
             .send(DomainEvent::Command(request))
-            .map_err(|_| AppError::unsupported("event loop command channel closed"))
+            .map_err(|_| AppError::unsupported("runtime command channel closed"))
     }
 
     pub(crate) fn enqueue_commands(
@@ -80,28 +80,28 @@ impl<'a> LoopDriverHandle<'a> {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct InteractiveLoopDriver;
+pub(crate) struct InteractiveRuntimeDriver;
 
-impl LoopDriver for InteractiveLoopDriver {
+impl RuntimeDriver for InteractiveRuntimeDriver {
     type Output = ();
 
     fn on_iteration(
         &mut self,
-        _observation: LoopObservation,
-        _handle: &mut LoopDriverHandle<'_>,
-    ) -> AppResult<LoopDriverDecision> {
-        Ok(LoopDriverDecision::Continue)
+        _observation: RuntimeObservation,
+        _handle: &mut RuntimeDriverHandle<'_>,
+    ) -> AppResult<RuntimeDriverDecision> {
+        Ok(RuntimeDriverDecision::Continue)
     }
 
     fn on_finish(
         &mut self,
-        _observation: LoopObservation,
-        _metrics: LoopMetricsSnapshot,
+        _observation: RuntimeObservation,
+        _metrics: RuntimeMetricsSnapshot,
     ) -> AppResult<Self::Output> {
         Ok(())
     }
 
-    fn on_loop_break(&mut self) -> AppResult<Self::Output> {
+    fn on_break(&mut self) -> AppResult<Self::Output> {
         Ok(())
     }
 }

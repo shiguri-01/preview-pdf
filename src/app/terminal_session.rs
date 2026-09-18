@@ -1,12 +1,7 @@
-use std::io::{self, Stdout};
+use std::io;
 
-use crossterm::execute;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Size;
-use ratatui::{Frame, Terminal};
+use ratatui::{DefaultTerminal, Frame};
 
 use crate::error::{AppError, AppResult};
 
@@ -23,46 +18,26 @@ pub(crate) trait TerminalSession: TerminalSurface {
 }
 
 pub(crate) struct InteractiveTerminalSession {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    terminal: DefaultTerminal,
     active: bool,
 }
 
 impl InteractiveTerminalSession {
     pub(crate) fn enter() -> AppResult<Self> {
-        enable_raw_mode()
-            .map_err(|source| AppError::io_with_context(source, "enabling terminal raw mode"))?;
-        let mut stdout = io::stdout();
-        if let Err(err) = execute!(stdout, EnterAlternateScreen) {
-            let _ = disable_raw_mode();
-            return Err(AppError::io_with_context(
-                err,
-                "entering terminal alternate screen",
-            ));
-        }
-
-        let backend = CrosstermBackend::new(stdout);
-        let mut terminal = match Terminal::new(backend) {
-            Ok(terminal) => terminal,
-            Err(err) => {
-                cleanup_terminal_enter_failure();
-                return Err(AppError::io_with_context(
-                    err,
-                    "initializing terminal backend",
-                ));
-            }
-        };
-        if let Err(err) = terminal.clear() {
-            cleanup_terminal_enter_failure();
-            return Err(AppError::io_with_context(
-                err,
-                "clearing terminal alternate screen",
-            ));
-        }
-
-        Ok(Self {
+        let terminal = ratatui::try_init().map_err(|source| {
+            // try_init installs the panic hook, but an ordinary error can leave
+            // raw mode or the alternate screen enabled before a session exists.
+            let _ = ratatui::try_restore();
+            AppError::io_with_context(source, "initializing terminal session")
+        })?;
+        let mut session = Self {
             terminal,
             active: true,
-        })
+        };
+        session.terminal.clear().map_err(|source| {
+            AppError::io_with_context(source, "clearing terminal alternate screen")
+        })?;
+        Ok(session)
     }
 
     pub(crate) fn restore(&mut self) -> io::Result<()> {
@@ -70,9 +45,9 @@ impl InteractiveTerminalSession {
             return Ok(());
         }
 
-        disable_raw_mode()?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
-        self.terminal.show_cursor()?;
+        let restore_result = ratatui::try_restore();
+        let cursor_result = self.terminal.show_cursor();
+        restore_result.and(cursor_result)?;
         self.active = false;
         Ok(())
     }
@@ -101,10 +76,4 @@ impl Drop for InteractiveTerminalSession {
     fn drop(&mut self) {
         let _ = self.restore();
     }
-}
-
-fn cleanup_terminal_enter_failure() {
-    let mut stdout = io::stdout();
-    let _ = execute!(stdout, LeaveAlternateScreen);
-    let _ = disable_raw_mode();
 }

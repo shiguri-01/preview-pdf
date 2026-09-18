@@ -1,10 +1,13 @@
 use std::time::Duration;
 
+use figment::{Figment, providers::Serialized};
+
 use crate::app::scale::{ZOOM_MAX, ZOOM_MIN};
 use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
+use crate::error::{AppError, AppResult};
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry};
 
-use super::keymap::build_default_sequence_registry;
+use super::keymap::{KeymapOptions, build_default_sequence_registry};
 use super::options::AppOptions;
 use super::types::{CacheConfig, Config, InputConfig, RenderConfig, ViewConfig, WatchConfig};
 
@@ -151,7 +154,8 @@ impl Default for WatchPolicy {
 
 #[derive(Debug, Clone, Default)]
 pub struct AppOptionsResolver {
-    options: AppOptions,
+    sources: Figment,
+    keymap: KeymapOptions,
 }
 
 impl AppOptionsResolver {
@@ -159,19 +163,24 @@ impl AppOptionsResolver {
         Self::default()
     }
 
-    pub fn apply_options(mut self, options: AppOptions) -> Self {
-        self.options = self.options.merge(options);
+    pub fn apply_options(mut self, mut options: AppOptions) -> Self {
+        self.keymap = self.keymap.merge(std::mem::take(&mut options.keymap));
+        self.sources = self.sources.merge(Serialized::defaults(options));
         self
     }
 
-    pub fn resolve(self) -> ResolvedAppOptions {
-        resolve_options(self.options)
+    pub fn resolve(self) -> AppResult<ResolvedAppOptions> {
+        let mut options: AppOptions = self.sources.extract().map_err(|source| {
+            AppError::invalid_argument(format!("resolving configuration: {source}"))
+        })?;
+        options.keymap = self.keymap;
+        Ok(resolve_options(options))
     }
 }
 
 impl Default for ResolvedAppOptions {
     fn default() -> Self {
-        AppOptionsResolver::new().resolve()
+        resolve_options(AppOptions::default())
     }
 }
 
@@ -359,10 +368,145 @@ mod tests {
 
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 
-    use crate::config::{AppOptions, RenderOptions, ViewOptions, WatchOptions};
+    use crate::config::{AppOptions, CacheOptions, RenderOptions, ViewOptions, WatchOptions};
     use crate::presenter::GraphicsProtocol;
 
     use super::AppOptionsResolver;
+
+    #[test]
+    fn no_option_sources_resolve_to_builtin_defaults() {
+        let resolved = AppOptionsResolver::new()
+            .resolve()
+            .expect("no sources should resolve");
+
+        assert_eq!(
+            crate::config::Config::from(resolved),
+            crate::config::Config::default()
+        );
+    }
+
+    #[test]
+    fn absent_options_preserve_earlier_values_but_explicit_zero_false_and_auto_override() {
+        let resolved = AppOptionsResolver::new()
+            .apply_options(AppOptions {
+                render: RenderOptions {
+                    graphics_protocol: Some(GraphicsProtocol::Kitty),
+                    worker_threads: Some(7),
+                    ..RenderOptions::default()
+                },
+                cache: CacheOptions {
+                    l1_max_entries: Some(42),
+                    ..CacheOptions::default()
+                },
+                watch: WatchOptions {
+                    enabled: Some(true),
+                    settle_delay_ms: Some(300),
+                },
+                ..AppOptions::default()
+            })
+            .apply_options(AppOptions {
+                render: RenderOptions {
+                    graphics_protocol: Some(GraphicsProtocol::Auto),
+                    ..RenderOptions::default()
+                },
+                watch: WatchOptions {
+                    enabled: Some(false),
+                    settle_delay_ms: Some(0),
+                },
+                ..AppOptions::default()
+            })
+            .apply_options(AppOptions::default())
+            .resolve()
+            .expect("layered options should resolve");
+
+        assert_eq!(
+            resolved.render.graphics_protocol,
+            Some(GraphicsProtocol::Auto)
+        );
+        assert_eq!(resolved.render.worker_threads, 7);
+        assert_eq!(resolved.cache.l1_max_entries, 42);
+        assert!(!resolved.watch.enabled);
+        assert_eq!(resolved.watch.settle_delay, Duration::from_millis(1));
+    }
+
+    #[test]
+    fn non_finite_values_reach_policy_sanitization() {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let resolved = AppOptionsResolver::new()
+                .apply_options(AppOptions {
+                    render: RenderOptions {
+                        max_render_scale: Some(value),
+                        ..RenderOptions::default()
+                    },
+                    view: ViewOptions {
+                        initial_zoom: Some(value),
+                        ..ViewOptions::default()
+                    },
+                    ..AppOptions::default()
+                })
+                .resolve()
+                .expect("non-finite options should resolve before sanitization");
+
+            assert_eq!(resolved.render.max_render_scale, 2.5);
+            assert_eq!(resolved.view.initial_zoom, 1.0);
+        }
+    }
+
+    #[test]
+    fn keymap_layers_preserve_unrelated_bindings_and_apply_later_overrides_and_unbinds() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+        use crate::command::Command;
+        use crate::config::keymap::{KeymapOptions, KeymapPreset, parse_keymap_binding};
+        use crate::extension::ExtensionUiSnapshot;
+        use crate::input::sequence::{KeyBindingContext, SequenceResolution, SequenceResolver};
+
+        let binding = |key, command| {
+            parse_keymap_binding("normal", key, command).expect("binding should be valid")
+        };
+        let resolved = AppOptionsResolver::new()
+            .apply_options(AppOptions {
+                keymap: KeymapOptions {
+                    preset: Some(KeymapPreset::None),
+                    bindings: vec![
+                        binding("x", Some("next-page")),
+                        binding("y", Some("next-page")),
+                        binding("z", Some("next-page")),
+                    ],
+                },
+                ..AppOptions::default()
+            })
+            .apply_options(AppOptions {
+                keymap: KeymapOptions {
+                    preset: None,
+                    bindings: vec![binding("x", Some("prev-page")), binding("z", None)],
+                },
+                ..AppOptions::default()
+            })
+            .apply_options(AppOptions::default())
+            .resolve()
+            .expect("keymap layers should resolve");
+        let mut resolver = SequenceResolver::new(
+            resolved.input.sequence_registry,
+            resolved.input.sequence_timeout,
+        );
+        let extensions = ExtensionUiSnapshot::default();
+        for (key, expected) in [
+            ('x', SequenceResolution::Dispatch(Command::PrevPage)),
+            ('y', SequenceResolution::Dispatch(Command::NextPage)),
+            ('z', SequenceResolution::Noop),
+            ('j', SequenceResolution::Noop),
+        ] {
+            assert_eq!(
+                resolver.handle_key_in_context(
+                    KeyBindingContext::normal(&extensions),
+                    KeyEvent::new(KeyCode::Char(key), KeyModifiers::NONE),
+                ),
+                expected,
+                "binding for {key}"
+            );
+        }
+    }
 
     #[test]
     fn resolver_applies_defaults_and_sanitizes_without_file_source() {
@@ -392,7 +536,10 @@ mod tests {
             ..AppOptions::default()
         };
 
-        let resolved = AppOptionsResolver::new().apply_options(options).resolve();
+        let resolved = AppOptionsResolver::new()
+            .apply_options(options)
+            .resolve()
+            .expect("options should resolve");
 
         assert_eq!(resolved.render.worker_threads, 1);
         assert_eq!(
@@ -435,6 +582,10 @@ mod tests {
                 worker_threads: Some(2),
                 ..RenderOptions::default()
             },
+            watch: WatchOptions {
+                enabled: Some(true),
+                ..WatchOptions::default()
+            },
             ..AppOptions::default()
         };
         let override_options = AppOptions {
@@ -449,18 +600,11 @@ mod tests {
             },
             ..AppOptions::default()
         };
-        let base = base.merge(AppOptions {
-            watch: WatchOptions {
-                enabled: Some(true),
-                ..WatchOptions::default()
-            },
-            ..AppOptions::default()
-        });
-
         let resolved = AppOptionsResolver::new()
             .apply_options(base)
             .apply_options(override_options)
-            .resolve();
+            .resolve()
+            .expect("layered options should resolve");
 
         assert_eq!(resolved.render.worker_threads, 4);
         assert!(!resolved.watch.enabled);

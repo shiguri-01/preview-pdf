@@ -1,7 +1,8 @@
 use crate::error::AppError;
 use crate::palette::{PaletteKind, PaletteOpenOptions};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum PageLayoutMode {
     #[default]
     Single,
@@ -17,7 +18,8 @@ impl PageLayoutMode {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SpreadDirection {
     #[default]
     Ltr,
@@ -33,7 +35,8 @@ impl SpreadDirection {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum SpreadCoverPolicy {
     #[default]
     Paired,

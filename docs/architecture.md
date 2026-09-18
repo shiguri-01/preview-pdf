@@ -13,6 +13,11 @@ Startup resolves inputs such as CLI arguments, configuration, backend state,
 view policy, and runtime services before the terminal loop begins. The loop
 then operates on resolved policy instead of reinterpreting startup state.
 
+Configuration sources produce typed option patches. The options resolver owns
+source precedence and scalar merging through Figment; policy resolution applies
+defaults and domain-specific validation once after merging. Validated key
+bindings accumulate in source order before the input registry is built.
+
 Runtime work enters the loop as typed data: input, worker completions, and
 internal effects. The loop routes that data through commands, extensions,
 rendering, presentation, and redraw decisions. The important architectural rule

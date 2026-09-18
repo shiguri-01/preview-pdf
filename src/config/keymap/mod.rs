@@ -202,10 +202,6 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
     registry
 }
 
-pub(crate) fn parse_keymap_preset(value: &str) -> AppResult<KeymapPreset> {
-    KeymapPreset::parse(value).ok_or(AppError::invalid_argument("unknown keymap preset"))
-}
-
 pub(crate) fn parse_keymap_when(value: &str) -> AppResult<KeymapWhen> {
     KeymapWhen::parse(value).ok_or(AppError::invalid_argument("unknown keymap condition"))
 }

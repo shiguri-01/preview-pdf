@@ -1,7 +1,7 @@
 mod cli;
 
 #[cfg(not(test))]
-use pvf::app::App;
+use pvf::app::AppBuilder;
 #[cfg(not(test))]
 use pvf::backend::open_default_backend;
 #[cfg(not(test))]
@@ -26,7 +26,9 @@ async fn run() -> AppResult<()> {
     let options = cli::parse();
 
     let pdf = open_default_backend(&options.pdf_path)?;
-    let app_options = options.config.load_options()?.merge(options.options);
-    let mut app = App::new_with_options(PresenterKind::RatatuiImage, app_options)?;
+    let mut app = AppBuilder::new(PresenterKind::RatatuiImage)
+        .replace_options(options.config.load_options()?)
+        .merge_options(options.options)
+        .build()?;
     app.run(pdf).await
 }

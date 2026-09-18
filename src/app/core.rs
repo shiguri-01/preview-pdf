@@ -120,7 +120,7 @@ pub struct RunOptions {
 
 pub struct AppBuilder {
     presenter_kind: PresenterKind,
-    options: AppOptions,
+    options: AppOptionsResolver,
     run_options: RunOptions,
 }
 
@@ -128,18 +128,18 @@ impl AppBuilder {
     pub fn new(presenter_kind: PresenterKind) -> Self {
         Self {
             presenter_kind,
-            options: AppOptions::default(),
+            options: AppOptionsResolver::new(),
             run_options: RunOptions::default(),
         }
     }
 
     pub fn replace_options(mut self, options: AppOptions) -> Self {
-        self.options = options;
+        self.options = AppOptionsResolver::new().apply_options(options);
         self
     }
 
     pub fn merge_options(mut self, options: AppOptions) -> Self {
-        self.options = self.options.merge(options);
+        self.options = self.options.apply_options(options);
         self
     }
 
@@ -149,9 +149,7 @@ impl AppBuilder {
     }
 
     pub fn build(self) -> AppResult<App> {
-        let resolved = AppOptionsResolver::new()
-            .apply_options(self.options)
-            .resolve();
+        let resolved = self.options.resolve()?;
         App::from_resolved_options(self.presenter_kind, resolved, self.run_options)
     }
 }
@@ -311,6 +309,33 @@ mod tests {
             .expect("app init");
 
         assert_eq!(app.render.runtime.l1_cache.max_entries(), 11);
+        assert_eq!(app.render_policy.worker_threads, 2);
+    }
+
+    #[test]
+    fn app_builder_replace_options_discards_earlier_patches() {
+        let app = AppBuilder::new(PresenterKind::RatatuiImage)
+            .merge_options(AppOptions {
+                cache: CacheOptions {
+                    l1_max_entries: Some(11),
+                    ..CacheOptions::default()
+                },
+                ..AppOptions::default()
+            })
+            .replace_options(AppOptions {
+                render: RenderOptions {
+                    worker_threads: Some(2),
+                    ..RenderOptions::default()
+                },
+                ..AppOptions::default()
+            })
+            .build()
+            .expect("app init");
+
+        assert_eq!(
+            app.render.runtime.l1_cache.max_entries(),
+            Config::default().cache.l1_max_entries
+        );
         assert_eq!(app.render_policy.worker_threads, 2);
     }
 

@@ -19,6 +19,10 @@ rendering, presentation, and redraw decisions. The important architectural rule
 is that state changes happen through owned runtime objects, not through hidden
 callbacks or cross-subsystem mutation.
 
+The event runtime owns the native file watcher and its debouncer. File
+notifications enter the same typed event loop as reload requests or watch
+errors; watcher callbacks do not mutate viewer state.
+
 Headless performance diagnostics use the same loop-driver shape as the
 interactive viewer. They should measure the real runtime path instead of
 maintaining a parallel simulation of viewer behavior.

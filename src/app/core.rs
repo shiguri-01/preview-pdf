@@ -340,7 +340,6 @@ mod tests {
             },
             watch: WatchOptions {
                 enabled: Some(true),
-                poll_interval_ms: Some(125),
                 settle_delay_ms: Some(375),
             },
             ..AppOptions::default()
@@ -382,7 +381,6 @@ mod tests {
         assert_eq!(app.state.spread_cover_policy, SpreadCoverPolicy::Cover);
         assert!(app.run_options().watch);
         assert!(app.watch_policy.enabled);
-        assert_eq!(app.watch_policy.poll_interval, Duration::from_millis(125));
         assert_eq!(app.watch_policy.settle_delay, Duration::from_millis(375));
     }
 

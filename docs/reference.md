@@ -286,6 +286,10 @@ Observable behavior:
 - Reload success replaces the active document, clamps the page, resets render
   work, clears presenter cache, and refreshes extension-owned derived data.
 - Reload failure keeps the previous document visible.
+- File watching uses native filesystem notifications for the resolved PDF's
+  parent directory, so replacing or recreating the file does not detach the
+  watcher. Debounced changes to the PDF request a reload; file reads and changes
+  to unrelated files do not. Watch errors are surfaced as notices.
 
 Compatibility:
 - Stale-result and cancellation behavior is correctness-sensitive and should be

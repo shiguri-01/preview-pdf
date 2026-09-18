@@ -128,7 +128,6 @@ enum RawKeymapCommand {
 #[serde(default)]
 struct RawWatchConfig {
     enabled: Option<bool>,
-    poll_interval_ms: Option<u64>,
     settle_delay_ms: Option<u64>,
 }
 
@@ -251,7 +250,6 @@ impl From<RawWatchConfig> for WatchOptions {
     fn from(raw: RawWatchConfig) -> Self {
         Self {
             enabled: raw.enabled,
-            poll_interval_ms: raw.poll_interval_ms,
             settle_delay_ms: raw.settle_delay_ms,
         }
     }
@@ -460,7 +458,6 @@ mod tests {
 
             [watch]
             enabled = true
-            poll_interval_ms = 125
             settle_delay_ms = 250
             "#,
         )
@@ -490,7 +487,6 @@ mod tests {
         assert_eq!(config.view.spread_cover, SpreadCoverPolicy::Cover);
         assert_eq!(config.input.sequence_timeout_ms, 333);
         assert!(config.watch.enabled);
-        assert_eq!(config.watch.poll_interval_ms, 125);
         assert_eq!(config.watch.settle_delay_ms, 250);
 
         fs::remove_file(&path).expect("config file should be removed");
@@ -1025,7 +1021,6 @@ mod tests {
 
             [watch]
             enabled = true
-            poll_interval_ms = 100
             settle_delay_ms = 200
             "#,
         )
@@ -1039,7 +1034,6 @@ mod tests {
         assert_eq!(options.view.spread_cover, Some(SpreadCoverPolicy::Cover));
         assert_eq!(options.input.sequence_timeout_ms, Some(750));
         assert_eq!(options.watch.enabled, Some(true));
-        assert_eq!(options.watch.poll_interval_ms, Some(100));
         assert_eq!(options.watch.settle_delay_ms, Some(200));
 
         fs::remove_file(&path).expect("config file should be removed");

@@ -136,7 +136,6 @@ impl Default for InputPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WatchPolicy {
     pub enabled: bool,
-    pub poll_interval: Duration,
     pub settle_delay: Duration,
 }
 
@@ -145,7 +144,6 @@ impl Default for WatchPolicy {
         let watch = WatchConfig::default();
         Self {
             enabled: watch.enabled,
-            poll_interval: Duration::from_millis(watch.poll_interval_ms),
             settle_delay: Duration::from_millis(watch.settle_delay_ms),
         }
     }
@@ -214,7 +212,6 @@ impl From<ResolvedAppOptions> for Config {
             },
             watch: WatchConfig {
                 enabled: options.watch.enabled,
-                poll_interval_ms: options.watch.poll_interval.as_millis() as u64,
                 settle_delay_ms: options.watch.settle_delay.as_millis() as u64,
             },
         }
@@ -288,11 +285,6 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
         initial_zoom = view_defaults.initial_zoom;
     }
     initial_zoom = initial_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
-    let watch_poll_interval_ms = options
-        .watch
-        .poll_interval_ms
-        .unwrap_or(watch_defaults.poll_interval_ms)
-        .max(1);
     let watch_settle_delay_ms = options
         .watch
         .settle_delay_ms
@@ -356,7 +348,6 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
         },
         watch: WatchPolicy {
             enabled: options.watch.enabled.unwrap_or(watch_defaults.enabled),
-            poll_interval: Duration::from_millis(watch_poll_interval_ms),
             settle_delay: Duration::from_millis(watch_settle_delay_ms),
         },
     }
@@ -396,7 +387,6 @@ mod tests {
             },
             watch: WatchOptions {
                 enabled: Some(true),
-                poll_interval_ms: Some(0),
                 settle_delay_ms: Some(0),
             },
             ..AppOptions::default()
@@ -434,7 +424,6 @@ mod tests {
         assert_eq!(resolved.view.spread_direction, SpreadDirection::Rtl);
         assert_eq!(resolved.view.spread_cover, SpreadCoverPolicy::Cover);
         assert!(resolved.watch.enabled);
-        assert_eq!(resolved.watch.poll_interval, Duration::from_millis(1));
         assert_eq!(resolved.watch.settle_delay, Duration::from_millis(1));
     }
 

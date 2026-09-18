@@ -105,6 +105,11 @@ impl App {
                     .set_error_notice(format!("input error: {message}"));
                 self.request_redraw(runtime, RedrawReason::InputError);
             }
+            RuntimeEvent::Event(DomainEvent::FileWatchError(message)) => {
+                self.state
+                    .set_error_notice(format!("file watch error: {message}"));
+                self.request_redraw(runtime, RedrawReason::StateChanged);
+            }
             RuntimeEvent::Event(DomainEvent::Command(request)) => {
                 if matches!(
                     self.handle_command_event(request, runtime, document)?,

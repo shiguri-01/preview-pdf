@@ -118,6 +118,7 @@ impl fmt::Debug for DocumentReloadResult {
 pub(crate) enum DomainEvent {
     Input(Event),
     InputError(String),
+    FileWatchError(String),
     Command(CommandRequest),
     App(AppEvent),
     ReloadDocument(DocumentReloadRequest),

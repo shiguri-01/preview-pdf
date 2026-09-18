@@ -61,7 +61,6 @@ impl From<Config> for AppOptions {
             keymap: KeymapOptions::default(),
             watch: WatchOptions {
                 enabled: Some(config.watch.enabled),
-                poll_interval_ms: Some(config.watch.poll_interval_ms),
                 settle_delay_ms: Some(config.watch.settle_delay_ms),
             },
         }
@@ -161,7 +160,6 @@ impl InputOptions {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WatchOptions {
     pub enabled: Option<bool>,
-    pub poll_interval_ms: Option<u64>,
     pub settle_delay_ms: Option<u64>,
 }
 
@@ -169,7 +167,6 @@ impl WatchOptions {
     pub(super) fn merge(self, next: Self) -> Self {
         Self {
             enabled: next.enabled.or(self.enabled),
-            poll_interval_ms: next.poll_interval_ms.or(self.poll_interval_ms),
             settle_delay_ms: next.settle_delay_ms.or(self.settle_delay_ms),
         }
     }

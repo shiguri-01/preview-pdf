@@ -1963,6 +1963,7 @@ dependencies = [
  "toml",
  "tui-input",
  "unicode-segmentation",
+ "unicode-truncate",
  "unicode-width",
 ]
 

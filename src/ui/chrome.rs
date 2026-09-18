@@ -1,6 +1,7 @@
 use ratatui::Frame;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
+use unicode_truncate::UnicodeTruncateStr;
 use unicode_width::UnicodeWidthStr;
 
 use crate::app::{Notice, NoticeLevel, PageLayoutMode, VisiblePageSlots};
@@ -92,7 +93,7 @@ fn build_status_text(
     }
 
     if display_width(&base) >= max_width {
-        return trim_trailing_whitespace(truncate_right_by_width(&base, max_width));
+        return base.unicode_truncate(max_width).0.trim_end().to_string();
     }
 
     let ext = extension_status_segments
@@ -126,7 +127,7 @@ fn build_status_text(
         return base;
     }
 
-    trim_trailing_whitespace(truncate_right_by_width(&base, max_width))
+    base.unicode_truncate(max_width).0.trim_end().to_string()
 }
 
 fn format_page_segment(chrome: &ChromeViewState, page_total: usize) -> String {
@@ -160,7 +161,7 @@ fn build_presenter_path_text(
 ) -> String {
     let protocol = graphics_protocol.unwrap_or("-");
     let text = format!("presenter={presenter_label}(proto={protocol})");
-    truncate_right_by_width(&text, max_width)
+    text.unicode_truncate(max_width).0.to_string()
 }
 
 fn stylize_status_line(text: &str) -> Line<'static> {
@@ -183,55 +184,15 @@ fn stylize_notice_line(notice: &Notice, max_width: usize) -> Line<'static> {
         NoticeLevel::Warning => warning_text(),
         NoticeLevel::Error => error_text(),
     };
-    let text = truncate_right_by_width(&format!("{label}: {}", notice.message), max_width);
-    Line::from(vec![Span::styled(text, accent)])
+    let text = format!("{label}: {}", notice.message);
+    Line::from(vec![Span::styled(
+        text.unicode_truncate(max_width).0.to_string(),
+        accent,
+    )])
 }
 
 fn display_width(text: &str) -> usize {
     UnicodeWidthStr::width(text)
-}
-
-fn trim_trailing_whitespace(mut input: String) -> String {
-    let trimmed_len = input.trim_end().len();
-    input.truncate(trimmed_len);
-    input
-}
-
-fn truncate_right_by_width(input: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
-    }
-    if display_width(input) <= max_width {
-        return input.to_string();
-    }
-    let mut out = String::new();
-    let mut width = 0;
-    for ch in input.chars() {
-        let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
-        if width + ch_width > max_width {
-            break;
-        }
-        width += ch_width;
-        out.push(ch);
-    }
-    out
-}
-
-fn suffix_by_width(input: &str, max_width: usize) -> (&str, usize) {
-    if max_width == 0 {
-        return ("", 0);
-    }
-    let mut width = 0;
-    let mut start = input.len();
-    for (idx, ch) in input.char_indices().rev() {
-        let ch_width = UnicodeWidthStr::width(ch.encode_utf8(&mut [0; 4]));
-        if width + ch_width > max_width {
-            break;
-        }
-        width += ch_width;
-        start = idx;
-    }
-    (&input[start..], width)
 }
 
 fn format_filename_segment(input: &str, max_width: usize) -> String {
@@ -258,18 +219,18 @@ fn elide_middle_by_width(input: &str, max_width: usize) -> String {
         return input.to_string();
     }
     if max_width <= ellipsis_width {
-        return truncate_right_by_width(input, max_width);
+        return input.unicode_truncate(max_width).0.to_string();
     }
 
     let content_budget = max_width - ellipsis_width;
     let suffix_budget = (content_budget.saturating_mul(2) / 3).max(1);
-    let (suffix, suffix_width) = suffix_by_width(input, suffix_budget);
+    let (suffix, suffix_width) = input.unicode_truncate_start(suffix_budget);
     let prefix_budget = content_budget.saturating_sub(suffix_width);
     let prefix_limit = input.len().saturating_sub(suffix.len());
-    let prefix = truncate_right_by_width(&input[..prefix_limit], prefix_budget);
+    let (prefix, _) = input[..prefix_limit].unicode_truncate(prefix_budget);
 
     if prefix.is_empty() {
-        let kept_suffix = truncate_right_by_width(suffix, content_budget);
+        let (kept_suffix, _) = suffix.unicode_truncate(content_budget);
         return format!("{ELLIPSIS}{kept_suffix}");
     }
 
@@ -332,6 +293,27 @@ mod tests {
         );
 
         assert_eq!(line.to_string(), "error: render failed");
+    }
+
+    #[test]
+    fn notice_truncation_preserves_emoji_graphemes() {
+        let line = stylize_notice_line(
+            &Notice {
+                level: NoticeLevel::Error,
+                message: "👨‍👩‍👧‍👦 failed".to_string(),
+            },
+            9,
+        );
+
+        assert_eq!(line.to_string(), "error: 👨‍👩‍👧‍👦");
+    }
+
+    #[test]
+    fn filename_elision_preserves_combining_characters_and_emoji() {
+        assert_eq!(
+            format_filename_segment("e\u{301}bcdef👨‍👩‍👧‍👦.pdf", 10),
+            "e\u{301}bc…👨‍👩‍👧‍👦.pdf"
+        );
     }
 
     #[test]

@@ -4,12 +4,11 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 use crate::error::{AppError, AppResult};
-use crate::presenter::GraphicsProtocol;
 
 use super::options::{
-    AppOptions, CacheOptions, InputOptions, KeymapOptions, RenderOptions, ViewOptions, WatchOptions,
+    AppOptions, CacheOptions, InputOptions, KeymapOptions, KeymapPreset, RenderOptions,
+    ViewOptions, WatchOptions,
 };
 use super::policy::AppOptionsResolver;
 use super::types::Config;
@@ -54,7 +53,7 @@ impl Config {
         let options = read_options_from_path(path.as_ref(), MissingConfigPolicy::Default)?;
         Ok(AppOptionsResolver::new()
             .apply_options(options)
-            .resolve()
+            .resolve()?
             .into())
     }
 }
@@ -62,52 +61,13 @@ impl Config {
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
 #[serde(default)]
 struct RawConfig {
-    render: Option<RawRenderConfig>,
-    cache: Option<RawCacheConfig>,
-    view: Option<RawViewConfig>,
-    input: Option<RawInputConfig>,
-    keymap_preset: Option<String>,
+    render: RenderOptions,
+    cache: CacheOptions,
+    view: ViewOptions,
+    input: InputOptions,
+    keymap_preset: Option<KeymapPreset>,
     keymap: Option<Vec<RawKeymapEntry>>,
-    watch: Option<RawWatchConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
-#[serde(default)]
-struct RawRenderConfig {
-    graphics_protocol: Option<String>,
-    worker_threads: Option<usize>,
-    input_poll_timeout_idle_ms: Option<u64>,
-    input_poll_timeout_busy_ms: Option<u64>,
-    prefetch_pause_ms: Option<u64>,
-    prefetch_tick_ms: Option<u64>,
-    pending_redraw_interval_ms: Option<u64>,
-    prefetch_dispatch_budget_per_tick: Option<usize>,
-    max_render_scale: Option<f32>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
-#[serde(default)]
-struct RawCacheConfig {
-    l1_memory_budget_mb: Option<usize>,
-    l2_memory_budget_mb: Option<usize>,
-    l1_max_entries: Option<usize>,
-    l2_max_entries: Option<usize>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default, PartialEq)]
-#[serde(default)]
-struct RawViewConfig {
-    initial_page: Option<usize>,
-    initial_zoom: Option<f32>,
-    initial_layout: Option<String>,
-    spread_direction: Option<String>,
-    spread_cover: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
-#[serde(default)]
-struct RawInputConfig {
-    sequence_timeout_ms: Option<u64>,
+    watch: WatchOptions,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -124,108 +84,25 @@ enum RawKeymapCommand {
     Unbind(bool),
 }
 
-#[derive(Debug, Clone, Deserialize, Default, PartialEq, Eq)]
-#[serde(default)]
-struct RawWatchConfig {
-    enabled: Option<bool>,
-    poll_interval_ms: Option<u64>,
-    settle_delay_ms: Option<u64>,
-}
-
 impl RawConfig {
     fn into_options(self) -> AppResult<AppOptions> {
         Ok(AppOptions {
-            render: self
-                .render
-                .map(RenderOptions::try_from)
-                .transpose()?
-                .unwrap_or_default(),
-            cache: self.cache.map(CacheOptions::from).unwrap_or_default(),
-            view: self
-                .view
-                .map(ViewOptions::try_from)
-                .transpose()?
-                .unwrap_or_default(),
-            input: self.input.map(InputOptions::from).unwrap_or_default(),
-            keymap: parse_keymap_options(self.keymap_preset.as_deref(), self.keymap)?,
-            watch: self.watch.map(WatchOptions::from).unwrap_or_default(),
+            render: self.render,
+            cache: self.cache,
+            view: self.view,
+            input: self.input,
+            keymap: parse_keymap_options(self.keymap_preset, self.keymap)?,
+            watch: self.watch,
         })
-    }
-}
-
-impl TryFrom<RawRenderConfig> for RenderOptions {
-    type Error = AppError;
-
-    fn try_from(raw: RawRenderConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
-            graphics_protocol: raw
-                .graphics_protocol
-                .as_deref()
-                .map(parse_graphics_protocol)
-                .transpose()?,
-            worker_threads: raw.worker_threads,
-            input_poll_timeout_idle_ms: raw.input_poll_timeout_idle_ms,
-            input_poll_timeout_busy_ms: raw.input_poll_timeout_busy_ms,
-            prefetch_pause_ms: raw.prefetch_pause_ms,
-            prefetch_tick_ms: raw.prefetch_tick_ms,
-            pending_redraw_interval_ms: raw.pending_redraw_interval_ms,
-            prefetch_dispatch_budget_per_tick: raw.prefetch_dispatch_budget_per_tick,
-            max_render_scale: raw.max_render_scale,
-        })
-    }
-}
-
-impl From<RawCacheConfig> for CacheOptions {
-    fn from(raw: RawCacheConfig) -> Self {
-        Self {
-            l1_memory_budget_mb: raw.l1_memory_budget_mb,
-            l2_memory_budget_mb: raw.l2_memory_budget_mb,
-            l1_max_entries: raw.l1_max_entries,
-            l2_max_entries: raw.l2_max_entries,
-        }
-    }
-}
-
-impl TryFrom<RawViewConfig> for ViewOptions {
-    type Error = AppError;
-
-    fn try_from(raw: RawViewConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
-            initial_page: raw.initial_page,
-            initial_zoom: raw.initial_zoom,
-            initial_layout: raw
-                .initial_layout
-                .as_deref()
-                .map(parse_page_layout_mode)
-                .transpose()?,
-            spread_direction: raw
-                .spread_direction
-                .as_deref()
-                .map(parse_spread_direction)
-                .transpose()?,
-            spread_cover: raw
-                .spread_cover
-                .as_deref()
-                .map(parse_spread_cover)
-                .transpose()?,
-        })
-    }
-}
-
-impl From<RawInputConfig> for InputOptions {
-    fn from(raw: RawInputConfig) -> Self {
-        Self {
-            sequence_timeout_ms: raw.sequence_timeout_ms,
-        }
     }
 }
 
 fn parse_keymap_options(
-    preset: Option<&str>,
+    preset: Option<KeymapPreset>,
     entries: Option<Vec<RawKeymapEntry>>,
 ) -> AppResult<KeymapOptions> {
     Ok(KeymapOptions {
-        preset: preset.map(super::keymap::parse_keymap_preset).transpose()?,
+        preset,
         bindings: entries
             .unwrap_or_default()
             .iter()
@@ -245,59 +122,6 @@ fn parse_keymap_entry(entry: &RawKeymapEntry) -> AppResult<super::keymap::Keymap
         }
     };
     super::keymap::parse_keymap_binding(&entry.when, &entry.key, command)
-}
-
-impl From<RawWatchConfig> for WatchOptions {
-    fn from(raw: RawWatchConfig) -> Self {
-        Self {
-            enabled: raw.enabled,
-            poll_interval_ms: raw.poll_interval_ms,
-            settle_delay_ms: raw.settle_delay_ms,
-        }
-    }
-}
-
-fn parse_page_layout_mode(value: &str) -> AppResult<PageLayoutMode> {
-    match value {
-        "single" => Ok(PageLayoutMode::Single),
-        "spread" => Ok(PageLayoutMode::Spread),
-        _ => Err(AppError::invalid_argument(format!(
-            "unknown view.initial_layout: {value}"
-        ))),
-    }
-}
-
-fn parse_spread_direction(value: &str) -> AppResult<SpreadDirection> {
-    match value {
-        "ltr" => Ok(SpreadDirection::Ltr),
-        "rtl" => Ok(SpreadDirection::Rtl),
-        _ => Err(AppError::invalid_argument(format!(
-            "unknown view.spread_direction: {value}"
-        ))),
-    }
-}
-
-fn parse_spread_cover(value: &str) -> AppResult<SpreadCoverPolicy> {
-    match value {
-        "paired" => Ok(SpreadCoverPolicy::Paired),
-        "cover" => Ok(SpreadCoverPolicy::Cover),
-        _ => Err(AppError::invalid_argument(format!(
-            "unknown view.spread_cover: {value}"
-        ))),
-    }
-}
-
-fn parse_graphics_protocol(value: &str) -> AppResult<GraphicsProtocol> {
-    match value {
-        "auto" => Ok(GraphicsProtocol::Auto),
-        "halfblocks" => Ok(GraphicsProtocol::Halfblocks),
-        "sixel" => Ok(GraphicsProtocol::Sixel),
-        "kitty" => Ok(GraphicsProtocol::Kitty),
-        "iterm2" => Ok(GraphicsProtocol::Iterm2),
-        _ => Err(AppError::invalid_argument(format!(
-            "unknown render.graphics_protocol: {value}"
-        ))),
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -460,7 +284,6 @@ mod tests {
 
             [watch]
             enabled = true
-            poll_interval_ms = 125
             settle_delay_ms = 250
             "#,
         )
@@ -490,7 +313,6 @@ mod tests {
         assert_eq!(config.view.spread_cover, SpreadCoverPolicy::Cover);
         assert_eq!(config.input.sequence_timeout_ms, 333);
         assert!(config.watch.enabled);
-        assert_eq!(config.watch.poll_interval_ms, 125);
         assert_eq!(config.watch.settle_delay_ms, 250);
 
         fs::remove_file(&path).expect("config file should be removed");
@@ -564,7 +386,10 @@ mod tests {
         .expect("config file should be written");
 
         let options = load_options_from_explicit_path(&path).expect("config should parse");
-        let resolved = AppOptionsResolver::new().apply_options(options).resolve();
+        let resolved = AppOptionsResolver::new()
+            .apply_options(options)
+            .resolve()
+            .expect("keymap options should resolve");
         let mut resolver =
             SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
 
@@ -604,7 +429,10 @@ mod tests {
         let options = load_options_from_explicit_path(&path).expect("config should parse");
         assert_eq!(options.keymap.preset, Some(KeymapPreset::None));
 
-        let resolved = AppOptionsResolver::new().apply_options(options).resolve();
+        let resolved = AppOptionsResolver::new()
+            .apply_options(options)
+            .resolve()
+            .expect("keymap options should resolve");
         let mut resolver =
             SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
 
@@ -641,7 +469,10 @@ mod tests {
         .expect("config file should be written");
 
         let options = load_options_from_explicit_path(&path).expect("config should parse");
-        let resolved = AppOptionsResolver::new().apply_options(options).resolve();
+        let resolved = AppOptionsResolver::new()
+            .apply_options(options)
+            .resolve()
+            .expect("keymap options should resolve");
         let mut resolver =
             SequenceResolver::new(resolved.input.sequence_registry, DEFAULT_SEQUENCE_TIMEOUT);
 
@@ -691,10 +522,9 @@ mod tests {
         .expect("config file should be written");
 
         let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
-        assert!(
-            err.to_string().contains("unknown keymap preset"),
-            "unexpected error: {err}"
-        );
+        let message = err.to_string();
+        assert!(message.contains("keymap_preset"), "{message}");
+        assert!(message.contains("unknown variant `bob`"), "{message}");
 
         fs::remove_file(&path).expect("config file should be removed");
     }
@@ -960,9 +790,11 @@ mod tests {
 
         let err = load_options_from_explicit_path(&path)
             .expect_err("unknown graphics protocol should be rejected");
+        let message = err.to_string();
+        assert!(message.contains("graphics_protocol"), "{message}");
         assert!(
-            err.to_string()
-                .contains("unknown render.graphics_protocol: graphics-protocol")
+            message.contains("unknown variant `graphics-protocol`"),
+            "{message}"
         );
 
         fs::remove_file(&path).expect("config file should be removed");
@@ -1025,7 +857,6 @@ mod tests {
 
             [watch]
             enabled = true
-            poll_interval_ms = 100
             settle_delay_ms = 200
             "#,
         )
@@ -1039,7 +870,6 @@ mod tests {
         assert_eq!(options.view.spread_cover, Some(SpreadCoverPolicy::Cover));
         assert_eq!(options.input.sequence_timeout_ms, Some(750));
         assert_eq!(options.watch.enabled, Some(true));
-        assert_eq!(options.watch.poll_interval_ms, Some(100));
         assert_eq!(options.watch.settle_delay_ms, Some(200));
 
         fs::remove_file(&path).expect("config file should be removed");
@@ -1058,10 +888,9 @@ mod tests {
         .expect("config file should be written");
 
         let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
-        assert!(
-            err.to_string().contains("unknown view.initial_layout"),
-            "unexpected error: {err}"
-        );
+        let message = err.to_string();
+        assert!(message.contains("initial_layout"), "{message}");
+        assert!(message.contains("unknown variant `grid`"), "{message}");
 
         fs::remove_file(&path).expect("config file should be removed");
     }

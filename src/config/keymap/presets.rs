@@ -7,21 +7,14 @@ use crate::input::shortcut::ShortcutKey;
 
 use super::KeymapWhen;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum KeymapPreset {
     Default,
     None,
 }
 
 impl KeymapPreset {
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value {
-            "default" => Some(Self::Default),
-            "none" => Some(Self::None),
-            _ => None,
-        }
-    }
-
     pub(crate) fn build_sequence_registry(self) -> SequenceRegistry {
         match self {
             Self::Default => build_default_sequence_registry(),

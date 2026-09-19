@@ -116,7 +116,6 @@ impl Default for InputConfig {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WatchConfig {
     pub enabled: bool,
-    pub poll_interval_ms: u64,
     pub settle_delay_ms: u64,
 }
 
@@ -124,7 +123,6 @@ impl Default for WatchConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            poll_interval_ms: 250,
             settle_delay_ms: 500,
         }
     }

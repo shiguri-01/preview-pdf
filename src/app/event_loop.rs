@@ -76,10 +76,9 @@ impl App {
             if watch {
                 runtime.event_bus.start_file_watch(
                     document.path.clone(),
-                    self.watch_policy.poll_interval,
                     self.watch_policy.settle_delay,
                     runtime.event_tx.clone(),
-                );
+                )?;
             }
         }
 

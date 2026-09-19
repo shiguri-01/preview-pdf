@@ -1,29 +1,23 @@
+use serde::{Deserialize, Serialize};
+
 use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
 use crate::presenter::GraphicsProtocol;
 
 pub use super::keymap::{KeymapBinding, KeymapOptions, KeymapPreset, KeymapWhen};
 use super::types::Config;
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AppOptions {
     pub render: RenderOptions,
     pub cache: CacheOptions,
     pub view: ViewOptions,
     pub input: InputOptions,
+    // Compiled bindings are accumulated in source order by AppOptionsResolver,
+    // separately from scalar option merging.
+    #[serde(skip)]
     pub keymap: KeymapOptions,
     pub watch: WatchOptions,
-}
-
-impl AppOptions {
-    pub fn merge(mut self, next: Self) -> Self {
-        self.render = self.render.merge(next.render);
-        self.cache = self.cache.merge(next.cache);
-        self.view = self.view.merge(next.view);
-        self.input = self.input.merge(next.input);
-        self.keymap = self.keymap.merge(next.keymap);
-        self.watch = self.watch.merge(next.watch);
-        self
-    }
 }
 
 impl From<Config> for AppOptions {
@@ -61,116 +55,75 @@ impl From<Config> for AppOptions {
             keymap: KeymapOptions::default(),
             watch: WatchOptions {
                 enabled: Some(config.watch.enabled),
-                poll_interval_ms: Some(config.watch.poll_interval_ms),
                 settle_delay_ms: Some(config.watch.settle_delay_ms),
             },
         }
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RenderOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub graphics_protocol: Option<GraphicsProtocol>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_threads: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub input_poll_timeout_idle_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub input_poll_timeout_busy_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prefetch_pause_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prefetch_tick_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pending_redraw_interval_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prefetch_dispatch_budget_per_tick: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_render_scale: Option<f32>,
 }
 
-impl RenderOptions {
-    pub(super) fn merge(self, next: Self) -> Self {
-        Self {
-            graphics_protocol: next.graphics_protocol.or(self.graphics_protocol),
-            worker_threads: next.worker_threads.or(self.worker_threads),
-            input_poll_timeout_idle_ms: next
-                .input_poll_timeout_idle_ms
-                .or(self.input_poll_timeout_idle_ms),
-            input_poll_timeout_busy_ms: next
-                .input_poll_timeout_busy_ms
-                .or(self.input_poll_timeout_busy_ms),
-            prefetch_pause_ms: next.prefetch_pause_ms.or(self.prefetch_pause_ms),
-            prefetch_tick_ms: next.prefetch_tick_ms.or(self.prefetch_tick_ms),
-            pending_redraw_interval_ms: next
-                .pending_redraw_interval_ms
-                .or(self.pending_redraw_interval_ms),
-            prefetch_dispatch_budget_per_tick: next
-                .prefetch_dispatch_budget_per_tick
-                .or(self.prefetch_dispatch_budget_per_tick),
-            max_render_scale: next.max_render_scale.or(self.max_render_scale),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct CacheOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub l1_memory_budget_mb: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub l2_memory_budget_mb: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub l1_max_entries: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub l2_max_entries: Option<usize>,
 }
 
-impl CacheOptions {
-    pub(super) fn merge(self, next: Self) -> Self {
-        Self {
-            l1_memory_budget_mb: next.l1_memory_budget_mb.or(self.l1_memory_budget_mb),
-            l2_memory_budget_mb: next.l2_memory_budget_mb.or(self.l2_memory_budget_mb),
-            l1_max_entries: next.l1_max_entries.or(self.l1_max_entries),
-            l2_max_entries: next.l2_max_entries.or(self.l2_max_entries),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ViewOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_page: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_zoom: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_layout: Option<PageLayoutMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spread_direction: Option<SpreadDirection>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub spread_cover: Option<SpreadCoverPolicy>,
 }
 
-impl ViewOptions {
-    pub(super) fn merge(self, next: Self) -> Self {
-        Self {
-            initial_page: next.initial_page.or(self.initial_page),
-            initial_zoom: next.initial_zoom.or(self.initial_zoom),
-            initial_layout: next.initial_layout.or(self.initial_layout),
-            spread_direction: next.spread_direction.or(self.spread_direction),
-            spread_cover: next.spread_cover.or(self.spread_cover),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct InputOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sequence_timeout_ms: Option<u64>,
 }
 
-impl InputOptions {
-    pub(super) fn merge(self, next: Self) -> Self {
-        Self {
-            sequence_timeout_ms: next.sequence_timeout_ms.or(self.sequence_timeout_ms),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct WatchOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
-    pub poll_interval_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub settle_delay_ms: Option<u64>,
-}
-
-impl WatchOptions {
-    pub(super) fn merge(self, next: Self) -> Self {
-        Self {
-            enabled: next.enabled.or(self.enabled),
-            poll_interval_ms: next.poll_interval_ms.or(self.poll_interval_ms),
-            settle_delay_ms: next.settle_delay_ms.or(self.settle_delay_ms),
-        }
-    }
 }

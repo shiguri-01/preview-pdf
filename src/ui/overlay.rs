@@ -4,6 +4,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_segmentation::UnicodeSegmentation;
+use unicode_truncate::UnicodeTruncateStr;
 use unicode_width::UnicodeWidthStr;
 
 use crate::palette::{PaletteItemView, PaletteView};
@@ -64,7 +65,7 @@ pub fn draw_error_overlay(frame: &mut Frame<'_>, area: Rect, message: &str) {
         return;
     }
 
-    let text = truncate_to_width(message, inner.width as usize);
+    let (text, _) = message.unicode_truncate(inner.width as usize);
     let paragraph = Paragraph::new(text)
         .alignment(Alignment::Center)
         .style(error_text());
@@ -424,23 +425,6 @@ fn selected_text_style() -> Style {
     primary_text().add_modifier(Modifier::REVERSED)
 }
 
-fn truncate_to_width(text: &str, max_width: usize) -> String {
-    if max_width == 0 {
-        return String::new();
-    }
-    let mut out = String::new();
-    let mut width = 0usize;
-    for grapheme in text.graphemes(true) {
-        let w = UnicodeWidthStr::width(grapheme);
-        if width.saturating_add(w) > max_width {
-            break;
-        }
-        out.push_str(grapheme);
-        width = width.saturating_add(w);
-    }
-    out
-}
-
 fn truncate_with_ellipsis(text: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
@@ -454,7 +438,7 @@ fn truncate_with_ellipsis(text: &str, max_width: usize) -> String {
         return ELLIPSIS.to_string();
     }
 
-    let prefix = truncate_to_width(text, max_width - ellipsis_width);
+    let (prefix, _) = text.unicode_truncate(max_width - ellipsis_width);
     format!("{prefix}{ELLIPSIS}")
 }
 
@@ -463,8 +447,8 @@ fn build_loading_message(label: &str, width: usize) -> String {
         return String::new();
     }
 
-    let text = truncate_to_width(&format!("Loading {label}"), width);
-    let text_width = UnicodeWidthStr::width(text.as_str());
+    let message = format!("Loading {label}");
+    let (text, text_width) = message.unicode_truncate(width);
     let left_padding = width.saturating_sub(text_width) / 2;
     let right_padding = width
         .saturating_sub(text_width)

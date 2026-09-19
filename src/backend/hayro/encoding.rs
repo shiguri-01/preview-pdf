@@ -19,15 +19,16 @@ fn decode_bom_prefixed_text(bytes: &[u8]) -> Option<String> {
 }
 
 fn decode_utf16_bytes(bytes: &[u8], endian: Utf16Endian) -> Option<String> {
-    let chunks = bytes.chunks_exact(2);
-    if !chunks.remainder().is_empty() {
+    let (chunks, remainder) = bytes.as_chunks::<2>();
+    if !remainder.is_empty() {
         return None;
     }
 
     let code_units = chunks
+        .iter()
         .map(|chunk| match endian {
-            Utf16Endian::Big => u16::from_be_bytes([chunk[0], chunk[1]]),
-            Utf16Endian::Little => u16::from_le_bytes([chunk[0], chunk[1]]),
+            Utf16Endian::Big => u16::from_be_bytes(*chunk),
+            Utf16Endian::Little => u16::from_le_bytes(*chunk),
         })
         .collect::<Vec<_>>();
 

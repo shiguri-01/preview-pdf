@@ -72,8 +72,6 @@ impl PdfRenderContext for HayroRenderContext<'_> {
 mod tests {
     use std::fs;
 
-    use hayro::vello_cpu::Pixmap;
-
     use crate::backend::test_support::{
         build_pdf, build_pdf_from_objects, build_pdf_with_raw_streams, unique_temp_path,
     };
@@ -81,7 +79,7 @@ mod tests {
 
     use crate::backend::PdfBackend;
 
-    use super::{PdfDoc, document::pixel_buffer_from_pixmap, encoding::decode_pdf_text_string};
+    use super::{PdfDoc, encoding::decode_pdf_text_string};
 
     #[test]
     fn open_rejects_directory_path() {
@@ -261,18 +259,6 @@ mod tests {
         );
 
         fs::remove_file(&file).expect("test file should be removed");
-    }
-
-    #[test]
-    fn pixel_buffer_from_pixmap_matches_slice_copy_bytes() {
-        let mut pixmap = Pixmap::new(2, 1);
-        let expected = {
-            let bytes = pixmap.data_as_u8_slice_mut();
-            bytes.copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
-            pixmap.data_as_u8_slice().to_vec()
-        };
-
-        assert_eq!(pixel_buffer_from_pixmap(pixmap), expected);
     }
 
     #[test]

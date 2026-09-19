@@ -229,21 +229,6 @@ enum HistoryMatchBucket {
 }
 
 #[cfg(test)]
-fn history_match_bucket(
-    idx: isize,
-    page_1indexed: usize,
-    reason: HistoryPaletteReason,
-    query: &str,
-) -> Option<HistoryMatchBucket> {
-    reason.match_bucket(idx, page_1indexed, query)
-}
-
-#[cfg(test)]
-fn history_reason_display_text(page_1indexed: usize, reason: HistoryPaletteReason) -> String {
-    reason.display_text(page_1indexed)
-}
-
-#[cfg(test)]
 mod tests {
     use crate::{
         extension::ExtensionUiSnapshot,
@@ -253,8 +238,7 @@ mod tests {
     };
 
     use super::{
-        HistoryMatchBucket, HistoryPaletteEntry, HistoryPaletteProvider, HistoryPaletteReason,
-        HistoryUiSnapshot, history_match_bucket, history_reason_display_text,
+        HistoryPaletteEntry, HistoryPaletteProvider, HistoryPaletteReason, HistoryUiSnapshot,
     };
 
     fn entry(
@@ -297,6 +281,20 @@ mod tests {
                         true,
                     ),
                     entry("back", -1, 11, HistoryPaletteReason::PageOnly, false),
+                    entry(
+                        "outline",
+                        -2,
+                        7,
+                        HistoryPaletteReason::Outline("Chapter 1".to_string()),
+                        false,
+                    ),
+                    entry(
+                        "goto",
+                        -3,
+                        4,
+                        HistoryPaletteReason::Goto("first-page".to_string()),
+                        false,
+                    ),
                 ]
                 .into(),
             },
@@ -305,12 +303,15 @@ mod tests {
         let ctx = context(&extensions, "");
 
         let items = provider.list(&ctx).expect("history list should build");
-        assert_eq!(items.len(), 3);
+        assert_eq!(items.len(), 5);
         assert_eq!(items[0].label()[0].text, "1");
         assert_eq!(items[1].label()[0].text, "0");
         assert_eq!(items[2].label()[0].text, "-1");
         assert_eq!(items[2].detail()[0].text, "p.12");
         assert_eq!(items[2].match_text(), "-1 p.12 p.12");
+        assert_eq!(items[1].plain_label_text(), "0  /1");
+        assert_eq!(items[3].plain_label_text(), "-2  #Chapter 1");
+        assert_eq!(items[4].plain_label_text(), "-3  first-page");
     }
 
     #[test]
@@ -324,10 +325,16 @@ mod tests {
                         "reason",
                         0,
                         3,
-                        HistoryPaletteReason::Search("1".to_string()),
+                        HistoryPaletteReason::Outline("Chapter 1".to_string()),
                         true,
                     ),
-                    entry("page", -2, 10, HistoryPaletteReason::PageOnly, false),
+                    entry(
+                        "page",
+                        -2,
+                        11,
+                        HistoryPaletteReason::Goto("first-page".to_string()),
+                        false,
+                    ),
                 ]
                 .into(),
             },
@@ -336,11 +343,8 @@ mod tests {
         let ctx = context(&extensions, "1");
 
         let items = provider.list(&ctx).expect("history list should build");
-        let labels: Vec<_> = items
-            .iter()
-            .map(|item| item.label()[0].text.as_str())
-            .collect();
-        assert_eq!(labels, vec!["1", "0", "-2"]);
+        let ids: Vec<_> = items.iter().map(|item| item.id().as_str()).collect();
+        assert_eq!(ids, vec!["index", "reason", "page"]);
     }
 
     #[test]
@@ -364,66 +368,6 @@ mod tests {
         let items = provider.list(&ctx).expect("history list should build");
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].id().as_str(), "outline");
-    }
-
-    #[test]
-    fn match_bucket_prefers_index_before_reason_before_page() {
-        assert_eq!(
-            history_match_bucket(
-                1,
-                12,
-                HistoryPaletteReason::Search("needle".to_string()),
-                "1"
-            ),
-            Some(HistoryMatchBucket::Index)
-        );
-        assert_eq!(
-            history_match_bucket(
-                -1,
-                12,
-                HistoryPaletteReason::Search("needle".to_string()),
-                "1"
-            ),
-            Some(HistoryMatchBucket::Index)
-        );
-        assert_eq!(
-            history_match_bucket(
-                0,
-                12,
-                HistoryPaletteReason::Outline("Chapter 1".to_string()),
-                "#chap"
-            ),
-            Some(HistoryMatchBucket::Reason)
-        );
-        assert_eq!(
-            history_match_bucket(
-                0,
-                12,
-                HistoryPaletteReason::Goto("first-page".to_string()),
-                "p.12"
-            ),
-            Some(HistoryMatchBucket::Page)
-        );
-    }
-
-    #[test]
-    fn reason_display_text_matches_visible_labeling() {
-        assert_eq!(
-            history_reason_display_text(12, HistoryPaletteReason::Search("needle".to_string())),
-            "/needle"
-        );
-        assert_eq!(
-            history_reason_display_text(8, HistoryPaletteReason::Outline("Chapter 1".to_string())),
-            "#Chapter 1"
-        );
-        assert_eq!(
-            history_reason_display_text(1, HistoryPaletteReason::Goto("first-page".to_string())),
-            "first-page"
-        );
-        assert_eq!(
-            history_reason_display_text(5, HistoryPaletteReason::PageOnly),
-            "p.5"
-        );
     }
 
     #[test]

@@ -835,460 +835,284 @@ mod tests {
     }
 
     #[test]
-    fn list_hides_search_hit_navigation_when_search_is_inactive() {
-        let provider = CommandPaletteProvider;
-        let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::default();
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::Command,
-            input: "",
-        };
+    fn list_exposes_search_navigation_only_while_search_is_active() {
+        for (case, search_active) in [("inactive", false), ("active", true)] {
+            let list = command_list_for_input("", search_active);
+            for id in ["next-search-hit", "search-results", "prev-search-hit"] {
+                assert_eq!(
+                    list.iter().any(|candidate| candidate.id().as_str() == id),
+                    search_active,
+                    "{case}: {id}"
+                );
+            }
+            for id in [
+                "open-palette",
+                "submit-search",
+                "search-goto",
+                "history-goto",
+            ] {
+                assert!(
+                    !list.iter().any(|candidate| candidate.id().as_str() == id),
+                    "{case}: internal command {id}"
+                );
+            }
+        }
+    }
 
-        let list = provider.list(&ctx).expect("list should be built");
-        assert!(
-            !list
+    #[test]
+    fn enum_candidates_follow_argument_phase_filtering_and_definition_order() {
+        for (case, input, expected) in [
+            ("non-enum", "goto-page ", &[][..]),
+            ("first enum", "layout-spread ", &["ltr", "rtl"]),
+            ("second enum", "layout-spread ltr ", &["paired", "cover"]),
+            ("fuzzy enum", "layout-spread r", &["ltr", "rtl"]),
+            ("definition order", "pan ", &["left", "right", "up", "down"]),
+            ("filtered order", "pan t", &["left", "right"]),
+            ("filtered singleton", "layout-spread rt", &["rtl"]),
+            ("second enum filtered", "layout-spread rtl p", &["paired"]),
+            (
+                "no-match fallback",
+                "pan z",
+                &["left", "right", "up", "down"],
+            ),
+            ("trailing non-enum", "pan left ", &[][..]),
+        ] {
+            assert_eq!(
+                ids(&command_list_for_input(input, false)),
+                expected,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn scoring_orders_exact_prefix_acronym_and_tied_matches() {
+        for (case, query, search_active, expected_order) in [
+            ("exact", "quit", false, &["quit"][..]),
+            (
+                "prefix before contains",
+                "search",
+                true,
+                &["search", "next-search-hit"],
+            ),
+            ("hyphen acronym", "nsh", true, &["next-search-hit"]),
+            (
+                "shorter then lexicographic",
+                "page",
+                false,
+                &["goto-page", "last-page", "next-page", "prev-page"],
+            ),
+        ] {
+            let actual = ids(&command_list_for_input(query, search_active));
+            let positions = expected_order
                 .iter()
-                .any(|candidate| candidate.id().as_str() == "next-search-hit")
-        );
-        assert!(
-            !list
-                .iter()
-                .any(|candidate| candidate.id().as_str() == "search-results")
-        );
-        assert!(
-            !list
-                .iter()
-                .any(|candidate| candidate.id().as_str() == "prev-search-hit")
-        );
-        assert!(
-            !list
-                .iter()
-                .any(|candidate| candidate.id().as_str() == "open-palette")
-        );
-        assert!(
-            !list
-                .iter()
-                .any(|candidate| candidate.id().as_str() == "submit-search")
-        );
-        assert!(
-            !list
-                .iter()
-                .any(|candidate| candidate.id().as_str() == "search-goto")
-        );
-        assert!(
-            !list
-                .iter()
-                .any(|candidate| candidate.id().as_str() == "history-goto")
-        );
+                .map(|expected| {
+                    actual
+                        .iter()
+                        .position(|id| id == expected)
+                        .unwrap_or_else(|| panic!("{case}: missing {expected}"))
+                })
+                .collect::<Vec<_>>();
+            assert!(
+                positions.windows(2).all(|pair| pair[0] < pair[1]),
+                "{case}: {actual:?}"
+            );
+            assert_eq!(positions.first(), Some(&0), "{case}: {actual:?}");
+        }
     }
 
     #[test]
-    fn list_shows_search_hit_navigation_when_search_is_active() {
-        let provider = CommandPaletteProvider;
-        let app = PaletteAppSnapshot::default();
-        let extensions = extension_snapshot(true);
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::Command,
-            input: "",
-        };
-
-        let list = provider.list(&ctx).expect("list should be built");
-        assert!(
-            list.iter()
-                .any(|candidate| candidate.id().as_str() == "next-search-hit")
-        );
-        assert!(
-            list.iter()
-                .any(|candidate| candidate.id().as_str() == "search-results")
-        );
-        assert!(
-            list.iter()
-                .any(|candidate| candidate.id().as_str() == "prev-search-hit")
-        );
+    fn submit_selected_candidates_dispatches_or_reopens_for_missing_required_arguments() {
+        for (case, input, selected, expected) in [
+            (
+                "optional arguments omitted",
+                "",
+                "layout-spread",
+                PaletteSubmitEffect::Dispatch {
+                    command: Command::PageLayoutSpread {
+                        direction: None,
+                        cover_policy: None,
+                    },
+                    history_record: Some(InputHistoryRecord::Command("layout-spread".to_string())),
+                    next: PalettePostAction::Close,
+                },
+            ),
+            (
+                "required argument missing",
+                "",
+                "zoom",
+                PaletteSubmitEffect::Reopen {
+                    kind: PaletteKind::Command,
+                    options: PaletteOpenOptions::input("zoom "),
+                },
+            ),
+            (
+                "search command",
+                "",
+                "search",
+                PaletteSubmitEffect::Dispatch {
+                    command: Command::OpenSearch,
+                    history_record: Some(InputHistoryRecord::Command("search".to_string())),
+                    next: PalettePostAction::Close,
+                },
+            ),
+            (
+                "first enum selected",
+                "layout-spread ",
+                "rtl",
+                PaletteSubmitEffect::Dispatch {
+                    command: Command::PageLayoutSpread {
+                        direction: Some(crate::command::SpreadDirectionArg::Rtl),
+                        cover_policy: None,
+                    },
+                    history_record: Some(InputHistoryRecord::Command(
+                        "layout-spread rtl".to_string(),
+                    )),
+                    next: PalettePostAction::Close,
+                },
+            ),
+            (
+                "second enum selected",
+                "layout-spread rtl ",
+                "cover",
+                PaletteSubmitEffect::Dispatch {
+                    command: Command::PageLayoutSpread {
+                        direction: Some(crate::command::SpreadDirectionArg::Rtl),
+                        cover_policy: Some(crate::command::SpreadCoverPolicyArg::Cover),
+                    },
+                    history_record: Some(InputHistoryRecord::Command(
+                        "layout-spread rtl cover".to_string(),
+                    )),
+                    next: PalettePostAction::Close,
+                },
+            ),
+        ] {
+            assert_eq!(
+                command_submit_effect(input, selected, false),
+                expected,
+                "{case}"
+            );
+        }
     }
 
     #[test]
-    fn non_enum_argument_phase_hides_candidates() {
-        let list = command_list_for_input("goto-page ", false);
-        assert!(list.is_empty());
-    }
-
-    #[test]
-    fn enum_argument_phase_lists_values() {
-        let list = command_list_for_input("layout-spread ", false);
-        assert_eq!(ids(&list), vec!["ltr".to_string(), "rtl".to_string()]);
-
-        let list = command_list_for_input("layout-spread ltr ", false);
-        assert_eq!(ids(&list), vec!["paired".to_string(), "cover".to_string()]);
-    }
-
-    #[test]
-    fn enum_argument_phase_filters_values() {
-        let list = command_list_for_input("layout-spread r", false);
-        assert_eq!(ids(&list), vec!["ltr".to_string(), "rtl".to_string()]);
-    }
-
-    #[test]
-    fn enum_argument_candidates_keep_definition_order() {
-        let list = command_list_for_input("pan ", false);
-        assert_eq!(
-            ids(&list),
-            vec![
-                "left".to_string(),
-                "right".to_string(),
-                "up".to_string(),
-                "down".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn enum_argument_candidates_filter_without_reordering() {
-        let list = command_list_for_input("pan t", false);
-        assert_eq!(ids(&list), vec!["left".to_string(), "right".to_string()]);
-
-        let list = command_list_for_input("layout-spread rt", false);
-        assert_eq!(ids(&list), vec!["rtl".to_string()]);
-
-        let list = command_list_for_input("layout-spread rtl p", false);
-        assert_eq!(ids(&list), vec!["paired".to_string()]);
-    }
-
-    #[test]
-    fn enum_argument_candidates_fall_back_to_full_list_when_no_match() {
-        let list = command_list_for_input("pan z", false);
-        assert_eq!(
-            ids(&list),
-            vec![
-                "left".to_string(),
-                "right".to_string(),
-                "up".to_string(),
-                "down".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn trailing_non_enum_argument_phase_hides_enum_candidates() {
-        let list = command_list_for_input("pan left ", false);
-        assert!(list.is_empty());
-    }
-
-    #[test]
-    fn scoring_prioritizes_exact_id_match() {
-        let list = command_list_for_input("quit", false);
-        assert_eq!(
-            list.first().map(|candidate| candidate.id().as_str()),
-            Some("quit")
-        );
-    }
-
-    #[test]
-    fn scoring_prioritizes_id_prefix_over_contains() {
-        let list = command_list_for_input("search", true);
-        let ids = ids(&list);
-        let idx_search = ids
-            .iter()
-            .position(|id| id == "search")
-            .expect("search should exist");
-        let idx_next_search_hit = ids
-            .iter()
-            .position(|id| id == "next-search-hit")
-            .expect("next-search-hit should exist");
-        assert!(idx_search < idx_next_search_hit);
-    }
-
-    #[test]
-    fn scoring_supports_hyphen_acronym_query() {
-        let list = command_list_for_input("nsh", true);
-        assert_eq!(
-            list.first().map(|candidate| candidate.id().as_str()),
-            Some("next-search-hit")
-        );
-    }
-
-    #[test]
-    fn scoring_tie_breaks_by_shorter_id_then_lexicographic() {
-        let list = command_list_for_input("page", false);
-        let ids = ids(&list);
-        let idx_goto_page = ids
-            .iter()
-            .position(|id| id == "goto-page")
-            .expect("goto-page should exist");
-        let idx_last_page = ids
-            .iter()
-            .position(|id| id == "last-page")
-            .expect("last-page should exist");
-        let idx_next_page = ids
-            .iter()
-            .position(|id| id == "next-page")
-            .expect("next-page should exist");
-        let idx_prev_page = ids
-            .iter()
-            .position(|id| id == "prev-page")
-            .expect("prev-page should exist");
-
-        assert!(idx_goto_page < idx_last_page);
-        assert!(idx_last_page < idx_next_page);
-        assert!(idx_next_page < idx_prev_page);
-    }
-
-    #[test]
-    fn submit_dispatches_optional_only_page_layout_without_reopen() {
-        let effect = command_submit_effect("", "layout-spread", false);
-        assert_eq!(
-            effect,
-            PaletteSubmitEffect::Dispatch {
-                command: Command::PageLayoutSpread {
+    fn submit_dispatches_complete_typed_commands_with_history() {
+        for (case, input, expected_command) in [
+            ("no arguments", "quit", Command::Quit),
+            (
+                "optional enum omitted",
+                "layout-spread",
+                Command::PageLayoutSpread {
                     direction: None,
                     cover_policy: None,
                 },
-                history_record: Some(InputHistoryRecord::Command("layout-spread".to_string(),)),
-                next: PalettePostAction::Close,
-            }
-        );
-    }
-
-    #[test]
-    fn submit_reopens_for_required_argument_commands() {
-        let effect = command_submit_effect("", "zoom", false);
-        assert_eq!(
-            effect,
-            PaletteSubmitEffect::Reopen {
+            ),
+        ] {
+            let provider = CommandPaletteProvider;
+            let app = PaletteAppSnapshot::default();
+            let extensions = ExtensionUiSnapshot::default();
+            let ctx = PaletteContext {
+                app,
+                extensions: &extensions,
                 kind: PaletteKind::Command,
-                options: PaletteOpenOptions::input("zoom "),
-            }
-        );
-    }
-
-    #[test]
-    fn submit_dispatches_search_to_open_search_palette() {
-        let effect = command_submit_effect("", "search", false);
-        assert_eq!(
-            effect,
-            PaletteSubmitEffect::Dispatch {
-                command: Command::OpenSearch,
-                history_record: Some(InputHistoryRecord::Command("search".to_string())),
-                next: PalettePostAction::Close,
-            }
-        );
-    }
-
-    #[test]
-    fn submit_dispatches_typed_command_with_history_record() {
-        let provider = CommandPaletteProvider;
-        let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::default();
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::Command,
-            input: "quit",
-        };
-
-        let effect = provider
-            .on_submit(&ctx, None)
-            .expect("typed command submit should succeed");
-
-        assert_eq!(
-            effect,
-            PaletteSubmitEffect::Dispatch {
-                command: Command::Quit,
-                history_record: Some(InputHistoryRecord::Command("quit".to_string())),
-                next: PalettePostAction::Close,
-            }
-        );
-    }
-
-    #[test]
-    fn submit_dispatches_typed_optional_enum_command_without_argument() {
-        let provider = CommandPaletteProvider;
-        let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::default();
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::Command,
-            input: "layout-spread",
-        };
-
-        let effect = provider
-            .on_submit(&ctx, None)
-            .expect("typed command submit should succeed");
-
-        assert_eq!(
-            effect,
-            PaletteSubmitEffect::Dispatch {
-                command: Command::PageLayoutSpread {
-                    direction: None,
-                    cover_policy: None,
+                input,
+            };
+            assert_eq!(
+                provider
+                    .on_submit(&ctx, None)
+                    .expect("typed command submit should succeed"),
+                PaletteSubmitEffect::Dispatch {
+                    command: expected_command,
+                    history_record: Some(InputHistoryRecord::Command(input.to_string())),
+                    next: PalettePostAction::Close,
                 },
-                history_record: Some(InputHistoryRecord::Command("layout-spread".to_string(),)),
-                next: PalettePostAction::Close,
-            }
-        );
+                "{case}"
+            );
+        }
     }
 
     #[test]
-    fn tab_completion_appends_trailing_space_for_required_argument_commands() {
-        let effect = command_tab_effect("z", "zoom", false);
-        assert_eq!(
-            effect,
-            PaletteTabEffect::SetInput {
-                value: "zoom ".to_string(),
-                move_cursor_to_end: true,
-            }
-        );
-    }
-
-    #[test]
-    fn tab_completion_appends_trailing_space_for_no_argument_commands() {
-        let effect = command_tab_effect("q", "quit", false);
-        assert_eq!(
-            effect,
-            PaletteTabEffect::SetInput {
-                value: "quit ".to_string(),
-                move_cursor_to_end: true,
-            }
-        );
-    }
-
-    #[test]
-    fn tab_completion_replaces_enum_argument_and_appends_space() {
-        let effect = command_tab_effect("layout-spread r", "rtl", false);
-        assert_eq!(
-            effect,
-            PaletteTabEffect::SetInput {
-                value: "layout-spread rtl ".to_string(),
-                move_cursor_to_end: true,
-            }
-        );
-    }
-
-    #[test]
-    fn submit_dispatches_selected_enum_argument_when_result_is_complete() {
-        let effect = command_submit_effect("layout-spread ", "rtl", false);
-        assert_eq!(
-            effect,
-            PaletteSubmitEffect::Dispatch {
-                command: Command::PageLayoutSpread {
-                    direction: Some(crate::command::SpreadDirectionArg::Rtl),
-                    cover_policy: None,
+    fn tab_completion_replaces_the_selected_command_or_enum_value() {
+        for (case, input, selected, expected) in [
+            ("required argument", "z", "zoom", "zoom "),
+            ("no argument", "q", "quit", "quit "),
+            (
+                "enum argument",
+                "layout-spread r",
+                "rtl",
+                "layout-spread rtl ",
+            ),
+        ] {
+            assert_eq!(
+                command_tab_effect(input, selected, false),
+                PaletteTabEffect::SetInput {
+                    value: expected.to_string(),
+                    move_cursor_to_end: true,
                 },
-                history_record: Some(InputHistoryRecord::Command("layout-spread rtl".to_string(),)),
-                next: PalettePostAction::Close,
-            }
-        );
+                "{case}"
+            );
+        }
     }
 
     #[test]
-    fn submit_dispatches_selected_spread_cover_policy_when_result_is_complete() {
-        let effect = command_submit_effect("layout-spread rtl ", "cover", false);
-        assert_eq!(
-            effect,
-            PaletteSubmitEffect::Dispatch {
-                command: Command::PageLayoutSpread {
-                    direction: Some(crate::command::SpreadDirectionArg::Rtl),
-                    cover_policy: Some(crate::command::SpreadCoverPolicyArg::Cover),
-                },
-                history_record: Some(InputHistoryRecord::Command(
-                    "layout-spread rtl cover".to_string(),
-                )),
-                next: PalettePostAction::Close,
-            }
-        );
+    fn assistive_text_describes_the_current_argument_or_completed_command() {
+        for (case, input, expected) in [
+            (
+                "first enum",
+                "layout-spread ",
+                "layout-spread [direction] [cover-policy] | direction: ltr / rtl",
+            ),
+            (
+                "second enum",
+                "layout-spread rtl ",
+                "layout-spread [direction] [cover-policy] | cover-policy: paired / cover",
+            ),
+            ("integer", "goto-page ", "goto-page <page> | page: integer"),
+            ("number", "zoom ", "zoom <ratio> | ratio: number"),
+            (
+                "arguments complete",
+                "pan left 1 ",
+                "pan <direction> [amount] | Pan",
+            ),
+            ("no arguments", "quit ", "quit | Quit"),
+        ] {
+            assert_eq!(
+                assistive_text_for_input(input, false),
+                Some(expected.to_string()),
+                "{case}"
+            );
+        }
     }
 
     #[test]
-    fn assistive_text_uses_enum_values_for_enum_arguments() {
-        assert_eq!(
-            assistive_text_for_input("layout-spread ", false),
-            Some("layout-spread [direction] [cover-policy] | direction: ltr / rtl".to_string())
-        );
-        assert_eq!(
-            assistive_text_for_input("layout-spread rtl ", false),
-            Some(
-                "layout-spread [direction] [cover-policy] | cover-policy: paired / cover"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn assistive_text_uses_integer_label_for_integer_arguments() {
-        assert_eq!(
-            assistive_text_for_input("goto-page ", false),
-            Some("goto-page <page> | page: integer".to_string())
-        );
-    }
-
-    #[test]
-    fn assistive_text_uses_number_label_for_float_arguments() {
-        assert_eq!(
-            assistive_text_for_input("zoom ", false),
-            Some("zoom <ratio> | ratio: number".to_string())
-        );
-    }
-
-    #[test]
-    fn assistive_text_shows_title_when_all_arguments_are_complete() {
-        assert_eq!(
-            assistive_text_for_input("pan left 1 ", false),
-            Some("pan <direction> [amount] | Pan".to_string())
-        );
-    }
-
-    #[test]
-    fn assistive_text_shows_title_for_complete_no_argument_command() {
-        assert_eq!(
-            assistive_text_for_input("quit ", false),
-            Some("quit | Quit".to_string())
-        );
-    }
-
-    #[test]
-    fn submit_reopens_when_input_targets_internal_command() {
-        let provider = CommandPaletteProvider;
-        let app = PaletteAppSnapshot::default();
-        let extensions = extension_snapshot(true);
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::Command,
-            input: "submit-search hello",
-        };
-
-        let err = provider
-            .on_submit(&ctx, None)
-            .expect_err("internal command input should error");
-        assert_eq!(
-            err.to_string(),
-            "invalid argument: submit-search is an internal command and cannot be invoked directly"
-        );
-    }
-
-    #[test]
-    fn submit_errors_when_explicit_input_has_invalid_arguments() {
-        let provider = CommandPaletteProvider;
-        let app = PaletteAppSnapshot::default();
-        let extensions = ExtensionUiSnapshot::default();
-        let ctx = PaletteContext {
-            app,
-            extensions: &extensions,
-            kind: PaletteKind::Command,
-            input: "first-page hoge",
-        };
-
-        let err = provider
-            .on_submit(&ctx, None)
-            .expect_err("invalid command arguments should error");
-        assert_eq!(
-            err.to_string(),
-            "invalid argument: first-page does not accept arguments"
-        );
+    fn submit_rejects_internal_commands_and_invalid_arguments() {
+        for (case, input, search_active, expected) in [
+            (
+                "internal command",
+                "submit-search hello",
+                true,
+                "invalid argument: submit-search is an internal command and cannot be invoked directly",
+            ),
+            (
+                "invalid arguments",
+                "first-page hoge",
+                false,
+                "invalid argument: first-page does not accept arguments",
+            ),
+        ] {
+            let provider = CommandPaletteProvider;
+            let app = PaletteAppSnapshot::default();
+            let extensions = extension_snapshot(search_active);
+            let ctx = PaletteContext {
+                app,
+                extensions: &extensions,
+                kind: PaletteKind::Command,
+                input,
+            };
+            let err = provider
+                .on_submit(&ctx, None)
+                .expect_err("invalid command input should error");
+            assert_eq!(err.to_string(), expected, "{case}");
+        }
     }
 }

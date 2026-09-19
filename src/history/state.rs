@@ -363,13 +363,16 @@ mod tests {
     }
 
     #[test]
-    fn same_page_search_records_current_reason_without_duplicate_origin() {
+    fn same_page_search_updates_current_reason_then_records_it_when_leaving() {
         let mut state = HistoryState::default();
         state.back_stack.push_back(HistoryEntry {
             page: 3,
             reason: None,
         });
 
+        assert_eq!(state.back_stack.len(), 1);
+        assert_eq!(state.back_stack.back().expect("origin exists").page, 3);
+
         state.on_event(&AppEvent::PageChanged {
             from: 3,
             to: 3,
@@ -377,33 +380,12 @@ mod tests {
                 query: "needle".to_string(),
             },
         });
-
         assert_eq!(state.back_stack.len(), 1);
-        let last = state.back_stack.back().expect("entry exists");
-        assert_eq!(last.page, 3);
-        assert!(last.reason.is_none());
         assert!(matches!(
             state.current_reason.as_ref(),
             Some(NavReason::Search { query }) if query == "needle"
         ));
-    }
 
-    #[test]
-    fn same_page_search_refreshes_reason_on_deduped_page() {
-        let mut state = HistoryState::default();
-
-        state.on_event(&AppEvent::PageChanged {
-            from: 1,
-            to: 3,
-            reason: NavReason::PageGoto(PageGotoKind::Specific),
-        });
-        state.on_event(&AppEvent::PageChanged {
-            from: 3,
-            to: 3,
-            reason: NavReason::Search {
-                query: "needle".to_string(),
-            },
-        });
         state.on_event(&AppEvent::PageChanged {
             from: 3,
             to: 8,

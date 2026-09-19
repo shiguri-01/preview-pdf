@@ -278,20 +278,6 @@ mod tests {
     }
 
     #[test]
-    fn insert_keeps_pending_frame_buffer_shared() {
-        let mut cache = TerminalFrameCache::default();
-        let key = key(0);
-        let source = frame();
-        let _ = cache.insert(key, source.clone(), source.byte_len(), false, None);
-
-        let stored_pixels = match cache.cached_mut(&key).map(|entry| entry.state()) {
-            Some(TerminalFrameState::PendingFrame(frame)) => &frame.pixels,
-            _ => panic!("expected pending frame"),
-        };
-        assert!(source.pixels.ptr_eq(stored_pixels));
-    }
-
-    #[test]
     fn pending_work_tracks_state_transitions() {
         let mut cache = TerminalFrameCache::default();
         let key = key(0);

@@ -161,43 +161,28 @@ mod tests {
     }
 
     #[test]
-    fn parse_cli_accepts_watch_flag() {
-        let cli =
-            Cli::try_parse_from(["pvf", "--watch", "sample.pdf"]).expect("watch flag should parse");
-        let options = parse_cli(cli);
-        assert_eq!(options.pdf_path, PathBuf::from("sample.pdf"));
-        assert_eq!(options.config, ConfigFileSelection::Default);
-        assert_eq!(options.options.watch.enabled, Some(true));
+    fn parse_cli_accepts_long_and_short_watch_flags() {
+        for flag in ["--watch", "-w"] {
+            let cli =
+                Cli::try_parse_from(["pvf", flag, "sample.pdf"]).expect("watch flag should parse");
+            let options = parse_cli(cli);
+            assert_eq!(options.pdf_path, PathBuf::from("sample.pdf"));
+            assert_eq!(options.config, ConfigFileSelection::Default);
+            assert_eq!(options.options.watch.enabled, Some(true));
+        }
     }
 
     #[test]
-    fn parse_cli_accepts_short_watch_flag() {
-        let cli = Cli::try_parse_from(["pvf", "-w", "sample.pdf"])
-            .expect("short watch flag should parse");
-        let options = parse_cli(cli);
-        assert_eq!(options.options.watch.enabled, Some(true));
-    }
-
-    #[test]
-    fn parse_cli_accepts_explicit_config_path() {
-        let cli = Cli::try_parse_from(["pvf", "--config", "pvf.toml", "sample.pdf"])
-            .expect("config path should parse");
-        let options = parse_cli(cli);
-        assert_eq!(
-            options.config,
-            ConfigFileSelection::Path(PathBuf::from("pvf.toml"))
-        );
-    }
-
-    #[test]
-    fn parse_cli_accepts_short_config_path() {
-        let cli =
-            Cli::try_parse_from(["pvf", "-c", "pvf.toml", "sample.pdf"]).expect("config path");
-        let options = parse_cli(cli);
-        assert_eq!(
-            options.config,
-            ConfigFileSelection::Path(PathBuf::from("pvf.toml"))
-        );
+    fn parse_cli_accepts_long_and_short_config_paths() {
+        for flag in ["--config", "-c"] {
+            let cli = Cli::try_parse_from(["pvf", flag, "pvf.toml", "sample.pdf"])
+                .expect("config path should parse");
+            let options = parse_cli(cli);
+            assert_eq!(
+                options.config,
+                ConfigFileSelection::Path(PathBuf::from("pvf.toml"))
+            );
+        }
     }
 
     #[test]
@@ -217,25 +202,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_cli_accepts_initial_view_overrides() {
-        let cli = Cli::try_parse_from([
-            "pvf",
-            "--page",
-            "10",
-            "--zoom",
-            "1.25",
-            "--layout",
-            "spread",
-            "sample.pdf",
-        ])
-        .expect("view overrides should parse");
-        let options = parse_cli(cli);
-        assert_eq!(options.options.view.initial_page, Some(10));
-        assert_eq!(options.options.view.initial_zoom, Some(1.25));
-        assert_eq!(
-            options.options.view.initial_layout,
-            Some(PageLayoutMode::Spread)
-        );
+    fn parse_cli_accepts_long_and_short_initial_view_overrides() {
+        for args in [
+            ["--page", "10", "--zoom", "1.25", "--layout", "spread"],
+            ["-p", "10", "-z", "1.25", "-l", "spread"],
+        ] {
+            let cli = Cli::try_parse_from(["pvf"].into_iter().chain(args).chain(["sample.pdf"]))
+                .expect("view overrides should parse");
+            let options = parse_cli(cli);
+            assert_eq!(options.options.view.initial_page, Some(10));
+            assert_eq!(options.options.view.initial_zoom, Some(1.25));
+            assert_eq!(
+                options.options.view.initial_layout,
+                Some(PageLayoutMode::Spread)
+            );
+        }
     }
 
     #[test]
@@ -254,28 +235,6 @@ mod tests {
         assert_eq!(
             options.options.render.graphics_protocol,
             Some(GraphicsProtocol::Auto)
-        );
-    }
-
-    #[test]
-    fn parse_cli_accepts_short_initial_view_overrides() {
-        let cli = Cli::try_parse_from([
-            "pvf",
-            "-p",
-            "10",
-            "-z",
-            "1.25",
-            "-l",
-            "spread",
-            "sample.pdf",
-        ])
-        .expect("short view overrides should parse");
-        let options = parse_cli(cli);
-        assert_eq!(options.options.view.initial_page, Some(10));
-        assert_eq!(options.options.view.initial_zoom, Some(1.25));
-        assert_eq!(
-            options.options.view.initial_layout,
-            Some(PageLayoutMode::Spread)
         );
     }
 

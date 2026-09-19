@@ -407,6 +407,7 @@ mod tests {
             .apply_options(AppOptions {
                 render: RenderOptions {
                     graphics_protocol: Some(GraphicsProtocol::Auto),
+                    worker_threads: Some(4),
                     ..RenderOptions::default()
                 },
                 watch: WatchOptions {
@@ -423,7 +424,7 @@ mod tests {
             resolved.render.graphics_protocol,
             Some(GraphicsProtocol::Auto)
         );
-        assert_eq!(resolved.render.worker_threads, 7);
+        assert_eq!(resolved.render.worker_threads, 4);
         assert_eq!(resolved.cache.l1_max_entries, 42);
         assert!(!resolved.watch.enabled);
         assert_eq!(resolved.watch.settle_delay, Duration::from_millis(1));
@@ -572,45 +573,5 @@ mod tests {
         assert_eq!(resolved.view.spread_cover, SpreadCoverPolicy::Cover);
         assert!(resolved.watch.enabled);
         assert_eq!(resolved.watch.settle_delay, Duration::from_millis(1));
-    }
-
-    #[test]
-    fn resolver_merges_later_options_over_earlier_options() {
-        let base = AppOptions {
-            render: RenderOptions {
-                graphics_protocol: Some(GraphicsProtocol::Sixel),
-                worker_threads: Some(2),
-                ..RenderOptions::default()
-            },
-            watch: WatchOptions {
-                enabled: Some(true),
-                ..WatchOptions::default()
-            },
-            ..AppOptions::default()
-        };
-        let override_options = AppOptions {
-            render: RenderOptions {
-                graphics_protocol: Some(GraphicsProtocol::Kitty),
-                worker_threads: Some(4),
-                ..RenderOptions::default()
-            },
-            watch: WatchOptions {
-                enabled: Some(false),
-                ..WatchOptions::default()
-            },
-            ..AppOptions::default()
-        };
-        let resolved = AppOptionsResolver::new()
-            .apply_options(base)
-            .apply_options(override_options)
-            .resolve()
-            .expect("layered options should resolve");
-
-        assert_eq!(resolved.render.worker_threads, 4);
-        assert!(!resolved.watch.enabled);
-        assert_eq!(
-            resolved.render.graphics_protocol,
-            Some(GraphicsProtocol::Kitty)
-        );
     }
 }

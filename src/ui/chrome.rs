@@ -269,51 +269,80 @@ mod tests {
     }
 
     #[test]
-    fn build_presenter_path_text_formats_presenter_with_proto() {
-        let text = build_presenter_path_text("ratatui-image", Some("kitty"), 200);
-
-        assert_eq!(text, "presenter=ratatui-image(proto=kitty)");
+    fn build_presenter_path_text_formats_protocol() {
+        for (name, protocol, expected) in [
+            (
+                "known protocol",
+                Some("kitty"),
+                "presenter=ratatui-image(proto=kitty)",
+            ),
+            ("unknown protocol", None, "presenter=ratatui-image(proto=-)"),
+        ] {
+            assert_eq!(
+                build_presenter_path_text("ratatui-image", protocol, 200),
+                expected,
+                "{name}"
+            );
+        }
     }
 
     #[test]
-    fn build_presenter_path_text_uses_placeholder_for_unknown_proto() {
-        let text = build_presenter_path_text("ratatui-image", None, 200);
-
-        assert_eq!(text, "presenter=ratatui-image(proto=-)");
+    fn stylize_notice_line_formats_and_truncates_messages() {
+        for (name, message, max_width, expected) in [
+            (
+                "severity prefix",
+                "render failed",
+                80,
+                "error: render failed",
+            ),
+            ("emoji grapheme truncation", "👨‍👩‍👧‍👦 failed", 9, "error: 👨‍👩‍👧‍👦"),
+        ] {
+            let line = stylize_notice_line(
+                &Notice {
+                    level: NoticeLevel::Error,
+                    message: message.to_string(),
+                },
+                max_width,
+            );
+            assert_eq!(line.to_string(), expected, "{name}");
+        }
     }
 
     #[test]
-    fn stylize_notice_line_prefixes_severity() {
-        let line = stylize_notice_line(
-            &Notice {
-                level: NoticeLevel::Error,
-                message: "render failed".to_string(),
-            },
-            80,
-        );
-
-        assert_eq!(line.to_string(), "error: render failed");
-    }
-
-    #[test]
-    fn notice_truncation_preserves_emoji_graphemes() {
-        let line = stylize_notice_line(
-            &Notice {
-                level: NoticeLevel::Error,
-                message: "👨‍👩‍👧‍👦 failed".to_string(),
-            },
-            9,
-        );
-
-        assert_eq!(line.to_string(), "error: 👨‍👩‍👧‍👦");
-    }
-
-    #[test]
-    fn filename_elision_preserves_combining_characters_and_emoji() {
-        assert_eq!(
-            format_filename_segment("e\u{301}bcdef👨‍👩‍👧‍👦.pdf", 10),
-            "e\u{301}bc…👨‍👩‍👧‍👦.pdf"
-        );
+    fn format_filename_segment_handles_fit_drop_and_elision() {
+        for (name, input, max_width, expected) in [
+            ("short name fits", "a.pdf", 5, "a.pdf"),
+            (
+                "long name below elision threshold at width five",
+                "very-long-document-name.pdf",
+                5,
+                "",
+            ),
+            (
+                "long name below elision threshold at width six",
+                "very-long-document-name.pdf",
+                6,
+                "",
+            ),
+            (
+                "long name elides at threshold",
+                "very-long-document-name.pdf",
+                7,
+                "ve….pdf",
+            ),
+            (
+                "elision preserves combining characters and emoji",
+                "e\u{301}bcdef👨‍👩‍👧‍👦.pdf",
+                10,
+                "e\u{301}bc…👨‍👩‍👧‍👦.pdf",
+            ),
+        ] {
+            assert_eq!(
+                format_filename_segment(input, max_width),
+                expected,
+                "{name}"
+            );
+        }
     }
 
     #[test]
@@ -403,31 +432,6 @@ mod tests {
             target_width,
         );
         assert_eq!(text, expected);
-    }
-
-    #[test]
-    fn format_filename_segment_keeps_short_name_when_it_fits_under_threshold() {
-        assert_eq!(format_filename_segment("a.pdf", 5), "a.pdf");
-    }
-
-    #[test]
-    fn format_filename_segment_drops_long_name_below_elision_threshold() {
-        assert_eq!(
-            format_filename_segment("very-long-document-name.pdf", 5),
-            ""
-        );
-        assert_eq!(
-            format_filename_segment("very-long-document-name.pdf", 6),
-            ""
-        );
-    }
-
-    #[test]
-    fn format_filename_segment_elides_long_name_at_threshold() {
-        assert_eq!(
-            format_filename_segment("very-long-document-name.pdf", 7),
-            "ve….pdf"
-        );
     }
 
     #[test]

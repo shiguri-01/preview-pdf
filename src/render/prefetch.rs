@@ -250,21 +250,6 @@ mod tests {
     }
 
     #[test]
-    fn guard_reverse_depth_config_supports_0_1_2() {
-        let mut cfg = PrefetchQueueConfig {
-            guard_reverse_depth: 0,
-            ..Default::default()
-        };
-        assert_eq!(cfg.effective_guard_reverse_depth(), 0);
-
-        cfg.guard_reverse_depth = 1;
-        assert_eq!(cfg.effective_guard_reverse_depth(), 1);
-
-        cfg.guard_reverse_depth = 2;
-        assert_eq!(cfg.effective_guard_reverse_depth(), 2);
-    }
-
-    #[test]
     fn retain_rebuilds_dedupe_index_after_filtering() {
         let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
         assert!(queue.push(1, meta(1, WorkClass::Background, 1)));

@@ -511,22 +511,47 @@ mod tests {
     }
 
     #[test]
-    fn keymap_config_rejects_unknown_preset() {
-        let path = unique_temp_path("bad-keymap-preset.toml");
-        fs::write(
-            &path,
-            r#"
-            keymap_preset = "bob"
-            "#,
-        )
-        .expect("config file should be written");
+    fn explicit_config_rejects_unknown_enum_values() {
+        for (name, source, field, value) in [
+            (
+                "keymap-preset",
+                r#"keymap_preset = "bob""#,
+                "keymap_preset",
+                "bob",
+            ),
+            (
+                "graphics-protocol",
+                r#"
+                [render]
+                graphics_protocol = "graphics-protocol"
+                "#,
+                "graphics_protocol",
+                "graphics-protocol",
+            ),
+            (
+                "view-layout",
+                r#"
+                [view]
+                initial_layout = "grid"
+                "#,
+                "initial_layout",
+                "grid",
+            ),
+        ] {
+            let path = unique_temp_path(&format!("bad-{name}.toml"));
+            fs::write(&path, source).expect("config file should be written");
 
-        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
-        let message = err.to_string();
-        assert!(message.contains("keymap_preset"), "{message}");
-        assert!(message.contains("unknown variant `bob`"), "{message}");
+            let err =
+                load_options_from_explicit_path(&path).expect_err("config should be rejected");
+            let message = err.to_string();
+            assert!(message.contains(field), "{name}: {message}");
+            assert!(
+                message.contains(&format!("unknown variant `{value}`")),
+                "{name}: {message}"
+            );
 
-        fs::remove_file(&path).expect("config file should be removed");
+            fs::remove_file(&path).expect("config file should be removed");
+        }
     }
 
     #[test]
@@ -655,57 +680,43 @@ mod tests {
     }
 
     #[test]
-    fn keymap_config_accepts_single_escape_bindings() {
-        let path = unique_temp_path("esc-keymap-key.toml");
-        fs::write(
-            &path,
-            r#"
-            [[keymap]]
-            when = "normal"
-            key = "<esc>"
-            command = "quit"
-            "#,
-        )
-        .expect("config file should be written");
+    fn keymap_config_accepts_special_key_bindings() {
+        for (name, key, command_name, key_code, command) in [
+            ("escape", "<esc>", "quit", KeyCode::Esc, Command::Quit),
+            (
+                "enter",
+                "<enter>",
+                "next-page",
+                KeyCode::Enter,
+                Command::NextPage,
+            ),
+        ] {
+            let path = unique_temp_path(&format!("{name}-keymap-key.toml"));
+            fs::write(
+                &path,
+                format!(
+                    r#"
+                    [[keymap]]
+                    when = "normal"
+                    key = "{key}"
+                    command = "{command_name}"
+                    "#
+                ),
+            )
+            .expect("config file should be written");
 
-        let options = load_options_from_explicit_path(&path).expect("config should load");
-        assert_eq!(
-            options.keymap.bindings,
-            vec![KeymapBinding::Exact {
-                when: KeymapWhen::Normal,
-                keys: vec![ShortcutKey::key(KeyCode::Esc)],
-                command: Command::Quit,
-            }]
-        );
+            let options = load_options_from_explicit_path(&path).expect("config should load");
+            assert_eq!(
+                options.keymap.bindings,
+                vec![KeymapBinding::Exact {
+                    when: KeymapWhen::Normal,
+                    keys: vec![ShortcutKey::key(key_code)],
+                    command,
+                }]
+            );
 
-        fs::remove_file(&path).expect("config file should be removed");
-    }
-
-    #[test]
-    fn keymap_config_accepts_enter_bindings() {
-        let path = unique_temp_path("enter-keymap-key.toml");
-        fs::write(
-            &path,
-            r#"
-            [[keymap]]
-            when = "normal"
-            key = "<enter>"
-            command = "next-page"
-            "#,
-        )
-        .expect("config file should be written");
-
-        let options = load_options_from_explicit_path(&path).expect("config should load");
-        assert_eq!(
-            options.keymap.bindings,
-            vec![KeymapBinding::Exact {
-                when: KeymapWhen::Normal,
-                keys: vec![ShortcutKey::key(KeyCode::Enter)],
-                command: Command::NextPage,
-            }]
-        );
-
-        fs::remove_file(&path).expect("config file should be removed");
+            fs::remove_file(&path).expect("config file should be removed");
+        }
     }
 
     #[test]
@@ -735,69 +746,28 @@ mod tests {
     }
 
     #[test]
-    fn explicit_config_reads_graphics_protocol() {
-        let path = unique_temp_path("graphics-protocol.toml");
-        fs::write(
-            &path,
-            r#"
-            [render]
-            graphics_protocol = "sixel"
-            "#,
-        )
-        .expect("config file should be written");
+    fn explicit_config_reads_graphics_protocols() {
+        for (value, expected) in [
+            ("sixel", GraphicsProtocol::Sixel),
+            ("auto", GraphicsProtocol::Auto),
+        ] {
+            let path = unique_temp_path(&format!("{value}-graphics-protocol.toml"));
+            fs::write(
+                &path,
+                format!(
+                    r#"
+                    [render]
+                    graphics_protocol = "{value}"
+                    "#
+                ),
+            )
+            .expect("config file should be written");
 
-        let options = load_options_from_explicit_path(&path).expect("config should load");
-        assert_eq!(
-            options.render.graphics_protocol,
-            Some(GraphicsProtocol::Sixel)
-        );
+            let options = load_options_from_explicit_path(&path).expect("config should load");
+            assert_eq!(options.render.graphics_protocol, Some(expected));
 
-        fs::remove_file(&path).expect("config file should be removed");
-    }
-
-    #[test]
-    fn explicit_config_reads_auto_graphics_protocol() {
-        let path = unique_temp_path("auto-graphics-protocol.toml");
-        fs::write(
-            &path,
-            r#"
-            [render]
-            graphics_protocol = "auto"
-            "#,
-        )
-        .expect("config file should be written");
-
-        let options = load_options_from_explicit_path(&path).expect("config should load");
-        assert_eq!(
-            options.render.graphics_protocol,
-            Some(GraphicsProtocol::Auto)
-        );
-
-        fs::remove_file(&path).expect("config file should be removed");
-    }
-
-    #[test]
-    fn explicit_config_rejects_unknown_graphics_protocol() {
-        let path = unique_temp_path("bad-graphics-protocol.toml");
-        fs::write(
-            &path,
-            r#"
-            [render]
-            graphics_protocol = "graphics-protocol"
-            "#,
-        )
-        .expect("config file should be written");
-
-        let err = load_options_from_explicit_path(&path)
-            .expect_err("unknown graphics protocol should be rejected");
-        let message = err.to_string();
-        assert!(message.contains("graphics_protocol"), "{message}");
-        assert!(
-            message.contains("unknown variant `graphics-protocol`"),
-            "{message}"
-        );
-
-        fs::remove_file(&path).expect("config file should be removed");
+            fs::remove_file(&path).expect("config file should be removed");
+        }
     }
 
     #[test]
@@ -871,26 +841,6 @@ mod tests {
         assert_eq!(options.input.sequence_timeout_ms, Some(750));
         assert_eq!(options.watch.enabled, Some(true));
         assert_eq!(options.watch.settle_delay_ms, Some(200));
-
-        fs::remove_file(&path).expect("config file should be removed");
-    }
-
-    #[test]
-    fn explicit_config_rejects_unknown_view_enum_values() {
-        let path = unique_temp_path("bad-view-options.toml");
-        fs::write(
-            &path,
-            r#"
-            [view]
-            initial_layout = "grid"
-            "#,
-        )
-        .expect("config file should be written");
-
-        let err = load_options_from_explicit_path(&path).expect_err("config should be rejected");
-        let message = err.to_string();
-        assert!(message.contains("initial_layout"), "{message}");
-        assert!(message.contains("unknown variant `grid`"), "{message}");
 
         fs::remove_file(&path).expect("config file should be removed");
     }

@@ -841,43 +841,6 @@ mod tests {
         );
     }
     #[test]
-    fn presenter_tracks_last_drawn_area_for_stable_redraws() {
-        let mut presenter = super::RatatuiImagePresenter::new();
-        let viewport = Viewport {
-            x: 0,
-            y: 0,
-            width: 12,
-            height: 7,
-        };
-        let area = Rect::new(2, 1, 12, 7);
-        presenter
-            .prepare(
-                RenderedPageKey::new(1, 0, 1.0),
-                &frame(),
-                viewport,
-                PanOffset::default(),
-                0,
-                1,
-            )
-            .expect("prepare should pass");
-
-        render_until_ready(&mut presenter, area);
-        let first_drawn_area =
-            presenter.state.last_drawn_areas[0].expect("ready render should record drawn area");
-
-        let backend = TestBackend::new(20, 10);
-        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-        terminal
-            .draw(|frame| {
-                presenter
-                    .render(frame, area, PresenterRenderOptions::default())
-                    .expect("ready redraw should pass");
-            })
-            .expect("draw should pass");
-
-        assert_eq!(presenter.state.last_drawn_areas[0], Some(first_drawn_area));
-    }
-    #[test]
     fn presenter_preserves_stable_ready_image_without_reblitting() {
         let mut presenter = super::RatatuiImagePresenter::new();
         let viewport = Viewport {

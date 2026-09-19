@@ -448,12 +448,6 @@ mod tests {
         let duplicated = BindingCondition::new(ConditionExpr::All(PALETTE_DUPLICATED));
         assert_eq!(palette, duplicated);
         assert_eq!(palette.priority_score(), duplicated.priority_score());
-    }
-
-    #[test]
-    fn single_alternative_conditions_have_the_same_normalized_form() {
-        static PALETTE_COMMAND: &[RuntimeCondition] =
-            &[RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
 
         let all = BindingCondition::new(ConditionExpr::All(PALETTE_COMMAND));
         let any = BindingCondition::new(ConditionExpr::Any(PALETTE_COMMAND));

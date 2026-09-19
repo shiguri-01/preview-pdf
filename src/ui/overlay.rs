@@ -553,7 +553,9 @@ mod tests {
     use ratatui::layout::Rect;
     use unicode_width::UnicodeWidthStr;
 
-    use crate::palette::{PaletteItemView, PaletteKind, PaletteView};
+    use crate::palette::{
+        PaletteItemView, PaletteKind, PaletteTextPart, PaletteTextTone, PaletteView,
+    };
 
     use super::{
         build_loading_message, build_palette_input_line, build_palette_item_line,
@@ -606,55 +608,47 @@ mod tests {
         }
     }
 
-    #[test]
-    fn palette_overlay_positions_cursor_on_character() {
-        let layout = build_palette_input_line("abc", 1, 12);
-        assert_eq!(layout.cursor_col, 4);
-        assert_eq!(rendered_input_text(&layout), "abc");
+    fn palette_item(label: &str, detail: &str, selected: bool) -> PaletteItemView {
+        PaletteItemView {
+            label: vec![PaletteTextPart {
+                text: label.to_string(),
+                tone: PaletteTextTone::Primary,
+            }],
+            detail: (!detail.is_empty())
+                .then(|| PaletteTextPart {
+                    text: detail.to_string(),
+                    tone: PaletteTextTone::Secondary,
+                })
+                .into_iter()
+                .collect(),
+            selected,
+        }
     }
 
     #[test]
-    fn palette_overlay_positions_cursor_at_end_of_input() {
-        let layout = build_palette_input_line("abc", 3, 12);
-        assert_eq!(layout.cursor_col, 6);
-    }
+    fn palette_input_layout_preserves_graphemes_and_keeps_cursor_visible() {
+        let cases = [
+            ("character", "abc", 1, 12, "abc", 4),
+            ("end", "abc", 3, 12, "abc", 6),
+            ("inside wide character", "あい", 1, 12, "あい", 4),
+            ("wide character boundary", "あい", 2, 12, "あい", 5),
+            ("combining sequence", "e\u{301}", 0, 12, "e\u{301}", 3),
+            (
+                "ZWJ emoji sequence",
+                "👩\u{200d}💻",
+                0,
+                12,
+                "👩\u{200d}💻",
+                3,
+            ),
+            ("scrolled input", "abcdefghij", 10, 8, "ghij", 7),
+        ];
 
-    #[test]
-    fn palette_overlay_handles_multibyte_input_without_panic() {
-        let backend = TestBackend::new(30, 10);
-        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
-        terminal
-            .draw(|frame| {
-                draw_palette_overlay(frame, Rect::new(0, 0, 30, 10), &test_view("あい", 1));
-            })
-            .expect("draw should pass");
-    }
-
-    #[test]
-    fn palette_overlay_positions_cursor_at_wide_char_boundary() {
-        let layout = build_palette_input_line("あい", 2, 12);
-        assert_eq!(layout.cursor_col, 5);
-    }
-
-    #[test]
-    fn palette_overlay_keeps_combining_sequence() {
-        let layout = build_palette_input_line("e\u{301}", 0, 12);
-        assert_eq!(rendered_input_text(&layout), "e\u{301}");
-        assert_eq!(layout.cursor_col, 3);
-    }
-
-    #[test]
-    fn palette_overlay_keeps_zwj_emoji_sequence() {
-        let layout = build_palette_input_line("👩\u{200d}💻", 0, 12);
-        assert_eq!(rendered_input_text(&layout), "👩\u{200d}💻");
-        assert_eq!(layout.cursor_col, 3);
-    }
-
-    #[test]
-    fn palette_overlay_scrolls_cursor_with_long_input() {
-        let layout = build_palette_input_line("abcdefghij", 10, 8);
-        assert_eq!(layout.cursor_col, 7);
-        assert_eq!(rendered_input_text(&layout), "ghij");
+        for (name, input, cursor, width, expected_text, expected_cursor_col) in cases {
+            let layout = build_palette_input_line(input, cursor, width);
+            assert_eq!(rendered_input_text(&layout), expected_text, "{name}");
+            assert_eq!(layout.cursor_col, expected_cursor_col, "{name}");
+        }
     }
 
     #[test]
@@ -675,133 +669,99 @@ mod tests {
     }
 
     #[test]
-    fn palette_item_line_uses_single_space_before_detail() {
-        let line = build_palette_item_line(
-            &PaletteItemView {
-                label: vec![crate::palette::PaletteTextPart {
-                    text: "goto-page".to_string(),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                detail: vec![crate::palette::PaletteTextPart {
-                    text: "Jump".to_string(),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                selected: false,
-            },
-            40,
-        );
+    fn palette_item_line_preserves_content_and_row_width_contracts() {
+        let cases = [
+            (
+                "detail with gap",
+                "goto-page",
+                "Jump",
+                false,
+                40,
+                false,
+                true,
+                None,
+            ),
+            (
+                "long label keeps detail",
+                "very long outline title",
+                "p.12",
+                false,
+                18,
+                true,
+                true,
+                None,
+            ),
+            (
+                "tight row hides detail",
+                "outline",
+                "p.12",
+                false,
+                8,
+                true,
+                false,
+                None,
+            ),
+            (
+                "row fills available width",
+                "open",
+                "Command",
+                true,
+                20,
+                false,
+                true,
+                Some(17),
+            ),
+            (
+                "wide truncated label fills row",
+                "界界界界界界界界界界",
+                "p.9",
+                false,
+                18,
+                true,
+                true,
+                Some(15),
+            ),
+            (
+                "exact fit preserves column gap",
+                "abcdefgh",
+                "p.12",
+                false,
+                16,
+                true,
+                true,
+                Some(13),
+            ),
+            (
+                "row reserves trailing padding",
+                "open",
+                "",
+                false,
+                12,
+                false,
+                false,
+                Some(9),
+            ),
+        ];
 
-        let rendered = rendered_candidate_text(&line);
-        assert!(rendered.starts_with("goto-page"));
-        assert!(rendered.ends_with("Jump"));
-        assert!(rendered.contains(" "));
-    }
+        for (name, label, detail, selected, width, elided, detail_visible, expected_width) in cases
+        {
+            let line = build_palette_item_line(&palette_item(label, detail, selected), width);
+            let rendered = rendered_candidate_text(&line);
 
-    #[test]
-    fn palette_item_line_keeps_right_fragment_when_left_is_long() {
-        let line = build_palette_item_line(
-            &PaletteItemView {
-                label: vec![crate::palette::PaletteTextPart {
-                    text: "very long outline title".to_string(),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                detail: vec![crate::palette::PaletteTextPart {
-                    text: "p.12".to_string(),
-                    tone: crate::palette::PaletteTextTone::Secondary,
-                }],
-                selected: false,
-            },
-            18,
-        );
-
-        let rendered = rendered_candidate_text(&line);
-        assert!(rendered.contains("…"));
-        assert!(rendered.ends_with("p.12"));
-    }
-
-    #[test]
-    fn palette_item_line_hides_right_fragment_when_space_is_tight() {
-        let line = build_palette_item_line(
-            &PaletteItemView {
-                label: vec![crate::palette::PaletteTextPart {
-                    text: "outline".to_string(),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                detail: vec![crate::palette::PaletteTextPart {
-                    text: "p.12".to_string(),
-                    tone: crate::palette::PaletteTextTone::Secondary,
-                }],
-                selected: false,
-            },
-            8,
-        );
-
-        let rendered = rendered_candidate_text(&line);
-        assert!(rendered.contains("…"));
-        assert!(!rendered.contains("p.12"));
-    }
-
-    #[test]
-    fn palette_item_line_fills_full_row_width() {
-        let line = build_palette_item_line(
-            &PaletteItemView {
-                label: vec![crate::palette::PaletteTextPart {
-                    text: "open".to_string(),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                detail: vec![crate::palette::PaletteTextPart {
-                    text: "Command".to_string(),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                selected: true,
-            },
-            20,
-        );
-
-        assert_eq!(rendered_candidate_width(&line), 17);
-    }
-
-    #[test]
-    fn palette_item_line_fills_full_row_width_when_wide_text_truncates_in_split_layout() {
-        let line = build_palette_item_line(
-            &PaletteItemView {
-                label: vec![crate::palette::PaletteTextPart {
-                    text: "界".repeat(10),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                detail: vec![crate::palette::PaletteTextPart {
-                    text: "p.9".to_string(),
-                    tone: crate::palette::PaletteTextTone::Secondary,
-                }],
-                selected: false,
-            },
-            18,
-        );
-
-        assert_eq!(rendered_candidate_width(&line), 15);
-    }
-
-    #[test]
-    fn palette_item_line_preserves_column_gap_when_left_and_right_exactly_fill_text_width() {
-        let line = build_palette_item_line(
-            &PaletteItemView {
-                label: vec![crate::palette::PaletteTextPart {
-                    text: "abcdefgh".to_string(),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                detail: vec![crate::palette::PaletteTextPart {
-                    text: "p.12".to_string(),
-                    tone: crate::palette::PaletteTextTone::Secondary,
-                }],
-                selected: false,
-            },
-            16,
-        );
-
-        let rendered = rendered_candidate_text(&line);
-        assert!(rendered.contains(" p.12"));
-        assert!(rendered.contains("…"));
-        assert_eq!(rendered_candidate_width(&line), 13);
+            assert_eq!(rendered.contains('…'), elided, "{name}");
+            if detail_visible {
+                assert!(rendered.ends_with(detail), "{name}: {rendered:?}");
+                assert!(
+                    rendered.contains(&format!(" {detail}")),
+                    "{name}: {rendered:?}"
+                );
+            } else if !detail.is_empty() {
+                assert!(!rendered.contains(detail), "{name}: {rendered:?}");
+            }
+            if let Some(expected_width) = expected_width {
+                assert_eq!(rendered_candidate_width(&line), expected_width, "{name}");
+            }
+        }
     }
 
     #[test]
@@ -829,23 +789,6 @@ mod tests {
 
         let expected = super::selected_text_style();
         assert!(line.spans.iter().all(|span| span.style == expected));
-    }
-
-    #[test]
-    fn palette_item_line_reserves_trailing_padding() {
-        let line = build_palette_item_line(
-            &PaletteItemView {
-                label: vec![crate::palette::PaletteTextPart {
-                    text: "open".to_string(),
-                    tone: crate::palette::PaletteTextTone::Primary,
-                }],
-                detail: Vec::new(),
-                selected: false,
-            },
-            12,
-        );
-
-        assert_eq!(rendered_candidate_width(&line), 9);
     }
 
     #[test]

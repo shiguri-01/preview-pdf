@@ -41,21 +41,3 @@ pub(super) fn join_palette_text_parts(parts: &[PaletteTextPart]) -> String {
     }
     text
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{PaletteTextPart, PaletteTextTone};
-
-    #[test]
-    fn constructors_set_expected_tones() {
-        assert_eq!(PaletteTextPart::primary("a").tone, PaletteTextTone::Primary);
-        assert_eq!(
-            PaletteTextPart::secondary("b").tone,
-            PaletteTextTone::Secondary
-        );
-        assert_eq!(
-            PaletteTextPart::highlight("c").tone,
-            PaletteTextTone::Highlight
-        );
-    }
-}

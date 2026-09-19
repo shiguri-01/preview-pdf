@@ -146,12 +146,7 @@ mod tests {
         palette::{PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteProvider},
     };
 
-    use super::{OutlinePaletteEntry, OutlinePaletteProvider, format_outline_page_detail};
-
-    #[test]
-    fn page_detail_uses_loading_overlay_format() {
-        assert_eq!(format_outline_page_detail(11), "p.12");
-    }
+    use super::{OutlinePaletteEntry, OutlinePaletteProvider};
 
     #[test]
     fn list_uses_p_prefixed_page_detail() {

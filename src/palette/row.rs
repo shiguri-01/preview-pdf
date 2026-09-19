@@ -162,11 +162,11 @@ fn render_cells(cells: Vec<PaletteCell>) -> Vec<PaletteTextPart> {
 #[cfg(test)]
 mod tests {
     use super::{PageIndex, PaletteRow};
-    use crate::palette::PaletteTextPart;
+    use crate::palette::{PaletteTextPart, PaletteTextTone};
 
     #[test]
-    fn plain_text_joins_label_and_detail_segments() {
-        let candidate = PaletteRow::new("id")
+    fn row_text_preserves_rendering_and_builds_matchable_text() {
+        let joined = PaletteRow::new("joined")
             .label_matchable_parts(vec![
                 PaletteTextPart::primary("open"),
                 PaletteTextPart::secondary(" now"),
@@ -174,14 +174,15 @@ mod tests {
             .detail_matchable_text("Command")
             .into_candidate();
 
-        assert_eq!(candidate.plain_label_text(), "open now");
-        assert_eq!(candidate.plain_detail_text(), "Command");
-        assert_eq!(candidate.plain_text(), "open now Command");
-    }
+        assert_eq!(joined.plain_label_text(), "open now");
+        assert_eq!(joined.plain_detail_text(), "Command");
+        assert_eq!(joined.label()[0].tone, PaletteTextTone::Primary);
+        assert_eq!(joined.label()[1].tone, PaletteTextTone::Secondary);
+        assert_eq!(joined.detail()[0].tone, PaletteTextTone::Secondary);
 
-    #[test]
-    fn plain_text_preserves_internal_spacing_in_parts() {
-        let candidate = PaletteRow::new("id")
+        let highlighted = PaletteTextPart::highlight("match");
+        assert_eq!(highlighted.tone, PaletteTextTone::Highlight);
+        let spaced = PaletteRow::new("spaced")
             .label_matchable_parts(vec![
                 PaletteTextPart::primary("open"),
                 PaletteTextPart::primary(" "),
@@ -189,13 +190,7 @@ mod tests {
             .detail_matchable_text("Command")
             .into_candidate();
 
-        assert_eq!(candidate.plain_label_text(), "open ");
-        assert_eq!(candidate.plain_text(), "open  Command");
-    }
-
-    #[test]
-    fn match_text_trims_render_only_cell_spacing() {
-        let candidate = PaletteRow::new("id")
+        let trimmed = PaletteRow::new("trimmed")
             .label_matchable_parts(vec![
                 PaletteTextPart::primary("open"),
                 PaletteTextPart::primary(" "),
@@ -203,29 +198,36 @@ mod tests {
             .detail_matchable_text(" Command ")
             .into_candidate();
 
-        assert_eq!(candidate.plain_text(), "open   Command ");
-        assert_eq!(candidate.match_text(), "open Command");
-    }
-
-    #[test]
-    fn match_text_comes_from_matchable_cells() {
-        let candidate = PaletteRow::new("id")
+        let matchable = PaletteRow::new("matchable")
             .label_matchable_text("page")
             .label_decoration(" ")
             .detail_page(PageIndex::zero_based(11))
             .into_candidate();
 
-        assert_eq!(candidate.match_text(), "page p.12");
-    }
-
-    #[test]
-    fn plain_text_uses_rendered_page_label() {
-        let candidate = PaletteRow::new("id")
+        let page = PaletteRow::new("page")
             .label_matchable_text("current")
             .detail_page(PageIndex::zero_based(11))
             .into_candidate();
 
-        assert_eq!(candidate.plain_text(), "current p.12");
-        assert_eq!(candidate.match_text(), "current p.12");
+        for (name, candidate, plain, matchable) in [
+            (
+                "joined parts",
+                joined,
+                "open now Command",
+                "open now Command",
+            ),
+            ("internal spacing", spaced, "open  Command", "open Command"),
+            (
+                "trimmed match cells",
+                trimmed,
+                "open   Command ",
+                "open Command",
+            ),
+            ("decoration excluded", matchable, "page  p.12", "page p.12"),
+            ("page label", page, "current p.12", "current p.12"),
+        ] {
+            assert_eq!(candidate.plain_text(), plain, "{name}");
+            assert_eq!(candidate.match_text(), matchable, "{name}");
+        }
     }
 }

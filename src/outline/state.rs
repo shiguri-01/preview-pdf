@@ -187,35 +187,6 @@ mod tests {
     }
 
     #[test]
-    fn palette_entries_flatten_outline_depth_first() {
-        let pdf = Arc::new(StubPdf {
-            path: PathBuf::from("outline.pdf"),
-            doc_id: 9,
-            outline: vec![OutlineNode {
-                title: "Root".to_string(),
-                page: 0,
-                children: vec![OutlineNode {
-                    title: "Child".to_string(),
-                    page: 2,
-                    children: Vec::new(),
-                }],
-            }],
-        }) as SharedPdfBackend;
-        let mut state = OutlineState::default();
-
-        state
-            .open_palette(pdf)
-            .expect("outline open should succeed");
-        let entries = state.palette_entries();
-
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].title, "Root");
-        assert_eq!(entries[0].depth, 0);
-        assert_eq!(entries[1].title, "Child");
-        assert_eq!(entries[1].depth, 1);
-    }
-
-    #[test]
     fn palette_entries_preserve_depth_first_sibling_order() {
         let pdf = Arc::new(StubPdf {
             path: PathBuf::from("outline.pdf"),
@@ -256,6 +227,9 @@ mod tests {
             .map(|entry| entry.title.as_str())
             .collect::<Vec<_>>();
         assert_eq!(titles, vec!["Root", "Child A", "Child B", "Second Root"]);
+        assert_eq!(entries[0].depth, 0);
+        assert_eq!(entries[1].depth, 1);
+        assert_eq!(entries[2].depth, 1);
         assert_eq!(entries[3].depth, 0);
     }
 

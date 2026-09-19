@@ -239,16 +239,11 @@ mod tests {
     }
 
     #[test]
-    fn status_bar_segments_is_empty_without_active_extensions() {
-        let host = test_extension_host();
-        let app = crate::app::AppState::default();
-        assert!(host.status_bar_segments(&app).is_empty());
-    }
-
-    #[test]
-    fn status_bar_segments_includes_search_when_query_is_active() {
+    fn status_bar_segments_reflect_active_search() {
         let mut host = test_extension_host();
         let mut app = crate::app::AppState::default();
+        assert!(host.status_bar_segments(&app).is_empty());
+
         let pdf = StubPdf::new(4);
 
         host.command_ports()

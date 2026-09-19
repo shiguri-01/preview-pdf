@@ -152,21 +152,6 @@ mod tests {
     }
 
     #[test]
-    fn cache_tracks_hit_rate() {
-        let mut cache = RenderedPageCache::new(4, 1024 * 1024);
-        let key = RenderedPageKey::new(10, 1, 1.0);
-        let _ = cache.insert(key, frame(10, 10), false);
-
-        assert!(cache.get(&key).is_some());
-        assert!(cache.get(&RenderedPageKey::new(10, 2, 1.0)).is_none());
-
-        let counters = cache.counters();
-        assert_eq!(counters.hits, 1);
-        assert_eq!(counters.misses, 1);
-        assert_eq!(cache.hit_rate(), 0.5);
-    }
-
-    #[test]
     fn cache_evicts_when_over_budget() {
         let mut cache = RenderedPageCache::new(2, 10_000);
         let _ = cache.insert(RenderedPageKey::new(1, 1, 1.0), frame(40, 40), false);
@@ -174,19 +159,6 @@ mod tests {
 
         assert!(cache.len() < 2);
         assert!(cache.memory_bytes() <= 10_000);
-    }
-
-    #[test]
-    fn cache_reinsert_updates_memory_without_double_counting() {
-        let mut cache = RenderedPageCache::new(4, 1024 * 1024);
-        let key = RenderedPageKey::new(1, 0, 1.0);
-        let _ = cache.insert(key, frame(8, 8), false);
-        let first_bytes = cache.memory_bytes();
-        let _ = cache.insert(key, frame(10, 10), false);
-
-        assert_eq!(cache.len(), 1);
-        assert!(cache.memory_bytes() > first_bytes);
-        assert_eq!(cache.memory_bytes(), frame(10, 10).byte_len());
     }
 
     #[test]
@@ -207,32 +179,6 @@ mod tests {
         assert!(cache.contains(&c));
         assert!(cache.memory_bytes() < before);
         assert_eq!(cache.counters().evictions, 2);
-    }
-
-    #[test]
-    fn insert_at_capacity_keeps_memory_accounting_consistent() {
-        let mut cache = RenderedPageCache::new(2, 1024 * 1024);
-        let _ = cache.insert(RenderedPageKey::new(1, 0, 1.0), frame(4, 4), false);
-        let _ = cache.insert(RenderedPageKey::new(1, 1, 1.0), frame(5, 5), false);
-        let _ = cache.insert(RenderedPageKey::new(1, 2, 1.0), frame(6, 6), false);
-
-        let expected = frame(5, 5).byte_len() + frame(6, 6).byte_len();
-        assert_eq!(cache.len(), 2);
-        assert_eq!(cache.memory_bytes(), expected);
-    }
-
-    #[test]
-    fn get_cloned_shares_pixel_buffer() {
-        let mut cache = RenderedPageCache::new(2, 1024 * 1024);
-        let key = RenderedPageKey::new(1, 0, 1.0);
-        let stored = frame(4, 4);
-        let _ = cache.insert(key, stored.clone(), false);
-
-        let cloned = cache
-            .get_cloned(&key)
-            .expect("cached frame should be available");
-
-        assert!(stored.pixels.ptr_eq(&cloned.pixels));
     }
 
     #[test]

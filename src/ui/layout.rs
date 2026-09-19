@@ -39,7 +39,7 @@ mod tests {
     use super::split_layout;
 
     #[test]
-    fn split_layout_reserves_status_bar() {
+    fn split_layout_reserves_configured_status_rows() {
         let area = Rect {
             x: 0,
             y: 0,
@@ -47,25 +47,15 @@ mod tests {
             height: 40,
         };
 
-        let layout = split_layout(area, false);
-        assert_eq!(layout.status.height, 1);
-        assert_eq!(layout.viewer.height, 39);
-        assert!(layout.viewer_inner.width <= layout.viewer.width);
-        assert!(layout.viewer_inner.height <= layout.viewer.height);
-    }
-
-    #[test]
-    fn split_layout_with_debug_reserves_two_status_rows() {
-        let area = Rect {
-            x: 0,
-            y: 0,
-            width: 120,
-            height: 40,
-        };
-
-        let layout = split_layout(area, true);
-        assert_eq!(layout.status.height, 2);
-        assert_eq!(layout.viewer.height, 38);
+        for (name, debug_status_visible, status_height, viewer_height) in
+            [("normal", false, 1, 39), ("debug", true, 2, 38)]
+        {
+            let layout = split_layout(area, debug_status_visible);
+            assert_eq!(layout.status.height, status_height, "{name}");
+            assert_eq!(layout.viewer.height, viewer_height, "{name}");
+            assert!(layout.viewer_inner.width <= layout.viewer.width, "{name}");
+            assert!(layout.viewer_inner.height <= layout.viewer.height, "{name}");
+        }
     }
 
     #[test]

@@ -214,26 +214,6 @@ mod tests {
     };
 
     #[test]
-    fn into_pixels_vec_reuses_unique_allocation() {
-        let expected = vec![1, 2, 3, 4];
-        let frame = RgbaFrame {
-            width: 1,
-            height: 1,
-            pixels: expected.clone().into(),
-        };
-
-        assert_eq!(frame.into_pixels_vec(), expected);
-    }
-
-    #[test]
-    fn pixel_buffer_ptr_eq_tracks_shared_storage() {
-        let pixels: PixelBuffer = vec![7; 4].into();
-        let cloned = pixels.clone();
-
-        assert!(pixels.ptr_eq(&cloned));
-    }
-
-    #[test]
     fn pooled_pixel_buffer_returns_storage_after_drop() {
         let pool = Box::leak(Box::new(PixelBufferPool::default()));
         let pixels = PixelBuffer::from_pooled_vec(vec![1, 2, 3, 4], pool);

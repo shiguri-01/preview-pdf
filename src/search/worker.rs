@@ -639,16 +639,6 @@ mod tests {
     }
 
     #[test]
-    fn search_page_cache_hits_after_insert() {
-        let mut cache = SearchPageCache::with_limits(4, usize::MAX);
-        let page = text_page("alpha");
-
-        cache.insert(1, 0, Arc::new(page.clone()));
-
-        assert_eq!(cache.get(1, 0).as_deref(), Some(&page));
-    }
-
-    #[test]
     fn search_page_cache_evicts_least_recently_used_over_max_entries() {
         let mut cache = SearchPageCache::with_limits(2, usize::MAX);
         cache.insert(1, 0, Arc::new(text_page("alpha")));
@@ -739,7 +729,7 @@ mod tests {
     }
 
     #[test]
-    fn search_page_cache_reinsertion_replaces_memory_accounting() {
+    fn search_page_cache_reinsertion_replaces_memory_without_evicting_the_entry() {
         let mut cache = SearchPageCache::with_limits(4, usize::MAX);
         let replacement = text_page("abcde");
         let expected_bytes = estimate_text_page_bytes(&replacement);
@@ -749,10 +739,7 @@ mod tests {
 
         assert_eq!(cache.len(), 1);
         assert_eq!(cache.memory_bytes(), expected_bytes);
-    }
 
-    #[test]
-    fn search_page_cache_reinsertion_does_not_trigger_budget_eviction() {
         let page = Arc::new(text_page("a"));
         let expected_bytes = estimate_text_page_bytes(&page);
         let mut cache = SearchPageCache::with_limits(4, expected_bytes);

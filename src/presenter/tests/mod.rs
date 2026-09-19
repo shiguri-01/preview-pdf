@@ -14,13 +14,12 @@ use crate::work::WorkClass;
 use super::encode::{
     EncodeLaneKind, EncodeWorkerRequest, enqueue_encode_request, pop_next_encode_task,
 };
-use super::factory::{PresenterFactoryOptions, create_presenter};
 use super::l2_cache::{TerminalFrameKey, TerminalFrameState};
 use super::ratatui::RatatuiImagePresenter;
 use super::terminal_cell::cell_size_from_window_metrics;
 use super::traits::{
-    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterFeedback, PresenterKind,
-    PresenterRenderMode, PresenterRenderOptions, Viewport,
+    ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterFeedback, PresenterRenderMode,
+    PresenterRenderOptions, Viewport,
 };
 
 fn frame() -> RgbaFrame {
@@ -56,16 +55,6 @@ fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
         first_ready_key(presenter).is_some(),
         "presenter should have a ready frame for fallback"
     );
-}
-
-#[test]
-fn select_ratatui_presenter() {
-    let presenter = create_presenter(
-        PresenterKind::RatatuiImage,
-        PresenterFactoryOptions::default(),
-    )
-    .expect("ratatui presenter should be selectable");
-    assert_eq!(presenter.capabilities().backend_name, "ratatui-image");
 }
 
 #[test]

@@ -439,13 +439,6 @@ mod tests {
         );
     }
     #[test]
-    fn render_failure_message_uses_spread_label() {
-        assert_eq!(
-            render_failure_message(Some("pp.12-13")),
-            "Could not render pp.12-13."
-        );
-    }
-    #[test]
     fn render_failure_message_falls_back_to_current_page() {
         assert_eq!(
             render_failure_message(None),

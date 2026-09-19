@@ -59,11 +59,6 @@ fn px_to_cells(px: u32, cell_px: u32, max_cells: u16) -> u16 {
     cells.max(1).min(u32::from(max_cells)) as u16
 }
 
-#[cfg(test)]
-pub(super) fn center_rect_within(area: Rect, width: u16, height: u16) -> Rect {
-    align_rect_within(area, width, height, PresenterHorizontalAlign::Center)
-}
-
 pub(super) fn align_rect_within(
     area: Rect,
     width: u16,
@@ -89,18 +84,16 @@ mod tests {
     use ratatui::layout::Rect;
 
     #[test]
-    fn center_rect_within_places_rect_in_the_middle() {
-        let area = Rect::new(10, 5, 20, 10);
-        let centered = center_rect_within(area, 8, 4);
-        assert_eq!(centered, Rect::new(16, 8, 8, 4));
-    }
-    #[test]
-    fn align_rect_within_can_pin_to_horizontal_edges() {
+    fn align_rect_within_places_rect_at_requested_horizontal_position() {
         let area = Rect::new(10, 5, 20, 10);
 
         assert_eq!(
             align_rect_within(area, 8, 4, PresenterHorizontalAlign::Start),
             Rect::new(10, 8, 8, 4)
+        );
+        assert_eq!(
+            align_rect_within(area, 8, 4, PresenterHorizontalAlign::Center),
+            Rect::new(16, 8, 8, 4)
         );
         assert_eq!(
             align_rect_within(area, 8, 4, PresenterHorizontalAlign::End),

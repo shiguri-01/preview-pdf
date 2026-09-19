@@ -273,8 +273,8 @@ mod tests {
     use crate::search::engine::SearchOccurrence;
 
     #[test]
-    fn locate_occurrences_skips_whitespace_insensitive_fallback_after_direct_match() {
-        let glyphs = vec![
+    fn locate_occurrences_prefers_direct_matches_then_falls_back_without_whitespace() {
+        let direct_glyphs = vec![
             glyph('f', 10.0, 20.0, 18.0, 32.0),
             glyph('o', 20.0, 20.0, 28.0, 32.0),
             glyph('o', 30.0, 20.0, 38.0, 32.0),
@@ -291,16 +291,7 @@ mod tests {
             glyph('r', 140.0, 20.0, 148.0, 32.0),
         ];
 
-        let occurrences = locate_occurrences(&glyphs, "foobar", false);
-
-        assert_eq!(occurrences.len(), 1);
-        assert_eq!(occurrences[0].match_start, 0);
-        assert_eq!(occurrences[0].match_end, 5);
-    }
-
-    #[test]
-    fn locate_occurrences_uses_whitespace_insensitive_fallback_without_direct_match() {
-        let glyphs = vec![
+        let fallback_glyphs = vec![
             glyph('f', 10.0, 20.0, 18.0, 32.0),
             glyph('o', 20.0, 20.0, 28.0, 32.0),
             glyph('o', 30.0, 20.0, 38.0, 32.0),
@@ -309,11 +300,19 @@ mod tests {
             glyph('r', 60.0, 20.0, 68.0, 32.0),
         ];
 
-        let occurrences = locate_occurrences(&glyphs, "foo bar", false);
-
-        assert_eq!(occurrences.len(), 1);
-        assert_eq!(occurrences[0].match_start, 0);
-        assert_eq!(occurrences[0].match_end, 5);
+        for (name, glyphs, query) in [
+            ("direct match", direct_glyphs, "foobar"),
+            (
+                "whitespace-insensitive fallback",
+                fallback_glyphs,
+                "foo bar",
+            ),
+        ] {
+            let occurrences = locate_occurrences(&glyphs, query, false);
+            assert_eq!(occurrences.len(), 1, "{name}");
+            assert_eq!(occurrences[0].match_start, 0, "{name}");
+            assert_eq!(occurrences[0].match_end, 5, "{name}");
+        }
     }
 
     #[test]

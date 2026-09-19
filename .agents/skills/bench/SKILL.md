@@ -1,23 +1,22 @@
 ---
 name: bench
-description: Run and interpret pvf headless performance diagnostics. Use for generating benchmark PDF fixtures, running `cargo bench --bench perf`, writing JSON reports, comparing results across PDFs or code changes, and explaining scenario metrics or regressions.
+description: Run or compare pvf headless benchmarks and interpret performance reports.
 ---
 
 # Bench
 
-Use this skill to run, compare, or explain repo-local performance diagnostics.
+Use `benches/perf.rs` as the entry point, `benches/fixtures/` as the fixture
+source, and `target/bench/` for generated fixtures and reports.
 
-Before changing benchmark behavior, report shape, scenario metadata, or
-performance-diagnostics policy, read the relevant `docs/reference.md`
-Performance Diagnostics section and `docs/testing.md` guidance on performance
-diagnostics versus correctness tests.
-For a straightforward benchmark rerun, inspect only the bench command, fixture,
-and report context needed to answer the request.
-Use `benches/perf.rs` as the bench entry point, `benches/fixtures/` as the fixture source, and `target/bench/` for generated fixtures and reports.
+Choose the smallest run that answers the measurement question. Run benchmarks
+sequentially to avoid contention; keep variables unrelated to the comparison
+axis stable.
 
-## Agent Workflow
+When changing benchmark behavior, report shape, or scenario metadata, consult
+Performance Diagnostics in `docs/reference.md`. For the boundary between
+performance diagnostics and correctness tests, use `docs/testing.md`.
+A rerun needs only the relevant command, fixture, and report context.
 
-Infer the measurement goal from the conversation, then choose the smallest run that answers it.
-Run benchmark commands sequentially, not in parallel.
-For comparisons, keep variables unrelated to the comparison axis stable.
-Report only the metrics that explain the user's question, and include enough context to reproduce the result: command, fixture, scenarios, warmup, iterations, output path, and comparison axis.
+Report the metrics relevant to the question and enough context to reproduce
+them: command, fixture, scenarios, warmup, iterations, output path, and
+comparison axis.

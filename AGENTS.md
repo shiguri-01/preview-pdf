@@ -2,29 +2,43 @@
 
 `pvf` is a Rust CLI/TUI PDF viewer.
 
-## Docs
-- `docs/README.md`: developer docs entry point. Read only relevant sections.
-- Keep docs in sync with code and test changes.
-- Repo-local skills provide task-specific workflow guidance; use them when they apply.
+## Development
 
-## Commands
-- `nix develop`: enter the flake-provided development shell; direnv can load it via `.envrc`.
-- `cargo check`: fast compile validation during iteration.
-- `cargo build`: full debug build.
-- `cargo run`: run locally.
-- `cargo test`: run tests.
-- `cargo fmt`: format.
-- `cargo clippy --all-targets --all-features -- -D warnings`: lint and fail on warnings.
+Use `nix develop` for the flake-provided environment; direnv can load it via
+`.envrc`. Choose validation for the changed surface:
 
-## Testing
-- Default: in-file `#[cfg(test)]` modules
-- `<module>/tests`: only for testing public-facing specs/interfaces of that module
+- Rust changes: `cargo check` or a focused test during iteration. Before
+  handoff, use `cargo fmt --check`, `cargo test`, and
+  `cargo clippy --all-targets --all-features -- -D warnings`.
+- Docs and instructions only: check the diff and affected references; Cargo
+  validation is unnecessary unless Rust-facing artifacts also change.
 
-## Simplicity
-- Prefer one clear implementation path over compatibility branches.
-- Do not add fallbacks, aliases, or legacy shims unless the task specifically calls for them.
-- When behavior changes, update the affected code and tests directly instead of keeping both old and new paths.
+For implementation requests, carry the change through relevant validation and
+fix failures caused by it. Routine local edits and checks within the requested
+scope do not need separate confirmation. Report remaining blockers and anything
+that could not be verified.
 
-## Commit & Pull Request Guidelines
-- Preferred commit format: `<type>(<scope>): <summary>` where useful (`feat`, `fix`, `refactor`, `docs`, `test`).
-- For GitHub PR creation/view/update tasks, use `pr-workflow` skill.
+## Project Knowledge
+
+`docs/README.md` routes developer documentation. Consult architecture guidance
+for ownership changes, reference guidance for stable contracts, and testing
+guidance for test placement or validation policy. Update affected documentation
+when those contracts change; keep local implementation details in code and tests.
+Complete command, configuration, and registry inventories belong in code;
+developer docs explain their contracts and rationale without duplicating lists.
+
+Repo-local skills provide guidance for specific workflows. Load those relevant
+to the task.
+
+## Design and Tests
+
+- Prefer one clear implementation path. Do not add fallbacks, aliases, or
+  legacy shims unless the task calls for them.
+- When behavior changes, update the affected implementation and tests directly.
+- Use in-file `#[cfg(test)]` modules by default. Reserve `<module>/tests` for
+  public-facing module contracts and repository `tests/` for process behavior.
+
+## Commits and Pull Requests
+
+Preferred commit format: `<type>(<scope>): <summary>` where useful.
+Use `pr-workflow` for GitHub PR creation, inspection, or updates.

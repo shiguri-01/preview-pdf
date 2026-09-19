@@ -1,32 +1,16 @@
 ---
 name: pr-workflow
-description: Create and review GitHub pull requests with a consistent workflow. Use this whenever the user asks to create a PR, open/view PR details, draft PR text, or prepare changes for merge.
+description: Create, inspect, review, or update GitHub pull requests for pvf.
 ---
 
-## Preconditions
+# Pull Requests
 
-1. Before creating a PR, run quality checks in this order:
-   - `cargo fmt --check`
-   - `cargo test`
-   - `cargo clippy --all-targets --all-features -- -D warnings`
-2. If any check fails, do not create the PR until fixed.
+Use `gh` for PR operations. Follow `AGENTS.md` and `docs/testing.md` for
+validation appropriate to the diff; reuse passing checks for unchanged content.
 
-## Create PR
+Keep the title and body proportional to the change: problem, resulting behavior,
+rationale, and validation. Pass multiline bodies with `--body-file`.
 
-1. Create a short branch-appropriate PR title using the same format as the preferred commit message format:
-   - `<type>(<scope>): <summary>` where useful (`feat`, `fix`, `refactor`, `docs`, `test`).
-2. Write a concise PR body tailored to the change's scope:
-   - Always include the rationale for the change.
-   - Small/obvious changes: verification results + one-line rationale
-   - Larger changes: problem, rationale, solution approach, risk/impact, verification.
-   - Omit sections that add no information for this specific change.
-   - Linked issue (if already known; do not search for it)
-3. Create PR with `gh pr create` using title/body prepared above.
-   - Note: In `--body`, literal `\n` may not become newlines; pass actual line breaks (or use `--body-file`).
-
-## View PR
-
-Use `gh pr view <number>` to fetch PR details.
-- `--json fields` and `--jq expression` are available for structured/filtered output.
-- `gh pr view <PR-number> --json=reviews` can fetch review summaries.
-- Inline review comments are not included in `--json=reviews`; fetch them with `gh api "repos/:owner/:repo/pulls/<PR-number>/comments" | jq 'map({file: .path, line: (.line // .original_line), author: .user.login, diff: .diff_hunk, comment: .body})'`.
+For reviews, inspect the diff, checks, and review feedback. `gh pr view --json
+reviews` omits inline comments; fetch those with
+`gh api "repos/:owner/:repo/pulls/<number>/comments"`.

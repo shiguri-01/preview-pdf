@@ -1,41 +1,25 @@
 ---
 name: pvf-extension
-description: Add, edit, rename, or review pvf extension behavior. Use when changing Extension implementations, ExtensionHost composition, extension-owned state, input hooks, AppEvent handling, background drain, status bar segments, extension UI snapshots, or reload/reset behavior.
+description: Change or review pvf extension lifecycle, host composition, or state ownership.
 ---
 
 # PVF Extension
 
-Use this skill for changes centered on pvf feature extensions and their runtime state.
+- `ExtensionHost` owns extension state. Preserve hook ordering and first-claim
+  input behavior when changing interception.
+- Observe typed `AppEvent` values instead of ad hoc cross-module calls.
+- Background drain reports whether visible or behavioral state changed.
+- Expose palette-facing data through small UI snapshots; keep status output
+  optional and compact.
+- For document reload, define which state resets, persists, or is rehydrated.
+- For asynchronous work, establish its owner, shutdown and cancellation paths,
+  stale-result identity, and event propagation.
 
-## Start
+Use Extensions in `docs/reference.md` for lifecycle or host contracts, Palette
+for palette integration, and Rendering And Workers for background work.
+Consult `docs/architecture.md` for ownership or event-flow changes and
+`docs/testing.md` for test-layer decisions.
 
-Read only the relevant `docs/reference.md` Extensions section before changing
-extension contracts or host composition.
-Read only the relevant `docs/reference.md` Palette section when an extension
-exposes data to a palette or opens a palette.
-Read only the relevant `docs/reference.md` Rendering And Workers section when
-extension work can outlive one event-loop iteration.
-Read the relevant part of `docs/architecture.md` when extension ownership,
-event flow, worker flow, or subsystem boundaries change.
-Read the relevant section of `docs/testing.md` before placing new extension
-tests.
-
-## Implementation Checks
-
-- Keep extension state owned by `ExtensionHost` unless the architecture changes deliberately.
-- Preserve hook ordering and first-claim input behavior when adding input interception.
-- Keep event observation driven by typed `AppEvent` values rather than ad hoc cross-module calls.
-- Make background drain report whether visible or behavioral state changed.
-- Expose palette-facing data through a small UI snapshot instead of leaking extension internals.
-- Keep status-bar output optional and compact.
-- If document reload affects the extension, define the reset, preserve, or rehydrate behavior explicitly.
-- If the extension starts asynchronous work, define owner, shutdown path, cancellation model, stale-result identity, and event propagation.
-
-## Tests And Docs
-
-- Add or update state tests for event handling, input hooks, background drain, status output, and reload/reset behavior.
-- Add host tests when composition, ordering, snapshot data, or cross-extension interactions change.
-- Update `docs/reference.md` for extension contract, host composition, built-in
-  extension behavior, worker, cancellation, or stale-result contract changes.
-- Update `docs/architecture.md` only when ownership, event flow, worker flow, or
-  boundary rationale changes.
+Test changed state behavior beside the extension. Host tests cover composition,
+ordering, snapshots, and cross-extension interactions. Update docs when stable
+contracts or ownership change.

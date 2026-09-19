@@ -1,83 +1,44 @@
 ---
 name: pvf-command
-description: Add, edit, rename, or review pvf command behavior. Use when changing command ids, arguments, parsing, roles, exposure, invocation policy, target requirements, enabled_when runtime conditions, command palette visibility, key bindings, help text, or command dispatch.
+description: Change or review pvf runtime command contracts, dispatch, or key bindings.
 ---
 
 # PVF Command
 
-Use this skill for changes centered on pvf runtime commands.
+For user-visible changes, establish the intended invocation, arguments,
+feedback, and relevant failure behavior from the request and existing commands.
+Clarify unresolved product choices when they matter; a separate design document
+is not required.
 
-## Start
+## Contracts
 
-Read only the relevant `docs/reference.md` sections for Commands and Key
-Bindings before changing command internals, command ids, invocation policy, key
-bindings, or help surfaces.
-Read only the relevant `docs/reference.md` Palette section when command palette
-behavior, completion, visibility, or submission changes.
-Read the relevant part of `docs/architecture.md` when command routing or
-subsystem boundaries change.
-Read the relevant section of `docs/testing.md` before placing new command or
-keymap tests.
+- The command catalog owns typed commands, ids, metadata, parsing, and execution
+  routing. Keep parser behavior, metadata arguments, and dispatch aligned.
+- Role, exposure, invocation source policy, target resolution, and runtime
+  `enabled_when` are separate concerns. Commands and key bindings share the
+  runtime condition system.
+- Keep public names and arguments stable during internal redesigns. Choose
+  new interfaces for user understanding.
+- Feature handlers own execution. Surface-local interactions use scoped key
+  bindings or interaction command requests and resolve targets through dispatch.
+  Normal, palette, and help keys share the input sequence registry.
+- Handlers return `CommandExecution`: `Applied` or `Noop` plus
+  `CommandEffects`. Dispatch applies effects after validation; handlers do not
+  write pending palette queues, input history, or loop lifecycle state directly.
+- Use effects for notices, app events, palette requests, history records,
+  follow-up commands, and lifecycle requests. Follow-up commands carry an
+  intentional invocation source and go through validation. Termination is a
+  lifecycle effect, not an outcome.
+- Keep navigation events and reasons aligned with the command's behavior.
+  Update keymap and help together when changing key access.
 
-## User-Facing Design First
+## Relevant context and checks
 
-Before editing implementation code for a user-visible command, write a short working contract:
+Use Commands and Keymap in `docs/reference.md` for those contracts;
+use its Palette section when changing listing, hints, completion, or submission.
+Use `docs/architecture.md` for routing or ownership changes and
+`docs/testing.md` for test-layer decisions.
 
-- What is the user trying to accomplish?
-- What would the user intuitively try first: a key, command palette search,
-  typed command, scoped interaction, or existing workflow?
-- What exact command id, arguments, key binding, title, help text, notice, or error will the user see?
-- What is the shortest successful path?
-- What happens for empty input, invalid input, unavailable state, repeated use, cancellation, and recovery?
-- Which existing command should this feel consistent with?
-
-Do not start implementation until the external behavior is clear enough to test.
-
-## Implementation Checks
-
-- Treat the command catalog as the source for the typed command, command id,
-  role, exposure, invocation policy, target requirement, `enabled_when`,
-  metadata, parser routing, and execution routing.
-- Keep parser behavior, metadata args, and dispatch behavior aligned.
-- Choose role, exposure, invocation policy, target requirement, and
-  `enabled_when` deliberately. Visibility, source policy, target resolution,
-  and runtime enabled-state are separate concerns.
-- Use the shared runtime condition system for command `enabled_when` and key
-  binding `enabled_when`; do not reintroduce command-only or keymap-only
-  condition enums.
-- Choose public command names and arguments for user understanding, not internal convenience.
-- Preserve existing user-facing command names and argument contracts unless an
-  explicit migration is being designed. Do not add fallback aliases or parallel
-  old/new dispatch paths for internal redesign work.
-- Put command execution in the feature handler that owns the behavior.
-- Surface-local operations such as palette submit, palette selection, palette
-  input editing, palette input history recall, help close, and help scroll
-  should be represented as scoped key bindings or interaction command requests,
-  then resolve their active target through dispatch.
-- Keep key binding resolution in the input sequence registry. Normal, palette,
-  and help keys should share the scoped key binding path instead of adding
-  surface-local key matching.
-- Command handlers return `CommandExecution`: an `Applied` or `Noop` outcome
-  plus `CommandEffects`. Use command effects for notices, explicit app events,
-  palette requests, input-history records, follow-up command requests, and
-  lifecycle requests.
-- Do not make handlers write pending palette queues, input history, or loop
-  lifecycle state directly. Dispatch owns applying command effects after
-  validation.
-- When a command completes another command, return a follow-up command request
-  in `CommandEffects` with an intentional invocation source instead of directly
-  bypassing command validation.
-- Represent process termination as a lifecycle effect, not as a command
-  outcome.
-- If a command affects navigation, ensure emitted app events and navigation reasons still match the feature behavior.
-- If a public command should be reachable by a key, update the keymap and help surface together.
-- If command palette behavior changes, verify listing, argument hints, completion, and runtime gating.
-
-## Tests And Docs
-
-- Add or update focused parser and dispatch tests for new argument shapes, validation, and source restrictions.
-- Add palette-provider tests when metadata, hints, visibility, or completion behavior changes.
-- Update `docs/reference.md` when command, key binding, palette visibility, or
-  user-visible runtime contracts change.
-- Update `docs/architecture.md` only when command routing or ownership
-  boundaries change.
+Protect changed argument shapes, validation, and source restrictions with
+parser or dispatch tests. Palette metadata and completion belong in provider
+tests. Update docs when stable contracts or ownership change.

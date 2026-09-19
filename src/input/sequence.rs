@@ -18,8 +18,6 @@ pub enum SequenceRegistrationError {
     ShiftCharBindingUnsupported,
 }
 
-type NumericCommandFactory = fn(usize) -> Command;
-
 #[derive(Debug, Clone, Copy)]
 pub struct KeyBindingContext<'a> {
     pub runtime: RuntimeConditionContext<'a>,
@@ -29,24 +27,6 @@ impl<'a> KeyBindingContext<'a> {
     pub fn normal(extensions: &'a ExtensionUiSnapshot) -> Self {
         Self {
             runtime: RuntimeConditionContext::normal(extensions),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GeneratedKeyMatcher {
-    PrintableCharacter,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GeneratedCommand {
-    TextInsert,
-}
-
-impl GeneratedCommand {
-    fn command_id(self) -> &'static str {
-        match self {
-            Self::TextInsert => "text.insert",
         }
     }
 }
@@ -63,14 +43,10 @@ enum SequenceBinding {
         enabled_when: BindingCondition,
         priority: BindingPriority,
         suffix: ShortcutKey,
-        command_id: &'static str,
-        factory: NumericCommandFactory,
     },
-    Generated {
+    TextInput {
         enabled_when: BindingCondition,
         priority: BindingPriority,
-        matcher: GeneratedKeyMatcher,
-        command: GeneratedCommand,
     },
 }
 
@@ -94,18 +70,11 @@ pub struct NumericSequenceBinding {
     pub command_id: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GeneratedSequenceBinding {
-    pub enabled_when: ConditionExpr,
-    pub matcher: GeneratedKeyMatcher,
-    pub command_id: &'static str,
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SequenceRegistrySnapshot {
     pub exact_bindings: Vec<ExactSequenceBinding>,
     pub numeric_prefix_bindings: Vec<NumericSequenceBinding>,
-    pub generated_bindings: Vec<GeneratedSequenceBinding>,
+    pub text_input_bindings: Vec<ConditionExpr>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -163,9 +132,7 @@ impl SequenceRegistry {
     pub fn register_numeric_prefix(
         &mut self,
         enabled_when: ConditionExpr,
-        command_id: &'static str,
         suffix: ShortcutKey,
-        factory: NumericCommandFactory,
     ) -> Result<(), SequenceRegistrationError> {
         let suffix = canonicalize_binding_key(suffix)?;
         if is_reserved_sequence_key(suffix) {
@@ -193,37 +160,26 @@ impl SequenceRegistry {
             enabled_when,
             priority,
             suffix,
-            command_id,
-            factory,
         });
         Ok(())
     }
 
-    pub fn register_generated(
-        &mut self,
-        enabled_when: ConditionExpr,
-        matcher: GeneratedKeyMatcher,
-        command: GeneratedCommand,
-    ) {
+    pub fn register_text_input(&mut self, enabled_when: ConditionExpr) {
         let enabled_when = BindingCondition::new(enabled_when);
         let priority = self.next_priority(&enabled_when);
 
         self.bindings.retain(|binding| {
             !matches!(
                 binding,
-                SequenceBinding::Generated {
+                SequenceBinding::TextInput {
                     enabled_when: existing_enabled_when,
-                    matcher: existing_matcher,
                     ..
                 } if existing_enabled_when == &enabled_when
-                    && *existing_matcher == matcher
             )
         });
-        self.bindings.push(SequenceBinding::Generated {
+        self.bindings.push(SequenceBinding::TextInput {
             enabled_when,
             priority,
-            matcher,
-            command,
         });
     }
 
@@ -300,25 +256,17 @@ impl SequenceRegistry {
                 SequenceBinding::NumericPrefix {
                     enabled_when,
                     suffix,
-                    command_id,
                     ..
                 } => snapshot
                     .numeric_prefix_bindings
                     .push(NumericSequenceBinding {
                         enabled_when: enabled_when.original(),
                         suffix: *suffix,
-                        command_id,
+                        command_id: "goto-page",
                     }),
-                SequenceBinding::Generated {
-                    enabled_when,
-                    matcher,
-                    command,
-                    ..
-                } => snapshot.generated_bindings.push(GeneratedSequenceBinding {
-                    enabled_when: enabled_when.original(),
-                    matcher: *matcher,
-                    command_id: command.command_id(),
-                }),
+                SequenceBinding::TextInput { enabled_when, .. } => {
+                    snapshot.text_input_bindings.push(enabled_when.original())
+                }
             }
         }
         snapshot
@@ -335,7 +283,7 @@ impl SequenceRegistry {
 
     fn match_buffer(&self, buffer: &[ShortcutKey], ctx: KeyBindingContext<'_>) -> RegistryMatch {
         let mut exact = None;
-        let mut generated = None;
+        let mut text_input = None;
         let mut has_prefix = false;
 
         for binding in &self.bindings {
@@ -363,11 +311,8 @@ impl SequenceRegistry {
                     }
                 }
                 SequenceBinding::NumericPrefix {
-                    priority,
-                    suffix,
-                    factory,
-                    ..
-                } => match match_numeric_prefix(buffer, *suffix, *factory) {
+                    priority, suffix, ..
+                } => match match_numeric_prefix(buffer, *suffix) {
                     NumericMatch::None => {}
                     NumericMatch::Prefix => has_prefix = true,
                     NumericMatch::Exact(command) => {
@@ -380,18 +325,12 @@ impl SequenceRegistry {
                         );
                     }
                 },
-                SequenceBinding::Generated {
-                    priority,
-                    matcher,
-                    command,
-                    ..
-                } => {
+                SequenceBinding::TextInput { priority, .. } => {
                     if buffer.len() == 1
-                        && let Some(command) =
-                            generated_command_for_key(*matcher, *command, buffer[0], ctx)
+                        && let Some(command) = text_input_command_for_key(buffer[0])
                     {
-                        generated = select_higher_priority_command(
-                            generated,
+                        text_input = select_higher_priority_command(
+                            text_input,
                             CommandMatch {
                                 priority: *priority,
                                 command,
@@ -403,7 +342,7 @@ impl SequenceRegistry {
         }
 
         RegistryMatch {
-            exact: exact.or(generated).map(|matched| matched.command),
+            exact: exact.or(text_input).map(|matched| matched.command),
             has_prefix,
         }
     }
@@ -678,32 +617,23 @@ fn binding_matches_context(binding: &SequenceBinding, ctx: KeyBindingContext<'_>
     let enabled_when = match binding {
         SequenceBinding::Exact { enabled_when, .. }
         | SequenceBinding::NumericPrefix { enabled_when, .. }
-        | SequenceBinding::Generated { enabled_when, .. } => enabled_when,
+        | SequenceBinding::TextInput { enabled_when, .. } => enabled_when,
     };
 
     enabled_when.is_met(&ctx.runtime)
 }
 
-fn generated_command_for_key(
-    matcher: GeneratedKeyMatcher,
-    command: GeneratedCommand,
-    key: ShortcutKey,
-    _ctx: KeyBindingContext<'_>,
-) -> Option<Command> {
-    match (matcher, command) {
-        (GeneratedKeyMatcher::PrintableCharacter, GeneratedCommand::TextInsert) => {
-            let modifiers = key.modifiers();
-            if !(modifiers.is_empty() || modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT) {
-                return None;
-            }
+fn text_input_command_for_key(key: ShortcutKey) -> Option<Command> {
+    let modifiers = key.modifiers();
+    if !(modifiers.is_empty() || modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT) {
+        return None;
+    }
 
-            match key.code() {
-                KeyCode::Char(ch) => Some(Command::TextInsert {
-                    text: ch.to_string(),
-                }),
-                _ => None,
-            }
-        }
+    match key.code() {
+        KeyCode::Char(ch) => Some(Command::TextInsert {
+            text: ch.to_string(),
+        }),
+        _ => None,
     }
 }
 
@@ -735,11 +665,7 @@ enum NumericMatch {
     Exact(Command),
 }
 
-fn match_numeric_prefix(
-    buffer: &[ShortcutKey],
-    suffix: ShortcutKey,
-    factory: NumericCommandFactory,
-) -> NumericMatch {
+fn match_numeric_prefix(buffer: &[ShortcutKey], suffix: ShortcutKey) -> NumericMatch {
     let mut digits = String::new();
     let mut index = 0;
 
@@ -768,7 +694,7 @@ fn match_numeric_prefix(
     }
 
     match digits.parse::<usize>() {
-        Ok(number) => NumericMatch::Exact(factory(number)),
+        Ok(page) => NumericMatch::Exact(Command::GotoPage { page }),
         Err(_) => NumericMatch::None,
     }
 }
@@ -853,8 +779,8 @@ fn format_pending_buffer(buffer: &[ShortcutKey]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_SEQUENCE_TIMEOUT, GeneratedCommand, GeneratedKeyMatcher, KeyBindingContext,
-        SequenceRegistrationError, SequenceRegistry, SequenceResolution, SequenceResolver,
+        DEFAULT_SEQUENCE_TIMEOUT, KeyBindingContext, SequenceRegistrationError, SequenceRegistry,
+        SequenceResolution, SequenceResolver,
     };
     use crate::app::Mode;
     use crate::command::Command;
@@ -1050,13 +976,9 @@ mod tests {
     }
 
     #[test]
-    fn generated_printable_binding_builds_text_insert_command() {
+    fn text_input_binding_builds_text_insert_command() {
         let mut registry = SequenceRegistry::new();
-        registry.register_generated(
-            ConditionExpr::Always,
-            GeneratedKeyMatcher::PrintableCharacter,
-            GeneratedCommand::TextInsert,
-        );
+        registry.register_text_input(ConditionExpr::Always);
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
         let extensions = ExtensionUiSnapshot::default();
 
@@ -1072,13 +994,9 @@ mod tests {
     }
 
     #[test]
-    fn generated_printable_binding_accepts_ctrl_alt_text() {
+    fn text_input_binding_accepts_ctrl_alt_text() {
         let mut registry = SequenceRegistry::new();
-        registry.register_generated(
-            ConditionExpr::Always,
-            GeneratedKeyMatcher::PrintableCharacter,
-            GeneratedCommand::TextInsert,
-        );
+        registry.register_text_input(ConditionExpr::Always);
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
         let extensions = ExtensionUiSnapshot::default();
 
@@ -1097,13 +1015,9 @@ mod tests {
     }
 
     #[test]
-    fn generated_printable_binding_ignores_ctrl_without_alt() {
+    fn text_input_binding_ignores_ctrl_without_alt() {
         let mut registry = SequenceRegistry::new();
-        registry.register_generated(
-            ConditionExpr::Always,
-            GeneratedKeyMatcher::PrintableCharacter,
-            GeneratedCommand::TextInsert,
-        );
+        registry.register_text_input(ConditionExpr::Always);
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
         let extensions = ExtensionUiSnapshot::default();
 
@@ -1117,13 +1031,9 @@ mod tests {
     }
 
     #[test]
-    fn generated_printable_binding_ignores_alt_without_ctrl() {
+    fn text_input_binding_ignores_alt_without_ctrl() {
         let mut registry = SequenceRegistry::new();
-        registry.register_generated(
-            ConditionExpr::Always,
-            GeneratedKeyMatcher::PrintableCharacter,
-            GeneratedCommand::TextInsert,
-        );
+        registry.register_text_input(ConditionExpr::Always);
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
         let extensions = ExtensionUiSnapshot::default();
 
@@ -1137,7 +1047,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_printable_binding_does_not_override_exact_binding() {
+    fn text_input_binding_does_not_override_exact_binding() {
         let mut registry = SequenceRegistry::new();
         registry
             .register_exact(
@@ -1149,11 +1059,7 @@ mod tests {
                 Command::TextYank,
             )
             .expect("exact binding should register");
-        registry.register_generated(
-            ConditionExpr::Always,
-            GeneratedKeyMatcher::PrintableCharacter,
-            GeneratedCommand::TextInsert,
-        );
+        registry.register_text_input(ConditionExpr::Always);
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
         let extensions = ExtensionUiSnapshot::default();
 
@@ -1170,17 +1076,13 @@ mod tests {
     }
 
     #[test]
-    fn generated_printable_binding_does_not_override_lower_priority_exact_binding() {
+    fn text_input_binding_does_not_override_lower_priority_exact_binding() {
         static PALETTE_MODE: &[RuntimeCondition] = &[RuntimeCondition::ModeIs(Mode::Palette)];
         static COMMAND_PALETTE: &[RuntimeCondition] =
             &[RuntimeCondition::PaletteKindIs(PaletteKind::Command)];
 
         let mut registry = SequenceRegistry::new();
-        registry.register_generated(
-            ConditionExpr::All(COMMAND_PALETTE),
-            GeneratedKeyMatcher::PrintableCharacter,
-            GeneratedCommand::TextInsert,
-        );
+        registry.register_text_input(ConditionExpr::All(COMMAND_PALETTE));
         registry
             .register_exact(
                 ConditionExpr::All(PALETTE_MODE),
@@ -1644,12 +1546,7 @@ mod tests {
     fn numeric_prefix_dispatches_and_formats_pending_digits() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_numeric_prefix(
-                ConditionExpr::Always,
-                "goto-page",
-                ShortcutKey::char('G'),
-                |page| Command::GotoPage { page },
-            )
+            .register_numeric_prefix(ConditionExpr::Always, ShortcutKey::char('G'))
             .expect("numeric prefix binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
@@ -1690,12 +1587,7 @@ mod tests {
             )
             .expect("exact binding should register");
         registry
-            .register_numeric_prefix(
-                ConditionExpr::Always,
-                "goto-page",
-                ShortcutKey::char('G'),
-                |page| Command::GotoPage { page },
-            )
+            .register_numeric_prefix(ConditionExpr::Always, ShortcutKey::char('G'))
             .expect("numeric prefix binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
 
@@ -1737,12 +1629,7 @@ mod tests {
     fn unregister_numeric_prefix_removes_count_binding() {
         let mut registry = SequenceRegistry::new();
         registry
-            .register_numeric_prefix(
-                ConditionExpr::Always,
-                "goto-page",
-                ShortcutKey::char('G'),
-                |page| Command::GotoPage { page },
-            )
+            .register_numeric_prefix(ConditionExpr::Always, ShortcutKey::char('G'))
             .expect("binding should register");
 
         assert!(
@@ -1779,12 +1666,7 @@ mod tests {
         let mut registry = SequenceRegistry::new();
 
         let error = registry
-            .register_numeric_prefix(
-                ConditionExpr::Always,
-                "goto-page",
-                ShortcutKey::char('5'),
-                |page| Command::GotoPage { page },
-            )
+            .register_numeric_prefix(ConditionExpr::Always, ShortcutKey::char('5'))
             .expect_err("digit suffix should be rejected");
         assert_eq!(error, SequenceRegistrationError::InvalidNumericSuffix);
     }
@@ -1800,12 +1682,7 @@ mod tests {
             )
             .expect("single-key binding should register");
         registry
-            .register_numeric_prefix(
-                ConditionExpr::Always,
-                "goto-page",
-                ShortcutKey::char('G'),
-                |page| Command::GotoPage { page },
-            )
+            .register_numeric_prefix(ConditionExpr::Always, ShortcutKey::char('G'))
             .expect("numeric prefix binding should register");
 
         let snapshot = registry.snapshot();

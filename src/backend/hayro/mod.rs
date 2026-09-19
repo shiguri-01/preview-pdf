@@ -18,8 +18,6 @@ pub struct PdfDoc {
     pdf: Pdf,
 }
 
-pub type HayroPdfBackend = PdfDoc;
-
 struct HayroRenderContext<'a> {
     doc: &'a PdfDoc,
     render_cache: RenderCache<'a>,

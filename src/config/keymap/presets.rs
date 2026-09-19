@@ -2,7 +2,7 @@ use crate::command::{Command, PanAmount, PanDirection};
 use crate::condition::ConditionExpr;
 use crate::palette::PaletteKind;
 
-use crate::input::sequence::{GeneratedCommand, GeneratedKeyMatcher, SequenceRegistry};
+use crate::input::sequence::SequenceRegistry;
 use crate::input::shortcut::ShortcutKey;
 
 use super::KeymapWhen;
@@ -77,13 +77,7 @@ fn register_page_navigation_bindings(registry: &mut SequenceRegistry) {
         Command::FirstPage,
     );
     register_exact_binding(registry, when, &[ShortcutKey::char('G')], Command::LastPage);
-    register_numeric_prefix_binding(
-        registry,
-        when,
-        "goto-page",
-        ShortcutKey::char('G'),
-        |page| Command::GotoPage { page },
-    );
+    register_numeric_prefix_binding(registry, when, ShortcutKey::char('G'));
 }
 
 fn register_view_bindings(registry: &mut SequenceRegistry) {
@@ -375,11 +369,7 @@ fn register_palette_bindings(registry: &mut SequenceRegistry) {
         &[ShortcutKey::ctrl('y')],
         Command::TextYank,
     );
-    registry.register_generated(
-        KeymapWhen::Palette.condition(),
-        GeneratedKeyMatcher::PrintableCharacter,
-        GeneratedCommand::TextInsert,
-    );
+    registry.register_text_input(KeymapWhen::Palette.condition());
 }
 
 fn register_help_bindings(registry: &mut SequenceRegistry) {
@@ -431,12 +421,10 @@ fn register_exact_binding(
 fn register_numeric_prefix_binding(
     registry: &mut SequenceRegistry,
     enabled_when: ConditionExpr,
-    command_id: &'static str,
     suffix: ShortcutKey,
-    factory: fn(usize) -> Command,
 ) {
     registry
-        .register_numeric_prefix(enabled_when, command_id, suffix, factory)
+        .register_numeric_prefix(enabled_when, suffix)
         .expect("numeric key binding should register");
 }
 
@@ -465,7 +453,7 @@ mod tests {
 
         assert!(snapshot.exact_bindings.is_empty());
         assert!(snapshot.numeric_prefix_bindings.is_empty());
-        assert!(snapshot.generated_bindings.is_empty());
+        assert!(snapshot.text_input_bindings.is_empty());
     }
 
     #[test]

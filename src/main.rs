@@ -7,8 +7,6 @@ use pvf::backend::open_default_backend;
 #[cfg(not(test))]
 use pvf::error::AppResult;
 #[cfg(not(test))]
-use pvf::presenter::PresenterKind;
-
 #[cfg(not(test))]
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -26,7 +24,7 @@ async fn run() -> AppResult<()> {
     let options = cli::parse();
 
     let pdf = open_default_backend(&options.pdf_path)?;
-    let mut app = AppBuilder::new(PresenterKind::RatatuiImage)
+    let mut app = AppBuilder::new()
         .replace_options(options.config.load_options()?)
         .merge_options(options.options)
         .build()?;

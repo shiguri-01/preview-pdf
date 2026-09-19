@@ -1023,8 +1023,7 @@ mod tests {
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
-        host.command_ports()
-            .search
+        host.search_mut()
             .submit(
                 &mut app,
                 Arc::clone(&pdf),
@@ -1056,8 +1055,7 @@ mod tests {
         let mut app = AppState::default();
         let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
-        host.command_ports()
-            .search
+        host.search_mut()
             .submit(
                 &mut app,
                 pdf,

@@ -10,7 +10,7 @@ use crate::extension::Extension;
 pub use engine::SearchEvent;
 pub use palette::SearchPaletteProvider;
 pub use palette::SearchResultsPaletteProvider;
-pub use state::{SearchCommandPort, SearchRuntime, SearchUiSnapshot};
+pub use state::{SearchRuntime, SearchUiSnapshot};
 
 pub struct SearchExtension;
 

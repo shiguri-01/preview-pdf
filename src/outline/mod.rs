@@ -5,7 +5,7 @@ use crate::app::AppState;
 use crate::event::AppEvent;
 use crate::extension::Extension;
 pub use palette::OutlinePaletteProvider;
-pub use state::{OutlineCommandPort, OutlineState, OutlineUiSnapshot};
+pub use state::{OutlineState, OutlineUiSnapshot};
 
 pub struct OutlineExtension;
 

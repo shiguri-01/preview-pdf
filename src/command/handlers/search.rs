@@ -9,19 +9,14 @@ use super::super::types::SearchMatcherKind;
 pub(in crate::command) fn open_search(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let request = ctx.extension_host.command_ports().search.open_palette();
+    let request = ctx.extension_host.search_mut().open_palette();
     Ok(CommandExecution::applied().with_palette_request(request))
 }
 
 pub(in crate::command) fn open_search_results(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let Some(request) = ctx
-        .extension_host
-        .command_ports()
-        .search
-        .open_results_palette()
-    else {
+    let Some(request) = ctx.extension_host.search_mut().open_results_palette() else {
         return Ok(CommandExecution::noop());
     };
     Ok(CommandExecution::applied().with_palette_request(request))
@@ -35,8 +30,7 @@ pub(in crate::command) fn submit_search(
     let pdf = Arc::clone(&ctx.pdf);
     let result = ctx
         .extension_host
-        .command_ports()
-        .search
+        .search_mut()
         .submit(ctx.app, pdf, query, matcher)?;
     Ok(CommandExecution::from_notice_result(result))
 }
@@ -48,8 +42,7 @@ pub(in crate::command) fn search_result_goto(
     let page_count = ctx.page_count();
     let result = ctx
         .extension_host
-        .command_ports()
-        .search
+        .search_mut()
         .goto_result(ctx.app, page_count, page)?;
     Ok(CommandExecution::from_notice_result(result))
 }
@@ -57,13 +50,13 @@ pub(in crate::command) fn search_result_goto(
 pub(in crate::command) fn next_search_hit(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let result = ctx.extension_host.command_ports().search.next_hit(ctx.app);
+    let result = ctx.extension_host.search_mut().next_hit(ctx.app);
     Ok(CommandExecution::from_notice_result(result))
 }
 
 pub(in crate::command) fn prev_search_hit(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let result = ctx.extension_host.command_ports().search.prev_hit(ctx.app);
+    let result = ctx.extension_host.search_mut().prev_hit(ctx.app);
     Ok(CommandExecution::from_notice_result(result))
 }

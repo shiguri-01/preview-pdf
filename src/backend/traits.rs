@@ -52,12 +52,8 @@ impl Drop for PixelStorage {
 pub struct PixelBuffer(Arc<PixelStorage>);
 
 impl PixelBuffer {
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.0.bytes.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.bytes.is_empty()
     }
 
     pub fn into_vec(self) -> Vec<u8> {
@@ -65,16 +61,6 @@ impl PixelBuffer {
             Ok(mut storage) if storage.recycle.is_none() => std::mem::take(&mut storage.bytes),
             Ok(storage) => storage.bytes.clone(),
             Err(shared) => shared.bytes.clone(),
-        }
-    }
-
-    pub fn with_mut_bytes<T>(self, f: impl FnOnce(&mut [u8]) -> T) -> T {
-        match Arc::try_unwrap(self.0) {
-            Ok(mut storage) => f(storage.bytes.as_mut_slice()),
-            Err(shared) => {
-                let mut bytes = shared.bytes.clone();
-                f(bytes.as_mut_slice())
-            }
         }
     }
 
@@ -235,20 +221,6 @@ mod tests {
 
         assert_eq!(pool.available(), 0);
         assert_eq!(frame.into_pixels_vec(), expected);
-        assert_eq!(pool.available(), 1);
-    }
-
-    #[test]
-    fn with_mut_bytes_recycles_pooled_storage_after_use() {
-        let pool = Box::leak(Box::new(PixelBufferPool::default()));
-        let pixels = PixelBuffer::from_pooled_vec(vec![1, 2, 3, 4], pool);
-
-        assert_eq!(pool.available(), 0);
-        let first = pixels.with_mut_bytes(|bytes| {
-            bytes[0] = 9;
-            bytes[0]
-        });
-        assert_eq!(first, 9);
         assert_eq!(pool.available(), 1);
     }
 

@@ -175,15 +175,9 @@ pub(crate) fn resolve_sequence_registry(options: &KeymapOptions) -> SequenceRegi
                     .register_exact(when.condition(), keys, command.clone())
                     .expect("validated exact keymap binding should register");
             }
-            KeymapBinding::NumericPrefix {
-                when,
-                suffix,
-                command_id,
-            } => {
-                let factory = numeric_prefix_factory(command_id)
-                    .expect("validated numeric prefix command should have a factory");
+            KeymapBinding::NumericPrefix { when, suffix, .. } => {
                 registry
-                    .register_numeric_prefix(when.condition(), command_id, *suffix, factory)
+                    .register_numeric_prefix(when.condition(), *suffix)
                     .expect("validated numeric keymap binding should register");
             }
             KeymapBinding::UnbindExact { when, keys } => {
@@ -219,12 +213,11 @@ pub(crate) fn parse_keymap_binding(
         let Some(command_text) = command_text else {
             return Ok(KeymapBinding::UnbindNumericPrefix { when, suffix });
         };
-        let command_id = parse_numeric_prefix_command(command_text)?;
-        validate_command_for_keymap_condition(command_id, when)?;
+        validate_numeric_prefix_command(command_text)?;
         return Ok(KeymapBinding::NumericPrefix {
             when,
             suffix,
-            command_id,
+            command_id: "goto-page",
         });
     }
 
@@ -261,19 +254,19 @@ fn parse_numeric_suffix(value: &str) -> AppResult<ShortcutKey> {
     Ok(*suffix)
 }
 
-fn parse_numeric_prefix_command(command_text: &str) -> AppResult<&'static str> {
+fn validate_numeric_prefix_command(command_text: &str) -> AppResult<()> {
     let command_id = command_text.trim();
     if command_id.is_empty() || command_id.split_whitespace().count() != 1 {
         return Err(AppError::invalid_argument(
             "count key binding command must be a command id",
         ));
     }
-    if numeric_prefix_factory(command_id).is_none() {
+    if command_id != "goto-page" {
         return Err(AppError::invalid_argument(
             "count key binding currently supports only goto-page",
         ));
     }
-    Ok("goto-page")
+    Ok(())
 }
 
 fn validate_command_for_keymap_condition(id: &str, when: KeymapWhen) -> AppResult<()> {
@@ -314,9 +307,7 @@ fn validate_exact_keys(keys: &[ShortcutKey]) -> AppResult<()> {
 
 fn validate_numeric_suffix(suffix: ShortcutKey) -> AppResult<()> {
     SequenceRegistry::new()
-        .register_numeric_prefix(ConditionExpr::Always, "goto-page", suffix, |page| {
-            Command::GotoPage { page }
-        })
+        .register_numeric_prefix(ConditionExpr::Always, suffix)
         .map(|_| ())
         .map_err(key_registration_error)
 }
@@ -334,13 +325,6 @@ fn key_registration_error(err: SequenceRegistrationError) -> AppError {
             "shifted character bindings must use the resulting character"
         }
     })
-}
-
-fn numeric_prefix_factory(command_id: &str) -> Option<fn(usize) -> Command> {
-    match command_id {
-        "goto-page" => Some(|page| Command::GotoPage { page }),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

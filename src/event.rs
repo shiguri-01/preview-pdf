@@ -87,11 +87,6 @@ impl DocumentReloadRequest {
             generation,
         }
     }
-
-    pub(crate) fn with_generation(mut self, generation: u64) -> Self {
-        self.generation = generation;
-        self
-    }
 }
 
 pub(crate) struct DocumentReloadResult {

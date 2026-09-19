@@ -59,10 +59,7 @@ impl App {
         }
 
         let mut document = ActiveDocument::new(pdf);
-        let (event_tx, event_rx, event_bus) = match event_mode {
-            RuntimeMode::Interactive { .. } => EventBusRuntime::spawn_interactive(),
-            RuntimeMode::Headless => EventBusRuntime::spawn_headless(),
-        };
+        let (event_tx, event_rx, event_bus) = EventBusRuntime::spawn_headless();
         let mut runtime = self.initialize_runtime(
             Arc::clone(&document.pdf),
             page_count,

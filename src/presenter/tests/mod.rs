@@ -8,7 +8,7 @@ use tokio::runtime::Builder;
 
 use crate::backend::RgbaFrame;
 use crate::render::cache::RenderedPageKey;
-use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig};
+use crate::render::prefetch::PrefetchQueue;
 use crate::work::WorkClass;
 
 use super::encode::{
@@ -688,7 +688,7 @@ fn encode_queue_prioritizes_current_over_prefetch() {
         width: 12,
         height: 7,
     };
-    let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+    let mut queue = PrefetchQueue::new();
 
     let low_key_1 = TerminalFrameKey {
         rendered_page: RenderedPageKey::new(1, 1, 1.0),
@@ -775,7 +775,7 @@ fn current_encode_queue_cancels_stale_generation() {
         width: 12,
         height: 7,
     };
-    let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+    let mut queue = PrefetchQueue::new();
 
     let stale_prefetch = EncodeWorkerRequest::Encode {
         key: TerminalFrameKey {

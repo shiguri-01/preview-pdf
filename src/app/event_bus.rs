@@ -21,7 +21,7 @@ pub(crate) struct EventBusRuntime {
 }
 
 impl EventBusRuntime {
-    pub(crate) fn spawn_interactive() -> (
+    pub(crate) fn spawn_headless() -> (
         UnboundedSender<DomainEvent>,
         UnboundedReceiver<DomainEvent>,
         Self,
@@ -32,23 +32,6 @@ impl EventBusRuntime {
             rx,
             Self {
                 tasks: Vec::new(),
-                file_watch: None,
-            },
-        )
-    }
-
-    pub(crate) fn spawn_headless() -> (
-        UnboundedSender<DomainEvent>,
-        UnboundedReceiver<DomainEvent>,
-        Self,
-    ) {
-        let (tx, rx) = unbounded_channel();
-        let tasks = Vec::new();
-        (
-            tx,
-            rx,
-            Self {
-                tasks,
                 file_watch: None,
             },
         )
@@ -221,20 +204,20 @@ mod tests {
     use super::{EventBusRuntime, forward_file_watch_events};
 
     #[test]
-    fn spawn_headless_creates_runtime_without_tasks() {
+    fn spawn_creates_runtime_without_tasks() {
         let (_tx, _rx, mut runtime) = EventBusRuntime::spawn_headless();
         assert!(runtime.tasks.is_empty());
         runtime.shutdown();
     }
 
     #[test]
-    fn spawn_interactive_creates_runtime_with_tasks() {
+    fn spawned_runtime_can_start_input() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("tokio runtime should initialize");
         runtime.block_on(async {
-            let (tx, _rx, mut runtime) = EventBusRuntime::spawn_interactive();
+            let (tx, _rx, mut runtime) = EventBusRuntime::spawn_headless();
             runtime.start_input(tx);
             runtime.shutdown();
         });

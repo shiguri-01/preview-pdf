@@ -9,7 +9,7 @@ use super::actors::{RenderActor, RenderNavSyncParts};
 use super::core::RenderSubsystem;
 use super::frame_ops::{encode_work_class_for_completed_render, prepare_presenter_frame};
 use super::render_runtime::PrefetchEncodeRequest;
-use super::scale::{scale_eq, zoom_eq};
+use super::scale::zoom_eq;
 use super::state::{AppState, VisiblePageSlots};
 use super::view_ops::{InitialPreviewPlan, compute_initial_preview_plan};
 
@@ -119,18 +119,12 @@ impl CurrentRenderView {
             .map(|plan| {
                 plan.page_keys
                     .iter()
-                    .enumerate()
-                    .map(|(idx, key)| RenderTask {
+                    .map(|key| RenderTask {
                         doc_id: key.doc_id,
                         page: key.page,
                         scale: key.scale_milli as f32 / 1000.0,
                         class: WorkClass::CriticalCurrent,
                         generation,
-                        reason: if idx == 0 {
-                            "initial-preview"
-                        } else {
-                            "initial-preview-spread"
-                        },
                     })
                     .collect()
             })
@@ -326,7 +320,7 @@ impl RenderSubsystem {
             return true;
         }
 
-        if !scale_eq(current_scale, *parts.tracked_scale) {
+        if !zoom_eq(current_scale, *parts.tracked_scale) {
             parts.nav.on_scale_change();
             self.runtime
                 .reset_prefetch(pdf, state.current_page, parts.nav.intent(), current_scale);
@@ -381,7 +375,7 @@ impl RenderSubsystem {
             }
         }
 
-        for (idx, page, key) in ctx.required.iter() {
+        for (_, page, key) in ctx.required.iter() {
             if self.runtime.has_cached_frame(&key) || render_worker.has_in_flight(&key) {
                 continue;
             }
@@ -393,11 +387,6 @@ impl RenderSubsystem {
                     scale: ctx.current_scale,
                     class: WorkClass::CriticalCurrent,
                     generation: render_actor.generation(),
-                    reason: if idx == 0 {
-                        "current-page"
-                    } else {
-                        "current-page-spread"
-                    },
                 },
                 render_actor.generation(),
                 ctx.current_interest_keys.as_slice(),

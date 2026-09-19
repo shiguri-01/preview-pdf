@@ -1,14 +1,10 @@
-use crate::error::AppResult;
 use crate::extension::{
     HistoryPaletteProvider, OutlinePaletteProvider, SearchPaletteProvider,
     SearchResultsPaletteProvider,
 };
 
 use super::providers::CommandPaletteProvider;
-use super::{
-    PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteProvider,
-    PaletteSubmitEffect, PaletteTabEffect,
-};
+use super::{PaletteKind, PaletteProvider};
 
 pub struct PaletteRegistry {
     command: CommandPaletteProvider,
@@ -16,14 +12,6 @@ pub struct PaletteRegistry {
     search_results: SearchResultsPaletteProvider,
     history: HistoryPaletteProvider,
     outline: OutlinePaletteProvider,
-}
-
-pub enum PaletteProviderRef<'a> {
-    Command(&'a CommandPaletteProvider),
-    Search(&'a SearchPaletteProvider),
-    SearchResults(&'a SearchResultsPaletteProvider),
-    History(&'a HistoryPaletteProvider),
-    Outline(&'a OutlinePaletteProvider),
 }
 
 impl Default for PaletteRegistry {
@@ -39,121 +27,13 @@ impl Default for PaletteRegistry {
 }
 
 impl PaletteRegistry {
-    pub fn get(&self, kind: PaletteKind) -> PaletteProviderRef<'_> {
+    pub fn get(&self, kind: PaletteKind) -> &dyn PaletteProvider {
         match kind {
-            PaletteKind::Command => PaletteProviderRef::Command(&self.command),
-            PaletteKind::Search => PaletteProviderRef::Search(&self.search),
-            PaletteKind::SearchResults => PaletteProviderRef::SearchResults(&self.search_results),
-            PaletteKind::History => PaletteProviderRef::History(&self.history),
-            PaletteKind::Outline => PaletteProviderRef::Outline(&self.outline),
-        }
-    }
-}
-
-impl<'a> PaletteProviderRef<'a> {
-    pub fn kind(&self) -> PaletteKind {
-        match self {
-            Self::Command(provider) => provider.kind(),
-            Self::Search(provider) => provider.kind(),
-            Self::SearchResults(provider) => provider.kind(),
-            Self::History(provider) => provider.kind(),
-            Self::Outline(provider) => provider.kind(),
-        }
-    }
-
-    pub fn title(&self, ctx: &PaletteContext<'_>) -> String {
-        match self {
-            Self::Command(provider) => provider.title(ctx),
-            Self::Search(provider) => provider.title(ctx),
-            Self::SearchResults(provider) => provider.title(ctx),
-            Self::History(provider) => provider.title(ctx),
-            Self::Outline(provider) => provider.title(ctx),
-        }
-    }
-
-    pub fn input_mode(&self) -> PaletteInputMode {
-        match self {
-            Self::Command(provider) => provider.input_mode(),
-            Self::Search(provider) => provider.input_mode(),
-            Self::SearchResults(provider) => provider.input_mode(),
-            Self::History(provider) => provider.input_mode(),
-            Self::Outline(provider) => provider.input_mode(),
-        }
-    }
-
-    pub fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>> {
-        match self {
-            Self::Command(provider) => provider.list(ctx),
-            Self::Search(provider) => provider.list(ctx),
-            Self::SearchResults(provider) => provider.list(ctx),
-            Self::History(provider) => provider.list(ctx),
-            Self::Outline(provider) => provider.list(ctx),
-        }
-    }
-
-    pub fn on_tab(
-        &self,
-        ctx: &PaletteContext<'_>,
-        selected: Option<&PaletteCandidate>,
-    ) -> AppResult<PaletteTabEffect> {
-        match self {
-            Self::Command(provider) => provider.on_tab(ctx, selected),
-            Self::Search(provider) => provider.on_tab(ctx, selected),
-            Self::SearchResults(provider) => provider.on_tab(ctx, selected),
-            Self::History(provider) => provider.on_tab(ctx, selected),
-            Self::Outline(provider) => provider.on_tab(ctx, selected),
-        }
-    }
-
-    pub fn on_submit(
-        &self,
-        ctx: &PaletteContext<'_>,
-        selected: Option<&PaletteCandidate>,
-    ) -> AppResult<PaletteSubmitEffect> {
-        match self {
-            Self::Command(provider) => provider.on_submit(ctx, selected),
-            Self::Search(provider) => provider.on_submit(ctx, selected),
-            Self::SearchResults(provider) => provider.on_submit(ctx, selected),
-            Self::History(provider) => provider.on_submit(ctx, selected),
-            Self::Outline(provider) => provider.on_submit(ctx, selected),
-        }
-    }
-
-    pub fn assistive_text(
-        &self,
-        ctx: &PaletteContext<'_>,
-        selected: Option<&PaletteCandidate>,
-    ) -> Option<String> {
-        match self {
-            Self::Command(provider) => provider.assistive_text(ctx, selected),
-            Self::Search(provider) => provider.assistive_text(ctx, selected),
-            Self::SearchResults(provider) => provider.assistive_text(ctx, selected),
-            Self::History(provider) => provider.assistive_text(ctx, selected),
-            Self::Outline(provider) => provider.assistive_text(ctx, selected),
-        }
-    }
-
-    pub fn reset_selection_on_input_change(&self) -> bool {
-        match self {
-            Self::Command(provider) => provider.reset_selection_on_input_change(),
-            Self::Search(provider) => provider.reset_selection_on_input_change(),
-            Self::SearchResults(provider) => provider.reset_selection_on_input_change(),
-            Self::History(provider) => provider.reset_selection_on_input_change(),
-            Self::Outline(provider) => provider.reset_selection_on_input_change(),
-        }
-    }
-
-    pub fn initial_selected_candidate(
-        &self,
-        ctx: &PaletteContext<'_>,
-        candidates: &[PaletteCandidate],
-    ) -> Option<usize> {
-        match self {
-            Self::Command(provider) => provider.initial_selected_candidate(ctx, candidates),
-            Self::Search(provider) => provider.initial_selected_candidate(ctx, candidates),
-            Self::SearchResults(provider) => provider.initial_selected_candidate(ctx, candidates),
-            Self::History(provider) => provider.initial_selected_candidate(ctx, candidates),
-            Self::Outline(provider) => provider.initial_selected_candidate(ctx, candidates),
+            PaletteKind::Command => &self.command,
+            PaletteKind::Search => &self.search,
+            PaletteKind::SearchResults => &self.search_results,
+            PaletteKind::History => &self.history,
+            PaletteKind::Outline => &self.outline,
         }
     }
 }

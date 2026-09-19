@@ -10,11 +10,6 @@ use crate::metrics::PerfStats;
 use crate::render::cache::RenderedPageKey;
 use crate::work::WorkClass;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PresenterKind {
-    RatatuiImage,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GraphicsProtocol {
@@ -273,10 +268,6 @@ pub trait ImagePresenter {
     fn initialize_headless_for_perf(&mut self) -> AppResult<()> {
         self.reset_perf_metrics();
         self.initialize_terminal()
-    }
-
-    fn status_label(&self) -> String {
-        self.capabilities().backend_name.to_string()
     }
 
     fn runtime_info(&self) -> PresenterRuntimeInfo {

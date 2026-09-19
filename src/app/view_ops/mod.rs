@@ -18,8 +18,7 @@ mod spread;
 mod viewer_outcome;
 
 use spread::{
-    SpreadSlotAreas, clear_pending_spread_regions, format_loading_target, format_render_target,
-    split_spread_slot_areas,
+    SpreadSlotAreas, clear_pending_spread_regions, format_target, split_spread_slot_areas,
 };
 use viewer_outcome::{
     draw_spread_loading_overlays, draw_viewer_outcome, normalize_render_outcome,
@@ -32,7 +31,7 @@ use super::render_runtime::{
     CachePrepareResult, FramePrepareOptions, PageSlotPrepareRequest, SpreadCanvasPrepareRequest,
 };
 use super::scale::{
-    compute_render_scale, compute_scale, quantize_scale, resolved_cell_size_px, scale_eq,
+    compute_render_scale, compute_scale, quantize_scale, resolved_cell_size_px, zoom_eq,
 };
 use super::state::{AppState, Mode, VisiblePageSlots};
 use super::terminal_session::TerminalSurface;
@@ -148,8 +147,8 @@ impl RenderFrameDrawPlan {
             .and_then(|name| name.to_str())
             .map(str::to_owned)
             .unwrap_or_else(|| pdf.path().display().to_string());
-        let loading_label = format_loading_target(visible_pages);
-        let render_target = format_render_target(visible_pages);
+        let loading_label = format_target(visible_pages);
+        let render_target = format_target(visible_pages);
         let page_presentation = state.page_presentation_for_slots(visible_pages);
         let spread_gap_px = u32::from(
             resolved_cell_size_px(presenter.cell_px)
@@ -703,7 +702,7 @@ pub(in crate::app) fn compute_initial_preview_plan(
     current_scale: f32,
 ) -> Option<InitialPreviewPlan> {
     let preview_scale = quantize_scale(current_scale * INITIAL_PREVIEW_SCALE_RATIO);
-    if scale_eq(preview_scale, current_scale) {
+    if zoom_eq(preview_scale, current_scale) {
         return None;
     }
 

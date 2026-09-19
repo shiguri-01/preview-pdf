@@ -7,11 +7,7 @@ pub(in crate::command) fn history_back(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
     let page_count = ctx.page_count();
-    let result = ctx
-        .extension_host
-        .command_ports()
-        .history
-        .back(ctx.app, page_count);
+    let result = ctx.extension_host.history_mut().back(ctx.app, page_count);
     Ok(CommandExecution::from_notice_result(result))
 }
 
@@ -21,8 +17,7 @@ pub(in crate::command) fn history_forward(
     let page_count = ctx.page_count();
     let result = ctx
         .extension_host
-        .command_ports()
-        .history
+        .history_mut()
         .forward(ctx.app, page_count);
     Ok(CommandExecution::from_notice_result(result))
 }
@@ -34,8 +29,7 @@ pub(in crate::command) fn history_goto(
     let page_count = ctx.page_count();
     let result = ctx
         .extension_host
-        .command_ports()
-        .history
+        .history_mut()
         .goto(ctx.app, page_count, page)?;
     Ok(CommandExecution::from_notice_result(result))
 }
@@ -43,10 +37,6 @@ pub(in crate::command) fn history_goto(
 pub(in crate::command) fn open_history(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let request = ctx
-        .extension_host
-        .command_ports()
-        .history
-        .open_palette(ctx.app);
+    let request = ctx.extension_host.history_mut().open_palette(ctx.app);
     Ok(CommandExecution::applied().with_palette_request(request))
 }

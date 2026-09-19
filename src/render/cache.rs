@@ -1,7 +1,5 @@
 use crate::backend::RgbaFrame;
-use crate::cache::{
-    BudgetedLruCache, CacheCounters, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy,
-};
+use crate::cache::{BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy};
 
 const DEFAULT_MEMORY_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES: usize = 128;
@@ -87,16 +85,13 @@ impl RenderedPageCache {
     }
 
     pub fn remove_doc(&mut self, doc_id: u64) {
-        let removed = self
+        let _ = self
             .entries
             .remove_where(|key, _frame| key.doc_id == doc_id);
-        self.entries.add_evictions(removed.len() as u64);
     }
 
     pub fn remove(&mut self, key: &RenderedPageKey) {
-        if self.entries.remove(key).is_some() {
-            self.entries.add_evictions(1);
-        }
+        let _ = self.entries.remove(key);
     }
 
     pub fn clear(&mut self) {
@@ -125,10 +120,6 @@ impl RenderedPageCache {
 
     pub fn memory_bytes(&self) -> usize {
         self.entries.memory_bytes()
-    }
-
-    pub fn counters(&self) -> CacheCounters {
-        self.entries.counters()
     }
 
     pub fn hit_rate(&self) -> f64 {
@@ -162,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_doc_reduces_memory_and_counts_evictions() {
+    fn remove_doc_reduces_memory() {
         let mut cache = RenderedPageCache::new(8, 1024 * 1024);
         let a = RenderedPageKey::new(10, 0, 1.0);
         let b = RenderedPageKey::new(10, 1, 1.0);
@@ -178,7 +169,6 @@ mod tests {
         assert!(!cache.contains(&b));
         assert!(cache.contains(&c));
         assert!(cache.memory_bytes() < before);
-        assert_eq!(cache.counters().evictions, 2);
     }
 
     #[test]

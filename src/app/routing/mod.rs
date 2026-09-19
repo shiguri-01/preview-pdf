@@ -345,7 +345,7 @@ impl App {
         }
         if request.generation == 0 {
             runtime.reload_generation += 1;
-            request = request.with_generation(runtime.reload_generation);
+            request.generation = runtime.reload_generation;
         }
         if !request.retry || matches!(request.reason, DocumentReloadReason::Manual) {
             runtime.reload_retry_attempts = 0;

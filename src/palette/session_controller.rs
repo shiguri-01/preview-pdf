@@ -8,9 +8,8 @@ use crate::input::InputHistorySnapshot;
 use super::candidate::{PaletteCandidate, PaletteCandidateId};
 use super::effect::{PaletteSubmitAction, PaletteTabEffect};
 use super::kind::PaletteKind;
-use super::matcher::{CandidateMatcher, ContainsMatcher};
-use super::provider::{PaletteAppSnapshot, PaletteContext, PaletteInputMode};
-use super::registry::PaletteProviderRef;
+use super::matcher;
+use super::provider::{PaletteAppSnapshot, PaletteContext, PaletteInputMode, PaletteProvider};
 use super::registry::PaletteRegistry;
 use super::request::PaletteOpenOptions;
 use super::view::{PaletteItemView, PaletteView};
@@ -85,7 +84,6 @@ impl PaletteInputHistoryNavigator {
 pub struct PaletteSessionController {
     next_session_id: u64,
     active: Option<PaletteSession>,
-    matcher: Box<dyn CandidateMatcher>,
 }
 
 impl Default for PaletteSessionController {
@@ -93,7 +91,6 @@ impl Default for PaletteSessionController {
         Self {
             next_session_id: 1,
             active: None,
-            matcher: Box::new(ContainsMatcher),
         }
     }
 }
@@ -125,7 +122,7 @@ impl PaletteSessionController {
         let visible = self.visible_candidates(input_mode, input.value(), &candidates);
         let selected =
             initial_selection_from_id(options.initial_selection_id.as_ref(), &candidates, &visible)
-                .or_else(|| initial_visible_selection(&provider, &ctx, &candidates, &visible))
+                .or_else(|| initial_visible_selection(provider, &ctx, &candidates, &visible))
                 .unwrap_or(0);
         let selected_candidate = selected_candidate_for(&candidates, &visible, selected);
         let assistive_text = provider.assistive_text(&ctx, selected_candidate);
@@ -378,7 +375,7 @@ impl PaletteSessionController {
         candidates: &[PaletteCandidate],
     ) -> Vec<usize> {
         match input_mode {
-            PaletteInputMode::FilterCandidates => self.matcher.select(input, candidates),
+            PaletteInputMode::FilterCandidates => matcher::select(input, candidates),
             PaletteInputMode::FreeText | PaletteInputMode::Custom => {
                 (0..candidates.len()).collect()
             }
@@ -477,7 +474,7 @@ fn selected_candidate(session: &PaletteSession) -> Option<&PaletteCandidate> {
 }
 
 fn initial_visible_selection(
-    provider: &PaletteProviderRef<'_>,
+    provider: &dyn PaletteProvider,
     ctx: &PaletteContext<'_>,
     candidates: &[PaletteCandidate],
     visible: &[usize],

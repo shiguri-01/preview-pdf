@@ -11,10 +11,10 @@ use crate::extension::ExtensionHost;
 use crate::input::InputHistoryService;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, SequenceResolver};
 use crate::palette::{PaletteRegistry, PaletteSessionController};
-use crate::presenter::{ImagePresenter, PresenterFactoryOptions, PresenterKind, create_presenter};
+use crate::presenter::{ImagePresenter, RatatuiImagePresenter};
 
 use super::render_runtime::RenderRuntime;
-use super::state::{AppState, CacheHandle, PaletteRequest};
+use super::state::{AppState, PaletteRequest};
 
 pub struct RenderSubsystem {
     pub presenter: Box<dyn ImagePresenter>,
@@ -65,24 +65,22 @@ impl Default for InteractionSubsystem {
 
 impl InteractionSubsystem {
     pub(crate) fn with_input_policy(policy: InputPolicy) -> Self {
-        Self {
-            extensions: ExtensionSubsystem::default(),
-            palette: PaletteSubsystem::default(),
-            history: InputHistoryService::default(),
-            sequences: SequenceSubsystem {
-                resolver: SequenceResolver::new(policy.sequence_registry, policy.sequence_timeout),
-            },
-        }
+        Self::with_sequence_resolver(SequenceResolver::new(
+            policy.sequence_registry,
+            policy.sequence_timeout,
+        ))
     }
 
     pub(crate) fn with_sequence_registry(registry: SequenceRegistry) -> Self {
+        Self::with_sequence_resolver(SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT))
+    }
+
+    fn with_sequence_resolver(resolver: SequenceResolver) -> Self {
         Self {
             extensions: ExtensionSubsystem::default(),
             palette: PaletteSubsystem::default(),
             history: InputHistoryService::default(),
-            sequences: SequenceSubsystem {
-                resolver: SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT),
-            },
+            sequences: SequenceSubsystem { resolver },
         }
     }
 
@@ -91,14 +89,7 @@ impl InteractionSubsystem {
         registry: SequenceRegistry,
         timeout: std::time::Duration,
     ) -> Self {
-        Self {
-            extensions: ExtensionSubsystem::default(),
-            palette: PaletteSubsystem::default(),
-            history: InputHistoryService::default(),
-            sequences: SequenceSubsystem {
-                resolver: SequenceResolver::new(registry, timeout),
-            },
-        }
+        Self::with_sequence_resolver(SequenceResolver::new(registry, timeout))
     }
 }
 
@@ -118,16 +109,15 @@ pub struct RunOptions {
     pub watch: bool,
 }
 
+#[derive(Default)]
 pub struct AppBuilder {
-    presenter_kind: PresenterKind,
     options: AppOptionsResolver,
     run_options: RunOptions,
 }
 
 impl AppBuilder {
-    pub fn new(presenter_kind: PresenterKind) -> Self {
+    pub fn new() -> Self {
         Self {
-            presenter_kind,
             options: AppOptionsResolver::new(),
             run_options: RunOptions::default(),
         }
@@ -150,42 +140,39 @@ impl AppBuilder {
 
     pub fn build(self) -> AppResult<App> {
         let resolved = self.options.resolve()?;
-        App::from_resolved_options(self.presenter_kind, resolved, self.run_options)
+        App::from_resolved_options(resolved, self.run_options)
     }
 }
 
 impl App {
-    pub fn new(presenter_kind: PresenterKind) -> AppResult<Self> {
+    pub fn new() -> AppResult<Self> {
         let options = load_default_app_options()?;
-        Self::new_with_options(presenter_kind, options)
+        Self::new_with_options(options)
     }
 
-    pub fn new_with_config(presenter_kind: PresenterKind, config: Config) -> AppResult<Self> {
-        Self::new_with_options(presenter_kind, AppOptions::from(config))
+    pub fn new_with_config(config: Config) -> AppResult<Self> {
+        Self::new_with_options(AppOptions::from(config))
     }
 
-    pub fn new_with_options(presenter_kind: PresenterKind, options: AppOptions) -> AppResult<Self> {
-        AppBuilder::new(presenter_kind)
-            .replace_options(options)
-            .build()
+    pub fn new_with_options(options: AppOptions) -> AppResult<Self> {
+        AppBuilder::new().replace_options(options).build()
     }
 
     fn from_resolved_options(
-        presenter_kind: PresenterKind,
         options: ResolvedAppOptions,
         run_options: RunOptions,
     ) -> AppResult<Self> {
         let cache = options.cache;
         let view = options.view;
         let watch = options.watch;
-        let presenter = create_presenter(
-            presenter_kind,
-            PresenterFactoryOptions {
-                l2_cache_limits: Some((cache.l2_max_entries, cache.l2_memory_budget_bytes())),
-                graphics_protocol: options.render.graphics_protocol,
-            },
-        )?;
-        let mut state = AppState {
+        let presenter = Box::new(
+            RatatuiImagePresenter::with_cache_limits_and_graphics_protocol(
+                cache.l2_max_entries,
+                cache.l2_memory_budget_bytes(),
+                options.render.graphics_protocol,
+            ),
+        );
+        let state = AppState {
             current_page: view.initial_page_index,
             page_layout_mode: view.initial_layout,
             spread_direction: view.spread_direction,
@@ -193,15 +180,6 @@ impl App {
             zoom: view.initial_zoom,
             ..AppState::default()
         };
-        state.caches.l1_rendered_pages = Some(CacheHandle {
-            name: "l1-rendered-pages",
-        });
-        if presenter.capabilities().supports_l2_cache {
-            state.caches.l2_terminal_frames = Some(CacheHandle {
-                name: "l2-terminal-frames",
-            });
-        }
-
         Ok(Self {
             state,
             render: RenderSubsystem::new(presenter, render_runtime_from_cache_policy(cache)),
@@ -242,12 +220,10 @@ fn render_runtime_from_cache_policy(cache: CachePolicy) -> RenderRuntime {
 mod tests {
     use std::time::Duration;
 
-    use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
-    use crate::config::{CacheOptions, InputOptions, RenderOptions, ViewOptions, WatchOptions};
-    use crate::presenter::PresenterKind;
-
     use super::{App, AppBuilder};
+    use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
     use crate::config::{AppOptions, Config};
+    use crate::config::{CacheOptions, InputOptions, RenderOptions, ViewOptions, WatchOptions};
 
     #[test]
     fn new_with_config_applies_l1_cache_limits() {
@@ -255,8 +231,7 @@ mod tests {
         config.cache.l1_max_entries = 7;
         config.cache.l1_memory_budget_mb = 2;
 
-        let app =
-            App::new_with_config(PresenterKind::RatatuiImage, config.clone()).expect("app init");
+        let app = App::new_with_config(config.clone()).expect("app init");
 
         assert_eq!(app.render.runtime.l1_cache.max_entries(), 7);
         assert_eq!(
@@ -276,7 +251,7 @@ mod tests {
             ..AppOptions::default()
         };
 
-        let app = App::new_with_options(PresenterKind::RatatuiImage, options).expect("app init");
+        let app = App::new_with_options(options).expect("app init");
 
         assert_eq!(app.render.runtime.l1_cache.max_entries(), 9);
         assert_eq!(
@@ -302,7 +277,7 @@ mod tests {
             ..AppOptions::default()
         };
 
-        let app = AppBuilder::new(PresenterKind::RatatuiImage)
+        let app = AppBuilder::new()
             .merge_options(cache_options)
             .merge_options(render_options)
             .build()
@@ -314,7 +289,7 @@ mod tests {
 
     #[test]
     fn app_builder_replace_options_discards_earlier_patches() {
-        let app = AppBuilder::new(PresenterKind::RatatuiImage)
+        let app = AppBuilder::new()
             .merge_options(AppOptions {
                 cache: CacheOptions {
                     l1_max_entries: Some(11),
@@ -370,7 +345,7 @@ mod tests {
             ..AppOptions::default()
         };
 
-        let app = App::new_with_options(PresenterKind::RatatuiImage, options).expect("app init");
+        let app = App::new_with_options(options).expect("app init");
 
         assert_eq!(app.render_policy.worker_threads, 5);
         assert_eq!(app.render_policy.max_render_scale, 3.0);
@@ -419,8 +394,7 @@ mod tests {
             ..AppOptions::default()
         };
 
-        let mut app =
-            App::new_with_options(PresenterKind::RatatuiImage, options).expect("app init");
+        let mut app = App::new_with_options(options).expect("app init");
         assert!(app.run_options().watch);
         assert!(app.watch_policy.enabled);
 

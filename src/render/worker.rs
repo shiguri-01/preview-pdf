@@ -500,7 +500,6 @@ mod tests {
             scale: 1.0,
             class,
             generation,
-            reason: "test-task",
         }
     }
 

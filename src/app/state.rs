@@ -9,15 +9,6 @@ pub enum PageLayoutMode {
     Spread,
 }
 
-impl PageLayoutMode {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Single => "single",
-            Self::Spread => "spread",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SpreadDirection {
@@ -26,30 +17,12 @@ pub enum SpreadDirection {
     Rtl,
 }
 
-impl SpreadDirection {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Ltr => "ltr",
-            Self::Rtl => "rtl",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SpreadCoverPolicy {
     #[default]
     Paired,
     Cover,
-}
-
-impl SpreadCoverPolicy {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Paired => "paired",
-            Self::Cover => "cover",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,14 +36,6 @@ pub struct VisiblePageSlots {
 impl VisiblePageSlots {
     pub fn existing_pages(self) -> [Option<usize>; 2] {
         [Some(self.anchor_page), self.trailing_page]
-    }
-
-    pub fn label(self, page_count: usize) -> String {
-        let total = page_count.max(1);
-        match self.trailing_page {
-            Some(trailing) => format!("{}-{}", self.anchor_page + 1, trailing + 1),
-            None => format!("{}/{}", self.anchor_page + 1, total),
-        }
     }
 }
 
@@ -125,17 +90,6 @@ impl NoticeAction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheHandle {
-    pub name: &'static str,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct CacheRefs {
-    pub l1_rendered_pages: Option<CacheHandle>,
-    pub l2_terminal_frames: Option<CacheHandle>,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct AppState {
     pub current_page: usize,
@@ -149,7 +103,6 @@ pub struct AppState {
     pub debug_status_visible: bool,
     pub mode: Mode,
     pub notice: Option<Notice>,
-    pub caches: CacheRefs,
 }
 
 impl Default for AppState {
@@ -166,7 +119,6 @@ impl Default for AppState {
             debug_status_visible: false,
             mode: Mode::Normal,
             notice: None,
-            caches: CacheRefs::default(),
         }
     }
 }

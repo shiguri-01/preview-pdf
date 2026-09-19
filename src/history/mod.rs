@@ -7,7 +7,7 @@ use crate::event::AppEvent;
 use crate::extension::Extension;
 use crate::input::{AppInputEvent, InputHookResult};
 pub use palette::{HistoryPaletteProvider, HistoryUiSnapshot};
-pub use state::{HistoryCommandPort, HistoryState};
+pub use state::HistoryState;
 
 pub struct HistoryExtension;
 

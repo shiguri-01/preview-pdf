@@ -1,6 +1,9 @@
 use crate::render::cache::RenderedPageKey;
-use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
+use crate::render::prefetch::{PrefetchQueue, QueueTaskMeta};
 use crate::work::WorkClass;
+
+const MAX_PREFETCH_DEPTH: usize = 3;
+const GUARD_REVERSE_DEPTH: usize = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavDirection {
@@ -25,21 +28,6 @@ impl Default for NavIntent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PrefetchPolicy {
-    pub max_prefetch_depth: usize,
-    pub guard_reverse_depth: u8,
-}
-
-impl Default for PrefetchPolicy {
-    fn default() -> Self {
-        Self {
-            max_prefetch_depth: 3,
-            guard_reverse_depth: 1,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderTask {
     pub doc_id: u64,
@@ -47,29 +35,22 @@ pub struct RenderTask {
     pub scale: f32,
     pub class: WorkClass,
     pub generation: u64,
-    pub reason: &'static str,
 }
 
 #[derive(Debug)]
 pub struct RenderScheduler {
     tasks: PrefetchQueue<RenderedPageKey, RenderTask>,
-    canceled_tasks: usize,
 }
 
 impl Default for RenderScheduler {
     fn default() -> Self {
-        Self::new(PrefetchQueueConfig::default())
+        Self {
+            tasks: PrefetchQueue::new(),
+        }
     }
 }
 
 impl RenderScheduler {
-    pub fn new(config: PrefetchQueueConfig) -> Self {
-        Self {
-            tasks: PrefetchQueue::new(config),
-            canceled_tasks: 0,
-        }
-    }
-
     pub fn enqueue(&mut self, task: RenderTask) {
         let key = RenderedPageKey::new(task.doc_id, task.page, task.scale);
         let meta = QueueTaskMeta {
@@ -85,23 +66,16 @@ impl RenderScheduler {
     }
 
     pub fn cancel_obsolete(&mut self, nav_intent: NavIntent, scale: f32) -> usize {
-        let canceled = self
-            .tasks
-            .retain(|task, _| !should_cancel(task, nav_intent, scale));
-        self.canceled_tasks = self.canceled_tasks.saturating_add(canceled);
-        canceled
+        self.tasks
+            .retain(|task, _| !should_cancel(task, nav_intent, scale))
     }
 
     pub fn cancel_stale_prefetch(&mut self, generation: u64) -> usize {
-        let canceled = self.tasks.cancel_stale_prefetch(generation);
-        self.canceled_tasks = self.canceled_tasks.saturating_add(canceled);
-        canceled
+        self.tasks.cancel_stale_prefetch(generation)
     }
 
     pub fn clear(&mut self) -> usize {
-        let canceled = self.tasks.clear();
-        self.canceled_tasks = self.canceled_tasks.saturating_add(canceled);
-        canceled
+        self.tasks.clear()
     }
 
     pub fn len(&self) -> usize {
@@ -111,27 +85,21 @@ impl RenderScheduler {
     pub fn is_empty(&self) -> bool {
         self.tasks.is_empty()
     }
-
-    pub fn canceled_tasks(&self) -> usize {
-        self.canceled_tasks
-    }
 }
 
-pub fn build_prefetch_plan_with_policy(
+pub fn build_prefetch_plan(
     cursor: usize,
     nav_intent: NavIntent,
     page_count: usize,
     doc_id: u64,
     scale: f32,
-    policy: PrefetchPolicy,
 ) -> Vec<RenderTask> {
     if page_count == 0 {
         return Vec::new();
     }
 
     let mut tasks = Vec::new();
-    let depth = dynamic_depth(nav_intent.streak).min(policy.max_prefetch_depth.max(1));
-    let guard_depth = policy.guard_reverse_depth as usize;
+    let depth = dynamic_depth(nav_intent.streak).min(MAX_PREFETCH_DEPTH);
     let cursor = cursor.min(page_count - 1);
 
     tasks.push(RenderTask {
@@ -140,7 +108,6 @@ pub fn build_prefetch_plan_with_policy(
         scale,
         class: WorkClass::CriticalCurrent,
         generation: nav_intent.generation,
-        reason: "current-page",
     });
 
     match nav_intent.dir {
@@ -154,10 +121,9 @@ pub fn build_prefetch_plan_with_policy(
                 scale,
                 WorkClass::DirectionalLead,
                 nav_intent.generation,
-                "lead+1",
             );
 
-            for i in 1..=guard_depth {
+            for i in 1..=GUARD_REVERSE_DEPTH {
                 push_relative(
                     &mut tasks,
                     cursor,
@@ -167,12 +133,10 @@ pub fn build_prefetch_plan_with_policy(
                     scale,
                     WorkClass::GuardReverse,
                     nav_intent.generation,
-                    "guard-reverse",
                 );
             }
 
             for i in 2..=depth {
-                let reason = if i == 2 { "lead+2" } else { "lead+3" };
                 push_relative(
                     &mut tasks,
                     cursor,
@@ -182,7 +146,6 @@ pub fn build_prefetch_plan_with_policy(
                     scale,
                     WorkClass::DirectionalLead,
                     nav_intent.generation,
-                    reason,
                 );
             }
 
@@ -190,13 +153,12 @@ pub fn build_prefetch_plan_with_policy(
                 push_relative(
                     &mut tasks,
                     cursor,
-                    -((guard_depth.max(1) + 1) as isize),
+                    -((GUARD_REVERSE_DEPTH + 1) as isize),
                     page_count,
                     doc_id,
                     scale,
                     WorkClass::Background,
                     nav_intent.generation,
-                    "background-reverse",
                 );
             }
         }
@@ -210,10 +172,9 @@ pub fn build_prefetch_plan_with_policy(
                 scale,
                 WorkClass::DirectionalLead,
                 nav_intent.generation,
-                "lead-1",
             );
 
-            for i in 1..=guard_depth {
+            for i in 1..=GUARD_REVERSE_DEPTH {
                 push_relative(
                     &mut tasks,
                     cursor,
@@ -223,12 +184,10 @@ pub fn build_prefetch_plan_with_policy(
                     scale,
                     WorkClass::GuardReverse,
                     nav_intent.generation,
-                    "guard-reverse",
                 );
             }
 
             for i in 2..=depth {
-                let reason = if i == 2 { "lead-2" } else { "lead-3" };
                 push_relative(
                     &mut tasks,
                     cursor,
@@ -238,7 +197,6 @@ pub fn build_prefetch_plan_with_policy(
                     scale,
                     WorkClass::DirectionalLead,
                     nav_intent.generation,
-                    reason,
                 );
             }
 
@@ -246,13 +204,12 @@ pub fn build_prefetch_plan_with_policy(
                 push_relative(
                     &mut tasks,
                     cursor,
-                    (guard_depth.max(1) + 1) as isize,
+                    (GUARD_REVERSE_DEPTH + 1) as isize,
                     page_count,
                     doc_id,
                     scale,
                     WorkClass::Background,
                     nav_intent.generation,
-                    "background-reverse",
                 );
             }
         }
@@ -299,7 +256,6 @@ fn push_relative(
     scale: f32,
     class: WorkClass,
     generation: u64,
-    reason: &'static str,
 ) {
     let pos = cursor as isize + offset;
     if pos < 0 || pos >= page_count as isize {
@@ -311,15 +267,14 @@ fn push_relative(
         scale,
         class,
         generation,
-        reason,
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        NavDirection, NavIntent, PrefetchPolicy, RenderScheduler, RenderTask,
-        build_prefetch_plan_with_policy, should_cancel,
+        NavDirection, NavIntent, RenderScheduler, RenderTask, build_prefetch_plan as build_plan,
+        should_cancel,
     };
     use crate::work::WorkClass;
 
@@ -328,14 +283,7 @@ mod tests {
         nav_intent: NavIntent,
         page_count: usize,
     ) -> Vec<RenderTask> {
-        build_prefetch_plan_with_policy(
-            cursor,
-            nav_intent,
-            page_count,
-            0,
-            1.0,
-            PrefetchPolicy::default(),
-        )
+        build_plan(cursor, nav_intent, page_count, 0, 1.0)
     }
 
     #[test]
@@ -388,7 +336,6 @@ mod tests {
             scale: 1.0,
             class: WorkClass::Background,
             generation: 1,
-            reason: "bg",
         });
         scheduler.enqueue(RenderTask {
             doc_id: 1,
@@ -396,7 +343,6 @@ mod tests {
             scale: 1.0,
             class: WorkClass::CriticalCurrent,
             generation: 1,
-            reason: "critical",
         });
 
         let first = scheduler.next_task().expect("task should exist");
@@ -411,7 +357,6 @@ mod tests {
             scale: 1.0,
             class: WorkClass::DirectionalLead,
             generation: 1,
-            reason: "lead",
         };
 
         let nav = NavIntent {
@@ -432,7 +377,6 @@ mod tests {
             scale: 1.0,
             class: WorkClass::DirectionalLead,
             generation: 1,
-            reason: "lead",
         });
         scheduler.enqueue(RenderTask {
             doc_id: 1,
@@ -440,7 +384,6 @@ mod tests {
             scale: 1.0,
             class: WorkClass::GuardReverse,
             generation: 1,
-            reason: "guard",
         });
 
         let canceled = scheduler.cancel_obsolete(
@@ -452,54 +395,5 @@ mod tests {
             1.0,
         );
         assert_eq!(canceled, 1);
-        assert_eq!(scheduler.canceled_tasks(), 1);
-    }
-
-    #[test]
-    fn can_override_prefetch_policy() {
-        let tasks = build_prefetch_plan_with_policy(
-            2,
-            NavIntent {
-                dir: NavDirection::Forward,
-                streak: 9,
-                generation: 0,
-            },
-            20,
-            7,
-            1.25,
-            PrefetchPolicy {
-                max_prefetch_depth: 1,
-                guard_reverse_depth: 0,
-            },
-        );
-
-        let pages: Vec<usize> = tasks.iter().map(|task| task.page).collect();
-        assert_eq!(pages, vec![2, 3]);
-    }
-
-    #[test]
-    fn guard_reverse_depth_supports_multiple_pages() {
-        let tasks = build_prefetch_plan_with_policy(
-            10,
-            NavIntent {
-                dir: NavDirection::Forward,
-                streak: 4,
-                generation: 0,
-            },
-            50,
-            1,
-            1.0,
-            PrefetchPolicy {
-                max_prefetch_depth: 3,
-                guard_reverse_depth: 2,
-            },
-        );
-
-        let pages: Vec<usize> = tasks
-            .iter()
-            .filter(|task| task.class == WorkClass::GuardReverse)
-            .map(|task| task.page)
-            .collect();
-        assert_eq!(pages, vec![9, 8]);
     }
 }

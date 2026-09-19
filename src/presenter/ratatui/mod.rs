@@ -93,7 +93,7 @@ impl RatatuiImagePresenter {
         Self::with_cache_limits_and_graphics_protocol(l2_max_entries, l2_memory_budget_bytes, None)
     }
 
-    pub(super) fn with_cache_limits_and_graphics_protocol(
+    pub(crate) fn with_cache_limits_and_graphics_protocol(
         l2_max_entries: usize,
         l2_memory_budget_bytes: usize,
         graphics_protocol: Option<GraphicsProtocol>,
@@ -404,10 +404,6 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.state.perf_stats.reset();
         self.state.terminal_initialized = true;
         Ok(())
-    }
-
-    fn status_label(&self) -> String {
-        format!("ratatui-image/{}", self.config.protocol_label)
     }
 
     fn runtime_info(&self) -> PresenterRuntimeInfo {

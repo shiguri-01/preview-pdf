@@ -11,10 +11,6 @@ pub(crate) fn zoom_eq(left: f32, right: f32) -> bool {
     (left - right).abs() <= 0.0005
 }
 
-pub(crate) fn scale_eq(left: f32, right: f32) -> bool {
-    (left - right).abs() <= 0.0005
-}
-
 pub(crate) fn select_input_poll_timeout(
     render_busy: bool,
     presenter_busy: bool,
@@ -108,7 +104,7 @@ mod tests {
 
     use super::{
         compute_render_scale, compute_scale, next_zoom_step, prev_zoom_step, quantize_scale,
-        scale_eq, select_input_poll_timeout,
+        select_input_poll_timeout, zoom_eq,
     };
 
     const DEFAULT_MAX_RENDER_SCALE: f32 = 2.5;
@@ -132,7 +128,7 @@ mod tests {
         assert!((render_scale - 1.77).abs() < 0.02);
 
         let scale = compute_scale(1.0, render_scale);
-        assert!(scale_eq(scale, 1.75));
+        assert!(zoom_eq(scale, 1.75));
     }
 
     #[test]
@@ -147,7 +143,7 @@ mod tests {
         let render_scale =
             compute_render_scale(viewport, None, 300.0, 300.0, DEFAULT_MAX_RENDER_SCALE);
         assert!((render_scale - 1.60).abs() < 0.02);
-        assert!(scale_eq(quantize_scale(1.83), 1.85));
+        assert!(zoom_eq(quantize_scale(1.83), 1.85));
     }
 
     #[test]
@@ -229,7 +225,7 @@ mod tests {
             DEFAULT_MAX_RENDER_SCALE,
         );
         assert!(render_scale > 1.20 && render_scale < 1.35);
-        assert!(scale_eq(compute_scale(1.0, render_scale), 1.30));
+        assert!(zoom_eq(compute_scale(1.0, render_scale), 1.30));
     }
 
     #[test]
@@ -260,14 +256,14 @@ mod tests {
 
     #[test]
     fn zoom_steps_move_to_the_next_or_previous_ladder_entry() {
-        assert!(scale_eq(next_zoom_step(1.0), 1.1));
-        assert!(scale_eq(next_zoom_step(1.05), 1.1));
-        assert!(scale_eq(next_zoom_step(1.1), 1.25));
-        assert!(scale_eq(next_zoom_step(0.83), 1.0));
-        assert!(scale_eq(prev_zoom_step(1.0), 0.75));
-        assert!(scale_eq(prev_zoom_step(1.05), 1.0));
-        assert!(scale_eq(prev_zoom_step(0.83), 0.75));
-        assert!(scale_eq(prev_zoom_step(0.25), 0.25));
-        assert!(scale_eq(next_zoom_step(4.0), 4.0));
+        assert!(zoom_eq(next_zoom_step(1.0), 1.1));
+        assert!(zoom_eq(next_zoom_step(1.05), 1.1));
+        assert!(zoom_eq(next_zoom_step(1.1), 1.25));
+        assert!(zoom_eq(next_zoom_step(0.83), 1.0));
+        assert!(zoom_eq(prev_zoom_step(1.0), 0.75));
+        assert!(zoom_eq(prev_zoom_step(1.05), 1.0));
+        assert!(zoom_eq(prev_zoom_step(0.83), 0.75));
+        assert!(zoom_eq(prev_zoom_step(0.25), 0.25));
+        assert!(zoom_eq(next_zoom_step(4.0), 4.0));
     }
 }

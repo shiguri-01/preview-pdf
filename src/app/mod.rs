@@ -20,8 +20,8 @@ mod view_ops;
 pub use core::{App, AppBuilder, RunOptions};
 pub use render_runtime::RenderRuntime;
 pub use state::{
-    AppState, CacheHandle, CacheRefs, Mode, Notice, NoticeAction, NoticeLevel, PageLayoutMode,
-    PaletteRequest, SpreadCoverPolicy, SpreadDirection, VisiblePageSlots, notice_action_for_error,
+    AppState, Mode, Notice, NoticeAction, NoticeLevel, PageLayoutMode, PaletteRequest,
+    SpreadCoverPolicy, SpreadDirection, VisiblePageSlots, notice_action_for_error,
 };
 
 pub(crate) use runtime_driver::{

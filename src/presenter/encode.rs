@@ -11,7 +11,7 @@ use tokio::sync::mpsc::{
 use tokio::task::JoinHandle;
 
 use crate::backend::RgbaFrame;
-use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
+use crate::render::prefetch::{PrefetchQueue, QueueTaskMeta};
 use crate::work::WorkClass;
 
 use super::image_ops::{create_protocol_with_picker, font_size_px, resize_frame_for_area};
@@ -290,7 +290,7 @@ fn encode_worker_main(
     mut request_rx: UnboundedReceiver<EncodeWorkerRequest>,
     result_tx: UnboundedSender<EncodeWorkerResult>,
 ) {
-    let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+    let mut queue = PrefetchQueue::new();
 
     loop {
         if queue.is_empty() {
@@ -420,7 +420,7 @@ mod tests {
     use crate::presenter::l2_cache::TerminalFrameKey;
     use crate::presenter::{PanOffset, Viewport};
     use crate::render::cache::RenderedPageKey;
-    use crate::render::prefetch::{PrefetchQueue, PrefetchQueueConfig};
+    use crate::render::prefetch::PrefetchQueue;
     use crate::work::WorkClass;
 
     use super::{
@@ -452,8 +452,7 @@ mod tests {
 
     #[test]
     fn enqueue_with_notifications_emits_canceled_stale_events() {
-        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
-            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> = PrefetchQueue::new();
         let picker = Picker::halfblocks();
         let stale_key = key(1);
         let fresh_key = key(2);
@@ -503,8 +502,7 @@ mod tests {
 
     #[test]
     fn current_lane_drops_older_generations() {
-        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
-            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> = PrefetchQueue::new();
         let picker = Picker::halfblocks();
         let area = Rect::new(0, 0, 10, 6);
         let stale_key = key(1);
@@ -547,8 +545,7 @@ mod tests {
 
     #[test]
     fn current_lane_keeps_newer_same_key_when_older_request_arrives_late() {
-        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
-            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> = PrefetchQueue::new();
         let picker = Picker::halfblocks();
         let same_key = key(1);
         let newer_area = Rect::new(0, 0, 10, 6);
@@ -593,8 +590,7 @@ mod tests {
 
     #[test]
     fn enqueue_with_notifications_keeps_newer_same_key_when_older_request_arrives_late() {
-        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> =
-            PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue: PrefetchQueue<TerminalFrameKey, EncodeWorkerTask> = PrefetchQueue::new();
         let picker = Picker::halfblocks();
         let same_key = key(1);
         let newer_area = Rect::new(0, 0, 10, 6);

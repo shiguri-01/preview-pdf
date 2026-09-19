@@ -209,7 +209,6 @@ impl RenderRuntime {
             scale: request.scale,
             class: WorkClass::CriticalCurrent,
             generation: 0,
-            reason: "current-page",
         };
         let frame = self.resolve_task_frame(doc, &task)?;
         let (frame, overlay_stamp) =

@@ -46,13 +46,7 @@ impl BindingCondition {
     pub fn priority_score(&self) -> u16 {
         self.alternatives
             .iter()
-            .map(|conditions| {
-                conditions
-                    .iter()
-                    .copied()
-                    .map(condition_weight)
-                    .sum::<u16>()
-            })
+            .map(|conditions| conditions.len() as u16)
             .max()
             .unwrap_or(0)
     }
@@ -273,24 +267,6 @@ fn add_condition(conditions: &mut Vec<RuntimeCondition>, condition: RuntimeCondi
 fn add_atom(conditions: &mut Vec<RuntimeCondition>, condition: RuntimeCondition) {
     if !conditions.contains(&condition) {
         conditions.push(condition);
-    }
-}
-
-fn condition_weight(condition: RuntimeCondition) -> u16 {
-    match condition {
-        RuntimeCondition::ModeIs(_)
-        | RuntimeCondition::ModeIsNot(_)
-        | RuntimeCondition::SearchIsActive
-        | RuntimeCondition::SearchIsInactive
-        | RuntimeCondition::PaletteIsOpen
-        | RuntimeCondition::PaletteIsClosed
-        | RuntimeCondition::PaletteKindIs(_)
-        | RuntimeCondition::HelpIsOpen
-        | RuntimeCondition::HelpIsClosed
-        | RuntimeCondition::PaletteInputHistoryIsAvailable
-        | RuntimeCondition::PaletteInputHistoryIsUnavailable
-        | RuntimeCondition::PaletteInputIsEmpty
-        | RuntimeCondition::PaletteInputIsNotEmpty => 1,
     }
 }
 

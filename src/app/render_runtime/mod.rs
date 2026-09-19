@@ -5,9 +5,7 @@ use crate::error::{AppError, AppResult};
 use crate::metrics::PerfStats;
 use crate::presenter::ImagePresenter;
 use crate::render::cache::{RenderedPageCache, RenderedPageKey};
-use crate::render::scheduler::{
-    NavIntent, PrefetchPolicy, RenderScheduler, RenderTask, build_prefetch_plan_with_policy,
-};
+use crate::render::scheduler::{NavIntent, RenderScheduler, RenderTask, build_prefetch_plan};
 use crate::work::WorkClass;
 
 mod prepare;
@@ -22,7 +20,6 @@ pub struct RenderRuntime {
     pub l1_cache: RenderedPageCache,
     pub scheduler: RenderScheduler,
     pub perf_stats: PerfStats,
-    pub prefetch_policy: PrefetchPolicy,
 }
 
 impl RenderRuntime {
@@ -31,7 +28,6 @@ impl RenderRuntime {
             l1_cache: RenderedPageCache::new(l1_max_entries, l1_memory_budget_bytes),
             scheduler: RenderScheduler::default(),
             perf_stats: PerfStats::default(),
-            prefetch_policy: PrefetchPolicy::default(),
         }
     }
 
@@ -45,14 +41,7 @@ impl RenderRuntime {
         let canceled = self.scheduler.cancel_obsolete(nav_intent, scale);
         self.perf_stats.add_canceled_tasks(canceled);
 
-        let tasks = build_prefetch_plan_with_policy(
-            cursor,
-            nav_intent,
-            doc.page_count(),
-            doc.doc_id(),
-            scale,
-            self.prefetch_policy,
-        );
+        let tasks = build_prefetch_plan(cursor, nav_intent, doc.page_count(), doc.doc_id(), scale);
         self.enqueue_prefetch_tasks(tasks);
     }
 
@@ -66,14 +55,7 @@ impl RenderRuntime {
         let canceled = self.scheduler.clear();
         self.perf_stats.add_canceled_tasks(canceled);
 
-        let tasks = build_prefetch_plan_with_policy(
-            cursor,
-            nav_intent,
-            doc.page_count(),
-            doc.doc_id(),
-            scale,
-            self.prefetch_policy,
-        );
+        let tasks = build_prefetch_plan(cursor, nav_intent, doc.page_count(), doc.doc_id(), scale);
         self.enqueue_prefetch_tasks(tasks);
     }
 

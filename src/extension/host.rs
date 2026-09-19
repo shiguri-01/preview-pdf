@@ -4,12 +4,10 @@ use crate::app::AppState;
 use crate::backend::SharedPdfBackend;
 use crate::event::AppEvent;
 use crate::highlight::HighlightOverlaySnapshot;
-use crate::history::{HistoryCommandPort, HistoryExtension, HistoryState, HistoryUiSnapshot};
+use crate::history::{HistoryExtension, HistoryState, HistoryUiSnapshot};
 use crate::input::{AppInputEvent, InputHookResult};
-use crate::outline::{OutlineCommandPort, OutlineExtension, OutlineState, OutlineUiSnapshot};
-use crate::search::{
-    SearchCommandPort, SearchEvent, SearchExtension, SearchRuntime, SearchUiSnapshot,
-};
+use crate::outline::{OutlineExtension, OutlineState, OutlineUiSnapshot};
+use crate::search::{SearchEvent, SearchExtension, SearchRuntime, SearchUiSnapshot};
 
 use super::traits::Extension;
 
@@ -23,12 +21,6 @@ pub struct ExtensionUiSnapshot {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExtensionRenderSnapshot {
     pub highlight_overlay: HighlightOverlaySnapshot,
-}
-
-pub(crate) struct ExtensionCommandPorts<'a> {
-    pub search: SearchCommandPort<'a>,
-    pub history: HistoryCommandPort<'a>,
-    pub outline: OutlineCommandPort<'a>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,12 +48,16 @@ impl ExtensionHost {
         }
     }
 
-    pub(crate) fn command_ports(&mut self) -> ExtensionCommandPorts<'_> {
-        ExtensionCommandPorts {
-            search: SearchCommandPort::new(&mut self.search),
-            history: HistoryCommandPort::new(&mut self.history),
-            outline: OutlineCommandPort::new(&mut self.outline),
-        }
+    pub(crate) fn search_mut(&mut self) -> &mut SearchRuntime {
+        &mut self.search
+    }
+
+    pub(crate) fn history_mut(&mut self) -> &mut HistoryState {
+        &mut self.history
+    }
+
+    pub(crate) fn outline_mut(&mut self) -> &mut OutlineState {
+        &mut self.outline
     }
 
     pub(crate) fn search(&self) -> &SearchRuntime {
@@ -246,8 +242,7 @@ mod tests {
 
         let pdf = StubPdf::new(4);
 
-        host.command_ports()
-            .search
+        host.search_mut()
             .submit(
                 &mut app,
                 Arc::new(pdf) as SharedPdfBackend,
@@ -267,8 +262,7 @@ mod tests {
         let mut app = crate::app::AppState::default();
         let pdf = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
 
-        host.command_ports()
-            .search
+        host.search_mut()
             .submit(
                 &mut app,
                 Arc::clone(&pdf),
@@ -279,8 +273,7 @@ mod tests {
         assert!(host.ui_snapshot(&app).search.active);
 
         let canceled = host
-            .command_ports()
-            .search
+            .search_mut()
             .cancel(pdf)
             .expect("cancel should succeed");
         assert!(canceled);
@@ -294,8 +287,7 @@ mod tests {
         let first = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
         let second = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
 
-        host.command_ports()
-            .search
+        host.search_mut()
             .submit(
                 &mut app,
                 first,
@@ -332,7 +324,7 @@ mod tests {
         );
 
         host.on_document_reloaded(&mut app, Arc::new(StubPdf::new(4)) as SharedPdfBackend);
-        let (outcome, notice) = host.command_ports().history.back(&mut app, 4);
+        let (outcome, notice) = host.history_mut().back(&mut app, 4);
 
         assert_eq!(outcome, CommandOutcome::Noop);
         assert_eq!(notice, crate::app::NoticeAction::Clear);

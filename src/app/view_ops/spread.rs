@@ -121,17 +121,10 @@ pub(super) fn format_page_target(page: usize) -> String {
     format!("p.{}", page + 1)
 }
 
-pub(super) fn format_loading_target(slots: VisiblePageSlots) -> String {
+pub(super) fn format_target(slots: VisiblePageSlots) -> String {
     match slots.trailing_page {
         Some(trailing) => format!("pp.{}-{}", slots.anchor_page + 1, trailing + 1),
         None => format_page_target(slots.anchor_page),
-    }
-}
-
-pub(super) fn format_render_target(slots: VisiblePageSlots) -> String {
-    match slots.trailing_page {
-        Some(trailing) => format!("pp.{}-{}", slots.anchor_page + 1, trailing + 1),
-        None => format!("p.{}", slots.anchor_page + 1),
     }
 }
 
@@ -167,7 +160,7 @@ mod tests {
     }
     #[test]
     fn loading_target_formats_single_page_with_p_prefix() {
-        let label = format_loading_target(VisiblePageSlots {
+        let label = format_target(VisiblePageSlots {
             anchor_page: 11,
             trailing_page: None,
             left_page: Some(11),
@@ -178,7 +171,7 @@ mod tests {
     }
     #[test]
     fn loading_target_formats_spread_with_pp_prefix() {
-        let label = format_loading_target(VisiblePageSlots {
+        let label = format_target(VisiblePageSlots {
             anchor_page: 11,
             trailing_page: Some(12),
             left_page: Some(11),
@@ -189,7 +182,7 @@ mod tests {
     }
     #[test]
     fn render_target_uses_error_label_convention() {
-        let label = format_render_target(VisiblePageSlots {
+        let label = format_target(VisiblePageSlots {
             anchor_page: 11,
             trailing_page: Some(12),
             left_page: Some(11),

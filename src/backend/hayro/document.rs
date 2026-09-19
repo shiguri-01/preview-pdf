@@ -20,12 +20,6 @@ use super::text::extract_text_page_with_device;
 impl PdfDoc {
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
         let path = path.as_ref();
-        let bytes = Self::load_shared_bytes(path)?;
-        Self::open_with_shared_bytes(path, bytes)
-    }
-
-    pub fn load_shared_bytes(path: impl AsRef<Path>) -> AppResult<Arc<Vec<u8>>> {
-        let path = path.as_ref();
         if path.as_os_str().is_empty() {
             return Err(AppError::invalid_argument("pdf path must not be empty"));
         }
@@ -48,16 +42,6 @@ impl PdfDoc {
             ));
         }
 
-        Ok(bytes)
-    }
-
-    pub fn open_with_shared_bytes(path: impl AsRef<Path>, bytes: Arc<Vec<u8>>) -> AppResult<Self> {
-        let path = path.as_ref();
-        if !bytes.as_slice().starts_with(b"%PDF-") {
-            return Err(AppError::invalid_argument(
-                "input is not a valid PDF header",
-            ));
-        }
         let doc_id = calculate_doc_id(path, bytes.as_slice());
         let pdf = Pdf::new(bytes)
             .map_err(|_| AppError::invalid_argument("failed to parse PDF with hayro"))?;

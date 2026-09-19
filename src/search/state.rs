@@ -17,55 +17,6 @@ pub struct SearchRuntime {
     next_epoch: u64,
 }
 
-pub struct SearchCommandPort<'a> {
-    runtime: &'a mut SearchRuntime,
-}
-
-impl<'a> SearchCommandPort<'a> {
-    pub(crate) fn new(runtime: &'a mut SearchRuntime) -> Self {
-        Self { runtime }
-    }
-
-    pub(crate) fn open_palette(&mut self) -> PaletteRequest {
-        self.runtime.open_palette()
-    }
-
-    pub(crate) fn submit(
-        &mut self,
-        app: &mut AppState,
-        pdf: SharedPdfBackend,
-        query: String,
-        matcher: SearchMatcherKind,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.runtime.submit(app, pdf, query, matcher)
-    }
-
-    pub(crate) fn open_results_palette(&mut self) -> Option<PaletteRequest> {
-        self.runtime.open_results_palette()
-    }
-
-    pub(crate) fn goto_result(
-        &mut self,
-        app: &mut AppState,
-        page_count: usize,
-        page: usize,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.runtime.goto_result(app, page_count, page)
-    }
-
-    pub(crate) fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
-        self.runtime.cancel(pdf)
-    }
-
-    pub(crate) fn next_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
-        self.runtime.next_hit(app)
-    }
-
-    pub(crate) fn prev_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
-        self.runtime.prev_hit(app)
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SearchUiSnapshot {
     pub active: bool,

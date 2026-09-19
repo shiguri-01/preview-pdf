@@ -48,12 +48,6 @@ fn default_registry_bindings_reference_commands_invocable_when_enabled() {
     }
 
     for binding in snapshot.numeric_prefix_bindings {
-        assert!(
-            find_command_spec(binding.command_id).is_some(),
-            "numeric key binding {:?} references unknown command {}",
-            binding.suffix,
-            binding.command_id
-        );
         assert_binding_is_invocable(
             binding.command_id,
             binding.enabled_when,
@@ -61,17 +55,11 @@ fn default_registry_bindings_reference_commands_invocable_when_enabled() {
         );
     }
 
-    for binding in snapshot.generated_bindings {
-        assert!(
-            find_command_spec(binding.command_id).is_some(),
-            "generated key binding {:?} references unknown command {}",
-            binding.matcher,
-            binding.command_id
-        );
+    for enabled_when in snapshot.text_input_bindings {
         assert_binding_is_invocable(
-            binding.command_id,
-            binding.enabled_when,
-            format!("generated key binding {:?}", binding.matcher),
+            "text.insert",
+            enabled_when,
+            "text input binding".to_string(),
         );
     }
 }

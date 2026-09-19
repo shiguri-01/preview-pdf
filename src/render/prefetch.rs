@@ -4,35 +4,6 @@ use std::hash::Hash;
 
 use crate::work::WorkClass;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PrefetchQueueConfig {
-    pub max_prefetch_depth: usize,
-    pub guard_reverse_depth: u8,
-    pub cancel_stale_generation: bool,
-    pub dedupe_by_key: bool,
-}
-
-impl Default for PrefetchQueueConfig {
-    fn default() -> Self {
-        Self {
-            max_prefetch_depth: 3,
-            guard_reverse_depth: 1,
-            cancel_stale_generation: true,
-            dedupe_by_key: true,
-        }
-    }
-}
-
-impl PrefetchQueueConfig {
-    pub fn effective_max_prefetch_depth(&self) -> usize {
-        self.max_prefetch_depth.max(1)
-    }
-
-    pub fn effective_guard_reverse_depth(&self) -> usize {
-        self.guard_reverse_depth as usize
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueueTaskMeta<K> {
     pub key: K,
@@ -79,24 +50,22 @@ pub struct PrefetchQueue<K, T> {
     tasks: BinaryHeap<QueuedTask<K, T>>,
     queued_keys: HashSet<K>,
     next_ordinal: u64,
-    config: PrefetchQueueConfig,
 }
 
 impl<K, T> PrefetchQueue<K, T>
 where
     K: Eq + Hash + Clone,
 {
-    pub fn new(config: PrefetchQueueConfig) -> Self {
+    pub fn new() -> Self {
         Self {
             tasks: BinaryHeap::new(),
             queued_keys: HashSet::new(),
             next_ordinal: 0,
-            config,
         }
     }
 
     pub fn push(&mut self, task: T, meta: QueueTaskMeta<K>) -> bool {
-        if self.config.dedupe_by_key && self.queued_keys.contains(&meta.key) {
+        if self.queued_keys.contains(&meta.key) {
             return false;
         }
 
@@ -108,29 +77,17 @@ where
         });
         self.next_ordinal = self.next_ordinal.saturating_add(1);
 
-        if self.config.dedupe_by_key {
-            self.queued_keys.insert(queued_key);
-        }
+        self.queued_keys.insert(queued_key);
         true
     }
 
     pub fn pop_next(&mut self) -> Option<T> {
-        self.pop_next_with_meta().map(|(task, _)| task)
-    }
-
-    pub fn pop_next_with_meta(&mut self) -> Option<(T, QueueTaskMeta<K>)> {
         let item = self.tasks.pop()?;
-        if self.config.dedupe_by_key {
-            self.queued_keys.remove(&item.meta.key);
-        }
-        Some((item.task, item.meta))
+        self.queued_keys.remove(&item.meta.key);
+        Some(item.task)
     }
 
     pub fn cancel_stale_prefetch(&mut self, generation: u64) -> usize {
-        if !self.config.cancel_stale_generation {
-            return 0;
-        }
-
         self.retain(|_, meta| {
             meta.generation >= generation || meta.class.kept_on_background_stale_generation()
         })
@@ -161,11 +118,9 @@ where
         tasks.retain(|item| keep(&item.task, &item.meta));
         let removed = original_len.saturating_sub(tasks.len());
 
-        if self.config.dedupe_by_key {
-            self.queued_keys.clear();
-            self.queued_keys
-                .extend(tasks.iter().map(|item| item.meta.key.clone()));
-        }
+        self.queued_keys.clear();
+        self.queued_keys
+            .extend(tasks.iter().map(|item| item.meta.key.clone()));
 
         self.tasks = BinaryHeap::from(tasks);
         removed
@@ -174,7 +129,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{PrefetchQueue, PrefetchQueueConfig, QueueTaskMeta};
+    use super::{PrefetchQueue, QueueTaskMeta};
     use crate::work::WorkClass;
 
     fn meta(key: u8, class: WorkClass, generation: u64) -> QueueTaskMeta<u8> {
@@ -186,15 +141,12 @@ mod tests {
     }
 
     fn contains_key(queue: &PrefetchQueue<u8, i32>, key: u8) -> bool {
-        if queue.config.dedupe_by_key {
-            return queue.queued_keys.contains(&key);
-        }
-        queue.tasks.iter().any(|item| item.meta.key == key)
+        queue.queued_keys.contains(&key)
     }
 
     #[test]
     fn pop_order_follows_priority_and_generation() {
-        let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue = PrefetchQueue::new();
         assert!(queue.push(1, meta(1, WorkClass::Background, 5)));
         assert!(queue.push(2, meta(2, WorkClass::DirectionalLead, 1)));
         assert!(queue.push(3, meta(3, WorkClass::DirectionalLead, 2)));
@@ -211,7 +163,7 @@ mod tests {
 
     #[test]
     fn fifo_within_same_class_and_generation() {
-        let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue = PrefetchQueue::new();
         assert!(queue.push(10, meta(10, WorkClass::DirectionalLead, 7)));
         assert!(queue.push(11, meta(11, WorkClass::DirectionalLead, 7)));
         assert!(queue.push(12, meta(12, WorkClass::DirectionalLead, 7)));
@@ -223,7 +175,7 @@ mod tests {
 
     #[test]
     fn dedupe_by_key_skips_duplicate_tasks() {
-        let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue = PrefetchQueue::new();
         assert!(queue.push(1, meta(42, WorkClass::Background, 1)));
         assert!(!queue.push(2, meta(42, WorkClass::CriticalCurrent, 2)));
         assert_eq!(queue.len(), 1);
@@ -232,7 +184,7 @@ mod tests {
 
     #[test]
     fn cancel_stale_prefetch_removes_only_lead_and_background() {
-        let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue = PrefetchQueue::new();
         assert!(queue.push(1, meta(1, WorkClass::CriticalCurrent, 1)));
         assert!(queue.push(2, meta(2, WorkClass::GuardReverse, 1)));
         assert!(queue.push(3, meta(3, WorkClass::DirectionalLead, 1)));
@@ -251,7 +203,7 @@ mod tests {
 
     #[test]
     fn retain_rebuilds_dedupe_index_after_filtering() {
-        let mut queue = PrefetchQueue::new(PrefetchQueueConfig::default());
+        let mut queue = PrefetchQueue::new();
         assert!(queue.push(1, meta(1, WorkClass::Background, 1)));
         assert!(queue.push(2, meta(2, WorkClass::DirectionalLead, 1)));
 

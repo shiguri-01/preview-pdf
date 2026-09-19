@@ -18,13 +18,6 @@ impl CacheLimits {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct CacheCounters {
-    pub hits: u64,
-    pub misses: u64,
-    pub evictions: u64,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OversizePolicy {
     Reject,
@@ -86,7 +79,8 @@ pub(crate) struct BudgetedLruCache<K: Eq + Hash, V> {
     limits: CacheLimits,
     memory_bytes: usize,
     entries: LruCache<K, CacheEntry<V>>,
-    counters: CacheCounters,
+    hits: u64,
+    misses: u64,
 }
 
 impl<K, V> BudgetedLruCache<K, V>
@@ -102,25 +96,26 @@ where
                 NonZeroUsize::new(limits.max_entries.saturating_mul(2).saturating_add(1))
                     .expect("cache entries is non-zero"),
             ),
-            counters: CacheCounters::default(),
+            hits: 0,
+            misses: 0,
         }
     }
 
     pub(crate) fn get(&mut self, key: &K) -> Option<&V> {
         if self.entries.peek(key).is_some() {
-            self.counters.hits += 1;
+            self.hits += 1;
             return self.entries.get(key).map(|entry| &entry.value);
         }
-        self.counters.misses += 1;
+        self.misses += 1;
         None
     }
 
     pub(crate) fn get_mut(&mut self, key: &K) -> Option<&mut V> {
         if self.entries.peek(key).is_some() {
-            self.counters.hits += 1;
+            self.hits += 1;
             return self.entries.get_mut(key).map(|entry| &mut entry.value);
         }
-        self.counters.misses += 1;
+        self.misses += 1;
         None
     }
 
@@ -236,20 +231,12 @@ where
         self.memory_bytes
     }
 
-    pub(crate) fn counters(&self) -> CacheCounters {
-        self.counters
-    }
-
-    pub(crate) fn add_evictions(&mut self, count: u64) {
-        self.counters.evictions = self.counters.evictions.saturating_add(count);
-    }
-
     pub(crate) fn hit_rate(&self) -> f64 {
-        let lookups = self.counters.hits + self.counters.misses;
+        let lookups = self.hits + self.misses;
         if lookups == 0 {
             return 0.0;
         }
-        self.counters.hits as f64 / lookups as f64
+        self.hits as f64 / lookups as f64
     }
 
     fn eviction_required_for_insert(
@@ -325,7 +312,6 @@ where
             let Some(entry) = self.pop_lru_unprotected(protected) else {
                 break;
             };
-            self.counters.evictions += 1;
             removed.push(entry);
         }
         removed
@@ -346,7 +332,6 @@ where
         let mut removed = Vec::new();
         for key in keys {
             if let Some(entry) = self.pop_entry(&key) {
-                self.counters.evictions += 1;
                 removed.push(entry);
             }
         }

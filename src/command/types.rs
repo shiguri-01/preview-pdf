@@ -1,5 +1,3 @@
-use std::sync::OnceLock;
-
 use crate::condition::ConditionExpr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,6 +8,7 @@ pub enum SearchMatcherKind {
 
 impl SearchMatcherKind {
     const VARIANTS: [Self; 2] = [Self::ContainsInsensitive, Self::ContainsSensitive];
+    const VALUES: &[&str] = &["contains-insensitive", "contains-sensitive"];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -30,16 +29,7 @@ impl SearchMatcherKind {
     }
 
     pub fn values() -> &'static [&'static str] {
-        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
-
-        VALUES
-            .get_or_init(|| {
-                SearchMatcherKind::VARIANTS
-                    .iter()
-                    .map(|candidate| candidate.as_str())
-                    .collect()
-            })
-            .as_ref()
+        Self::VALUES
     }
 }
 
@@ -57,16 +47,13 @@ pub enum SpreadDirectionArg {
 
 impl SpreadDirectionArg {
     const VARIANTS: [Self; 2] = [Self::Ltr, Self::Rtl];
+    const VALUES: &[&str] = &["ltr", "rtl"];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Ltr => "ltr",
             Self::Rtl => "rtl",
         }
-    }
-
-    pub fn id(self) -> &'static str {
-        self.as_str()
     }
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -77,16 +64,7 @@ impl SpreadDirectionArg {
     }
 
     pub fn values() -> &'static [&'static str] {
-        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
-
-        VALUES
-            .get_or_init(|| {
-                SpreadDirectionArg::VARIANTS
-                    .iter()
-                    .map(|candidate| candidate.as_str())
-                    .collect()
-            })
-            .as_ref()
+        Self::VALUES
     }
 }
 
@@ -98,16 +76,13 @@ pub enum SpreadCoverPolicyArg {
 
 impl SpreadCoverPolicyArg {
     const VARIANTS: [Self; 2] = [Self::Paired, Self::Cover];
+    const VALUES: &[&str] = &["paired", "cover"];
 
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Paired => "paired",
             Self::Cover => "cover",
         }
-    }
-
-    pub fn id(self) -> &'static str {
-        self.as_str()
     }
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -118,16 +93,7 @@ impl SpreadCoverPolicyArg {
     }
 
     pub fn values() -> &'static [&'static str] {
-        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
-
-        VALUES
-            .get_or_init(|| {
-                SpreadCoverPolicyArg::VARIANTS
-                    .iter()
-                    .map(|candidate| candidate.as_str())
-                    .collect()
-            })
-            .as_ref()
+        Self::VALUES
     }
 }
 
@@ -141,6 +107,7 @@ pub enum PanDirection {
 
 impl PanDirection {
     const VARIANTS: [Self; 4] = [Self::Left, Self::Right, Self::Up, Self::Down];
+    const VALUES: &[&str] = &["left", "right", "up", "down"];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -159,16 +126,7 @@ impl PanDirection {
     }
 
     pub fn values() -> &'static [&'static str] {
-        static VALUES: OnceLock<Box<[&'static str]>> = OnceLock::new();
-
-        VALUES
-            .get_or_init(|| {
-                PanDirection::VARIANTS
-                    .iter()
-                    .map(|candidate| candidate.as_str())
-                    .collect()
-            })
-            .as_ref()
+        Self::VALUES
     }
 }
 
@@ -247,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn enum_value_lists_are_derived_from_variant_strings() {
+    fn enum_value_lists_match_variant_strings() {
         assert_eq!(
             PanDirection::values(),
             &[

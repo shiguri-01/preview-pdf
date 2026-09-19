@@ -18,29 +18,6 @@ pub struct OutlineState {
     cache: Option<OutlineCache>,
 }
 
-pub struct OutlineCommandPort<'a> {
-    state: &'a mut OutlineState,
-}
-
-impl<'a> OutlineCommandPort<'a> {
-    pub(crate) fn new(state: &'a mut OutlineState) -> Self {
-        Self { state }
-    }
-
-    pub(crate) fn open_palette(&mut self, pdf: SharedPdfBackend) -> AppResult<PaletteRequest> {
-        self.state.open_palette(pdf)
-    }
-
-    pub(crate) fn goto(
-        &mut self,
-        app: &mut AppState,
-        page_count: usize,
-        page: usize,
-    ) -> AppResult<(CommandOutcome, NoticeAction)> {
-        self.state.goto(app, page_count, page)
-    }
-}
-
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OutlineUiSnapshot {
     pub entries: Arc<[OutlinePaletteEntry]>,

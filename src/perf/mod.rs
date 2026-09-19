@@ -14,7 +14,6 @@ use crate::app::{App, RuntimeMode};
 use crate::backend::open_default_backend;
 use crate::error::{AppError, AppResult};
 use crate::metrics::{PerfStats, RedrawReasonCounts};
-use crate::presenter::PresenterKind;
 
 use driver::{
     HeadlessTerminalSession, PERF_HEADLESS_HEIGHT, PERF_HEADLESS_WIDTH, PerfRuntimeDriver,
@@ -101,13 +100,6 @@ pub struct PerfScenarioParameters {
     pub idle_duration_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PageStepPolicy {
-    Unused,
-    Fixed(usize),
-    Configured,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PerfScenarioId {
@@ -139,7 +131,11 @@ impl PerfScenarioId {
 
     pub fn parameters(self, run: &PerfSuiteConfig) -> PerfScenarioParameters {
         PerfScenarioParameters {
-            page_steps: self.page_step_policy().resolve(run.page_steps),
+            page_steps: match self {
+                Self::ColdFirstPage | Self::IdleSettledRedraw => 0,
+                Self::ZoomStep => 2,
+                Self::SteadyNextPage | Self::SteadyPrevPage | Self::RapidNextPage => run.page_steps,
+            },
             idle_duration_ms: match self {
                 Self::IdleSettledRedraw => run.idle_ms,
                 _ => 0,
@@ -148,27 +144,10 @@ impl PerfScenarioId {
     }
 
     fn uses_configured_page_steps(self) -> bool {
-        self.page_step_policy() == PageStepPolicy::Configured
-    }
-
-    fn page_step_policy(self) -> PageStepPolicy {
-        match self {
-            Self::ColdFirstPage | Self::IdleSettledRedraw => PageStepPolicy::Unused,
-            Self::ZoomStep => PageStepPolicy::Fixed(2),
-            Self::SteadyNextPage | Self::SteadyPrevPage | Self::RapidNextPage => {
-                PageStepPolicy::Configured
-            }
-        }
-    }
-}
-
-impl PageStepPolicy {
-    fn resolve(self, configured_page_steps: usize) -> usize {
-        match self {
-            Self::Unused => 0,
-            Self::Fixed(page_steps) => page_steps,
-            Self::Configured => configured_page_steps,
-        }
+        matches!(
+            self,
+            Self::SteadyNextPage | Self::SteadyPrevPage | Self::RapidNextPage
+        )
     }
 }
 
@@ -363,7 +342,7 @@ pub async fn run_suite(config: PerfSuiteConfig) -> AppResult<PerfSuiteReport> {
             let iteration_started_at = Instant::now();
             let pdf = open_default_backend(&config.pdf_path)?;
             doc_id.get_or_insert(pdf.doc_id());
-            let mut app = App::new(PresenterKind::RatatuiImage)?;
+            let mut app = App::new()?;
             app.enable_metrics_collection()?;
             let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;
             let driver = PerfRuntimeDriver::new(scenario, parameters.clone(), iteration_started_at);

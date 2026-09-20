@@ -205,8 +205,7 @@ impl App {
     }
 
     fn default_pan_step_cells<S: TerminalSurface>(&self, session: &S) -> i32 {
-        let Some(viewport) = Self::current_viewport(session, self.state.debug_status_visible)
-        else {
+        let Some(viewport) = Self::current_viewport(session) else {
             return 1;
         };
         i32::from((viewport.width.min(viewport.height) / 5).max(1))
@@ -441,7 +440,7 @@ impl App {
         runtime.render_worker =
             RenderWorker::spawn(Arc::clone(&backend), self.render_policy.worker_threads);
 
-        let viewport = Self::current_viewport(&runtime.session, self.state.debug_status_visible);
+        let viewport = Self::current_viewport(&runtime.session);
         let visible_pages = self.state.visible_page_slots(page_count);
         let tracked_scale =
             self.compute_current_scale(backend.as_ref(), visible_pages.anchor_page, viewport);

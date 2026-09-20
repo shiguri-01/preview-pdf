@@ -16,7 +16,6 @@ pub struct ChromeViewState {
     pub visible_pages: VisiblePageSlots,
     pub page_presentation: PageLayoutMode,
     pub zoom: f32,
-    pub debug_status_visible: bool,
     pub notice: Option<Notice>,
 }
 
@@ -27,8 +26,6 @@ pub fn draw_chrome(
     chrome: &ChromeViewState,
     file_name: &str,
     page_count: usize,
-    presenter_label: &str,
-    graphics_protocol: Option<&str>,
     extension_status_segments: &[String],
 ) {
     let status_text = build_status_text(
@@ -47,29 +44,6 @@ pub fn draw_chrome(
             .style(primary_text())
             .wrap(Wrap { trim: true })
     };
-    if chrome.debug_status_visible && layout.status.height >= 2 {
-        let top =
-            ratatui::layout::Rect::new(layout.status.x, layout.status.y, layout.status.width, 1);
-        frame.render_widget(primary, top);
-
-        let presenter_path_text = build_presenter_path_text(
-            presenter_label,
-            graphics_protocol,
-            layout.status.width as usize,
-        );
-        let bottom = ratatui::layout::Rect::new(
-            layout.status.x,
-            layout.status.y + 1,
-            layout.status.width,
-            layout.status.height.saturating_sub(1).max(1),
-        );
-        let debug = Paragraph::new(presenter_path_text)
-            .style(primary_text())
-            .wrap(Wrap { trim: true });
-        frame.render_widget(debug, bottom);
-        return;
-    }
-
     frame.render_widget(primary, layout.status);
 }
 
@@ -154,16 +128,6 @@ fn format_page_segment(chrome: &ChromeViewState, page_total: usize) -> String {
     }
 }
 
-fn build_presenter_path_text(
-    presenter_label: &str,
-    graphics_protocol: Option<&str>,
-    max_width: usize,
-) -> String {
-    let protocol = graphics_protocol.unwrap_or("-");
-    let text = format!("presenter={presenter_label}(proto={protocol})");
-    text.unicode_truncate(max_width).0.to_string()
-}
-
 fn stylize_status_line(text: &str) -> Line<'static> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     for (idx, part) in text.split(" | ").enumerate() {
@@ -242,8 +206,8 @@ mod tests {
     use crate::app::{AppState, Notice, NoticeLevel, PageLayoutMode, SpreadCoverPolicy};
 
     use super::{
-        ChromeViewState, build_presenter_path_text, build_status_text, display_width,
-        format_filename_segment, stylize_notice_line,
+        ChromeViewState, build_status_text, display_width, format_filename_segment,
+        stylize_notice_line,
     };
 
     fn chrome_from_app(app: &AppState, page_count: usize) -> ChromeViewState {
@@ -251,7 +215,6 @@ mod tests {
             visible_pages: app.visible_page_slots(page_count),
             page_presentation: app.page_presentation_for_slots(app.visible_page_slots(page_count)),
             zoom: app.zoom,
-            debug_status_visible: app.debug_status_visible,
             notice: app.notice.clone(),
         }
     }
@@ -266,24 +229,6 @@ mod tests {
 
         let text = build_status_text(&chrome_from_app(&app, 10), "sample.pdf", 10, &[], 80);
         assert_eq!(text, "p. 3/10 | zoom 1.50x | sample.pdf");
-    }
-
-    #[test]
-    fn build_presenter_path_text_formats_protocol() {
-        for (name, protocol, expected) in [
-            (
-                "known protocol",
-                Some("kitty"),
-                "presenter=ratatui-image(proto=kitty)",
-            ),
-            ("unknown protocol", None, "presenter=ratatui-image(proto=-)"),
-        ] {
-            assert_eq!(
-                build_presenter_path_text("ratatui-image", protocol, 200),
-                expected,
-                "{name}"
-            );
-        }
     }
 
     #[test]

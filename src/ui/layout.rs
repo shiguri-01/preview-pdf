@@ -6,11 +6,10 @@ pub struct UiLayout {
     pub status: Rect,
 }
 
-pub fn split_layout(area: Rect, debug_status_visible: bool) -> UiLayout {
-    let status_height = if debug_status_visible { 2 } else { 1 };
+pub fn split_layout(area: Rect) -> UiLayout {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(status_height)])
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(area);
 
     let viewer = chunks[0];
@@ -35,7 +34,7 @@ mod tests {
     use super::split_layout;
 
     #[test]
-    fn split_layout_reserves_configured_status_rows() {
+    fn split_layout_reserves_status_row() {
         let area = Rect {
             x: 0,
             y: 0,
@@ -43,13 +42,9 @@ mod tests {
             height: 40,
         };
 
-        for (name, debug_status_visible, status_height, viewer_height) in
-            [("normal", false, 1, 39), ("debug", true, 2, 38)]
-        {
-            let layout = split_layout(area, debug_status_visible);
-            assert_eq!(layout.status.height, status_height, "{name}");
-            assert_eq!(layout.viewer.height, viewer_height, "{name}");
-        }
+        let layout = split_layout(area);
+        assert_eq!(layout.status.height, 1);
+        assert_eq!(layout.viewer.height, 39);
     }
 
     #[test]

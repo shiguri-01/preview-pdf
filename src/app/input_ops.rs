@@ -604,7 +604,7 @@ mod tests {
             .register_exact(
                 ConditionExpr::Always,
                 &[ShortcutKey::char('x')],
-                Command::DebugStatusHide,
+                Command::ZoomReset,
             )
             .expect("single-key binding should register");
         registry
@@ -637,7 +637,7 @@ mod tests {
         assert_eq!(
             mismatch.commands,
             vec![CommandRequest::new(
-                Command::DebugStatusHide,
+                Command::ZoomReset,
                 CommandInvocationSource::Binding,
             )]
         );

@@ -47,7 +47,7 @@ impl App {
         redraw_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let render_worker =
             RenderWorker::spawn(Arc::clone(&backend), self.render_policy.worker_threads);
-        let viewport = Self::current_viewport(&session, self.state.debug_status_visible);
+        let viewport = Self::current_viewport(&session);
         let visible_pages = self.state.visible_page_slots(page_count);
         let tracked_scale =
             self.compute_current_scale(backend.as_ref(), visible_pages.anchor_page, viewport);

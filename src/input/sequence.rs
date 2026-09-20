@@ -953,14 +953,14 @@ mod tests {
             .register_exact(
                 ConditionExpr::All(SEARCH_ACTIVE),
                 &[ShortcutKey::char('x')],
-                Command::DebugStatusShow,
+                Command::ZoomReset,
             )
             .expect("first binding should register");
         registry
             .register_exact(
                 ConditionExpr::All(NORMAL_MODE),
                 &[ShortcutKey::char('x')],
-                Command::DebugStatusHide,
+                Command::ZoomReset,
             )
             .expect("later binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);
@@ -971,7 +971,7 @@ mod tests {
                 normal_context(&extensions),
                 KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
             ),
-            SequenceResolution::Dispatch(Command::DebugStatusHide)
+            SequenceResolution::Dispatch(Command::ZoomReset)
         );
     }
 
@@ -1264,7 +1264,7 @@ mod tests {
             .register_exact(
                 ConditionExpr::All(SEARCH_ACTIVE),
                 &[ShortcutKey::char('g')],
-                Command::DebugStatusShow,
+                Command::ZoomReset,
             )
             .expect("conditional binding should register");
         registry
@@ -1300,7 +1300,7 @@ mod tests {
             .register_exact(
                 ConditionExpr::All(SEARCH_ACTIVE),
                 &[ShortcutKey::char('g')],
-                Command::DebugStatusShow,
+                Command::ZoomReset,
             )
             .expect("conditional binding should register");
         registry
@@ -1314,7 +1314,7 @@ mod tests {
             .register_exact(
                 ConditionExpr::Always,
                 &[ShortcutKey::char('x')],
-                Command::DebugStatusHide,
+                Command::ZoomReset,
             )
             .expect("single-key binding should register");
         let mut resolver = SequenceResolver::new(registry, Duration::ZERO);
@@ -1334,7 +1334,7 @@ mod tests {
                 normal_context(&inactive_extensions),
                 KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
             ),
-            SequenceResolution::Dispatch(Command::DebugStatusHide)
+            SequenceResolution::Dispatch(Command::ZoomReset)
         );
     }
 
@@ -1347,7 +1347,7 @@ mod tests {
             .register_exact(
                 ConditionExpr::All(SEARCH_ACTIVE),
                 &[ShortcutKey::char('g'), ShortcutKey::char('g')],
-                Command::DebugStatusShow,
+                Command::ZoomReset,
             )
             .expect("conditional binding should register");
         let mut resolver = SequenceResolver::new(registry, DEFAULT_SEQUENCE_TIMEOUT);

@@ -28,8 +28,7 @@ use super::l2_cache::{
 use super::terminal_cell::{picker_with_resolved_cell_size, protocol_type_label};
 use super::traits::{
     GraphicsProtocol, ImagePresenter, PanOffset, PresenterBackgroundEvent, PresenterCaps,
-    PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot,
-    PresenterSlotOutcome, Viewport,
+    PresenterRenderOutcome, PresenterRenderSlot, PresenterSlot, PresenterSlotOutcome, Viewport,
 };
 
 pub(super) const ENCODE_FAILURE_MESSAGE: &str = "failed to encode terminal image";
@@ -404,12 +403,6 @@ impl ImagePresenter for RatatuiImagePresenter {
         self.state.perf_stats.reset();
         self.state.terminal_initialized = true;
         Ok(())
-    }
-
-    fn runtime_info(&self) -> PresenterRuntimeInfo {
-        PresenterRuntimeInfo {
-            graphics_protocol: Some(self.config.protocol_label),
-        }
     }
 
     fn prepare_slots(&mut self, slots: &[PresenterSlot<'_>]) -> AppResult<()> {

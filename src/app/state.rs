@@ -110,7 +110,6 @@ pub struct AppState {
     pub pan_x: i32,
     pub pan_y: i32,
     pub help_scroll: usize,
-    pub debug_status_visible: bool,
     pub mode: Mode,
     pub notice: Option<Notice>,
 }
@@ -126,7 +125,6 @@ impl Default for AppState {
             pan_x: 0,
             pan_y: 0,
             help_scroll: 0,
-            debug_status_visible: false,
             mode: Mode::Normal,
             notice: None,
         }

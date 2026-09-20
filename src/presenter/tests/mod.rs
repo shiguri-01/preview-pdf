@@ -58,12 +58,6 @@ fn render_until_ready(presenter: &mut RatatuiImagePresenter, area: Rect) {
 }
 
 #[test]
-fn presenter_runtime_info_exposes_graphics_protocol_when_available() {
-    let presenter = RatatuiImagePresenter::new();
-    assert!(presenter.runtime_info().graphics_protocol.is_some());
-}
-
-#[test]
 fn presenter_with_cache_limits_applies_l2_cache_limits() {
     let presenter = RatatuiImagePresenter::with_cache_limits(5, 2048);
     assert_eq!(presenter.state.l2_cache.max_entries(), 5);

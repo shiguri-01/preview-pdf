@@ -101,11 +101,6 @@ pub struct PresenterCaps {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct PresenterRuntimeInfo {
-    pub graphics_protocol: Option<&'static str>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PresenterFeedback {
     #[default]
     None,
@@ -270,10 +265,6 @@ pub trait ImagePresenter {
     fn initialize_headless_for_perf(&mut self) -> AppResult<()> {
         self.reset_perf_metrics();
         self.initialize_terminal()
-    }
-
-    fn runtime_info(&self) -> PresenterRuntimeInfo {
-        PresenterRuntimeInfo::default()
     }
 
     fn prepare(

@@ -7,8 +7,8 @@ use crate::input::sequence::SequenceRegistrySnapshot;
 use crate::palette::PaletteView;
 use crate::presenter::{
     ImagePresenter, PanOffset, PresenterFeedback, PresenterHorizontalAlign, PresenterRenderMode,
-    PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo,
-    PresenterSlotOutcome, Viewport,
+    PresenterRenderOptions, PresenterRenderOutcome, PresenterRenderSlot, PresenterSlotOutcome,
+    Viewport,
 };
 use crate::render::cache::RenderedPageKey;
 use crate::ui;
@@ -69,13 +69,10 @@ struct RenderFrameDrawPlan {
     generation: u64,
     mode: Mode,
     help_scroll: usize,
-    debug_status_visible: bool,
     chrome: ui::ChromeViewState,
     page_presentation: PageLayoutMode,
     enable_crop: bool,
     file_name: String,
-    presenter_backend_name: &'static str,
-    presenter_runtime: PresenterRuntimeInfo,
     presenter_cell_px: Option<(u16, u16)>,
     render_options: PresenterRenderOptions,
     pan: PanOffset,
@@ -86,8 +83,6 @@ struct RenderFrameDrawPlan {
 }
 
 struct RenderFramePresenterInfo {
-    backend_name: &'static str,
-    runtime: PresenterRuntimeInfo,
     cell_px: Option<(u16, u16)>,
 }
 
@@ -163,19 +158,15 @@ impl RenderFrameDrawPlan {
             generation,
             mode: state.mode,
             help_scroll: state.help_scroll,
-            debug_status_visible: state.debug_status_visible,
             chrome: ui::ChromeViewState {
                 visible_pages,
                 page_presentation,
                 zoom: state.zoom,
-                debug_status_visible: state.debug_status_visible,
                 notice: state.notice.clone(),
             },
             page_presentation,
             enable_crop: state.zoom > 1.0,
             file_name,
-            presenter_backend_name: presenter.backend_name,
-            presenter_runtime: presenter.runtime,
             presenter_cell_px: presenter.cell_px,
             render_options,
             pan: PanOffset {
@@ -192,10 +183,9 @@ impl RenderFrameDrawPlan {
 
 pub(in crate::app) fn current_viewport_for_session<S: TerminalSurface>(
     session: &S,
-    debug_status_visible: bool,
 ) -> Option<Viewport> {
     let area = session.size().ok()?.into();
-    let layout = ui::split_layout(area, debug_status_visible);
+    let layout = ui::split_layout(area);
     if layout.viewer.width == 0 || layout.viewer.height == 0 {
         return None;
     }
@@ -239,11 +229,8 @@ pub(in crate::app) fn compute_current_scale_for_state(
 }
 
 impl App {
-    pub(in crate::app) fn current_viewport<S: TerminalSurface>(
-        session: &S,
-        debug_status_visible: bool,
-    ) -> Option<Viewport> {
-        current_viewport_for_session(session, debug_status_visible)
+    pub(in crate::app) fn current_viewport<S: TerminalSurface>(session: &S) -> Option<Viewport> {
+        current_viewport_for_session(session)
     }
 
     pub(in crate::app) fn compute_current_scale(
@@ -439,8 +426,6 @@ impl RenderSubsystem {
             self.viewer_has_image,
             self.image_occluded_last_frame,
             RenderFramePresenterInfo {
-                backend_name: presenter_caps.backend_name,
-                runtime: self.presenter.runtime_info(),
                 cell_px: presenter_caps.cell_px,
             },
         );
@@ -461,15 +446,13 @@ impl RenderSubsystem {
         let mut render_feedback = PresenterFeedback::None;
         let mut viewer_has_image = self.viewer_has_image;
         let draw_result = session.draw(|frame| {
-            let layout = ui::split_layout(frame.area(), draw_plan.debug_status_visible);
+            let layout = ui::split_layout(frame.area());
             ui::draw_chrome(
                 frame,
                 layout,
                 &draw_plan.chrome,
                 &draw_plan.file_name,
                 draw_plan.page_count,
-                draw_plan.presenter_backend_name,
-                draw_plan.presenter_runtime.graphics_protocol,
                 &draw_plan.status_bar_segments,
             );
 

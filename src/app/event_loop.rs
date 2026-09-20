@@ -258,7 +258,7 @@ impl App {
         prefetch_pause_after_input: Duration,
         prefetch_dispatch_budget: usize,
     ) -> IterationStep {
-        let prefetch_viewport = Self::current_viewport(session, self.state.debug_status_visible);
+        let prefetch_viewport = Self::current_viewport(session);
         let visible_pages = self.state.visible_page_slots(backend.page_count());
         let current_scale =
             self.compute_current_scale(backend, visible_pages.anchor_page, prefetch_viewport);

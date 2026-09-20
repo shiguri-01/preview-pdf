@@ -110,7 +110,7 @@ mod tests {
     use crate::extension::ExtensionWorkerEvent;
     use crate::presenter::{
         ImagePresenter, PresenterBackgroundEvent, PresenterCaps, PresenterFeedback,
-        PresenterRenderOutcome, PresenterRenderSlot, PresenterRuntimeInfo, PresenterSlot,
+        PresenterRenderOutcome, PresenterRenderSlot, PresenterSlot,
     };
     use crate::render::worker::RenderWorker;
     use crate::search::engine::{SearchEpoch, SearchEvent, SearchSnapshot};
@@ -155,10 +155,6 @@ mod tests {
                 cell_px: None,
                 preferred_max_render_scale: 1.0,
             }
-        }
-
-        fn runtime_info(&self) -> PresenterRuntimeInfo {
-            PresenterRuntimeInfo::default()
         }
 
         fn has_pending_work(&self) -> bool {

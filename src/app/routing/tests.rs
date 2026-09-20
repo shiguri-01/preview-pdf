@@ -340,7 +340,7 @@ fn input_outcome_applies_expired_command_before_latest_command() {
         .register_exact(
             ConditionExpr::Always,
             &[ShortcutKey::char('g')],
-            Command::DebugStatusShow,
+            Command::ZoomIn,
         )
         .expect("single-key binding should register");
     registry
@@ -354,7 +354,7 @@ fn input_outcome_applies_expired_command_before_latest_command() {
         .register_exact(
             ConditionExpr::Always,
             &[ShortcutKey::char('x')],
-            Command::DebugStatusHide,
+            Command::ZoomReset,
         )
         .expect("single-key binding should register");
     app.interaction =
@@ -386,9 +386,9 @@ fn input_outcome_applies_expired_command_before_latest_command() {
         .expect("input should be handled");
 
     assert!(matches!(control, RuntimeControl::Continue));
-    assert!(
-        !app.state.debug_status_visible,
-        "DebugStatusShow must be applied before DebugStatusHide"
+    assert_eq!(
+        app.state.zoom, 1.0,
+        "expired zoom-in must run before zoom-reset"
     );
     assert!(!matches!(
         runtime.event_rx.try_recv(),
@@ -1132,7 +1132,7 @@ fn non_current_render_complete_does_not_redraw() {
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&backend));
     runtime.ui_actor.clear_redraw();
-    let viewport = App::current_viewport(&runtime.session, app.state.debug_status_visible);
+    let viewport = App::current_viewport(&runtime.session);
     let current_scale =
         app.compute_current_scale(backend.as_ref(), app.state.current_page, viewport);
     let non_current_key = RenderedPageKey::new(backend.doc_id(), 42, current_scale);

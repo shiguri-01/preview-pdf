@@ -188,7 +188,7 @@ impl RenderActor {
     where
         S: TerminalSurface,
     {
-        let viewport = current_viewport_for_session(ctx.session, state.debug_status_visible);
+        let viewport = current_viewport_for_session(ctx.session);
         let visible_pages = state.visible_page_slots(ctx.backend.page_count());
         let current_scale = compute_current_scale_for_state(
             state,

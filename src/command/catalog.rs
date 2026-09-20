@@ -392,33 +392,6 @@ define_commands! {
         parse: (super::parse::parse_page_layout_spread),
         exec: super::handlers::page_layout_spread,
     }
-    DebugStatusShow {
-        id: "debug-show",
-        title: "Show Debug Info",
-        args: &NO_ARGS,
-        invocation: CommandInvocationPolicy::User,
-        enabled_when: ConditionExpr::Always,
-        parse: no_args,
-        exec: super::handlers::debug_status_show,
-    }
-    DebugStatusHide {
-        id: "debug-hide",
-        title: "Hide Debug Info",
-        args: &NO_ARGS,
-        invocation: CommandInvocationPolicy::User,
-        enabled_when: ConditionExpr::Always,
-        parse: no_args,
-        exec: super::handlers::debug_status_hide,
-    }
-    DebugStatusToggle {
-        id: "debug-toggle",
-        title: "Toggle Debug Info",
-        args: &NO_ARGS,
-        invocation: CommandInvocationPolicy::User,
-        enabled_when: ConditionExpr::Always,
-        parse: no_args,
-        exec: super::handlers::debug_status_toggle,
-    }
     OpenPalette(
         kind: PaletteKind,
         options: PaletteOpenOptions,

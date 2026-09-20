@@ -200,19 +200,19 @@ impl RenderRuntime {
     #[cfg(test)]
     pub(super) fn prepare_current_page(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         request: CurrentPagePrepareRequest<'_>,
     ) -> AppResult<PreparedPresenterSlots> {
         let task = RenderTask {
-            doc_id: doc.doc_id(),
+            doc_id: backend.doc_id(),
             page: request.page,
             scale: request.scale,
             class: WorkClass::CriticalCurrent,
             generation: 0,
         };
-        let frame = self.resolve_task_frame(doc, &task)?;
+        let frame = self.resolve_task_frame(backend, &task)?;
         let (frame, overlay_stamp) =
-            decorate_single_page_frame(doc, task.page, &frame, request.options.overlay)?;
+            decorate_single_page_frame(backend, task.page, &frame, request.options.overlay)?;
         let mut pan = request.pan;
         let (frame, pan_for_presenter) = prepare_presenter_frame(
             &frame,
@@ -236,10 +236,10 @@ impl RenderRuntime {
 
     pub(crate) fn prepare_page_slots_from_cache(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         request: PageSlotPrepareRequest<'_>,
     ) -> AppResult<CachePrepareResult<PreparedPresenterSlots>> {
-        let Some(prepared) = self.build_page_slots_from_cache(doc, request)? else {
+        let Some(prepared) = self.build_page_slots_from_cache(backend, request)? else {
             self.perf_stats.set_l1_hit_rate(self.l1_cache.hit_rate());
             return Ok(CachePrepareResult::Miss);
         };
@@ -249,17 +249,17 @@ impl RenderRuntime {
 
     pub(crate) fn prepare_spread_canvas_from_cache(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         request: SpreadCanvasPrepareRequest<'_>,
     ) -> AppResult<CachePrepareResult<PreparedSpreadCanvas>> {
         let left = self.spread_canvas_slot_page(
-            doc,
+            backend,
             request.visible_pages.left_page,
             request.scale,
             request.overlay,
         )?;
         let right = self.spread_canvas_slot_page(
-            doc,
+            backend,
             request.visible_pages.right_page,
             request.scale,
             request.overlay,
@@ -352,7 +352,7 @@ impl RenderRuntime {
 
     fn build_page_slots_from_cache(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         request: PageSlotPrepareRequest<'_>,
     ) -> AppResult<Option<PreparedPresenterSlots>> {
         let mut cached = Vec::with_capacity(request.page_slots.len());
@@ -401,7 +401,7 @@ impl RenderRuntime {
                 continue;
             };
             let (frame, overlay_stamp) = decorate_single_page_frame(
-                doc,
+                backend,
                 slot.key.page,
                 &slot.frame,
                 request.options.overlay,
@@ -429,7 +429,7 @@ impl RenderRuntime {
 
     fn cached_decorated_page(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         page: Option<usize>,
         scale: f32,
         overlay: &HighlightOverlaySnapshot,
@@ -437,11 +437,11 @@ impl RenderRuntime {
         let Some(page) = page else {
             return Ok(None);
         };
-        let key = RenderedPageKey::new(doc.doc_id(), page, scale);
+        let key = RenderedPageKey::new(backend.doc_id(), page, scale);
         let Some(frame) = self.l1_cache.get(&key) else {
             return Ok(None);
         };
-        let (frame, overlay_stamp) = decorate_single_page_frame(doc, page, frame, overlay)?;
+        let (frame, overlay_stamp) = decorate_single_page_frame(backend, page, frame, overlay)?;
         Ok(Some(CachedDecoratedPage {
             key,
             frame,
@@ -451,7 +451,7 @@ impl RenderRuntime {
 
     fn spread_canvas_slot_page(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         page: Option<usize>,
         scale: f32,
         overlay: &HighlightOverlaySnapshot,
@@ -464,11 +464,11 @@ impl RenderRuntime {
             });
         };
 
-        let page = self.cached_decorated_page(doc, Some(page_index), scale, overlay)?;
+        let page = self.cached_decorated_page(backend, Some(page_index), scale, overlay)?;
         let geometry = page
             .as_ref()
             .map(spread_canvas_page)
-            .or_else(|| estimated_spread_canvas_page(doc, page_index, scale));
+            .or_else(|| estimated_spread_canvas_page(backend, page_index, scale));
 
         Ok(SpreadCanvasSlotPage {
             page,
@@ -486,11 +486,11 @@ fn spread_canvas_page(page: &CachedDecoratedPage) -> SpreadCanvasPage {
 }
 
 fn estimated_spread_canvas_page(
-    doc: &dyn PdfBackend,
+    backend: &dyn PdfBackend,
     page: usize,
     scale: f32,
 ) -> Option<SpreadCanvasPage> {
-    let (width_pt, height_pt) = doc.page_dimensions(page).ok()?;
+    let (width_pt, height_pt) = backend.page_dimensions(page).ok()?;
     let width = scaled_page_dimension(width_pt, scale);
     let height = scaled_page_dimension(height_pt, scale);
     Some(SpreadCanvasPage { width, height })
@@ -535,7 +535,7 @@ fn decorate_frame(
 }
 
 fn decorate_single_page_frame(
-    doc: &dyn PdfBackend,
+    backend: &dyn PdfBackend,
     page: usize,
     frame: &RgbaFrame,
     overlay: &HighlightOverlaySnapshot,
@@ -543,17 +543,17 @@ fn decorate_single_page_frame(
     if overlay.is_empty() {
         return Ok((frame.clone(), 0));
     }
-    let page_space = page_render_space(doc, page, frame, 0)?;
+    let page_space = page_render_space(backend, page, frame, 0)?;
     Ok((decorate_frame(frame, overlay, &[page_space]), overlay.stamp))
 }
 
 fn page_render_space(
-    doc: &dyn PdfBackend,
+    backend: &dyn PdfBackend,
     page: usize,
     frame: &RgbaFrame,
     origin_x_px: u32,
 ) -> AppResult<PageRenderSpace> {
-    let (width_pt, height_pt) = doc.page_dimensions(page)?;
+    let (width_pt, height_pt) = backend.page_dimensions(page)?;
     Ok(PageRenderSpace {
         page,
         origin_x_px,

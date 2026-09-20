@@ -50,12 +50,12 @@ impl SearchRuntime {
     pub fn submit(
         &mut self,
         app: &mut AppState,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         query: String,
         matcher: SearchMatcherKind,
     ) -> AppResult<(CommandOutcome, NoticeAction)> {
         let Self { state, engine, .. } = self;
-        state.submit(app, pdf, started_engine(engine), query, matcher)
+        state.submit(app, backend, started_engine(engine), query, matcher)
     }
 
     pub fn open_results_palette(&mut self) -> Option<PaletteRequest> {
@@ -71,9 +71,9 @@ impl SearchRuntime {
         self.state.goto_result(app, page_count, page)
     }
 
-    pub fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<bool> {
+    pub fn cancel(&mut self, backend: SharedPdfBackend) -> AppResult<bool> {
         let Self { state, engine, .. } = self;
-        state.cancel(pdf, started_engine(engine))
+        state.cancel(backend, started_engine(engine))
     }
 
     pub fn next_hit(&mut self, app: &mut AppState) -> (CommandOutcome, NoticeAction) {
@@ -89,13 +89,13 @@ impl SearchRuntime {
         state.handle_worker_event(app, started_engine(engine), event)
     }
 
-    pub fn prewarm(&mut self, pdf: SharedPdfBackend) {
-        self.engine_mut().prewarm(pdf);
+    pub fn prewarm(&mut self, backend: SharedPdfBackend) {
+        self.engine_mut().prewarm(backend);
     }
 
     pub fn resolve_priority_geometry(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         visible_pages: [Option<usize>; 2],
     ) {
         if self.state.query.is_empty() {
@@ -106,7 +106,7 @@ impl SearchRuntime {
         let generation = self.state.generation;
         let query = self.state.query.clone();
         self.engine_mut()
-            .resolve_geometry(pdf, generation, query, matcher, pages, true);
+            .resolve_geometry(backend, generation, query, matcher, pages, true);
     }
 
     pub fn matcher(&self) -> SearchMatcherKind {
@@ -144,7 +144,7 @@ impl SearchRuntime {
         }
     }
 
-    pub fn on_document_reloaded(&mut self, app: &mut AppState, pdf: SharedPdfBackend) {
+    pub fn on_document_reloaded(&mut self, app: &mut AppState, backend: SharedPdfBackend) {
         let active_search = self
             .is_active()
             .then(|| (self.query().to_string(), self.matcher()));
@@ -153,16 +153,16 @@ impl SearchRuntime {
             epoch: self.state.epoch,
             ..SearchState::default()
         };
-        self.prewarm(Arc::clone(&pdf));
+        self.prewarm(Arc::clone(&backend));
         if let Some((query, matcher)) = active_search
-            && let Err(err) = self.submit(app, Arc::clone(&pdf), query, matcher)
+            && let Err(err) = self.submit(app, Arc::clone(&backend), query, matcher)
         {
             self.advance_epoch();
             self.state = SearchState {
                 epoch: self.state.epoch,
                 ..SearchState::default()
             };
-            self.prewarm(pdf);
+            self.prewarm(backend);
             app.set_warning_notice(format!("Could not restore search after reload: {err}"));
         }
     }
@@ -199,7 +199,7 @@ pub struct SearchState {
     /// Final matched occurrences for the results palette, ordered by page/match order.
     palette_entries: Arc<[SearchPaletteEntry]>,
     current_hit: Option<usize>,
-    active_pdf: Option<SharedPdfBackend>,
+    active_backend: Option<SharedPdfBackend>,
 }
 
 impl Default for SearchState {
@@ -215,7 +215,7 @@ impl Default for SearchState {
             hits: Vec::new(),
             palette_entries: Arc::from([]),
             current_hit: None,
-            active_pdf: None,
+            active_backend: None,
         }
     }
 }
@@ -249,14 +249,14 @@ impl SearchState {
     pub fn submit(
         &mut self,
         _app: &mut AppState,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         search_engine: &mut SearchEngine,
         query: String,
         matcher: SearchMatcherKind,
     ) -> AppResult<(CommandOutcome, NoticeAction)> {
         let query = query.trim().to_string();
         if query.is_empty() {
-            self.generation = search_engine.cancel(Arc::clone(&pdf))?;
+            self.generation = search_engine.cancel(Arc::clone(&backend))?;
             self.query.clear();
             self.matcher = matcher;
             self.clear_results();
@@ -264,18 +264,19 @@ impl SearchState {
         }
 
         let search_matcher = matcher_for_kind(matcher);
-        let generation = search_engine.submit(Arc::clone(&pdf), query.clone(), search_matcher)?;
+        let generation =
+            search_engine.submit(Arc::clone(&backend), query.clone(), search_matcher)?;
 
         self.query = query;
         self.matcher = matcher;
         self.generation = generation;
         self.in_progress = true;
-        self.total_pages = pdf.page_count();
+        self.total_pages = backend.page_count();
         self.hit_pages_progress = 0;
         self.hits.clear();
         self.palette_entries = Arc::from([]);
         self.current_hit = None;
-        self.active_pdf = Some(Arc::clone(&pdf));
+        self.active_backend = Some(Arc::clone(&backend));
         Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }
 
@@ -314,14 +315,14 @@ impl SearchState {
 
     pub fn cancel(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         search_engine: &mut SearchEngine,
     ) -> AppResult<bool> {
         if self.query.is_empty() {
             return Ok(false);
         }
 
-        self.generation = search_engine.cancel(pdf)?;
+        self.generation = search_engine.cancel(backend)?;
         self.query.clear();
         self.clear_results();
         Ok(true)
@@ -365,11 +366,11 @@ impl SearchState {
                 self.hits = hits;
                 let pages = self.geometry_priority_pages([Some(app.current_page), None], true);
                 if !pages.is_empty()
-                    && let Some(pdf) = &self.active_pdf
+                    && let Some(backend) = &self.active_backend
                 {
                     let matcher = matcher_for_kind(self.matcher);
                     search_engine.resolve_geometry(
-                        Arc::clone(pdf),
+                        Arc::clone(backend),
                         self.generation,
                         self.query.clone(),
                         matcher,
@@ -559,7 +560,7 @@ impl SearchState {
         self.hits.clear();
         self.palette_entries = Arc::from([]);
         self.current_hit = None;
-        self.active_pdf = None;
+        self.active_backend = None;
     }
 
     fn event_is_current(&self, epoch: SearchEpoch, generation: u64) -> bool {
@@ -624,12 +625,12 @@ mod tests {
         }
     }
 
-    struct StubPdf {
+    struct StubBackend {
         path: PathBuf,
         page_count: usize,
     }
 
-    impl StubPdf {
+    impl StubBackend {
         fn new(page_count: usize) -> Self {
             Self {
                 path: PathBuf::from("stub.pdf"),
@@ -638,7 +639,7 @@ mod tests {
         }
     }
 
-    impl PdfBackend for StubPdf {
+    impl PdfBackend for StubBackend {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -676,12 +677,12 @@ mod tests {
         }
     }
 
-    struct HighlightUnavailableStubPdf {
+    struct HighlightUnavailableBackend {
         path: PathBuf,
         page: TextPage,
     }
 
-    impl HighlightUnavailableStubPdf {
+    impl HighlightUnavailableBackend {
         fn new(text: &str) -> Self {
             Self {
                 path: PathBuf::from("highlight-unavailable.pdf"),
@@ -698,7 +699,7 @@ mod tests {
         }
     }
 
-    impl PdfBackend for HighlightUnavailableStubPdf {
+    impl PdfBackend for HighlightUnavailableBackend {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -735,13 +736,13 @@ mod tests {
     fn submit_search_marks_search_active() {
         let mut state = test_state();
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(5)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(5)) as SharedPdfBackend;
         let mut engine = test_engine();
 
         let (outcome, _) = state
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -804,13 +805,13 @@ mod tests {
     fn submit_empty_query_clears_search_active() {
         let mut state = SearchState::default();
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(2)) as SharedPdfBackend;
         let mut engine = test_engine();
 
         state
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -821,7 +822,7 @@ mod tests {
         let (outcome, _) = state
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 &mut engine,
                 "   ".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -838,13 +839,13 @@ mod tests {
     fn cancel_clears_active_search_state() {
         let mut state = test_state();
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(2)) as SharedPdfBackend;
         let mut engine = test_engine();
 
         state
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -853,7 +854,7 @@ mod tests {
         assert!(state.is_active());
 
         let canceled = state
-            .cancel(Arc::clone(&pdf), &mut engine)
+            .cancel(Arc::clone(&backend), &mut engine)
             .expect("cancel should succeed");
         assert!(canceled);
         assert!(!state.is_active());
@@ -928,13 +929,13 @@ mod tests {
     fn worker_event_after_cancel_does_not_change_state_or_notice() {
         let mut state = test_state();
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(2)) as SharedPdfBackend;
         let mut engine = test_engine();
 
         state
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -942,7 +943,7 @@ mod tests {
             .expect("submit should succeed");
         app.clear_notice();
         state
-            .cancel(Arc::clone(&pdf), &mut engine)
+            .cancel(Arc::clone(&backend), &mut engine)
             .expect("cancel should succeed");
 
         let changed = state.handle_worker_event(
@@ -964,13 +965,13 @@ mod tests {
     fn worker_completion_warns_when_highlight_is_unavailable() {
         let mut state = test_state();
         let mut app = AppState::default();
-        let pdf = Arc::new(HighlightUnavailableStubPdf::new("alpha beta")) as SharedPdfBackend;
+        let backend = Arc::new(HighlightUnavailableBackend::new("alpha beta")) as SharedPdfBackend;
         let mut engine = test_engine();
 
         state
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 &mut engine,
                 "alpha".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
@@ -1002,12 +1003,12 @@ mod tests {
     fn worker_event_with_stale_epoch_is_ignored() {
         let mut state = test_state();
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(2)) as SharedPdfBackend;
         let mut engine = test_engine();
         state
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 &mut engine,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,

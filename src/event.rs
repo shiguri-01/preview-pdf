@@ -98,7 +98,11 @@ pub(crate) struct DocumentReloadResult {
 impl fmt::Debug for DocumentReloadResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let result = match &self.result {
-            Ok(pdf) => format!("Ok(doc_id: {}, pages: {})", pdf.doc_id(), pdf.page_count()),
+            Ok(backend) => format!(
+                "Ok(doc_id: {}, pages: {})",
+                backend.doc_id(),
+                backend.page_count()
+            ),
             Err(message) => format!("Err({message:?})"),
         };
         f.debug_struct("DocumentReloadResult")

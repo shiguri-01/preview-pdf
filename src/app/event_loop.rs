@@ -20,9 +20,9 @@ use super::scale::select_input_poll_timeout;
 use super::terminal_session::{InteractiveTerminalSession, TerminalSession, TerminalSurface};
 
 impl App {
-    pub async fn run(&mut self, pdf: SharedPdfBackend) -> AppResult<()> {
+    pub async fn run(&mut self, backend: SharedPdfBackend) -> AppResult<()> {
         self.run_with_options(
-            pdf,
+            backend,
             RunOptions {
                 watch: self.watch_policy.enabled,
             },
@@ -32,12 +32,12 @@ impl App {
 
     pub async fn run_with_options(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         options: RunOptions,
     ) -> AppResult<()> {
         let session = InteractiveTerminalSession::enter()?;
         self.run_event_runtime(
-            pdf,
+            backend,
             session,
             RuntimeMode::Interactive {
                 watch: options.watch,
@@ -49,7 +49,7 @@ impl App {
 
     pub(crate) async fn run_event_runtime<S, D>(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         session: S,
         event_mode: RuntimeMode,
         mut driver: D,
@@ -59,15 +59,15 @@ impl App {
         D: RuntimeDriver,
     {
         let session = RestoringSession::new(session);
-        let page_count = pdf.page_count();
+        let page_count = backend.page_count();
         if page_count == 0 {
             return Err(AppError::invalid_argument("pdf has no pages"));
         }
 
-        let mut document = ActiveDocument::new(pdf);
+        let mut document = ActiveDocument::new(backend);
         let (event_tx, event_rx, event_bus) = EventBusRuntime::spawn_headless();
         let mut runtime = self.initialize_runtime(
-            Arc::clone(&document.pdf),
+            Arc::clone(&document.backend),
             session,
             event_tx,
             event_rx,
@@ -77,7 +77,7 @@ impl App {
             runtime.event_bus.start_input(runtime.event_tx.clone());
             if watch {
                 runtime.event_bus.start_file_watch(
-                    document.pdf.path().to_path_buf(),
+                    document.backend.path().to_path_buf(),
                     self.watch_policy.settle_delay,
                     runtime.event_tx.clone(),
                 )?;
@@ -110,7 +110,7 @@ impl App {
         D: RuntimeDriver,
     {
         loop {
-            let step = self.process_runtime_iteration(runtime, document.pdf.as_ref())?;
+            let step = self.process_runtime_iteration(runtime, document.backend.as_ref())?;
             let observation = self.driver_observation(runtime, &step);
             let mut handle = RuntimeDriverHandle::new(&runtime.event_tx);
             match driver.on_iteration(observation, &mut handle)? {
@@ -166,14 +166,14 @@ impl App {
     fn process_runtime_iteration<S>(
         &mut self,
         runtime: &mut AppRuntime<S>,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
     ) -> AppResult<IterationStep>
     where
         S: TerminalSurface,
     {
         let pre_sync_step = self.build_iteration_step(
             &runtime.session,
-            pdf,
+            backend,
             &runtime.input_actor,
             runtime.render_actor.generation(),
             runtime.prefetch_pause_after_input,
@@ -183,13 +183,13 @@ impl App {
             &mut self.render,
             &mut self.interaction,
             &mut self.state,
-            pdf,
+            backend,
             pre_sync_step.current_scale,
         );
         let step = if changed {
             self.build_iteration_step(
                 &runtime.session,
-                pdf,
+                backend,
                 &runtime.input_actor,
                 runtime.render_actor.generation(),
                 runtime.prefetch_pause_after_input,
@@ -201,11 +201,11 @@ impl App {
         runtime.render_actor.ensure_iteration_work(
             &mut self.render,
             &mut self.state,
-            pdf,
+            backend,
             &mut runtime.render_worker,
             &step,
         );
-        self.update_ui_and_render_frame(runtime, pdf, changed, &step)?;
+        self.update_ui_and_render_frame(runtime, backend, changed, &step)?;
         Ok(step)
     }
 
@@ -252,19 +252,19 @@ impl App {
     fn build_iteration_step(
         &mut self,
         session: &impl TerminalSurface,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         input_actor: &InputActor,
         render_generation: u64,
         prefetch_pause_after_input: Duration,
         prefetch_dispatch_budget: usize,
     ) -> IterationStep {
         let prefetch_viewport = Self::current_viewport(session, self.state.debug_status_visible);
-        let visible_pages = self.state.visible_page_slots(pdf.page_count());
+        let visible_pages = self.state.visible_page_slots(backend.page_count());
         let current_scale =
-            self.compute_current_scale(pdf, visible_pages.anchor_page, prefetch_viewport);
+            self.compute_current_scale(backend, visible_pages.anchor_page, prefetch_viewport);
         let current_view = self.render.build_current_render_view(
             &self.state,
-            pdf,
+            backend,
             visible_pages,
             current_scale,
             render_generation == 0,
@@ -290,7 +290,7 @@ impl App {
         );
 
         IterationStep {
-            page_count: pdf.page_count(),
+            page_count: backend.page_count(),
             current_scale: current_view.current_scale,
             visible_pages: current_view.visible_pages,
             required: current_view.required,
@@ -306,7 +306,7 @@ impl App {
     fn update_ui_and_render_frame<S>(
         &mut self,
         runtime: &mut AppRuntime<S>,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         changed: bool,
         step: &IterationStep,
     ) -> AppResult<()>
@@ -320,8 +320,8 @@ impl App {
             &self.interaction,
             &mut self.state,
             &mut runtime.session,
-            pdf,
-            pdf.page_count(),
+            backend,
+            backend.page_count(),
             runtime.render_actor.generation(),
             runtime.render_actor.nav_streak(),
             render_busy,

@@ -133,7 +133,7 @@ impl SearchEngine {
 
     pub fn submit(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         query: impl Into<String>,
         matcher: Arc<dyn SearchMatcher>,
     ) -> AppResult<u64> {
@@ -143,7 +143,7 @@ impl SearchEngine {
         let job = SearchJob {
             epoch: self.epoch,
             generation,
-            pdf,
+            backend,
             query: query.into(),
             matcher,
         };
@@ -155,19 +155,19 @@ impl SearchEngine {
         Ok(generation)
     }
 
-    pub fn cancel(&mut self, pdf: SharedPdfBackend) -> AppResult<u64> {
-        self.submit(pdf, String::new(), Arc::new(CancelMatcher))
+    pub fn cancel(&mut self, backend: SharedPdfBackend) -> AppResult<u64> {
+        self.submit(backend, String::new(), Arc::new(CancelMatcher))
     }
 
-    pub fn prewarm(&mut self, pdf: SharedPdfBackend) {
+    pub fn prewarm(&mut self, backend: SharedPdfBackend) {
         let _ = self
             .request_tx
-            .send(WorkerRequest::Prewarm(PrewarmJob { pdf }));
+            .send(WorkerRequest::Prewarm(PrewarmJob { backend }));
     }
 
     pub fn resolve_geometry(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         generation: u64,
         query: impl Into<String>,
         matcher: Arc<dyn SearchMatcher>,
@@ -187,7 +187,7 @@ impl SearchEngine {
             .send(WorkerRequest::ResolveGeometry(GeometryJob {
                 generation,
                 epoch: self.epoch,
-                pdf,
+                backend,
                 query: query.into(),
                 matcher,
                 pages,

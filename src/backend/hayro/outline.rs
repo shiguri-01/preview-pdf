@@ -11,8 +11,8 @@ use crate::error::{AppError, AppResult};
 
 use super::encoding::decode_pdf_text_string;
 
-pub(super) fn extract_outline_nodes(pdf: &Pdf) -> AppResult<Vec<OutlineNode>> {
-    let xref = pdf.xref();
+pub(super) fn extract_outline_nodes(backend: &Pdf) -> AppResult<Vec<OutlineNode>> {
+    let xref = backend.xref();
     let Some(root) = xref.get::<Dict<'_>>(xref.root_id()) else {
         return Err(AppError::unsupported("failed to resolve pdf catalog"));
     };
@@ -26,7 +26,7 @@ pub(super) fn extract_outline_nodes(pdf: &Pdf) -> AppResult<Vec<OutlineNode>> {
         return Ok(Vec::new());
     };
 
-    let page_index = pdf
+    let page_index = backend
         .pages()
         .iter()
         .enumerate()

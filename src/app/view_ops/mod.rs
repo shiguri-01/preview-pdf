@@ -106,7 +106,7 @@ struct RenderFrameFeedback {
 struct FrameCachePreparer<'a> {
     runtime: &'a mut super::render_runtime::RenderRuntime,
     presenter: &'a mut dyn ImagePresenter,
-    pdf: &'a dyn PdfBackend,
+    backend: &'a dyn PdfBackend,
     cell_px: Option<(u16, u16)>,
     highlight_overlay: &'a HighlightOverlaySnapshot,
     generation: u64,
@@ -115,7 +115,7 @@ struct FrameCachePreparer<'a> {
 impl RenderFrameDrawPlan {
     fn new(
         state: &AppState,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         plan: RenderFramePlan,
         viewer_has_image: bool,
         image_occluded_last_frame: bool,
@@ -141,12 +141,12 @@ impl RenderFrameDrawPlan {
             image_occluded,
             image_occluded_last_frame && !image_occluded,
         );
-        let file_name = pdf
+        let file_name = backend
             .path()
             .file_name()
             .and_then(|name| name.to_str())
             .map(str::to_owned)
-            .unwrap_or_else(|| pdf.path().display().to_string());
+            .unwrap_or_else(|| backend.path().display().to_string());
         let loading_label = format_target(visible_pages);
         let render_target = format_target(visible_pages);
         let page_presentation = state.page_presentation_for_slots(visible_pages);
@@ -217,7 +217,7 @@ pub(in crate::app) fn compute_current_scale_for_state(
     state: &AppState,
     render: &RenderSubsystem,
     render_policy: &RenderPolicy,
-    pdf: &dyn PdfBackend,
+    backend: &dyn PdfBackend,
     page: usize,
     viewport: Option<Viewport>,
 ) -> f32 {
@@ -225,9 +225,10 @@ pub(in crate::app) fn compute_current_scale_for_state(
         return quantize_scale(state.zoom);
     };
 
-    let slots = state.visible_page_slots_for_page(page, pdf.page_count());
+    let slots = state.visible_page_slots_for_page(page, backend.page_count());
     let page_presentation = state.page_presentation_for_slots(slots);
-    let (page_width_pt, page_height_pt) = resolve_layout_dimensions(pdf, page_presentation, slots);
+    let (page_width_pt, page_height_pt) =
+        resolve_layout_dimensions(backend, page_presentation, slots);
     let caps = render.presenter.capabilities();
     let max_scale = caps
         .preferred_max_render_scale
@@ -252,7 +253,7 @@ impl App {
 
     pub(in crate::app) fn compute_current_scale(
         &self,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         page: usize,
         viewport: Option<Viewport>,
     ) -> f32 {
@@ -260,7 +261,7 @@ impl App {
             &self.state,
             &self.render,
             &self.render_policy,
-            pdf,
+            backend,
             page,
             viewport,
         )
@@ -288,14 +289,14 @@ impl FrameCachePreparer<'_> {
             || {
                 vec![(
                     PresenterRenderMode::Full,
-                    RenderedPageKey::new(self.pdf.doc_id(), page, full_scale),
+                    RenderedPageKey::new(self.backend.doc_id(), page, full_scale),
                 )]
             },
             |preview| {
                 vec![
                     (
                         PresenterRenderMode::Full,
-                        RenderedPageKey::new(self.pdf.doc_id(), page, full_scale),
+                        RenderedPageKey::new(self.backend.doc_id(), page, full_scale),
                     ),
                     (PresenterRenderMode::InitialPreview, preview.page_keys[0]),
                 ]
@@ -309,7 +310,7 @@ impl FrameCachePreparer<'_> {
                 overlay: self.highlight_overlay,
             };
             let result = self.runtime.prepare_page_slots_from_cache(
-                self.pdf,
+                self.backend,
                 PageSlotPrepareRequest {
                     page_slots: &page_slots,
                     pan: requested_pan,
@@ -377,7 +378,7 @@ impl FrameCachePreparer<'_> {
     ) -> AppResult<Option<Vec<PresenterRenderSlot>>> {
         if draw_plan.enable_crop {
             let result = self.runtime.prepare_spread_canvas_from_cache(
-                self.pdf,
+                self.backend,
                 SpreadCanvasPrepareRequest {
                     viewport,
                     visible_pages: draw_plan.visible_pages,
@@ -399,14 +400,15 @@ impl FrameCachePreparer<'_> {
             };
         }
 
-        let page_slots = slot_areas.page_slots(self.pdf.doc_id(), draw_plan.visible_pages, scale);
+        let page_slots =
+            slot_areas.page_slots(self.backend.doc_id(), draw_plan.visible_pages, scale);
         let options = FramePrepareOptions {
             cell_px: self.cell_px,
             crop: false,
             overlay: self.highlight_overlay,
         };
         let result = self.runtime.prepare_page_slots_from_cache(
-            self.pdf,
+            self.backend,
             PageSlotPrepareRequest {
                 page_slots: &page_slots,
                 pan: requested_pan,
@@ -431,13 +433,13 @@ impl RenderSubsystem {
         &mut self,
         state: &mut AppState,
         session: &mut impl TerminalSurface,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         plan: RenderFramePlan,
     ) -> AppResult<()> {
         let presenter_caps = self.presenter.capabilities();
         let draw_plan = RenderFrameDrawPlan::new(
             state,
-            pdf,
+            backend,
             plan,
             self.viewer_has_image,
             self.image_occluded_last_frame,
@@ -447,7 +449,7 @@ impl RenderSubsystem {
                 cell_px: presenter_caps.cell_px,
             },
         );
-        let feedback = self.draw_render_frame(session, pdf, draw_plan)?;
+        let feedback = self.draw_render_frame(session, backend, draw_plan)?;
         self.apply_render_frame_feedback(state, feedback);
 
         Ok(())
@@ -456,7 +458,7 @@ impl RenderSubsystem {
     fn draw_render_frame(
         &mut self,
         session: &mut impl TerminalSurface,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         draw_plan: RenderFrameDrawPlan,
     ) -> AppResult<RenderFrameFeedback> {
         let requested_pan = draw_plan.pan;
@@ -489,7 +491,7 @@ impl RenderSubsystem {
                 let mut preparer = FrameCachePreparer {
                     runtime: &mut self.runtime,
                     presenter: self.presenter.as_mut(),
-                    pdf,
+                    backend,
                     cell_px: draw_plan.presenter_cell_px,
                     highlight_overlay: &draw_plan.highlight_overlay,
                     generation: draw_plan.generation,
@@ -671,11 +673,11 @@ impl RenderSubsystem {
 }
 
 fn resolve_layout_dimensions(
-    pdf: &dyn PdfBackend,
+    backend: &dyn PdfBackend,
     page_presentation: PageLayoutMode,
     slots: VisiblePageSlots,
 ) -> (f32, f32) {
-    let (anchor_width, anchor_height) = pdf
+    let (anchor_width, anchor_height) = backend
         .page_dimensions(slots.anchor_page)
         .unwrap_or(DEFAULT_PAGE_SIZE_PT);
     match slots.trailing_page {
@@ -686,7 +688,7 @@ fn resolve_layout_dimensions(
             PageLayoutMode::Spread => (anchor_width + anchor_width, anchor_height),
         },
         Some(trailing_page) => {
-            let (trailing_width, trailing_height) = pdf
+            let (trailing_width, trailing_height) = backend
                 .page_dimensions(trailing_page)
                 .unwrap_or((anchor_width, anchor_height));
             let slot_width = anchor_width.max(trailing_width);
@@ -737,12 +739,12 @@ mod tests {
     use crate::backend::{PdfBackend, RgbaFrame, TextPage};
     use crate::render::cache::RenderedPageKey;
 
-    struct DimPdf {
+    struct DimBackend {
         path: PathBuf,
         dims: Vec<(f32, f32)>,
     }
 
-    impl DimPdf {
+    impl DimBackend {
         fn new(dims: Vec<(f32, f32)>) -> Self {
             Self {
                 path: PathBuf::from("dims.pdf"),
@@ -751,7 +753,7 @@ mod tests {
         }
     }
 
-    impl PdfBackend for DimPdf {
+    impl PdfBackend for DimBackend {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -800,7 +802,7 @@ mod tests {
 
     #[test]
     fn resolve_layout_dimensions_uses_blank_partner_width_for_tail_spread() {
-        let pdf = DimPdf::new(vec![(200.0, 300.0)]);
+        let backend = DimBackend::new(vec![(200.0, 300.0)]);
         let slots = VisiblePageSlots {
             anchor_page: 0,
             trailing_page: None,
@@ -808,15 +810,15 @@ mod tests {
             right_page: None,
         };
 
-        let single = resolve_layout_dimensions(&pdf, PageLayoutMode::Single, slots);
-        let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
+        let single = resolve_layout_dimensions(&backend, PageLayoutMode::Single, slots);
+        let spread = resolve_layout_dimensions(&backend, PageLayoutMode::Spread, slots);
 
         assert_eq!(single, (200.0, 300.0));
         assert_eq!(spread, (400.0, 300.0));
     }
     #[test]
     fn resolve_layout_dimensions_uses_both_pages_when_trailing_exists() {
-        let pdf = DimPdf::new(vec![(200.0, 300.0), (180.0, 280.0)]);
+        let backend = DimBackend::new(vec![(200.0, 300.0), (180.0, 280.0)]);
         let slots = VisiblePageSlots {
             anchor_page: 0,
             trailing_page: Some(1),
@@ -824,7 +826,7 @@ mod tests {
             right_page: Some(1),
         };
 
-        let spread = resolve_layout_dimensions(&pdf, PageLayoutMode::Spread, slots);
+        let spread = resolve_layout_dimensions(&backend, PageLayoutMode::Spread, slots);
         assert_eq!(spread, (400.0, 300.0));
     }
     #[test]

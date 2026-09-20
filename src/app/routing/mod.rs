@@ -112,7 +112,7 @@ impl App {
                     RenderCompleteContext {
                         render_policy: &self.render_policy,
                         session: &runtime.session,
-                        pdf: document.pdf.as_ref(),
+                        backend: document.backend.as_ref(),
                         input_actor: &runtime.input_actor,
                         prefetch_pause_after_input: runtime.prefetch_pause_after_input,
                         in_flight_len: runtime.render_worker.in_flight_len(),
@@ -243,14 +243,14 @@ impl App {
         let state_before_command = self.state.clone();
         let previous_visible_pages = self
             .state
-            .visible_page_slots(document.pdf.page_count())
+            .visible_page_slots(document.backend.page_count())
             .existing_pages();
         let view_policy = self.view_policy;
         let dispatch = match self.interaction.dispatch_command(
             &mut self.state,
             view_policy,
             request,
-            Arc::clone(&document.pdf),
+            Arc::clone(&document.backend),
         ) {
             Ok(dispatch) => dispatch,
             Err(err) => {
@@ -279,11 +279,11 @@ impl App {
         }
         let current_visible_pages = self
             .state
-            .visible_page_slots(document.pdf.page_count())
+            .visible_page_slots(document.backend.page_count())
             .existing_pages();
         if current_visible_pages != previous_visible_pages {
             self.interaction.sync_extensions_after_page_change(
-                Arc::clone(&document.pdf),
+                Arc::clone(&document.backend),
                 current_visible_pages,
             );
         }
@@ -326,7 +326,7 @@ impl App {
 
         runtime.reload_in_flight = true;
         runtime.event_bus.start_document_reload(
-            document.pdf.path().to_path_buf(),
+            document.backend.path().to_path_buf(),
             request,
             runtime.event_tx.clone(),
         );
@@ -347,8 +347,8 @@ impl App {
         }
 
         match reload.result {
-            Ok(pdf) => {
-                if let Err(err) = self.apply_document_reload(runtime, document, pdf) {
+            Ok(backend) => {
+                if let Err(err) = self.apply_document_reload(runtime, document, backend) {
                     self.state
                         .set_error_notice(format!("Could not reload document: {err}"));
                     self.request_redraw(runtime, RedrawReason::AppEvent);
@@ -417,48 +417,48 @@ impl App {
         &mut self,
         runtime: &mut AppRuntime<S>,
         document: &mut ActiveDocument,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
     ) -> AppResult<()>
     where
         S: TerminalSurface,
     {
-        if pdf.page_count() == 0 {
+        if backend.page_count() == 0 {
             return Err(AppError::invalid_argument("reloaded pdf has no pages"));
         }
-        let old_doc_id = document.pdf.doc_id();
+        let old_doc_id = document.backend.doc_id();
         runtime.reload_retry_attempts = 0;
-        document.replace(Arc::clone(&pdf));
-        let page_count = pdf.page_count();
+        document.replace(Arc::clone(&backend));
+        let page_count = backend.page_count();
         self.state.current_page = self.state.current_page.min(page_count - 1);
         self.state.normalize_current_page(page_count);
         self.state.clear_reload_notice();
         self.state.clear_render_notice();
 
-        self.render.runtime.l1_cache.remove_doc(old_doc_id);
+        self.render.runtime.l1_cache.remove_document(old_doc_id);
         self.render.presenter.reset_terminal_state();
         self.render.viewer_has_image = false;
         self.render.image_occluded_last_frame = false;
         runtime.render_worker =
-            RenderWorker::spawn(Arc::clone(&pdf), self.render_policy.worker_threads);
+            RenderWorker::spawn(Arc::clone(&backend), self.render_policy.worker_threads);
 
         let viewport = Self::current_viewport(&runtime.session, self.state.debug_status_visible);
         let visible_pages = self.state.visible_page_slots(page_count);
         let tracked_scale =
-            self.compute_current_scale(pdf.as_ref(), visible_pages.anchor_page, viewport);
+            self.compute_current_scale(backend.as_ref(), visible_pages.anchor_page, viewport);
         let mut render_actor = super::actors::RenderActor::new(
             visible_pages.anchor_page,
             self.state.zoom,
             tracked_scale,
         );
         self.render.runtime.reset_prefetch(
-            pdf.as_ref(),
+            backend.as_ref(),
             visible_pages.anchor_page,
             render_actor.nav_mut().intent(),
             tracked_scale,
         );
         runtime.render_actor = render_actor;
         self.interaction
-            .reset_extensions_for_document_reload(&mut self.state, Arc::clone(&pdf));
+            .reset_extensions_for_document_reload(&mut self.state, Arc::clone(&backend));
         self.request_redraw(runtime, RedrawReason::StateChanged);
         Ok(())
     }

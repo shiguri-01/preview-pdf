@@ -84,7 +84,7 @@ impl RenderedPageCache {
             .inserted
     }
 
-    pub fn remove_doc(&mut self, doc_id: u64) {
+    pub fn remove_document(&mut self, doc_id: u64) {
         let _ = self
             .entries
             .remove_where(|key, _frame| key.doc_id == doc_id);
@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_doc_reduces_memory() {
+    fn remove_document_reduces_memory() {
         let mut cache = RenderedPageCache::new(8, 1024 * 1024);
         let a = RenderedPageKey::new(10, 0, 1.0);
         let b = RenderedPageKey::new(10, 1, 1.0);
@@ -163,7 +163,7 @@ mod tests {
         let _ = cache.insert(c, frame(6, 6), false);
         let before = cache.memory_bytes();
 
-        cache.remove_doc(10);
+        cache.remove_document(10);
 
         assert!(!cache.contains(&a));
         assert!(!cache.contains(&b));

@@ -38,16 +38,16 @@ pub(in crate::app) struct AppRuntime<S> {
 }
 
 pub(in crate::app) struct ActiveDocument {
-    pub(in crate::app) pdf: SharedPdfBackend,
+    pub(in crate::app) backend: SharedPdfBackend,
 }
 
 impl ActiveDocument {
-    pub(in crate::app) fn new(pdf: SharedPdfBackend) -> Self {
-        Self { pdf }
+    pub(in crate::app) fn new(backend: SharedPdfBackend) -> Self {
+        Self { backend }
     }
 
-    pub(in crate::app) fn replace(&mut self, pdf: SharedPdfBackend) {
-        self.pdf = pdf;
+    pub(in crate::app) fn replace(&mut self, backend: SharedPdfBackend) {
+        self.backend = backend;
     }
 }
 

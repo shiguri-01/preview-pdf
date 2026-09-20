@@ -33,7 +33,7 @@ impl RenderRuntime {
 
     pub fn schedule_navigation(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         cursor: usize,
         nav_intent: NavIntent,
         scale: f32,
@@ -41,13 +41,19 @@ impl RenderRuntime {
         let canceled = self.scheduler.cancel_obsolete(nav_intent, scale);
         self.perf_stats.add_canceled_tasks(canceled);
 
-        let tasks = build_prefetch_plan(cursor, nav_intent, doc.page_count(), doc.doc_id(), scale);
+        let tasks = build_prefetch_plan(
+            cursor,
+            nav_intent,
+            backend.page_count(),
+            backend.doc_id(),
+            scale,
+        );
         self.enqueue_prefetch_tasks(tasks);
     }
 
     pub fn reset_prefetch(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         cursor: usize,
         nav_intent: NavIntent,
         scale: f32,
@@ -55,17 +61,23 @@ impl RenderRuntime {
         let canceled = self.scheduler.clear();
         self.perf_stats.add_canceled_tasks(canceled);
 
-        let tasks = build_prefetch_plan(cursor, nav_intent, doc.page_count(), doc.doc_id(), scale);
+        let tasks = build_prefetch_plan(
+            cursor,
+            nav_intent,
+            backend.page_count(),
+            backend.doc_id(),
+            scale,
+        );
         self.enqueue_prefetch_tasks(tasks);
     }
 
-    pub fn run_next_prefetch(&mut self, doc: &dyn PdfBackend) -> AppResult<Option<RenderTask>> {
+    pub fn run_next_prefetch(&mut self, backend: &dyn PdfBackend) -> AppResult<Option<RenderTask>> {
         let Some(task) = self.scheduler.next_task() else {
             self.sync_queue_depth();
             return Ok(None);
         };
 
-        let _ = self.resolve_task_frame(doc, &task)?;
+        let _ = self.resolve_task_frame(backend, &task)?;
         self.sync_queue_depth();
         Ok(Some(task))
     }
@@ -110,10 +122,10 @@ impl RenderRuntime {
 
     fn resolve_task_frame(
         &mut self,
-        doc: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         task: &RenderTask,
     ) -> AppResult<RgbaFrame> {
-        if task.doc_id != doc.doc_id() {
+        if task.doc_id != backend.doc_id() {
             return Err(AppError::invalid_argument(
                 "render task does not match active document",
             ));
@@ -126,7 +138,7 @@ impl RenderRuntime {
         }
 
         let render_start = Instant::now();
-        let frame = doc.render_page(task.page, task.scale)?;
+        let frame = backend.render_page(task.page, task.scale)?;
         self.perf_stats.record_render(render_start.elapsed());
         let allow_single_oversize = task.class == WorkClass::CriticalCurrent;
         let _ = self
@@ -159,7 +171,7 @@ mod tests {
 
     use super::*;
     use crate::backend::test_support::{build_pdf, unique_temp_path};
-    use crate::backend::{OutlineNode, PdfDoc, PdfRect};
+    use crate::backend::{HayroPdfBackend, OutlineNode, PdfRect};
     use crate::error::AppResult;
     use crate::highlight::{
         HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle,
@@ -250,9 +262,9 @@ mod tests {
         }
     }
 
-    struct TwoPageRuntimePdf;
+    struct TwoPageRuntimeBackend;
 
-    impl PdfBackend for TwoPageRuntimePdf {
+    impl PdfBackend for TwoPageRuntimeBackend {
         fn path(&self) -> &std::path::Path {
             std::path::Path::new("two-page-runtime.pdf")
         }
@@ -282,11 +294,11 @@ mod tests {
         }
     }
 
-    struct CountingDimensionsPdf {
+    struct CountingDimensionsBackend {
         dimensions_calls: AtomicUsize,
     }
 
-    impl CountingDimensionsPdf {
+    impl CountingDimensionsBackend {
         fn new() -> Self {
             Self {
                 dimensions_calls: AtomicUsize::new(0),
@@ -294,7 +306,7 @@ mod tests {
         }
     }
 
-    impl PdfBackend for CountingDimensionsPdf {
+    impl PdfBackend for CountingDimensionsBackend {
         fn path(&self) -> &std::path::Path {
             std::path::Path::new("counting-dimensions.pdf")
         }
@@ -325,9 +337,9 @@ mod tests {
         }
     }
 
-    struct PageDimensionFailingPdf;
+    struct PageDimensionFailingBackend;
 
-    impl PdfBackend for PageDimensionFailingPdf {
+    impl PdfBackend for PageDimensionFailingBackend {
         fn path(&self) -> &std::path::Path {
             std::path::Path::new("page-dimension-failing.pdf")
         }
@@ -363,7 +375,7 @@ mod tests {
 
     fn prepare_spread_canvas(
         runtime: &mut RenderRuntime,
-        doc: &TwoPageRuntimePdf,
+        backend: &TwoPageRuntimeBackend,
         presenter: &mut TestPresenter,
         viewport: Viewport,
         slots: VisiblePageSlots,
@@ -371,7 +383,7 @@ mod tests {
         gap_px: u32,
     ) -> AppResult<Option<[Option<Rect>; 2]>> {
         match runtime.prepare_spread_canvas_from_cache(
-            doc,
+            backend,
             SpreadCanvasPrepareRequest {
                 viewport,
                 visible_pages: slots,
@@ -394,13 +406,13 @@ mod tests {
 
     fn prepare_page_slots(
         runtime: &mut RenderRuntime,
-        doc: &TwoPageRuntimePdf,
+        backend: &TwoPageRuntimeBackend,
         presenter: &mut TestPresenter,
         page_slots: &[(Option<RenderedPageKey>, Viewport)],
         pan: &mut PanOffset,
     ) -> AppResult<bool> {
         match runtime.prepare_page_slots_from_cache(
-            doc,
+            backend,
             PageSlotPrepareRequest {
                 page_slots,
                 pan: *pan,
@@ -440,12 +452,12 @@ mod tests {
 
     #[test]
     fn spread_canvas_slots_crop_from_shared_pan_coordinate_space() {
-        let doc = TwoPageRuntimePdf;
+        let backend = TwoPageRuntimeBackend;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
         for page in 0..2 {
             runtime.l1_cache.insert(
-                RenderedPageKey::new(doc.doc_id(), page, 1.0),
+                RenderedPageKey::new(backend.doc_id(), page, 1.0),
                 RgbaFrame {
                     width: 100,
                     height: 50,
@@ -461,7 +473,7 @@ mod tests {
 
         let areas = prepare_spread_canvas(
             &mut runtime,
-            &doc,
+            &backend,
             &mut presenter,
             Viewport {
                 x: 0,
@@ -491,11 +503,11 @@ mod tests {
 
     #[test]
     fn spread_canvas_slots_crop_from_centered_page_y_origin() {
-        let doc = TwoPageRuntimePdf;
+        let backend = TwoPageRuntimeBackend;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
         runtime.l1_cache.insert(
-            RenderedPageKey::new(doc.doc_id(), 0, 1.0),
+            RenderedPageKey::new(backend.doc_id(), 0, 1.0),
             RgbaFrame {
                 width: 100,
                 height: 100,
@@ -504,7 +516,7 @@ mod tests {
             false,
         );
         runtime.l1_cache.insert(
-            RenderedPageKey::new(doc.doc_id(), 1, 1.0),
+            RenderedPageKey::new(backend.doc_id(), 1, 1.0),
             RgbaFrame {
                 width: 100,
                 height: 40,
@@ -519,7 +531,7 @@ mod tests {
 
         let areas = prepare_spread_canvas(
             &mut runtime,
-            &doc,
+            &backend,
             &mut presenter,
             Viewport {
                 x: 0,
@@ -548,12 +560,12 @@ mod tests {
 
     #[test]
     fn spread_canvas_slots_keep_slot_identity_when_left_page_is_offscreen() {
-        let doc = TwoPageRuntimePdf;
+        let backend = TwoPageRuntimeBackend;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
         for page in 0..2 {
             runtime.l1_cache.insert(
-                RenderedPageKey::new(doc.doc_id(), page, 1.0),
+                RenderedPageKey::new(backend.doc_id(), page, 1.0),
                 RgbaFrame {
                     width: 100,
                     height: 50,
@@ -569,7 +581,7 @@ mod tests {
 
         let areas = prepare_spread_canvas(
             &mut runtime,
-            &doc,
+            &backend,
             &mut presenter,
             Viewport {
                 x: 0,
@@ -595,11 +607,11 @@ mod tests {
 
     #[test]
     fn spread_canvas_slots_keep_pending_slot_when_partner_page_misses() {
-        let doc = TwoPageRuntimePdf;
+        let backend = TwoPageRuntimeBackend;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
         runtime.l1_cache.insert(
-            RenderedPageKey::new(doc.doc_id(), 1, 1.0),
+            RenderedPageKey::new(backend.doc_id(), 1, 1.0),
             RgbaFrame {
                 width: 100,
                 height: 100,
@@ -614,7 +626,7 @@ mod tests {
 
         let areas = prepare_spread_canvas(
             &mut runtime,
-            &doc,
+            &backend,
             &mut presenter,
             Viewport {
                 x: 0,
@@ -643,7 +655,7 @@ mod tests {
 
     #[test]
     fn spread_canvas_slots_miss_when_no_visible_cached_slots_exist() {
-        let doc = TwoPageRuntimePdf;
+        let backend = TwoPageRuntimeBackend;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
         let mut pan = PanOffset {
@@ -653,7 +665,7 @@ mod tests {
 
         let areas = prepare_spread_canvas(
             &mut runtime,
-            &doc,
+            &backend,
             &mut presenter,
             Viewport {
                 x: 0,
@@ -685,12 +697,12 @@ mod tests {
 
     #[test]
     fn page_slots_keep_requested_negative_pan_while_presenting_effective_pan() {
-        let doc = TwoPageRuntimePdf;
+        let backend = TwoPageRuntimeBackend;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
         for page in 0..2 {
             runtime.l1_cache.insert(
-                RenderedPageKey::new(doc.doc_id(), page, 1.0),
+                RenderedPageKey::new(backend.doc_id(), page, 1.0),
                 RgbaFrame {
                     width: 100,
                     height: 100,
@@ -705,7 +717,7 @@ mod tests {
         };
         let page_slots = [
             (
-                Some(RenderedPageKey::new(doc.doc_id(), 0, 1.0)),
+                Some(RenderedPageKey::new(backend.doc_id(), 0, 1.0)),
                 Viewport {
                     x: 0,
                     y: 0,
@@ -714,7 +726,7 @@ mod tests {
                 },
             ),
             (
-                Some(RenderedPageKey::new(doc.doc_id(), 1, 1.0)),
+                Some(RenderedPageKey::new(backend.doc_id(), 1, 1.0)),
                 Viewport {
                     x: 5,
                     y: 0,
@@ -724,9 +736,14 @@ mod tests {
             ),
         ];
 
-        let prepared =
-            prepare_page_slots(&mut runtime, &doc, &mut presenter, &page_slots, &mut pan)
-                .expect("page slot prepare should pass");
+        let prepared = prepare_page_slots(
+            &mut runtime,
+            &backend,
+            &mut presenter,
+            &page_slots,
+            &mut pan,
+        )
+        .expect("page slot prepare should pass");
 
         assert!(prepared);
         assert_eq!(
@@ -745,12 +762,12 @@ mod tests {
 
     #[test]
     fn page_slots_prepare_clamped_pan_once_per_cached_slot() {
-        let doc = CountingDimensionsPdf::new();
+        let backend = CountingDimensionsBackend::new();
         let mut runtime = RenderRuntime::default();
         let overlay = two_page_highlight_overlay();
         for page in 0..2 {
             runtime.l1_cache.insert(
-                RenderedPageKey::new(doc.doc_id(), page, 1.0),
+                RenderedPageKey::new(backend.doc_id(), page, 1.0),
                 RgbaFrame {
                     width: 100,
                     height: 100,
@@ -761,7 +778,7 @@ mod tests {
         }
         let page_slots = [
             (
-                Some(RenderedPageKey::new(doc.doc_id(), 0, 1.0)),
+                Some(RenderedPageKey::new(backend.doc_id(), 0, 1.0)),
                 Viewport {
                     x: 0,
                     y: 0,
@@ -770,7 +787,7 @@ mod tests {
                 },
             ),
             (
-                Some(RenderedPageKey::new(doc.doc_id(), 1, 1.0)),
+                Some(RenderedPageKey::new(backend.doc_id(), 1, 1.0)),
                 Viewport {
                     x: 5,
                     y: 0,
@@ -782,7 +799,7 @@ mod tests {
 
         let result = runtime
             .prepare_page_slots_from_cache(
-                &doc,
+                &backend,
                 PageSlotPrepareRequest {
                     page_slots: &page_slots,
                     pan: PanOffset {
@@ -799,16 +816,16 @@ mod tests {
             .expect("page slot prepare should pass");
 
         assert!(matches!(result, CachePrepareResult::Prepared(_)));
-        assert_eq!(doc.dimensions_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(backend.dimensions_calls.load(Ordering::Relaxed), 2);
     }
 
     #[test]
     fn page_slots_keep_cached_slot_when_partner_page_misses() {
-        let doc = TwoPageRuntimePdf;
+        let backend = TwoPageRuntimeBackend;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
         runtime.l1_cache.insert(
-            RenderedPageKey::new(doc.doc_id(), 1, 1.0),
+            RenderedPageKey::new(backend.doc_id(), 1, 1.0),
             RgbaFrame {
                 width: 100,
                 height: 100,
@@ -822,7 +839,7 @@ mod tests {
         };
         let page_slots = [
             (
-                Some(RenderedPageKey::new(doc.doc_id(), 0, 1.0)),
+                Some(RenderedPageKey::new(backend.doc_id(), 0, 1.0)),
                 Viewport {
                     x: 0,
                     y: 0,
@@ -831,7 +848,7 @@ mod tests {
                 },
             ),
             (
-                Some(RenderedPageKey::new(doc.doc_id(), 1, 1.0)),
+                Some(RenderedPageKey::new(backend.doc_id(), 1, 1.0)),
                 Viewport {
                     x: 5,
                     y: 0,
@@ -841,9 +858,14 @@ mod tests {
             ),
         ];
 
-        let prepared =
-            prepare_page_slots(&mut runtime, &doc, &mut presenter, &page_slots, &mut pan)
-                .expect("page slot prepare should pass");
+        let prepared = prepare_page_slots(
+            &mut runtime,
+            &backend,
+            &mut presenter,
+            &page_slots,
+            &mut pan,
+        )
+        .expect("page slot prepare should pass");
 
         assert!(prepared);
         assert_eq!(
@@ -862,7 +884,7 @@ mod tests {
 
     #[test]
     fn page_slots_return_miss_when_all_requested_pages_miss_l1() {
-        let doc = TwoPageRuntimePdf;
+        let backend = TwoPageRuntimeBackend;
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
         let mut pan = PanOffset {
@@ -870,7 +892,7 @@ mod tests {
             cells_y: -7,
         };
         let page_slots = [(
-            Some(RenderedPageKey::new(doc.doc_id(), 0, 1.0)),
+            Some(RenderedPageKey::new(backend.doc_id(), 0, 1.0)),
             Viewport {
                 x: 0,
                 y: 0,
@@ -879,9 +901,14 @@ mod tests {
             },
         )];
 
-        let prepared =
-            prepare_page_slots(&mut runtime, &doc, &mut presenter, &page_slots, &mut pan)
-                .expect("page slot prepare should pass");
+        let prepared = prepare_page_slots(
+            &mut runtime,
+            &backend,
+            &mut presenter,
+            &page_slots,
+            &mut pan,
+        )
+        .expect("page slot prepare should pass");
 
         assert!(!prepared);
         assert_eq!(
@@ -898,11 +925,11 @@ mod tests {
     fn schedule_navigation_updates_queue_and_cancellation_metrics() {
         let file = unique_temp_path("runtime_schedule.pdf");
         fs::write(&file, build_pdf(&["p1", "p2", "p3", "p4"])).expect("test pdf should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
 
         let mut runtime = RenderRuntime::default();
         runtime.schedule_navigation(
-            &doc,
+            &backend,
             1,
             NavIntent {
                 dir: NavDirection::Forward,
@@ -916,7 +943,7 @@ mod tests {
 
         let canceled_before = runtime.perf_stats.canceled_tasks;
         runtime.schedule_navigation(
-            &doc,
+            &backend,
             1,
             NavIntent {
                 dir: NavDirection::Backward,
@@ -935,7 +962,7 @@ mod tests {
     fn prepare_current_page_updates_l1_and_presenter_metrics() {
         let file = unique_temp_path("runtime_render.pdf");
         fs::write(&file, build_pdf(&["page"])).expect("test pdf should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
 
         let mut runtime = RenderRuntime::default();
         let mut presenter = TestPresenter::default();
@@ -949,7 +976,7 @@ mod tests {
 
         runtime
             .prepare_current_page(
-                &doc,
+                &backend,
                 prepare::CurrentPagePrepareRequest {
                     viewport,
                     page: 0,
@@ -970,7 +997,7 @@ mod tests {
             .expect("first prepare should succeed");
         runtime
             .prepare_current_page(
-                &doc,
+                &backend,
                 prepare::CurrentPagePrepareRequest {
                     viewport,
                     page: 0,
@@ -1018,7 +1045,7 @@ mod tests {
 
     #[test]
     fn prepare_current_page_returns_error_when_overlay_geometry_is_unavailable() {
-        let doc = PageDimensionFailingPdf;
+        let backend = PageDimensionFailingBackend;
         let mut runtime = RenderRuntime::default();
         let viewport = Viewport {
             x: 0,
@@ -1029,7 +1056,7 @@ mod tests {
         let overlay = single_page_highlight_overlay();
 
         let err = match runtime.prepare_current_page(
-            &doc,
+            &backend,
             prepare::CurrentPagePrepareRequest {
                 viewport,
                 page: 0,
@@ -1051,9 +1078,9 @@ mod tests {
 
     #[test]
     fn page_slots_return_error_when_overlay_geometry_is_unavailable() {
-        let doc = PageDimensionFailingPdf;
+        let backend = PageDimensionFailingBackend;
         let mut runtime = RenderRuntime::default();
-        let key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
+        let key = RenderedPageKey::new(backend.doc_id(), 0, 1.0);
         runtime.l1_cache.insert(
             key,
             RgbaFrame {
@@ -1066,7 +1093,7 @@ mod tests {
         let overlay = single_page_highlight_overlay();
 
         let err = match runtime.prepare_page_slots_from_cache(
-            &doc,
+            &backend,
             PageSlotPrepareRequest {
                 page_slots: &[(
                     Some(key),
@@ -1096,9 +1123,9 @@ mod tests {
 
     #[test]
     fn spread_canvas_returns_error_when_overlay_geometry_is_unavailable() {
-        let doc = PageDimensionFailingPdf;
+        let backend = PageDimensionFailingBackend;
         let mut runtime = RenderRuntime::default();
-        let key = RenderedPageKey::new(doc.doc_id(), 0, 1.0);
+        let key = RenderedPageKey::new(backend.doc_id(), 0, 1.0);
         runtime.l1_cache.insert(
             key,
             RgbaFrame {
@@ -1111,7 +1138,7 @@ mod tests {
         let overlay = single_page_highlight_overlay();
 
         let err = match runtime.prepare_spread_canvas_from_cache(
-            &doc,
+            &backend,
             SpreadCanvasPrepareRequest {
                 viewport: Viewport {
                     x: 0,
@@ -1143,11 +1170,11 @@ mod tests {
     fn run_next_prefetch_reduces_queue_depth() {
         let file = unique_temp_path("runtime_prefetch.pdf");
         fs::write(&file, build_pdf(&["a", "b", "c"])).expect("test pdf should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
 
         let mut runtime = RenderRuntime::default();
         runtime.reset_prefetch(
-            &doc,
+            &backend,
             0,
             NavIntent {
                 dir: NavDirection::Forward,
@@ -1160,10 +1187,10 @@ mod tests {
         assert!(queued > 0);
 
         let task = runtime
-            .run_next_prefetch(&doc)
+            .run_next_prefetch(&backend)
             .expect("prefetch should run")
             .expect("task should exist");
-        assert_eq!(task.doc_id, doc.doc_id());
+        assert_eq!(task.doc_id, backend.doc_id());
         assert_eq!(runtime.perf_stats.queue_depth, queued - 1);
 
         fs::remove_file(&file).expect("test pdf should be removed");

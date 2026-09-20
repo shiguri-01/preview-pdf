@@ -23,10 +23,10 @@ fn main() {}
 async fn run() -> AppResult<()> {
     let options = cli::parse();
 
-    let pdf = open_default_backend(&options.pdf_path)?;
+    let backend = open_default_backend(&options.pdf_path)?;
     let mut app = AppBuilder::new()
         .replace_options(options.config.load_options()?)
         .merge_options(options.options)
         .build()?;
-    app.run(pdf).await
+    app.run(backend).await
 }

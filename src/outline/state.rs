@@ -24,8 +24,8 @@ pub struct OutlineUiSnapshot {
 }
 
 impl OutlineState {
-    pub fn open_palette(&mut self, pdf: SharedPdfBackend) -> AppResult<PaletteRequest> {
-        self.ensure_loaded(pdf.as_ref())?;
+    pub fn open_palette(&mut self, backend: SharedPdfBackend) -> AppResult<PaletteRequest> {
+        self.ensure_loaded(backend.as_ref())?;
         Ok(PaletteRequest::Open {
             kind: PaletteKind::Outline,
             options: PaletteOpenOptions::default(),
@@ -67,20 +67,20 @@ impl OutlineState {
         *self = Self::default();
     }
 
-    fn ensure_loaded(&mut self, pdf: &dyn PdfBackend) -> AppResult<()> {
+    fn ensure_loaded(&mut self, backend: &dyn PdfBackend) -> AppResult<()> {
         if self
             .cache
             .as_ref()
-            .is_some_and(|cache| cache.doc_id == pdf.doc_id())
+            .is_some_and(|cache| cache.doc_id == backend.doc_id())
         {
             return Ok(());
         }
 
-        let outline = pdf.extract_outline()?;
+        let outline = backend.extract_outline()?;
         let mut entries = Vec::new();
         flatten_outline(&outline, 0, &mut entries);
         self.cache = Some(OutlineCache {
-            doc_id: pdf.doc_id(),
+            doc_id: backend.doc_id(),
             entries: Arc::from(entries),
         });
         Ok(())
@@ -119,13 +119,13 @@ mod tests {
 
     use super::OutlineState;
 
-    struct StubPdf {
+    struct StubBackend {
         path: PathBuf,
         doc_id: u64,
         outline: Vec<OutlineNode>,
     }
 
-    impl PdfBackend for StubPdf {
+    impl PdfBackend for StubBackend {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn palette_entries_preserve_depth_first_sibling_order() {
-        let pdf = Arc::new(StubPdf {
+        let backend = Arc::new(StubBackend {
             path: PathBuf::from("outline.pdf"),
             doc_id: 8,
             outline: vec![
@@ -195,7 +195,7 @@ mod tests {
         let mut state = OutlineState::default();
 
         state
-            .open_palette(pdf)
+            .open_palette(backend)
             .expect("outline open should succeed");
         let entries = state.palette_entries();
 
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn palette_entries_reuse_cached_arc_for_same_document() {
-        let pdf = Arc::new(StubPdf {
+        let backend = Arc::new(StubBackend {
             path: PathBuf::from("outline.pdf"),
             doc_id: 9,
             outline: vec![OutlineNode {
@@ -224,12 +224,12 @@ mod tests {
         let mut state = OutlineState::default();
 
         state
-            .open_palette(Arc::clone(&pdf))
+            .open_palette(Arc::clone(&backend))
             .expect("first outline open should succeed");
         let first = state.palette_entries();
 
         state
-            .open_palette(pdf)
+            .open_palette(backend)
             .expect("second outline open should succeed");
         let second = state.palette_entries();
 

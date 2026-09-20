@@ -1,4 +1,4 @@
-mod document;
+mod backend;
 mod encoding;
 mod outline;
 mod text;
@@ -12,57 +12,57 @@ use crate::error::AppResult;
 
 use super::traits::{OutlineNode, PdfBackend, PdfRenderContext, RgbaFrame, TextPage};
 
-pub struct PdfDoc {
+pub struct HayroPdfBackend {
     path: PathBuf,
     doc_id: u64,
     pdf: Pdf,
 }
 
 struct HayroRenderContext<'a> {
-    doc: &'a PdfDoc,
+    backend: &'a HayroPdfBackend,
     render_cache: RenderCache<'a>,
 }
 
-impl PdfBackend for PdfDoc {
+impl PdfBackend for HayroPdfBackend {
     fn path(&self) -> &Path {
-        PdfDoc::path(self)
+        HayroPdfBackend::path(self)
     }
 
     fn doc_id(&self) -> u64 {
-        PdfDoc::doc_id(self)
+        HayroPdfBackend::doc_id(self)
     }
 
     fn page_count(&self) -> usize {
-        PdfDoc::page_count(self)
+        HayroPdfBackend::page_count(self)
     }
 
     fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)> {
-        PdfDoc::page_render_dimensions(self, page)
+        HayroPdfBackend::page_render_dimensions(self, page)
     }
 
     fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
-        PdfDoc::render_page(self, page, scale)
+        HayroPdfBackend::render_page(self, page, scale)
     }
 
     fn render_context(&self) -> Box<dyn PdfRenderContext + '_> {
         Box::new(HayroRenderContext {
-            doc: self,
+            backend: self,
             render_cache: RenderCache::new(),
         })
     }
 
     fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
-        PdfDoc::extract_text_page(self, page)
+        HayroPdfBackend::extract_text_page(self, page)
     }
 
     fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
-        PdfDoc::extract_outline(self)
+        HayroPdfBackend::extract_outline(self)
     }
 }
 
 impl PdfRenderContext for HayroRenderContext<'_> {
     fn render_page(&mut self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
-        self.doc
+        self.backend
             .render_page_with_cache(page, scale, &self.render_cache)
     }
 }
@@ -77,14 +77,14 @@ mod tests {
 
     use crate::backend::PdfBackend;
 
-    use super::{PdfDoc, encoding::decode_pdf_text_string};
+    use super::{HayroPdfBackend, encoding::decode_pdf_text_string};
 
     #[test]
     fn open_rejects_directory_path() {
         let dir = unique_temp_path("dir");
         fs::create_dir_all(&dir).expect("test directory should be created");
 
-        let result = PdfDoc::open(&dir);
+        let result = HayroPdfBackend::open(&dir);
         assert!(matches!(
             result,
             Err(AppError::InvalidArgument(message))
@@ -100,10 +100,10 @@ mod tests {
         fs::write(&file, build_pdf(&["first page", "second page"]))
             .expect("test file should be created");
 
-        let doc = PdfDoc::open(&file).expect("regular file path should be accepted");
-        assert_eq!(doc.path(), file.as_path());
-        assert_eq!(doc.page_count(), 2);
-        assert_ne!(doc.doc_id(), 0);
+        let backend = HayroPdfBackend::open(&file).expect("regular file path should be accepted");
+        assert_eq!(backend.path(), file.as_path());
+        assert_eq!(backend.page_count(), 2);
+        assert_ne!(backend.doc_id(), 0);
 
         fs::remove_file(&file).expect("test file should be removed");
     }
@@ -120,13 +120,13 @@ mod tests {
         );
 
         fs::write(&file, first).expect("first test pdf should be created");
-        let first_doc = PdfDoc::open(&file).expect("first pdf should open");
-        let first_doc_id = first_doc.doc_id();
+        let first_backend = HayroPdfBackend::open(&file).expect("first backend should open");
+        let first_backend_id = first_backend.doc_id();
 
         fs::write(&file, second).expect("second test pdf should replace first");
-        let second_doc = PdfDoc::open(&file).expect("second pdf should open");
+        let second_backend = HayroPdfBackend::open(&file).expect("second backend should open");
 
-        assert_ne!(first_doc_id, second_doc.doc_id());
+        assert_ne!(first_backend_id, second_backend.doc_id());
         fs::remove_file(&file).expect("test file should be removed");
     }
 
@@ -135,8 +135,8 @@ mod tests {
         let file = unique_temp_path("doc_id_stable.pdf");
         fs::write(&file, build_pdf(&["stable"])).expect("test pdf should be created");
 
-        let first = PdfDoc::open(&file).expect("first pdf open should succeed");
-        let second = PdfDoc::open(&file).expect("second pdf open should succeed");
+        let first = HayroPdfBackend::open(&file).expect("first backend open should succeed");
+        let second = HayroPdfBackend::open(&file).expect("second backend open should succeed");
 
         assert_eq!(first.doc_id(), second.doc_id());
         fs::remove_file(&file).expect("test file should be removed");
@@ -146,9 +146,11 @@ mod tests {
     fn render_page_rejects_out_of_range_page() {
         let file = unique_temp_path("render.pdf");
         fs::write(&file, build_pdf(&["hello"])).expect("test file should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
 
-        let err = doc.render_page(8, 1.0).expect_err("page should be invalid");
+        let err = backend
+            .render_page(8, 1.0)
+            .expect_err("page should be invalid");
         assert!(matches!(
             err,
             AppError::InvalidArgument(message) if message == "page index is out of range"
@@ -161,9 +163,9 @@ mod tests {
     fn page_render_dimensions_read_page_size() {
         let file = unique_temp_path("dimensions.pdf");
         fs::write(&file, build_pdf(&["hello"])).expect("test file should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
 
-        let (width, height) = doc
+        let (width, height) = backend
             .page_render_dimensions(0)
             .expect("dimensions should be available");
         assert!((width - 300.0).abs() < f32::EPSILON);
@@ -178,8 +180,8 @@ mod tests {
         fs::write(&file, build_pdf(&["hello world", "second page"]))
             .expect("test file should be created");
 
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let text = doc
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
+        let text = backend
             .extract_text_page(0)
             .expect("extract should succeed")
             .plain_text();
@@ -202,8 +204,8 @@ mod tests {
         )
         .expect("test file should be created");
 
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let text = doc
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
+        let text = backend
             .extract_text_page(0)
             .expect("extract should succeed")
             .plain_text();
@@ -221,8 +223,8 @@ mod tests {
         let file = unique_temp_path("pixmap.pdf");
         fs::write(&file, build_pdf(&["render me"])).expect("test file should be created");
 
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let frame = doc.render_page(0, 1.0).expect("render should succeed");
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
+        let frame = backend.render_page(0, 1.0).expect("render should succeed");
         assert!(frame.width > 0);
         assert!(frame.height > 0);
         assert_eq!(
@@ -238,8 +240,8 @@ mod tests {
         let file = unique_temp_path("render_context.pdf");
         fs::write(&file, build_pdf(&["first", "second"])).expect("test file should be created");
 
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let mut render_context = doc.render_context();
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
+        let mut render_context = backend.render_context();
         let first = render_context
             .render_page(0, 1.0)
             .expect("first page should render");
@@ -289,8 +291,8 @@ mod tests {
         let file = unique_temp_path("outline_named_dest.pdf");
         fs::write(&file, build_pdf_with_named_outline()).expect("test file should be created");
 
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let outline = doc
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
+        let outline = backend
             .extract_outline()
             .expect("outline extraction should succeed");
 
@@ -307,8 +309,8 @@ mod tests {
         fs::write(&file, build_pdf_with_cyclic_named_outline())
             .expect("test file should be created");
 
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let outline = doc
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
+        let outline = backend
             .extract_outline()
             .expect("outline extraction should succeed");
 
@@ -325,8 +327,8 @@ mod tests {
         fs::write(&file, build_pdf_with_cyclic_named_outline_aliases())
             .expect("test file should be created");
 
-        let doc = PdfDoc::open(&file).expect("pdf should open");
-        let outline = doc
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
+        let outline = backend
             .extract_outline()
             .expect("outline extraction should succeed");
 

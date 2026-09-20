@@ -27,11 +27,11 @@ pub(in crate::command) fn submit_search(
     query: String,
     matcher: SearchMatcherKind,
 ) -> AppResult<CommandExecution> {
-    let pdf = Arc::clone(&ctx.pdf);
+    let backend = Arc::clone(&ctx.backend);
     let result = ctx
         .extension_host
         .search_mut()
-        .submit(ctx.app, pdf, query, matcher)?;
+        .submit(ctx.app, backend, query, matcher)?;
     Ok(CommandExecution::from_notice_result(result))
 }
 

@@ -93,23 +93,24 @@ impl ExtensionHost {
         ExtensionEventOutcome { changed }
     }
 
-    pub fn on_document_opened(&mut self, pdf: SharedPdfBackend) {
-        self.search.prewarm(pdf);
+    pub fn on_document_opened(&mut self, backend: SharedPdfBackend) {
+        self.search.prewarm(backend);
     }
 
-    pub fn on_document_reloaded(&mut self, app: &mut AppState, pdf: SharedPdfBackend) {
-        self.search.on_document_reloaded(app, pdf);
+    pub fn on_document_reloaded(&mut self, app: &mut AppState, backend: SharedPdfBackend) {
+        self.search.on_document_reloaded(app, backend);
         self.history = HistoryState::default();
         self.outline.on_document_reloaded();
     }
 
     pub fn on_visible_pages_changed(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         visible_pages: [Option<usize>; 2],
     ) {
-        self.search.prewarm(Arc::clone(&pdf));
-        self.search.resolve_priority_geometry(pdf, visible_pages);
+        self.search.prewarm(Arc::clone(&backend));
+        self.search
+            .resolve_priority_geometry(backend, visible_pages);
     }
 
     pub fn status_bar_segments(&self, _app: &AppState) -> Vec<String> {
@@ -156,12 +157,12 @@ mod tests {
 
     use super::ExtensionHost;
 
-    struct StubPdf {
+    struct StubBackend {
         path: PathBuf,
         page_count: usize,
     }
 
-    impl StubPdf {
+    impl StubBackend {
         fn new(page_count: usize) -> Self {
             Self {
                 path: PathBuf::from("stub.pdf"),
@@ -170,7 +171,7 @@ mod tests {
         }
     }
 
-    impl PdfBackend for StubPdf {
+    impl PdfBackend for StubBackend {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -221,12 +222,12 @@ mod tests {
         let mut app = crate::app::AppState::default();
         assert!(host.status_bar_segments(&app).is_empty());
 
-        let pdf = StubPdf::new(4);
+        let backend = StubBackend::new(4);
 
         host.search_mut()
             .submit(
                 &mut app,
-                Arc::new(pdf) as SharedPdfBackend,
+                Arc::new(backend) as SharedPdfBackend,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
             )
@@ -241,12 +242,12 @@ mod tests {
     fn cancel_search_clears_active_query() {
         let mut host = test_extension_host();
         let mut app = crate::app::AppState::default();
-        let pdf = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(4)) as SharedPdfBackend;
 
         host.search_mut()
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
             )
@@ -255,7 +256,7 @@ mod tests {
 
         let canceled = host
             .search_mut()
-            .cancel(pdf)
+            .cancel(backend)
             .expect("cancel should succeed");
         assert!(canceled);
         assert!(!host.ui_snapshot(&app).search.active);
@@ -265,8 +266,8 @@ mod tests {
     fn document_reload_preserves_active_search() {
         let mut host = test_extension_host();
         let mut app = crate::app::AppState::default();
-        let first = Arc::new(StubPdf::new(4)) as SharedPdfBackend;
-        let second = Arc::new(StubPdf::new(2)) as SharedPdfBackend;
+        let first = Arc::new(StubBackend::new(4)) as SharedPdfBackend;
+        let second = Arc::new(StubBackend::new(2)) as SharedPdfBackend;
 
         host.search_mut()
             .submit(
@@ -304,7 +305,7 @@ mod tests {
             &mut app,
         );
 
-        host.on_document_reloaded(&mut app, Arc::new(StubPdf::new(4)) as SharedPdfBackend);
+        host.on_document_reloaded(&mut app, Arc::new(StubBackend::new(4)) as SharedPdfBackend);
         let (outcome, notice) = host.history_mut().back(&mut app, 4);
 
         assert_eq!(outcome, CommandOutcome::Noop);

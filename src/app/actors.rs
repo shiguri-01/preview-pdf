@@ -30,7 +30,7 @@ pub(crate) struct RenderNavSyncParts<'a> {
 pub(super) struct RenderCompleteContext<'a, S> {
     pub(super) render_policy: &'a RenderPolicy,
     pub(super) session: &'a S,
-    pub(super) pdf: &'a dyn PdfBackend,
+    pub(super) backend: &'a dyn PdfBackend,
     pub(super) input_actor: &'a InputActor,
     pub(super) prefetch_pause_after_input: Duration,
     pub(super) in_flight_len: usize,
@@ -135,12 +135,12 @@ impl RenderActor {
         render: &mut RenderSubsystem,
         interaction: &mut InteractionSubsystem,
         state: &mut AppState,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         current_scale: f32,
     ) -> bool {
         let mut changed = false;
         let previous_page = state.current_page;
-        state.normalize_current_page(pdf.page_count());
+        state.normalize_current_page(backend.page_count());
         if state.current_page != previous_page {
             changed = true;
         }
@@ -152,7 +152,7 @@ impl RenderActor {
         }
 
         let mut nav_sync_parts = self.nav_sync_parts_mut();
-        if render.sync_navigation_state(state, pdf, &mut nav_sync_parts, current_scale) {
+        if render.sync_navigation_state(state, backend, &mut nav_sync_parts, current_scale) {
             changed = true;
         }
         changed
@@ -162,13 +162,13 @@ impl RenderActor {
         &mut self,
         render: &mut RenderSubsystem,
         state: &mut AppState,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         render_worker: &mut RenderWorker,
         step: &IterationStep,
     ) {
         render.ensure_current_task_enqueued(
             state,
-            pdf,
+            backend,
             self,
             render_worker,
             CurrentTaskContext {
@@ -193,18 +193,18 @@ impl RenderActor {
         S: TerminalSurface,
     {
         let viewport = current_viewport_for_session(ctx.session, state.debug_status_visible);
-        let visible_pages = state.visible_page_slots(ctx.pdf.page_count());
+        let visible_pages = state.visible_page_slots(ctx.backend.page_count());
         let current_scale = compute_current_scale_for_state(
             state,
             render,
             ctx.render_policy,
-            ctx.pdf,
+            ctx.backend,
             visible_pages.anchor_page,
             viewport,
         );
         let current_view = render.build_current_render_view(
             state,
-            ctx.pdf,
+            ctx.backend,
             visible_pages,
             current_scale,
             self.generation() == 0,
@@ -296,7 +296,7 @@ impl UiActor {
         interaction: &InteractionSubsystem,
         state: &mut AppState,
         session: &mut S,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         page_count: usize,
         render_generation: u64,
         nav_streak: usize,
@@ -325,7 +325,7 @@ impl UiActor {
             render.render_frame(
                 state,
                 session,
-                pdf,
+                backend,
                 RenderFramePlan {
                     palette_view,
                     help_keymap: interaction.sequences.resolver.snapshot(),

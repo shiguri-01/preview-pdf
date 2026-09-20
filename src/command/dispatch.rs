@@ -25,7 +25,7 @@ pub struct CommandDispatchResult {
 }
 
 pub struct CommandDispatchContext<'a> {
-    pub pdf: SharedPdfBackend,
+    pub backend: SharedPdfBackend,
     pub extension_host: &'a mut ExtensionHost,
     pub palette_registry: &'a PaletteRegistry,
     pub palette_session: &'a mut PaletteSessionController,
@@ -36,7 +36,7 @@ pub struct CommandDispatchContext<'a> {
 pub(super) struct CommandExecContext<'a> {
     pub app: &'a mut AppState,
     pub view_policy: ViewPolicy,
-    pub pdf: SharedPdfBackend,
+    pub backend: SharedPdfBackend,
     pub extension_host: &'a mut ExtensionHost,
     pub palette_registry: &'a PaletteRegistry,
     pub palette_session: &'a mut PaletteSessionController,
@@ -44,7 +44,7 @@ pub(super) struct CommandExecContext<'a> {
 
 impl CommandExecContext<'_> {
     pub(super) fn page_count(&self) -> usize {
-        self.pdf.page_count()
+        self.backend.page_count()
     }
 }
 
@@ -67,7 +67,7 @@ pub fn dispatch_with_view_policy(
     dispatch_ctx: CommandDispatchContext<'_>,
 ) -> AppResult<CommandDispatchResult> {
     let CommandDispatchContext {
-        pdf,
+        backend,
         extension_host,
         palette_registry,
         palette_session,
@@ -108,7 +108,7 @@ pub fn dispatch_with_view_policy(
         &mut CommandExecContext {
             app,
             view_policy,
-            pdf,
+            backend,
             extension_host: &mut *extension_host,
             palette_registry,
             palette_session: &mut *palette_session,
@@ -228,13 +228,13 @@ mod tests {
         dispatch_with_view_policy,
     };
 
-    struct StubPdf {
+    struct StubBackend {
         path: PathBuf,
         doc_id: u64,
         page_count: usize,
     }
 
-    impl StubPdf {
+    impl StubBackend {
         fn new(page_count: usize) -> Self {
             Self {
                 path: PathBuf::from("stub.pdf"),
@@ -244,7 +244,7 @@ mod tests {
         }
     }
 
-    impl PdfBackend for StubPdf {
+    impl PdfBackend for StubBackend {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -286,7 +286,7 @@ mod tests {
         app: &mut AppState,
         cmd: Command,
         source: CommandInvocationSource,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         extension_host: &mut ExtensionHost,
         palette_requests: &mut VecDeque<PaletteRequest>,
     ) -> crate::error::AppResult<CommandDispatchResult> {
@@ -299,7 +299,7 @@ mod tests {
             cmd,
             source,
             CommandDispatchContext {
-                pdf,
+                backend,
                 extension_host,
                 palette_registry: &registry,
                 palette_session: &mut session,
@@ -318,7 +318,7 @@ mod tests {
 
     fn new_zoom_test_fixture() -> (SharedPdfBackend, ExtensionHost, VecDeque<PaletteRequest>) {
         (
-            Arc::new(StubPdf::new(3)) as SharedPdfBackend,
+            Arc::new(StubBackend::new(3)) as SharedPdfBackend,
             test_extension_host(),
             VecDeque::new(),
         )
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn dispatch_quit_requests_quit_and_emits_command_executed() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -335,7 +335,7 @@ mod tests {
             &mut app,
             Command::Quit,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -355,7 +355,7 @@ mod tests {
     #[test]
     fn dispatch_next_page_emits_page_changed_and_command_executed() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -363,7 +363,7 @@ mod tests {
             &mut app,
             Command::NextPage,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -394,13 +394,13 @@ mod tests {
             zoom: 1.0,
             ..AppState::default()
         };
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -409,12 +409,12 @@ mod tests {
         assert!(zoom_eq(app.zoom, 1.1));
         assert_eq!(result.outcome, CommandOutcome::Applied);
 
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -432,13 +432,13 @@ mod tests {
             pan_y: -3,
             ..AppState::default()
         };
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::ZoomReset,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn dispatch_pan_applies_explicit_cell_amount() {
         let mut app = AppState::default();
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
@@ -470,7 +470,7 @@ mod tests {
                 amount: PanAmount::Cells(3),
             },
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -487,13 +487,13 @@ mod tests {
             zoom: 4.0,
             ..AppState::default()
         };
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::SetZoom { value: 10.0 },
             CommandInvocationSource::CommandPaletteInput,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -513,13 +513,13 @@ mod tests {
     #[test]
     fn dispatch_set_zoom_warns_when_input_is_slightly_above_maximum() {
         let mut app = AppState::default();
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::SetZoom { value: 4.0004 },
             CommandInvocationSource::CommandPaletteInput,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -539,13 +539,13 @@ mod tests {
     #[test]
     fn dispatch_set_zoom_warns_when_input_is_below_minimum() {
         let mut app = AppState::default();
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::SetZoom { value: 0.1 },
             CommandInvocationSource::CommandPaletteInput,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -565,13 +565,13 @@ mod tests {
     #[test]
     fn dispatch_set_zoom_warns_when_input_is_slightly_below_minimum() {
         let mut app = AppState::default();
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::SetZoom { value: 0.2497 },
             CommandInvocationSource::CommandPaletteInput,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -594,13 +594,13 @@ mod tests {
             zoom: 4.0,
             ..AppState::default()
         };
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -623,13 +623,13 @@ mod tests {
             zoom: 0.25,
             ..AppState::default()
         };
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -652,13 +652,13 @@ mod tests {
             zoom: 3.9997,
             ..AppState::default()
         };
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::ZoomIn,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -675,13 +675,13 @@ mod tests {
             zoom: 0.2503,
             ..AppState::default()
         };
-        let (pdf, mut host, mut palette_requests) = new_zoom_test_fixture();
+        let (backend, mut host, mut palette_requests) = new_zoom_test_fixture();
 
         let result = dispatch(
             &mut app,
             Command::ZoomOut,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn dispatch_open_palette_emits_command_executed_only() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -706,7 +706,7 @@ mod tests {
                 options: crate::palette::PaletteOpenOptions::default(),
             },
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -729,7 +729,7 @@ mod tests {
             mode: Mode::Palette,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
         let mut session = PaletteSessionController::default();
@@ -753,7 +753,7 @@ mod tests {
             Command::PaletteSubmit,
             CommandInvocationSource::Binding,
             CommandDispatchContext {
-                pdf,
+                backend,
                 extension_host: &mut host,
                 palette_registry: &registry,
                 palette_session: &mut session,
@@ -780,7 +780,7 @@ mod tests {
             mode: Mode::Palette,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
         let mut session = PaletteSessionController::default();
@@ -807,7 +807,7 @@ mod tests {
             Command::PaletteSubmit,
             CommandInvocationSource::Binding,
             CommandDispatchContext {
-                pdf,
+                backend,
                 extension_host: &mut host,
                 palette_registry: &registry,
                 palette_session: &mut session,
@@ -828,7 +828,7 @@ mod tests {
     #[test]
     fn dispatch_rejects_palette_command_without_active_palette() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
         let mut session = PaletteSessionController::default();
@@ -841,7 +841,7 @@ mod tests {
             Command::PaletteSelectNext,
             CommandInvocationSource::Binding,
             CommandDispatchContext {
-                pdf,
+                backend,
                 extension_host: &mut host,
                 palette_registry: &registry,
                 palette_session: &mut session,
@@ -862,7 +862,7 @@ mod tests {
     #[test]
     fn dispatch_open_help_changes_mode_and_emits_mode_event() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -870,7 +870,7 @@ mod tests {
             &mut app,
             Command::OpenHelp,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -902,7 +902,7 @@ mod tests {
             help_scroll: 3,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -910,7 +910,7 @@ mod tests {
             &mut app,
             Command::CloseHelp,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -939,7 +939,7 @@ mod tests {
     #[test]
     fn dispatch_help_scroll_commands_require_help_mode() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -947,7 +947,7 @@ mod tests {
             &mut app,
             Command::HelpScrollDown,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -971,7 +971,7 @@ mod tests {
             mode: crate::app::Mode::Help,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -979,7 +979,7 @@ mod tests {
             &mut app,
             Command::HelpScrollDown,
             CommandInvocationSource::Binding,
-            Arc::clone(&pdf),
+            Arc::clone(&backend),
             &mut host,
             &mut palette_requests,
         )
@@ -999,7 +999,7 @@ mod tests {
             &mut app,
             Command::HelpScrollUp,
             CommandInvocationSource::Binding,
-            Arc::clone(&pdf),
+            Arc::clone(&backend),
             &mut host,
             &mut palette_requests,
         )
@@ -1019,14 +1019,14 @@ mod tests {
     #[test]
     fn dispatch_cancel_clears_active_search() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
         host.search_mut()
             .submit(
                 &mut app,
-                Arc::clone(&pdf),
+                Arc::clone(&backend),
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
             )
@@ -1037,7 +1037,7 @@ mod tests {
             &mut app,
             Command::CancelSearch,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -1053,12 +1053,12 @@ mod tests {
     #[test]
     fn collect_transition_events_emits_search_when_page_is_unchanged() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         host.search_mut()
             .submit(
                 &mut app,
-                pdf,
+                backend,
                 "needle".to_string(),
                 SearchMatcherKind::ContainsInsensitive,
             )
@@ -1092,7 +1092,7 @@ mod tests {
             current_page: 3,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(8)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -1103,7 +1103,7 @@ mod tests {
                 cover_policy: None,
             },
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -1129,7 +1129,7 @@ mod tests {
             spread_cover_policy: SpreadCoverPolicy::Cover,
             ..AppState::default()
         };
-        let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(8)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -1140,7 +1140,7 @@ mod tests {
                 cover_policy: None,
             },
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -1154,7 +1154,7 @@ mod tests {
     #[test]
     fn dispatch_page_layout_spread_cover_keeps_cover_policy() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(8)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -1165,7 +1165,7 @@ mod tests {
                 cover_policy: Some(SpreadCoverPolicyArg::Cover),
             },
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -1188,7 +1188,7 @@ mod tests {
             spread_cover: SpreadCoverPolicy::Cover,
             ..ViewPolicy::default()
         };
-        let pdf = Arc::new(StubPdf::new(8)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(8)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let registry = PaletteRegistry::default();
         let mut session = PaletteSessionController::default();
@@ -1204,7 +1204,7 @@ mod tests {
             },
             CommandInvocationSource::Binding,
             CommandDispatchContext {
-                pdf,
+                backend,
                 extension_host: &mut host,
                 palette_registry: &registry,
                 palette_session: &mut session,
@@ -1281,7 +1281,7 @@ mod tests {
     #[test]
     fn dispatch_rejects_internal_command_from_binding() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -1292,7 +1292,7 @@ mod tests {
                 matcher: SearchMatcherKind::ContainsInsensitive,
             },
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )
@@ -1308,7 +1308,7 @@ mod tests {
     #[test]
     fn dispatch_rejects_unavailable_command_from_binding() {
         let mut app = AppState::default();
-        let pdf = Arc::new(StubPdf::new(3)) as SharedPdfBackend;
+        let backend = Arc::new(StubBackend::new(3)) as SharedPdfBackend;
         let mut host = test_extension_host();
         let mut palette_requests = VecDeque::new();
 
@@ -1316,7 +1316,7 @@ mod tests {
             &mut app,
             Command::NextSearchHit,
             CommandInvocationSource::Binding,
-            pdf,
+            backend,
             &mut host,
             &mut palette_requests,
         )

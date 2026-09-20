@@ -104,7 +104,7 @@ mod tests {
 
     use super::{RuntimeEventSources, wait_next_event};
     use crate::backend::test_support::{build_pdf, unique_temp_path};
-    use crate::backend::{PdfDoc, SharedPdfBackend};
+    use crate::backend::{HayroPdfBackend, SharedPdfBackend};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
     use crate::event::DomainEvent;
     use crate::extension::ExtensionWorkerEvent;
@@ -176,9 +176,9 @@ mod tests {
     fn idle_render_worker() -> RenderWorker {
         let file = unique_temp_path(".pdf");
         fs::write(&file, build_pdf(&["page"])).expect("test pdf should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
         fs::remove_file(&file).expect("test pdf should be removed");
-        let shared: SharedPdfBackend = Arc::new(doc);
+        let shared: SharedPdfBackend = Arc::new(backend);
         RenderWorker::spawn(shared, 1)
     }
 

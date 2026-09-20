@@ -168,19 +168,19 @@ impl RenderSubsystem {
     pub(super) fn build_current_render_view(
         &self,
         state: &AppState,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         visible_pages: VisiblePageSlots,
         current_scale: f32,
         is_cold_start: bool,
     ) -> CurrentRenderView {
         let mut required = RequiredRenderPages::new(
             visible_pages.anchor_page,
-            RenderedPageKey::new(pdf.doc_id(), visible_pages.anchor_page, current_scale),
+            RenderedPageKey::new(backend.doc_id(), visible_pages.anchor_page, current_scale),
         );
         if let Some(trailing_page) = visible_pages.trailing_page {
             required.push_trailing(
                 trailing_page,
-                RenderedPageKey::new(pdf.doc_id(), trailing_page, current_scale),
+                RenderedPageKey::new(backend.doc_id(), trailing_page, current_scale),
             );
         }
         let current_cached = required
@@ -193,7 +193,7 @@ impl RenderSubsystem {
         let initial_preview = cold_start_initial_preview_plan(
             is_cold_start,
             current_cached,
-            pdf.doc_id(),
+            backend.doc_id(),
             visible_pages,
             page_presentation,
             current_scale,
@@ -203,7 +203,7 @@ impl RenderSubsystem {
             current_interest_keys.extend(preview_plan.page_keys.iter().copied());
         }
         let presenter_key = RenderedPageKey::with_layout(
-            pdf.doc_id(),
+            backend.doc_id(),
             visible_pages.anchor_page,
             current_scale,
             presenter_layout_tag,
@@ -289,14 +289,18 @@ impl RenderSubsystem {
     pub(super) fn sync_navigation_state(
         &mut self,
         state: &AppState,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         parts: &mut RenderNavSyncParts<'_>,
         current_scale: f32,
     ) -> bool {
         if !zoom_eq(state.zoom, *parts.tracked_zoom) {
             parts.nav.on_zoom_change();
-            self.runtime
-                .reset_prefetch(pdf, state.current_page, parts.nav.intent(), current_scale);
+            self.runtime.reset_prefetch(
+                backend,
+                state.current_page,
+                parts.nav.intent(),
+                current_scale,
+            );
             *parts.tracked_zoom = state.zoom;
             *parts.tracked_scale = current_scale;
             *parts.tracked_page = state.current_page;
@@ -310,7 +314,7 @@ impl RenderSubsystem {
                 state.page_step_between(*parts.tracked_page, state.current_page),
             );
             self.runtime.schedule_navigation(
-                pdf,
+                backend,
                 state.current_page,
                 parts.nav.intent(),
                 current_scale,
@@ -322,8 +326,12 @@ impl RenderSubsystem {
 
         if !zoom_eq(current_scale, *parts.tracked_scale) {
             parts.nav.on_scale_change();
-            self.runtime
-                .reset_prefetch(pdf, state.current_page, parts.nav.intent(), current_scale);
+            self.runtime.reset_prefetch(
+                backend,
+                state.current_page,
+                parts.nav.intent(),
+                current_scale,
+            );
             *parts.tracked_scale = current_scale;
             return true;
         }
@@ -334,7 +342,7 @@ impl RenderSubsystem {
     pub(super) fn ensure_current_task_enqueued(
         &mut self,
         _state: &mut AppState,
-        pdf: &dyn PdfBackend,
+        backend: &dyn PdfBackend,
         render_actor: &RenderActor,
         render_worker: &mut RenderWorker,
         ctx: CurrentTaskContext,
@@ -382,7 +390,7 @@ impl RenderSubsystem {
 
             let (enqueued, preempted) = render_worker.enqueue_current_with_preemption(
                 RenderTask {
-                    doc_id: pdf.doc_id(),
+                    doc_id: backend.doc_id(),
                     page,
                     scale: ctx.current_scale,
                     class: WorkClass::CriticalCurrent,

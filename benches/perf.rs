@@ -8,8 +8,8 @@ use pvf::perf::{PerfScenarioId, PerfSuiteConfig, run_suite, write_report};
 #[derive(Debug, Parser)]
 #[command(version, about = "Headless pvf performance diagnostics")]
 struct BenchArgs {
-    #[arg(long, value_name = "PATH")]
-    pdf: PathBuf,
+    #[arg(long = "pdf", value_name = "PATH")]
+    pdf_path: PathBuf,
 
     #[arg(long, value_name = "ID|all")]
     scenario: Vec<String>,
@@ -37,7 +37,7 @@ impl BenchArgs {
     fn suite_config(&self) -> AppResult<PerfSuiteConfig> {
         let scenarios = parse_scenarios(&self.scenario)?;
         Ok(PerfSuiteConfig {
-            pdf_path: self.pdf.clone(),
+            pdf_path: self.pdf_path.clone(),
             scenarios,
             warmup_iterations: self.warmup,
             measured_iterations: self.iterations,

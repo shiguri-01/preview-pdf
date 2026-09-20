@@ -99,26 +99,26 @@ impl InteractionSubsystem {
             .changed
     }
 
-    pub(crate) fn prepare_extensions_for_document(&mut self, pdf: SharedPdfBackend) {
-        self.extensions.host.on_document_opened(pdf);
+    pub(crate) fn prepare_extensions_for_document(&mut self, backend: SharedPdfBackend) {
+        self.extensions.host.on_document_opened(backend);
     }
 
     pub(crate) fn reset_extensions_for_document_reload(
         &mut self,
         state: &mut AppState,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
     ) {
-        self.extensions.host.on_document_reloaded(state, pdf);
+        self.extensions.host.on_document_reloaded(state, backend);
     }
 
     pub(crate) fn sync_extensions_after_page_change(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         visible_pages: [Option<usize>; 2],
     ) {
         self.extensions
             .host
-            .on_visible_pages_changed(pdf, visible_pages);
+            .on_visible_pages_changed(backend, visible_pages);
     }
 
     pub(crate) fn palette_view(&self) -> Option<PaletteView> {
@@ -190,7 +190,7 @@ impl InteractionSubsystem {
         state: &mut AppState,
         view_policy: ViewPolicy,
         request: CommandRequest,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
     ) -> AppResult<CommandDispatchResult> {
         let result = dispatch_with_view_policy(
             state,
@@ -198,7 +198,7 @@ impl InteractionSubsystem {
             request.command,
             request.source,
             CommandDispatchContext {
-                pdf,
+                backend,
                 extension_host: &mut self.extensions.host,
                 palette_registry: &self.palette.registry,
                 palette_session: &mut self.palette.session,
@@ -275,7 +275,7 @@ mod tests {
 
     use crate::app::{AppState, Mode, PaletteRequest};
     use crate::backend::test_support::{build_pdf, unique_temp_path};
-    use crate::backend::{PdfDoc, SharedPdfBackend};
+    use crate::backend::{HayroPdfBackend, SharedPdfBackend};
     use crate::command::{Command, CommandInvocationSource, CommandRequest};
     use crate::condition::ConditionExpr;
     use crate::config::ViewPolicy;
@@ -289,9 +289,9 @@ mod tests {
     fn test_pdf_backend() -> SharedPdfBackend {
         let file = unique_temp_path(".pdf");
         fs::write(&file, build_pdf(&["page"])).expect("test pdf should be created");
-        let doc = PdfDoc::open(&file).expect("pdf should open");
+        let backend = HayroPdfBackend::open(&file).expect("backend should open");
         fs::remove_file(&file).expect("test pdf should be removed");
-        Arc::new(doc)
+        Arc::new(backend)
     }
 
     #[test]
@@ -1140,7 +1140,7 @@ mod tests {
 
     #[test]
     fn dispatch_command_preserves_pending_sequences_that_remain_enabled() {
-        let pdf = test_pdf_backend();
+        let backend = test_pdf_backend();
         let mut registry = SequenceRegistry::new();
         registry
             .register_exact(
@@ -1175,7 +1175,7 @@ mod tests {
                 &mut state,
                 ViewPolicy::default(),
                 CommandRequest::new(Command::OpenHelp, CommandInvocationSource::Binding),
-                pdf,
+                backend,
             )
             .expect("help command should dispatch");
 

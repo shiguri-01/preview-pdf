@@ -8,8 +8,8 @@ use super::super::effects::CommandExecution;
 pub(in crate::command) fn open_outline(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let pdf = Arc::clone(&ctx.pdf);
-    let request = ctx.extension_host.outline_mut().open_palette(pdf)?;
+    let backend = Arc::clone(&ctx.backend);
+    let request = ctx.extension_host.outline_mut().open_palette(backend)?;
     Ok(CommandExecution::applied().with_palette_request(request))
 }
 

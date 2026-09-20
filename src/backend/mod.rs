@@ -8,7 +8,7 @@ mod hayro;
 pub(crate) mod test_support;
 mod traits;
 
-pub use hayro::PdfDoc;
+pub use hayro::HayroPdfBackend;
 pub use traits::{
     OutlineNode, PdfBackend, PdfRect, PdfRenderContext, PixelBuffer, PixelBufferPool, RgbaFrame,
     TextGlyph, TextPage,
@@ -17,5 +17,5 @@ pub use traits::{
 pub type SharedPdfBackend = Arc<dyn PdfBackend>;
 
 pub fn open_default_backend(path: impl AsRef<Path>) -> AppResult<SharedPdfBackend> {
-    PdfDoc::open(path).map(|doc| Arc::new(doc) as SharedPdfBackend)
+    HayroPdfBackend::open(path).map(|backend| Arc::new(backend) as SharedPdfBackend)
 }

@@ -18,7 +18,7 @@ use super::AppRuntime;
 impl App {
     pub(in crate::app) fn initialize_runtime<S>(
         &mut self,
-        pdf: SharedPdfBackend,
+        backend: SharedPdfBackend,
         session: S,
         event_tx: UnboundedSender<DomainEvent>,
         event_rx: UnboundedReceiver<DomainEvent>,
@@ -27,7 +27,7 @@ impl App {
     where
         S: TerminalSurface,
     {
-        let page_count = pdf.page_count();
+        let page_count = backend.page_count();
         self.state.current_page = self.state.current_page.min(page_count - 1);
         self.state.normalize_current_page(page_count);
 
@@ -46,24 +46,24 @@ impl App {
         let mut redraw_tick = time::interval(pending_redraw_interval);
         redraw_tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let render_worker =
-            RenderWorker::spawn(Arc::clone(&pdf), self.render_policy.worker_threads);
+            RenderWorker::spawn(Arc::clone(&backend), self.render_policy.worker_threads);
         let viewport = Self::current_viewport(&session, self.state.debug_status_visible);
         let visible_pages = self.state.visible_page_slots(page_count);
         let tracked_scale =
-            self.compute_current_scale(pdf.as_ref(), visible_pages.anchor_page, viewport);
+            self.compute_current_scale(backend.as_ref(), visible_pages.anchor_page, viewport);
         let mut render_actor =
             RenderActor::new(visible_pages.anchor_page, self.state.zoom, tracked_scale);
         let (extension_worker_tx, extension_worker_rx) = unbounded_channel();
         self.interaction
             .start_extension_workers(extension_worker_tx);
         self.render.runtime.reset_prefetch(
-            pdf.as_ref(),
+            backend.as_ref(),
             visible_pages.anchor_page,
             render_actor.nav_mut().intent(),
             tracked_scale,
         );
         self.interaction
-            .prepare_extensions_for_document(Arc::clone(&pdf));
+            .prepare_extensions_for_document(Arc::clone(&backend));
 
         Ok(AppRuntime {
             prefetch_pause_after_input,

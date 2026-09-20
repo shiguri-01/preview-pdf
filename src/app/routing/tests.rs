@@ -18,7 +18,9 @@ use crate::app::{
     RuntimeObservation,
 };
 use crate::backend::test_support::{build_pdf, unique_temp_path};
-use crate::backend::{OutlineNode, PdfBackend, PdfDoc, RgbaFrame, SharedPdfBackend, TextPage};
+use crate::backend::{
+    HayroPdfBackend, OutlineNode, PdfBackend, RgbaFrame, SharedPdfBackend, TextPage,
+};
 use crate::command::{Command, CommandInvocationSource, CommandRequest, PanAmount, PanDirection};
 use crate::condition::ConditionExpr;
 use crate::config::Config;
@@ -148,9 +150,9 @@ impl PdfBackend for EmptyPdfBackend {
 fn test_pdf_backend() -> SharedPdfBackend {
     let file = unique_temp_path(".pdf");
     fs::write(&file, build_pdf(&["page"])).expect("test pdf should be created");
-    let doc = PdfDoc::open(&file).expect("pdf should open");
+    let backend = HayroPdfBackend::open(&file).expect("backend should open");
     fs::remove_file(&file).expect("test pdf should be removed");
-    Arc::new(doc)
+    Arc::new(backend)
 }
 
 #[test]
@@ -162,12 +164,17 @@ fn run_event_runtime_restores_session_when_pdf_has_no_pages() {
     let restore_count = Arc::new(AtomicUsize::new(0));
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let session = StubSession::with_restore_count(80, 24, Arc::clone(&restore_count));
-    let pdf: SharedPdfBackend = Arc::new(EmptyPdfBackend::new());
+    let backend: SharedPdfBackend = Arc::new(EmptyPdfBackend::new());
     let driver = RestoreProbeDriver;
 
     let err = tokio_runtime
-        .block_on(app.run_event_runtime(pdf, session, crate::app::RuntimeMode::Headless, driver))
-        .expect_err("empty pdf should fail before the loop starts");
+        .block_on(app.run_event_runtime(
+            backend,
+            session,
+            crate::app::RuntimeMode::Headless,
+            driver,
+        ))
+        .expect_err("empty backend should fail before the loop starts");
 
     assert!(err.to_string().contains("pdf has no pages"));
     assert_eq!(restore_count.load(Ordering::Relaxed), 1);
@@ -269,7 +276,7 @@ fn wake_timeout_applies_expired_sequence_command() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let mut registry = SequenceRegistry::new();
     registry
@@ -299,9 +306,9 @@ fn wake_timeout_applies_expired_sequence_command() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
 
     let control = app
         .handle_waited_event(
@@ -326,7 +333,7 @@ fn input_outcome_applies_expired_command_before_latest_command() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let mut registry = SequenceRegistry::new();
     registry
@@ -363,9 +370,9 @@ fn input_outcome_applies_expired_command_before_latest_command() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
 
     let control = app
         .handle_waited_event(
@@ -396,7 +403,7 @@ fn focus_changing_timeout_drops_waited_input() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let mut registry = SequenceRegistry::new();
     registry
@@ -433,9 +440,9 @@ fn focus_changing_timeout_drops_waited_input() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
 
     let control = app
         .handle_waited_event(
@@ -460,7 +467,7 @@ fn palette_close_from_input_applies_before_queued_input() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     app.interaction
         .palette
@@ -474,7 +481,7 @@ fn palette_close_from_input_applies_before_queued_input() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime
         .event_tx
@@ -483,7 +490,7 @@ fn palette_close_from_input_applies_before_queued_input() {
             KeyModifiers::NONE,
         ))))
         .expect("queued input should be accepted");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
 
     let control = app
         .handle_waited_event(
@@ -512,14 +519,14 @@ fn command_error_becomes_notice_and_runtime_continues() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
 
     let control = app
         .handle_waited_event(
@@ -546,13 +553,13 @@ fn reload_document_command_starts_reload_without_blocking_loop() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let backend = test_pdf_backend();
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
 
     let control = app
@@ -580,7 +587,8 @@ fn document_reload_success_replaces_active_document_and_clamps_page() {
     let file = unique_temp_path("reload_success.pdf");
     fs::write(&file, build_pdf(&["one", "two", "three"]))
         .expect("first test pdf should be created");
-    let first = Arc::new(PdfDoc::open(&file).expect("first pdf should open")) as SharedPdfBackend;
+    let first = Arc::new(HayroPdfBackend::open(&file).expect("first backend should open"))
+        as SharedPdfBackend;
     let old_doc_id = first.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&first));
     let mut app = App::new_with_config(Config::default()).expect("app init");
@@ -594,7 +602,8 @@ fn document_reload_success_replaces_active_document_and_clamps_page() {
 
     fs::write(&file, build_pdf(&["new one", "new two"]))
         .expect("second test pdf should replace first");
-    let second = Arc::new(PdfDoc::open(&file).expect("second pdf should open")) as SharedPdfBackend;
+    let second = Arc::new(HayroPdfBackend::open(&file).expect("second backend should open"))
+        as SharedPdfBackend;
     assert_ne!(old_doc_id, second.doc_id());
 
     app.handle_waited_event(
@@ -608,8 +617,8 @@ fn document_reload_success_replaces_active_document_and_clamps_page() {
     )
     .expect("reload result should be handled");
 
-    assert_ne!(document.pdf.doc_id(), old_doc_id);
-    assert_eq!(document.pdf.page_count(), 2);
+    assert_ne!(document.backend.doc_id(), old_doc_id);
+    assert_eq!(document.backend.page_count(), 2);
     assert_eq!(app.state.current_page, 1);
     assert!(runtime.ui_actor.needs_redraw());
     fs::remove_file(&file).expect("test file should be removed");
@@ -624,8 +633,10 @@ fn document_reload_success_applies_even_when_doc_id_matches() {
     let _guard = tokio_runtime.enter();
     let file = unique_temp_path("reload_same_doc_id.pdf");
     fs::write(&file, build_pdf(&["same content"])).expect("test pdf should be created");
-    let first = Arc::new(PdfDoc::open(&file).expect("first pdf should open")) as SharedPdfBackend;
-    let second = Arc::new(PdfDoc::open(&file).expect("second pdf should open")) as SharedPdfBackend;
+    let first = Arc::new(HayroPdfBackend::open(&file).expect("first backend should open"))
+        as SharedPdfBackend;
+    let second = Arc::new(HayroPdfBackend::open(&file).expect("second backend should open"))
+        as SharedPdfBackend;
     assert_eq!(first.doc_id(), second.doc_id());
     assert!(!Arc::ptr_eq(&first, &second));
 
@@ -651,7 +662,7 @@ fn document_reload_success_applies_even_when_doc_id_matches() {
     )
     .expect("reload result should be handled");
 
-    assert!(Arc::ptr_eq(&document.pdf, &second));
+    assert!(Arc::ptr_eq(&document.backend, &second));
     assert_eq!(runtime.reload_retry_attempts, 0);
     assert!(runtime.ui_actor.needs_redraw());
     fs::remove_file(&file).expect("test file should be removed");
@@ -666,7 +677,8 @@ fn document_reload_success_clears_previous_reload_notice() {
     let _guard = tokio_runtime.enter();
     let file = unique_temp_path("reload_clears_notice.pdf");
     fs::write(&file, build_pdf(&["one"])).expect("first test pdf should be created");
-    let first = Arc::new(PdfDoc::open(&file).expect("first pdf should open")) as SharedPdfBackend;
+    let first = Arc::new(HayroPdfBackend::open(&file).expect("first backend should open"))
+        as SharedPdfBackend;
     let mut document = ActiveDocument::new(Arc::clone(&first));
     let mut app = App::new_with_config(Config::default()).expect("app init");
     app.state
@@ -679,7 +691,8 @@ fn document_reload_success_clears_previous_reload_notice() {
     runtime.reload_in_flight = true;
 
     fs::write(&file, build_pdf(&["two"])).expect("second test pdf should replace first");
-    let second = Arc::new(PdfDoc::open(&file).expect("second pdf should open")) as SharedPdfBackend;
+    let second = Arc::new(HayroPdfBackend::open(&file).expect("second backend should open"))
+        as SharedPdfBackend;
 
     app.handle_waited_event(
         RuntimeEvent::Event(DomainEvent::DocumentReloaded(DocumentReloadResult {
@@ -703,14 +716,14 @@ fn manual_document_reload_failure_keeps_previous_document() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
-    let old_doc_id = pdf.doc_id();
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let backend = test_pdf_backend();
+    let old_doc_id = backend.doc_id();
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -726,7 +739,7 @@ fn manual_document_reload_failure_keeps_previous_document() {
     )
     .expect("reload failure should be handled");
 
-    assert_eq!(document.pdf.doc_id(), old_doc_id);
+    assert_eq!(document.backend.doc_id(), old_doc_id);
     assert!(!runtime.reload_in_flight);
     let notice = app.state.notice.expect("reload failure should set notice");
     assert_eq!(notice.level, crate::app::NoticeLevel::Error);
@@ -740,14 +753,14 @@ fn file_reload_failure_keeps_previous_document_and_retries_quietly() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
-    let old_doc_id = pdf.doc_id();
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let backend = test_pdf_backend();
+    let old_doc_id = backend.doc_id();
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -763,7 +776,7 @@ fn file_reload_failure_keeps_previous_document_and_retries_quietly() {
     )
     .expect("reload failure should be handled");
 
-    assert_eq!(document.pdf.doc_id(), old_doc_id);
+    assert_eq!(document.backend.doc_id(), old_doc_id);
     assert!(!runtime.reload_in_flight);
     assert_eq!(runtime.reload_retry_attempts, 1);
     assert!(app.state.notice.is_none());
@@ -791,14 +804,14 @@ fn file_reload_failure_after_retry_budget_shows_warning() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
-    let old_doc_id = pdf.doc_id();
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let backend = test_pdf_backend();
+    let old_doc_id = backend.doc_id();
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -815,7 +828,7 @@ fn file_reload_failure_after_retry_budget_shows_warning() {
     )
     .expect("reload failure should be handled");
 
-    assert_eq!(document.pdf.doc_id(), old_doc_id);
+    assert_eq!(document.backend.doc_id(), old_doc_id);
     assert!(!runtime.reload_in_flight);
     assert_eq!(runtime.reload_retry_attempts, 5);
     assert!(runtime.ui_actor.needs_redraw());
@@ -835,7 +848,8 @@ fn file_reload_success_after_retries_replaces_document_and_resets_retry_count() 
     let file = unique_temp_path("reload_retry_success.pdf");
     fs::write(&file, build_pdf(&["one", "two", "three"]))
         .expect("first test pdf should be created");
-    let first = Arc::new(PdfDoc::open(&file).expect("first pdf should open")) as SharedPdfBackend;
+    let first = Arc::new(HayroPdfBackend::open(&file).expect("first backend should open"))
+        as SharedPdfBackend;
     let old_doc_id = first.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&first));
     let mut app = App::new_with_config(Config::default()).expect("app init");
@@ -851,7 +865,8 @@ fn file_reload_success_after_retries_replaces_document_and_resets_retry_count() 
 
     fs::write(&file, build_pdf(&["new one", "new two"]))
         .expect("second test pdf should replace first");
-    let second = Arc::new(PdfDoc::open(&file).expect("second pdf should open")) as SharedPdfBackend;
+    let second = Arc::new(HayroPdfBackend::open(&file).expect("second backend should open"))
+        as SharedPdfBackend;
     assert_ne!(old_doc_id, second.doc_id());
 
     app.handle_waited_event(
@@ -865,8 +880,8 @@ fn file_reload_success_after_retries_replaces_document_and_resets_retry_count() 
     )
     .expect("reload result should be handled");
 
-    assert_ne!(document.pdf.doc_id(), old_doc_id);
-    assert_eq!(document.pdf.page_count(), 2);
+    assert_ne!(document.backend.doc_id(), old_doc_id);
+    assert_eq!(document.backend.page_count(), 2);
     assert_eq!(app.state.current_page, 1);
     assert_eq!(runtime.reload_retry_attempts, 0);
     assert!(app.state.notice.is_none());
@@ -881,14 +896,14 @@ fn stale_file_reload_failure_yields_to_pending_fresh_reload() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
-    let old_doc_id = pdf.doc_id();
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let backend = test_pdf_backend();
+    let old_doc_id = backend.doc_id();
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -908,7 +923,7 @@ fn stale_file_reload_failure_yields_to_pending_fresh_reload() {
     )
     .expect("reload failure should be handled");
 
-    assert_eq!(document.pdf.doc_id(), old_doc_id);
+    assert_eq!(document.backend.doc_id(), old_doc_id);
     assert!(runtime.reload_in_flight);
     assert!(runtime.pending_reload.is_none());
     assert_eq!(runtime.reload_retry_attempts, 0);
@@ -926,7 +941,8 @@ fn stale_file_reload_success_yields_to_pending_fresh_reload() {
     let file = unique_temp_path("reload_stale_success.pdf");
     fs::write(&file, build_pdf(&["one", "two", "three"]))
         .expect("first test pdf should be created");
-    let first = Arc::new(PdfDoc::open(&file).expect("first pdf should open")) as SharedPdfBackend;
+    let first = Arc::new(HayroPdfBackend::open(&file).expect("first backend should open"))
+        as SharedPdfBackend;
     let old_doc_id = first.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&first));
     let mut app = App::new_with_config(Config::default()).expect("app init");
@@ -944,7 +960,8 @@ fn stale_file_reload_success_yields_to_pending_fresh_reload() {
 
     fs::write(&file, build_pdf(&["stale one", "stale two"]))
         .expect("second test pdf should replace first");
-    let stale = Arc::new(PdfDoc::open(&file).expect("stale pdf should open")) as SharedPdfBackend;
+    let stale = Arc::new(HayroPdfBackend::open(&file).expect("stale backend should open"))
+        as SharedPdfBackend;
     assert_ne!(old_doc_id, stale.doc_id());
 
     app.handle_waited_event(
@@ -958,7 +975,7 @@ fn stale_file_reload_success_yields_to_pending_fresh_reload() {
     )
     .expect("reload result should be handled");
 
-    assert_eq!(document.pdf.doc_id(), old_doc_id);
+    assert_eq!(document.backend.doc_id(), old_doc_id);
     assert!(runtime.reload_in_flight);
     assert!(runtime.pending_reload.is_none());
     assert_eq!(runtime.reload_retry_attempts, 0);
@@ -976,13 +993,13 @@ fn old_delayed_retry_after_newer_reload_is_ignored() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let backend = test_pdf_backend();
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.reload_generation = 2;
     runtime.reload_retry_attempts = 3;
@@ -1013,15 +1030,15 @@ fn command_event_returns_break_when_effect_channel_is_closed() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.event_rx.close();
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
 
     let control = app
         .handle_waited_event(
@@ -1044,15 +1061,15 @@ fn encode_complete_without_redraw_request_does_not_redraw() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
 
     app.handle_waited_event(
         RuntimeEvent::Event(DomainEvent::EncodeComplete(
@@ -1075,14 +1092,14 @@ fn prefetch_tick_only_marks_prefetch_due() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     assert!(runtime.render_actor.take_prefetch_due());
     assert!(!runtime.render_actor.take_prefetch_due());
     runtime.ui_actor.clear_redraw();
@@ -1106,18 +1123,19 @@ fn non_current_render_complete_does_not_redraw() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     runtime.ui_actor.clear_redraw();
     let viewport = App::current_viewport(&runtime.session, app.state.debug_status_visible);
-    let current_scale = app.compute_current_scale(pdf.as_ref(), app.state.current_page, viewport);
-    let non_current_key = RenderedPageKey::new(pdf.doc_id(), 42, current_scale);
+    let current_scale =
+        app.compute_current_scale(backend.as_ref(), app.state.current_page, viewport);
+    let non_current_key = RenderedPageKey::new(backend.doc_id(), 42, current_scale);
 
     app.handle_waited_event(
         RuntimeEvent::Event(DomainEvent::RenderComplete(failed_render_result(
@@ -1141,14 +1159,14 @@ fn noop_navigation_command_without_state_change_does_not_redraw() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     runtime.ui_actor.clear_redraw();
 
     app.handle_waited_event(
@@ -1182,14 +1200,14 @@ fn unavailable_search_navigation_without_notice_change_does_not_redraw() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     runtime.ui_actor.clear_redraw();
 
     app.handle_waited_event(
@@ -1212,15 +1230,15 @@ fn noop_command_redraws_when_it_changes_visible_notice() {
         .build()
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
-    let pdf = test_pdf_backend();
+    let backend = test_pdf_backend();
     let mut app = App::new_with_config(Config::default()).expect("app init");
     app.state.set_warning_notice("old warning");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
+        .initialize_runtime(Arc::clone(&backend), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
-    let mut document = ActiveDocument::new(Arc::clone(&pdf));
+    let mut document = ActiveDocument::new(Arc::clone(&backend));
     runtime.ui_actor.clear_redraw();
 
     app.handle_waited_event(

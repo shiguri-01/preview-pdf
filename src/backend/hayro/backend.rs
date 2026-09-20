@@ -13,11 +13,11 @@ use hayro::{RenderCache, RenderSettings, render};
 use crate::backend::{OutlineNode, RgbaFrame, TextPage};
 use crate::error::{AppError, AppResult};
 
-use super::PdfDoc;
+use super::HayroPdfBackend;
 use super::outline::extract_outline_nodes;
 use super::text::extract_text_page_with_device;
 
-impl PdfDoc {
+impl HayroPdfBackend {
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
         let path = path.as_ref();
         if path.as_os_str().is_empty() {

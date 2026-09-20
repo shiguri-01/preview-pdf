@@ -422,13 +422,13 @@ mod tests {
     #[test]
     fn sync_render_notice_preserves_non_render_notice() {
         let mut app = AppState::default();
-        app.set_error_notice("search failed: backend failed");
+        app.set_error_notice("search failed: pdf failed");
 
         sync_render_notice(&mut app, false, PresenterFeedback::None, "p.12");
 
         assert_eq!(
             app.notice.as_ref().map(|notice| notice.message.as_str()),
-            Some("search failed: backend failed")
+            Some("search failed: pdf failed")
         );
     }
     #[test]

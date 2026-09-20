@@ -265,7 +265,7 @@ pub struct PerfScenarioReport {
 pub struct PerfSuiteReport {
     pub version: u32,
     pub generated_at_unix_ms: u128,
-    pub pdf: PerfPdfInfo,
+    pub backend: PerfPdfInfo,
     pub run: PerfRunInfo,
     pub scenarios: Vec<PerfScenarioReport>,
 }
@@ -311,7 +311,7 @@ impl PerfSuiteReport {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|elapsed| elapsed.as_millis())
                 .unwrap_or(0),
-            pdf: PerfPdfInfo {
+            backend: PerfPdfInfo {
                 path: pdf_path.display().to_string(),
                 doc_id,
             },
@@ -340,14 +340,14 @@ pub async fn run_suite(config: PerfSuiteConfig) -> AppResult<PerfSuiteReport> {
         let parameters = scenario.parameters(&config);
         for iteration in 0..total_iterations {
             let iteration_started_at = Instant::now();
-            let pdf = open_default_backend(&config.pdf_path)?;
-            doc_id.get_or_insert(pdf.doc_id());
+            let backend = open_default_backend(&config.pdf_path)?;
+            doc_id.get_or_insert(backend.doc_id());
             let mut app = App::new()?;
             app.enable_metrics_collection()?;
             let session = HeadlessTerminalSession::new(PERF_HEADLESS_WIDTH, PERF_HEADLESS_HEIGHT)?;
             let driver = PerfRuntimeDriver::new(scenario, parameters.clone(), iteration_started_at);
             let snapshot = app
-                .run_event_runtime(pdf, session, RuntimeMode::Headless, driver)
+                .run_event_runtime(backend, session, RuntimeMode::Headless, driver)
                 .await?;
             if iteration >= config.warmup_iterations {
                 measured.push(snapshot);

@@ -15,21 +15,21 @@ use super::matcher::{SearchMatcher, apply_hit_snippet, occurrence_highlight_unav
 pub(crate) struct SearchJob {
     pub(crate) epoch: SearchEpoch,
     pub(crate) generation: u64,
-    pub(crate) pdf: SharedPdfBackend,
+    pub(crate) backend: SharedPdfBackend,
     pub(crate) query: String,
     pub(crate) matcher: Arc<dyn SearchMatcher>,
 }
 
 #[derive(Clone)]
 pub(crate) struct PrewarmJob {
-    pub(crate) pdf: SharedPdfBackend,
+    pub(crate) backend: SharedPdfBackend,
 }
 
 #[derive(Clone)]
 pub(crate) struct GeometryJob {
     pub(crate) epoch: SearchEpoch,
     pub(crate) generation: u64,
-    pub(crate) pdf: SharedPdfBackend,
+    pub(crate) backend: SharedPdfBackend,
     pub(crate) query: String,
     pub(crate) matcher: Arc<dyn SearchMatcher>,
     pub(crate) pages: Vec<usize>,
@@ -256,13 +256,13 @@ fn run_prewarm_job(
     page_cache: &mut SearchPageCache,
     prewarm_finished_doc_ids: &mut HashSet<u64>,
 ) -> PrewarmControl {
-    let doc = job.pdf.clone();
-    let total_pages = doc.page_count();
+    let backend = job.backend.clone();
+    let total_pages = backend.page_count();
     if total_pages == 0 {
         return PrewarmControl::Finished;
     }
 
-    let doc_id = doc.doc_id();
+    let doc_id = backend.doc_id();
     if prewarm_finished_doc_ids.contains(&doc_id) {
         return PrewarmControl::Finished;
     }
@@ -284,7 +284,7 @@ fn run_prewarm_job(
         if page_cache.get(doc_id, page).is_some() {
             continue;
         }
-        if let Ok(text_page) = doc.extract_text_page(page) {
+        if let Ok(text_page) = backend.extract_text_page(page) {
             let text_page = Arc::new(text_page);
             if !page_cache.try_insert_without_eviction(doc_id, page, text_page) {
                 prewarm_finished_doc_ids.insert(doc_id);
@@ -327,9 +327,9 @@ fn run_job(
         return WorkerControl::Continue;
     }
 
-    let doc = job.pdf;
-    let doc_id = doc.doc_id();
-    let total_pages = doc.page_count();
+    let backend = job.backend;
+    let doc_id = backend.doc_id();
+    let total_pages = backend.page_count();
 
     let mut hits = Vec::new();
     let mut highlight_unavailable = false;
@@ -345,7 +345,7 @@ fn run_job(
 
         let text_page = match page_cache.get(doc_id, page) {
             Some(text_page) => Ok(text_page),
-            None => doc.extract_text_page(page).map(|text_page| {
+            None => backend.extract_text_page(page).map(|text_page| {
                 let text_page = Arc::new(text_page);
                 page_cache.try_insert_without_eviction(doc_id, page, Arc::clone(&text_page));
                 text_page
@@ -417,9 +417,9 @@ fn run_geometry_job(
         return WorkerControl::Continue;
     }
 
-    let doc = job.pdf;
-    let doc_id = doc.doc_id();
-    let total_pages = doc.page_count();
+    let backend = job.backend;
+    let doc_id = backend.doc_id();
+    let total_pages = backend.page_count();
     let mut seen = HashSet::new();
 
     for page in job.pages.into_iter().filter(|page| *page < total_pages) {
@@ -442,7 +442,7 @@ fn run_geometry_job(
 
         let text_page = match page_cache.get(doc_id, page) {
             Some(text_page) => Ok(text_page),
-            None => doc.extract_text_page(page).map(|text_page| {
+            None => backend.extract_text_page(page).map(|text_page| {
                 let text_page = Arc::new(text_page);
                 page_cache.insert(doc_id, page, Arc::clone(&text_page));
                 text_page
@@ -528,14 +528,14 @@ mod tests {
     use crate::search::engine::{SearchEpoch, SearchEvent};
     use crate::search::matcher::matcher_for_kind;
 
-    struct CountingTextPageStubPdf {
+    struct CountingTextPageBackend {
         path: PathBuf,
         doc_id: u64,
         pages: Vec<TextPage>,
         text_page_calls: Mutex<Vec<usize>>,
     }
 
-    impl CountingTextPageStubPdf {
+    impl CountingTextPageBackend {
         fn new(doc_id: u64, pages: Vec<TextPage>) -> Self {
             let page_count = pages.len();
             Self {
@@ -554,7 +554,7 @@ mod tests {
         }
     }
 
-    impl PdfBackend for CountingTextPageStubPdf {
+    impl PdfBackend for CountingTextPageBackend {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -589,13 +589,13 @@ mod tests {
         }
     }
 
-    struct FailingPageStubPdf {
+    struct FailingPageBackend {
         path: PathBuf,
         pages: Vec<TextPage>,
         failing_page: usize,
     }
 
-    impl FailingPageStubPdf {
+    impl FailingPageBackend {
         fn new(pages: Vec<TextPage>, failing_page: usize) -> Self {
             Self {
                 path: PathBuf::from("failing-page.pdf"),
@@ -605,7 +605,7 @@ mod tests {
         }
     }
 
-    impl PdfBackend for FailingPageStubPdf {
+    impl PdfBackend for FailingPageBackend {
         fn path(&self) -> &Path {
             &self.path
         }
@@ -715,14 +715,14 @@ mod tests {
         assert_eq!(
             cache
                 .get(1, 0)
-                .expect("doc 1 page should exist")
+                .expect("backend 1 page should exist")
                 .plain_text(),
             "alpha"
         );
         assert_eq!(
             cache
                 .get(2, 0)
-                .expect("doc 2 page should exist")
+                .expect("backend 2 page should exist")
                 .plain_text(),
             "beta"
         );
@@ -757,7 +757,7 @@ mod tests {
         let first_page = text_page("alpha");
         let second_page = text_page("beta gamma");
         let budget = estimate_text_page_bytes(&first_page);
-        let pdf = Arc::new(CountingTextPageStubPdf::new(
+        let backend = Arc::new(CountingTextPageBackend::new(
             302,
             vec![first_page, second_page],
         ));
@@ -769,7 +769,9 @@ mod tests {
 
         assert!(matches!(
             run_prewarm_job(
-                PrewarmJob { pdf: pdf.clone() },
+                PrewarmJob {
+                    backend: backend.clone()
+                },
                 &mut request_rx,
                 &mut pending,
                 &mut page_cache,
@@ -777,11 +779,13 @@ mod tests {
             ),
             PrewarmControl::Finished
         ));
-        assert_eq!(pdf.text_page_calls(), vec![1, 1]);
+        assert_eq!(backend.text_page_calls(), vec![1, 1]);
 
         assert!(matches!(
             run_prewarm_job(
-                PrewarmJob { pdf: pdf.clone() },
+                PrewarmJob {
+                    backend: backend.clone()
+                },
                 &mut request_rx,
                 &mut pending,
                 &mut page_cache,
@@ -789,12 +793,12 @@ mod tests {
             ),
             PrewarmControl::Finished
         ));
-        assert_eq!(pdf.text_page_calls(), vec![1, 1]);
+        assert_eq!(backend.text_page_calls(), vec![1, 1]);
     }
 
     #[test]
     fn interrupted_prewarm_can_resume_after_priority_work() {
-        let pdf = Arc::new(CountingTextPageStubPdf::new(
+        let backend = Arc::new(CountingTextPageBackend::new(
             303,
             vec![text_page("alpha"), text_page("beta")],
         ));
@@ -808,14 +812,16 @@ mod tests {
             .send(WorkerRequest::Query(SearchJob {
                 epoch: SearchEpoch(1),
                 generation: 1,
-                pdf: pdf.clone(),
+                backend: backend.clone(),
                 query: "alpha".to_string(),
                 matcher: matcher_for_kind(SearchMatcherKind::ContainsInsensitive),
             }))
             .expect("query request should be queued");
 
         let interrupted = match run_prewarm_job(
-            PrewarmJob { pdf: pdf.clone() },
+            PrewarmJob {
+                backend: backend.clone(),
+            },
             &mut request_rx,
             &mut pending,
             &mut page_cache,
@@ -827,7 +833,7 @@ mod tests {
         };
 
         assert!(pending.query.is_some());
-        assert_eq!(pdf.text_page_calls(), vec![0, 0]);
+        assert_eq!(backend.text_page_calls(), vec![0, 0]);
 
         pending.query = None;
         assert!(matches!(
@@ -840,12 +846,12 @@ mod tests {
             ),
             PrewarmControl::Finished
         ));
-        assert_eq!(pdf.text_page_calls(), vec![1, 1]);
+        assert_eq!(backend.text_page_calls(), vec![1, 1]);
     }
 
     #[test]
     fn search_continues_after_page_text_extraction_failure() {
-        let pdf = Arc::new(FailingPageStubPdf::new(
+        let backend = Arc::new(FailingPageBackend::new(
             vec![text_page("alpha"), text_page("broken"), text_page("beta")],
             1,
         )) as SharedPdfBackend;
@@ -859,7 +865,7 @@ mod tests {
             SearchJob {
                 epoch: SearchEpoch(1),
                 generation: 1,
-                pdf,
+                backend,
                 query: "beta".to_string(),
                 matcher: matcher_for_kind(SearchMatcherKind::ContainsInsensitive),
             },

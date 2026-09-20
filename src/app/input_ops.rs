@@ -11,7 +11,6 @@ use crate::error::AppResult;
 use crate::event::AppEvent;
 use crate::extension::{ExtensionUiSnapshot, ExtensionWorkerEvent};
 use crate::input::sequence::{KeyBindingContext, SequenceResolution};
-use crate::input::{AppInputEvent, InputHookResult};
 use crate::palette::PaletteView;
 
 use super::core::InteractionSubsystem;
@@ -33,33 +32,9 @@ impl InteractionSubsystem {
     }
 
     fn handle_key_binding(&mut self, state: &mut AppState, key: KeyEvent) -> KeyEventOutcome {
-        // Once a sequence has started, keep routing keys through the resolver until it
-        // either dispatches, times out, or is canceled. That keeps multi-key handling
-        // from being stolen by global shortcuts or extension-local hooks mid-sequence.
-        if state.mode == Mode::Normal && !self.sequences.resolver.has_pending() {
-            match self.handle_extension_input(state, AppInputEvent::Key(key)) {
-                InputHookResult::Ignored => {}
-                InputHookResult::Consumed => {
-                    return KeyEventOutcome {
-                        redraw: true,
-                        commands: Vec::new(),
-                    };
-                }
-                InputHookResult::EmitCommand(ext_command) => {
-                    return KeyEventOutcome {
-                        redraw: false,
-                        commands: vec![CommandRequest::new(
-                            ext_command,
-                            CommandInvocationSource::Binding,
-                        )],
-                    };
-                }
-            }
-        }
-
-        let extensions = self.extensions.host.ui_snapshot(state);
+        let extensions = self.extensions.ui_snapshot(state);
         let ctx = self.key_binding_context(state, &extensions);
-        let resolution = self.sequences.resolver.handle_key_in_context(ctx, key);
+        let resolution = self.sequences.handle_key_in_context(ctx, key);
         Self::sequence_outcome(resolution, CommandInvocationSource::Binding, false)
     }
 
@@ -85,7 +60,7 @@ impl InteractionSubsystem {
         &mut self,
         event_tx: tokio::sync::mpsc::UnboundedSender<ExtensionWorkerEvent>,
     ) {
-        self.extensions.host.start_workers(event_tx);
+        self.extensions.start_workers(event_tx);
     }
 
     pub(crate) fn handle_extension_worker_events(
@@ -93,14 +68,11 @@ impl InteractionSubsystem {
         state: &mut AppState,
         events: Vec<ExtensionWorkerEvent>,
     ) -> bool {
-        self.extensions
-            .host
-            .handle_worker_events(events, state)
-            .changed
+        self.extensions.handle_worker_events(events, state)
     }
 
     pub(crate) fn prepare_extensions_for_document(&mut self, backend: SharedPdfBackend) {
-        self.extensions.host.on_document_opened(backend);
+        self.extensions.on_document_opened(backend);
     }
 
     pub(crate) fn reset_extensions_for_document_reload(
@@ -108,7 +80,7 @@ impl InteractionSubsystem {
         state: &mut AppState,
         backend: SharedPdfBackend,
     ) {
-        self.extensions.host.on_document_reloaded(state, backend);
+        self.extensions.on_document_reloaded(state, backend);
     }
 
     pub(crate) fn sync_extensions_after_page_change(
@@ -117,7 +89,6 @@ impl InteractionSubsystem {
         visible_pages: [Option<usize>; 2],
     ) {
         self.extensions
-            .host
             .on_visible_pages_changed(backend, visible_pages);
     }
 
@@ -127,24 +98,15 @@ impl InteractionSubsystem {
 
     pub(crate) fn pending_sequence_status(&self) -> Option<String> {
         self.sequences
-            .resolver
             .pending_display()
             .map(|pending| format!("keys {pending}"))
     }
 
     pub(crate) fn flush_sequence_timeout(&mut self, state: &AppState) -> KeyEventOutcome {
-        let extensions = self.extensions.host.ui_snapshot(state);
+        let extensions = self.extensions.ui_snapshot(state);
         let ctx = self.key_binding_context(state, &extensions);
-        let resolution = self.sequences.resolver.flush_timeout(ctx);
+        let resolution = self.sequences.flush_timeout(ctx);
         Self::sequence_outcome(resolution, CommandInvocationSource::Binding, true)
-    }
-
-    pub(crate) fn handle_extension_input(
-        &mut self,
-        state: &mut AppState,
-        event: AppInputEvent,
-    ) -> InputHookResult {
-        self.extensions.host.handle_input(event, state)
     }
 
     pub(crate) fn apply_palette_requests(&mut self, state: &mut AppState) -> bool {
@@ -152,9 +114,8 @@ impl InteractionSubsystem {
         while let Some(request) = self.palette.pending_requests.pop_front() {
             match request {
                 PaletteRequest::Open { kind, options } => {
-                    let extensions = self.extensions.host.ui_snapshot(state);
+                    let extensions = self.extensions.ui_snapshot(state);
                     match self.palette.session.open(
-                        &self.palette.registry,
                         state,
                         &extensions,
                         kind,
@@ -199,8 +160,7 @@ impl InteractionSubsystem {
             request.source,
             CommandDispatchContext {
                 backend,
-                extension_host: &mut self.extensions.host,
-                palette_registry: &self.palette.registry,
+                extension_host: &mut self.extensions,
                 palette_session: &mut self.palette.session,
                 palette_requests: &mut self.palette.pending_requests,
                 input_history: &mut self.history,
@@ -211,13 +171,13 @@ impl InteractionSubsystem {
     }
 
     pub(crate) fn handle_app_event(&mut self, state: &mut AppState, event: &AppEvent) {
-        self.extensions.host.handle_event(event, state);
+        self.extensions.handle_event(event, state);
     }
 
     fn reconcile_sequences(&mut self, state: &AppState) {
-        let extensions = self.extensions.host.ui_snapshot(state);
+        let extensions = self.extensions.ui_snapshot(state);
         let ctx = self.key_binding_context(state, &extensions);
-        self.sequences.resolver.reconcile(ctx);
+        self.sequences.reconcile(ctx);
     }
 
     fn command_redraw(command: &Command, redraw_on_dispatch: bool) -> bool {

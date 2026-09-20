@@ -9,7 +9,6 @@ use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry};
 
 use super::keymap::{KeymapOptions, build_default_sequence_registry};
 use super::options::AppOptions;
-use super::types::{CacheConfig, Config, InputConfig, RenderConfig, ViewConfig, WatchConfig};
 
 #[derive(Debug, Clone)]
 pub struct ResolvedAppOptions {
@@ -30,11 +29,10 @@ pub struct RenderPolicy {
 
 impl Default for RenderPolicy {
     fn default() -> Self {
-        let render = RenderConfig::default();
         Self {
-            graphics_protocol: render.graphics_protocol,
-            worker_threads: render.worker_threads,
-            max_render_scale: render.max_render_scale,
+            graphics_protocol: None,
+            worker_threads: 3,
+            max_render_scale: 2.5,
         }
     }
 }
@@ -51,14 +49,13 @@ pub struct EventLoopPolicy {
 
 impl Default for EventLoopPolicy {
     fn default() -> Self {
-        let render = RenderConfig::default();
         Self {
-            input_poll_timeout_idle: Duration::from_millis(render.input_poll_timeout_idle_ms),
-            input_poll_timeout_busy: Duration::from_millis(render.input_poll_timeout_busy_ms),
-            prefetch_pause_after_input: Duration::from_millis(render.prefetch_pause_ms),
-            prefetch_tick_interval: Duration::from_millis(render.prefetch_tick_ms),
-            pending_redraw_interval: Duration::from_millis(render.pending_redraw_interval_ms),
-            prefetch_dispatch_budget_per_tick: render.prefetch_dispatch_budget_per_tick,
+            input_poll_timeout_idle: Duration::from_millis(16),
+            input_poll_timeout_busy: Duration::from_millis(8),
+            prefetch_pause_after_input: Duration::from_millis(120),
+            prefetch_tick_interval: Duration::from_millis(8),
+            pending_redraw_interval: Duration::from_millis(33),
+            prefetch_dispatch_budget_per_tick: 6,
         }
     }
 }
@@ -73,12 +70,11 @@ pub struct CachePolicy {
 
 impl Default for CachePolicy {
     fn default() -> Self {
-        let cache = CacheConfig::default();
         Self {
-            l1_memory_budget_mb: cache.l1_memory_budget_mb,
-            l2_memory_budget_mb: cache.l2_memory_budget_mb,
-            l1_max_entries: cache.l1_max_entries,
-            l2_max_entries: cache.l2_max_entries,
+            l1_memory_budget_mb: 512,
+            l2_memory_budget_mb: 64,
+            l1_max_entries: 128,
+            l2_max_entries: 96,
         }
     }
 }
@@ -110,13 +106,12 @@ pub struct ViewPolicy {
 
 impl Default for ViewPolicy {
     fn default() -> Self {
-        let view = ViewConfig::default();
         Self {
-            initial_page_index: view.initial_page - 1,
-            initial_zoom: view.initial_zoom,
-            initial_layout: view.initial_layout,
-            spread_direction: view.spread_direction,
-            spread_cover: view.spread_cover,
+            initial_page_index: 0,
+            initial_zoom: 1.0,
+            initial_layout: PageLayoutMode::Single,
+            spread_direction: SpreadDirection::Ltr,
+            spread_cover: SpreadCoverPolicy::Paired,
         }
     }
 }
@@ -144,10 +139,9 @@ pub struct WatchPolicy {
 
 impl Default for WatchPolicy {
     fn default() -> Self {
-        let watch = WatchConfig::default();
         Self {
-            enabled: watch.enabled,
-            settle_delay: Duration::from_millis(watch.settle_delay_ms),
+            enabled: false,
+            settle_delay: Duration::from_millis(500),
         }
     }
 }
@@ -184,54 +178,12 @@ impl Default for ResolvedAppOptions {
     }
 }
 
-impl From<ResolvedAppOptions> for Config {
-    fn from(options: ResolvedAppOptions) -> Self {
-        Self {
-            render: RenderConfig {
-                graphics_protocol: options.render.graphics_protocol,
-                worker_threads: options.render.worker_threads,
-                input_poll_timeout_idle_ms: options.event_loop.input_poll_timeout_idle.as_millis()
-                    as u64,
-                input_poll_timeout_busy_ms: options.event_loop.input_poll_timeout_busy.as_millis()
-                    as u64,
-                prefetch_pause_ms: options.event_loop.prefetch_pause_after_input.as_millis() as u64,
-                prefetch_tick_ms: options.event_loop.prefetch_tick_interval.as_millis() as u64,
-                pending_redraw_interval_ms: options.event_loop.pending_redraw_interval.as_millis()
-                    as u64,
-                prefetch_dispatch_budget_per_tick: options
-                    .event_loop
-                    .prefetch_dispatch_budget_per_tick,
-                max_render_scale: options.render.max_render_scale,
-            },
-            cache: CacheConfig {
-                l1_memory_budget_mb: options.cache.l1_memory_budget_mb,
-                l2_memory_budget_mb: options.cache.l2_memory_budget_mb,
-                l1_max_entries: options.cache.l1_max_entries,
-                l2_max_entries: options.cache.l2_max_entries,
-            },
-            view: ViewConfig {
-                initial_page: options.view.initial_page_index + 1,
-                initial_zoom: options.view.initial_zoom,
-                initial_layout: options.view.initial_layout,
-                spread_direction: options.view.spread_direction,
-                spread_cover: options.view.spread_cover,
-            },
-            input: InputConfig {
-                sequence_timeout_ms: options.input.sequence_timeout.as_millis() as u64,
-            },
-            watch: WatchConfig {
-                enabled: options.watch.enabled,
-                settle_delay_ms: options.watch.settle_delay.as_millis() as u64,
-            },
-        }
-    }
-}
-
 fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
-    let render_defaults = RenderConfig::default();
-    let cache_defaults = CacheConfig::default();
-    let view_defaults = ViewConfig::default();
-    let watch_defaults = WatchConfig::default();
+    let render_defaults = RenderPolicy::default();
+    let event_loop_defaults = EventLoopPolicy::default();
+    let cache_defaults = CachePolicy::default();
+    let view_defaults = ViewPolicy::default();
+    let watch_defaults = WatchPolicy::default();
 
     let worker_threads = options
         .render
@@ -241,32 +193,32 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
     let input_poll_timeout_idle_ms = options
         .render
         .input_poll_timeout_idle_ms
-        .unwrap_or(render_defaults.input_poll_timeout_idle_ms)
+        .unwrap_or(event_loop_defaults.input_poll_timeout_idle.as_millis() as u64)
         .max(1);
     let input_poll_timeout_busy_ms = options
         .render
         .input_poll_timeout_busy_ms
-        .unwrap_or(render_defaults.input_poll_timeout_busy_ms)
+        .unwrap_or(event_loop_defaults.input_poll_timeout_busy.as_millis() as u64)
         .max(1);
     let prefetch_pause_ms = options
         .render
         .prefetch_pause_ms
-        .unwrap_or(render_defaults.prefetch_pause_ms)
+        .unwrap_or(event_loop_defaults.prefetch_pause_after_input.as_millis() as u64)
         .max(1);
     let prefetch_tick_ms = options
         .render
         .prefetch_tick_ms
-        .unwrap_or(render_defaults.prefetch_tick_ms)
+        .unwrap_or(event_loop_defaults.prefetch_tick_interval.as_millis() as u64)
         .max(1);
     let pending_redraw_interval_ms = options
         .render
         .pending_redraw_interval_ms
-        .unwrap_or(render_defaults.pending_redraw_interval_ms)
+        .unwrap_or(event_loop_defaults.pending_redraw_interval.as_millis() as u64)
         .max(1);
     let prefetch_dispatch_budget_per_tick = options
         .render
         .prefetch_dispatch_budget_per_tick
-        .unwrap_or(render_defaults.prefetch_dispatch_budget_per_tick)
+        .unwrap_or(event_loop_defaults.prefetch_dispatch_budget_per_tick)
         .max(1);
     let mut max_render_scale = options
         .render
@@ -283,7 +235,7 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
     let initial_page_index = options
         .view
         .initial_page
-        .unwrap_or(view_defaults.initial_page)
+        .unwrap_or(view_defaults.initial_page_index + 1)
         .max(1)
         - 1;
     let mut initial_zoom = options
@@ -297,7 +249,7 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
     let watch_settle_delay_ms = options
         .watch
         .settle_delay_ms
-        .unwrap_or(watch_defaults.settle_delay_ms)
+        .unwrap_or(watch_defaults.settle_delay.as_millis() as u64)
         .max(1);
 
     ResolvedAppOptions {
@@ -367,6 +319,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
+    use crate::input::sequence::DEFAULT_SEQUENCE_TIMEOUT;
 
     use crate::config::{AppOptions, CacheOptions, RenderOptions, ViewOptions, WatchOptions};
     use crate::presenter::GraphicsProtocol;
@@ -379,10 +332,12 @@ mod tests {
             .resolve()
             .expect("no sources should resolve");
 
-        assert_eq!(
-            crate::config::Config::from(resolved),
-            crate::config::Config::default()
-        );
+        assert_eq!(resolved.render, super::RenderPolicy::default());
+        assert_eq!(resolved.view, super::ViewPolicy::default());
+        assert_eq!(resolved.event_loop, super::EventLoopPolicy::default());
+        assert_eq!(resolved.cache, super::CachePolicy::default());
+        assert_eq!(resolved.watch, super::WatchPolicy::default());
+        assert_eq!(resolved.input.sequence_timeout, DEFAULT_SEQUENCE_TIMEOUT);
     }
 
     #[test]

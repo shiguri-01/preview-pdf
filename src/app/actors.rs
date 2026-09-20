@@ -116,10 +116,6 @@ impl RenderActor {
         self.nav.intent().generation
     }
 
-    pub(crate) fn nav_streak(&self) -> usize {
-        self.nav.intent().streak
-    }
-
     pub(crate) fn mark_prefetch_due(&mut self) {
         self.prefetch_due = true;
     }
@@ -299,7 +295,6 @@ impl UiActor {
         backend: &dyn PdfBackend,
         page_count: usize,
         render_generation: u64,
-        nav_streak: usize,
         render_busy: bool,
         presenter_busy: bool,
         changed: bool,
@@ -318,7 +313,7 @@ impl UiActor {
 
         if self.needs_redraw() {
             let palette_view = interaction.palette_view();
-            let mut status_bar_segments = interaction.extensions.host.status_bar_segments(state);
+            let mut status_bar_segments = interaction.extensions.status_bar_segments(state);
             if let Some(pending_sequence) = interaction.pending_sequence_status() {
                 status_bar_segments.push(pending_sequence);
             }
@@ -328,20 +323,17 @@ impl UiActor {
                 backend,
                 RenderFramePlan {
                     palette_view,
-                    help_keymap: interaction.sequences.resolver.snapshot(),
+                    help_keymap: interaction.sequences.snapshot(),
                     status_bar_segments,
                     page_count,
                     visible_pages: step.visible_pages,
                     current_scale: step.current_scale,
                     initial_preview: step.initial_preview.clone(),
-                    presenter_key: step.presenter_key,
                     highlight_overlay: interaction
                         .extensions
-                        .host
                         .render_snapshot(step.visible_pages.existing_pages())
                         .highlight_overlay,
                     generation: render_generation,
-                    nav_streak,
                 },
             )?;
             self.clear_redraw();

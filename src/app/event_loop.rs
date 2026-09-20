@@ -272,7 +272,6 @@ impl App {
         let overlay_stamp = self
             .interaction
             .extensions
-            .host
             .render_snapshot(current_view.visible_pages.existing_pages())
             .highlight_overlay
             .stamp;
@@ -298,7 +297,6 @@ impl App {
             initial_preview_tasks: current_view.preview_tasks(render_generation),
             prefetch_dispatch,
             initial_preview: current_view.initial_preview,
-            presenter_key: current_view.presenter_key,
             current_cached: current_view.current_cached,
         }
     }
@@ -323,7 +321,6 @@ impl App {
             backend,
             backend.page_count(),
             runtime.render_actor.generation(),
-            runtime.render_actor.nav_streak(),
             render_busy,
             presenter_busy,
             changed,

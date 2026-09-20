@@ -11,12 +11,10 @@ pub(in crate::command) fn text_insert(
     text: String,
 ) -> AppResult<CommandExecution> {
     let extensions = ctx.extension_host.ui_snapshot(ctx.app);
-    text_execution(ctx.palette_session.insert_text(
-        ctx.palette_registry,
-        ctx.app,
-        &extensions,
-        text.as_str(),
-    )?)
+    text_execution(
+        ctx.palette_session
+            .insert_text(ctx.app, &extensions, text.as_str())?,
+    )
 }
 
 pub(in crate::command) fn text_delete_backward(
@@ -102,36 +100,30 @@ fn text_edit(
     request: InputRequest,
 ) -> AppResult<CommandExecution> {
     let extensions = ctx.extension_host.ui_snapshot(ctx.app);
-    text_execution(ctx.palette_session.edit_input(
-        ctx.palette_registry,
-        ctx.app,
-        &extensions,
-        request,
-    )?)
+    text_execution(
+        ctx.palette_session
+            .edit_input(ctx.app, &extensions, request)?,
+    )
 }
 
 pub(in crate::command) fn palette_input_history_older(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
     let extensions = ctx.extension_host.ui_snapshot(ctx.app);
-    text_execution(ctx.palette_session.recall_history(
-        ctx.palette_registry,
-        ctx.app,
-        &extensions,
-        true,
-    )?)
+    text_execution(
+        ctx.palette_session
+            .recall_history(ctx.app, &extensions, true)?,
+    )
 }
 
 pub(in crate::command) fn palette_input_history_newer(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
     let extensions = ctx.extension_host.ui_snapshot(ctx.app);
-    text_execution(ctx.palette_session.recall_history(
-        ctx.palette_registry,
-        ctx.app,
-        &extensions,
-        false,
-    )?)
+    text_execution(
+        ctx.palette_session
+            .recall_history(ctx.app, &extensions, false)?,
+    )
 }
 
 fn text_execution(changed: bool) -> AppResult<CommandExecution> {

@@ -1,7 +1,6 @@
 mod candidate;
 mod effect;
 mod kind;
-mod matcher;
 mod provider;
 pub mod providers;
 mod registry;
@@ -16,8 +15,7 @@ pub use effect::{PalettePostAction, PaletteSubmitEffect, PaletteTabEffect};
 pub use kind::PaletteKind;
 #[cfg(test)]
 pub use provider::PaletteAppSnapshot;
-pub use provider::{PaletteContext, PaletteInputMode, PaletteProvider};
-pub use registry::PaletteRegistry;
+pub use provider::{PaletteContext, PaletteProvider};
 pub use request::PaletteOpenOptions;
 pub use row::{PageIndex, PaletteRow};
 pub use session_controller::PaletteSessionController;

@@ -1,8 +1,7 @@
 use crate::app::NoticeAction;
 use crate::app::scale::{ZOOM_MAX, ZOOM_MIN, next_zoom_step, prev_zoom_step};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
-use super::super::core::{reset_zoom, set_zoom as set_zoom_core, set_zoom_with_notice};
 use super::super::dispatch::CommandExecContext;
 use super::super::effects::CommandExecution;
 use super::super::types::{PanAmount, PanDirection};
@@ -11,8 +10,7 @@ pub(in crate::command) fn set_zoom(
     ctx: &mut CommandExecContext<'_>,
     value: f32,
 ) -> AppResult<CommandExecution> {
-    let result = set_zoom_core(ctx.app, value)?;
-    Ok(CommandExecution::from_notice_result(result))
+    set_zoom_with_notice(ctx, value, NoticeAction::Clear)
 }
 
 pub(in crate::command) fn zoom_in(ctx: &mut CommandExecContext<'_>) -> AppResult<CommandExecution> {
@@ -22,8 +20,7 @@ pub(in crate::command) fn zoom_in(ctx: &mut CommandExecContext<'_>) -> AppResult
     } else {
         NoticeAction::Clear
     };
-    let result = set_zoom_with_notice(ctx.app, next, notice)?;
-    Ok(CommandExecution::from_notice_result(result))
+    set_zoom_with_notice(ctx, next, notice)
 }
 
 pub(in crate::command) fn zoom_out(
@@ -35,15 +32,19 @@ pub(in crate::command) fn zoom_out(
     } else {
         NoticeAction::Clear
     };
-    let result = set_zoom_with_notice(ctx.app, prev, notice)?;
-    Ok(CommandExecution::from_notice_result(result))
+    set_zoom_with_notice(ctx, prev, notice)
 }
 
 pub(in crate::command) fn zoom_reset(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
-    let result = reset_zoom(ctx.app)?;
-    Ok(CommandExecution::from_notice_result(result))
+    if ctx.app.zoom == 1.0 && ctx.app.pan_x == 0 && ctx.app.pan_y == 0 {
+        return Ok(CommandExecution::noop());
+    }
+    ctx.app.zoom = 1.0;
+    ctx.app.pan_x = 0;
+    ctx.app.pan_y = 0;
+    Ok(CommandExecution::applied())
 }
 
 pub(in crate::command) fn pan(
@@ -68,4 +69,31 @@ fn pan_delta(direction: PanDirection, cells: i32) -> (i32, i32) {
         PanDirection::Up => (0, cells.saturating_neg()),
         PanDirection::Down => (0, cells),
     }
+}
+
+fn set_zoom_with_notice(
+    ctx: &mut CommandExecContext<'_>,
+    value: f32,
+    unclamped_notice: NoticeAction,
+) -> AppResult<CommandExecution> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(AppError::invalid_argument(
+            "zoom must be a positive finite value",
+        ));
+    }
+    let clamped = value.clamp(ZOOM_MIN, ZOOM_MAX);
+    let notice = if value == clamped {
+        unclamped_notice
+    } else if value > clamped {
+        NoticeAction::warning(format!("maximum zoom is {ZOOM_MAX:.2}x"))
+    } else {
+        NoticeAction::warning(format!("minimum zoom is {ZOOM_MIN:.2}x"))
+    };
+    let outcome = if ctx.app.zoom == clamped {
+        crate::command::CommandOutcome::Noop
+    } else {
+        ctx.app.zoom = clamped;
+        crate::command::CommandOutcome::Applied
+    };
+    Ok(CommandExecution::from_notice_result((outcome, notice)))
 }

@@ -4,7 +4,7 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::input::shortcut::format_shortcut_key;
 use crate::palette::{
-    PageIndex, PaletteCandidate, PaletteCandidateId, PaletteContext, PaletteInputMode, PaletteKind,
+    PageIndex, PaletteCandidate, PaletteCandidateId, PaletteContext, PaletteKind,
     PalettePostAction, PaletteProvider, PaletteRow, PaletteSubmitEffect,
 };
 
@@ -41,10 +41,6 @@ impl PaletteProvider for HistoryPaletteProvider {
         "Navigation History".to_string()
     }
 
-    fn input_mode(&self) -> PaletteInputMode {
-        PaletteInputMode::Custom
-    }
-
     fn reset_selection_on_input_change(&self) -> bool {
         true
     }
@@ -75,10 +71,11 @@ impl PaletteProvider for HistoryPaletteProvider {
         let mut page_matches = Vec::new();
 
         for entry in ctx.extensions.history.entries.iter() {
-            let idx = entry.display_index;
-            let view = HistoryEntryView::new(entry);
-            let bucket = view.match_bucket(idx, entry.page.display_number(), &query);
-            let candidate = view.into_candidate(entry);
+            let bucket =
+                entry
+                    .reason
+                    .match_bucket(entry.display_index, entry.page.display_number(), &query);
+            let candidate = history_candidate(entry);
             match bucket {
                 Some(HistoryMatchBucket::Index) => index_matches.push(candidate),
                 Some(HistoryMatchBucket::Reason) => reason_matches.push(candidate),
@@ -129,45 +126,16 @@ impl PaletteProvider for HistoryPaletteProvider {
 }
 
 fn build_history_candidates(entries: &[HistoryPaletteEntry]) -> Vec<PaletteCandidate> {
-    entries
-        .iter()
-        .map(|entry| HistoryEntryView::new(entry).into_candidate(entry))
-        .collect()
+    entries.iter().map(history_candidate).collect()
 }
 
-#[derive(Debug, Clone)]
-struct HistoryEntryView {
-    display_index: isize,
-    page: PageIndex,
-    reason: HistoryPaletteReason,
-}
-
-impl HistoryEntryView {
-    fn new(entry: &HistoryPaletteEntry) -> Self {
-        Self {
-            display_index: entry.display_index,
-            page: entry.page.clone(),
-            reason: entry.reason.clone(),
-        }
-    }
-
-    fn into_candidate(self, entry: &HistoryPaletteEntry) -> PaletteCandidate {
-        PaletteRow::new(entry.id.clone())
-            .label_matchable_text(self.display_index.to_string())
-            .label_decoration("  ")
-            .label_matchable_text(self.reason.display_text(self.page.display_number()))
-            .detail_page(entry.page.clone())
-            .into_candidate()
-    }
-
-    fn match_bucket(
-        &self,
-        idx: isize,
-        page_1indexed: usize,
-        query: &str,
-    ) -> Option<HistoryMatchBucket> {
-        self.reason.match_bucket(idx, page_1indexed, query)
-    }
+fn history_candidate(entry: &HistoryPaletteEntry) -> PaletteCandidate {
+    PaletteRow::new(entry.id.clone())
+        .label_matchable_text(entry.display_index.to_string())
+        .label_decoration("  ")
+        .label_matchable_text(entry.reason.display_text(entry.page.display_number()))
+        .detail_page(entry.page.clone())
+        .into_candidate()
 }
 
 fn page_text(page_1indexed: usize) -> String {

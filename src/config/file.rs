@@ -10,8 +10,6 @@ use super::options::{
     AppOptions, CacheOptions, InputOptions, KeymapOptions, KeymapPreset, RenderOptions,
     ViewOptions, WatchOptions,
 };
-use super::policy::AppOptionsResolver;
-use super::types::Config;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigFileSelection {
@@ -39,23 +37,6 @@ pub fn load_default_app_options() -> AppResult<AppOptions> {
 
 pub fn load_options_from_explicit_path(path: impl AsRef<Path>) -> AppResult<AppOptions> {
     read_options_from_path(path.as_ref(), MissingConfigPolicy::Error)
-}
-
-impl Config {
-    pub fn load() -> AppResult<Self> {
-        let Some(path) = default_config_path() else {
-            return Ok(Self::default());
-        };
-        Self::load_from_path(path)
-    }
-
-    pub fn load_from_path(path: impl AsRef<Path>) -> AppResult<Self> {
-        let options = read_options_from_path(path.as_ref(), MissingConfigPolicy::Default)?;
-        Ok(AppOptionsResolver::new()
-            .apply_options(options)
-            .resolve()?
-            .into())
-    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default, PartialEq)]
@@ -227,7 +208,7 @@ mod tests {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     use super::{
-        Config, ConfigFileSelection, default_config_path_from_env, load_options_from_explicit_path,
+        ConfigFileSelection, default_config_path_from_env, load_options_from_explicit_path,
     };
 
     fn handle_normal_key(resolver: &mut SequenceResolver, key: KeyEvent) -> SequenceResolution {
@@ -243,79 +224,6 @@ mod tests {
         let mut path = std::env::temp_dir();
         path.push(format!("pvf_config_{suffix}_{}_{}", process::id(), nanos));
         path
-    }
-
-    #[test]
-    fn optional_config_file_missing_uses_defaults() {
-        let missing = unique_temp_path("missing.toml");
-        let config = Config::load_from_path(&missing).expect("missing config should fallback");
-        assert_eq!(config, Config::default());
-    }
-
-    #[test]
-    fn config_file_partial_sections_merge_with_sanitized_defaults() {
-        let path = unique_temp_path("custom.toml");
-        fs::write(
-            &path,
-            r#"
-            [render]
-            worker_threads = 0
-            input_poll_timeout_idle_ms = 0
-            input_poll_timeout_busy_ms = 0
-            prefetch_pause_ms = 0
-            prefetch_tick_ms = 0
-            pending_redraw_interval_ms = 0
-            prefetch_dispatch_budget_per_tick = 0
-            max_render_scale = 0.5
-            graphics_protocol = "kitty"
-
-            [cache]
-            l1_memory_budget_mb = 256
-
-            [view]
-            initial_page = 4
-            initial_zoom = 1.25
-            initial_layout = "spread"
-            spread_direction = "rtl"
-            spread_cover = "cover"
-
-            [input]
-            sequence_timeout_ms = 333
-
-            [watch]
-            enabled = true
-            settle_delay_ms = 250
-            "#,
-        )
-        .expect("config file should be written");
-
-        let config = Config::load_from_path(&path).expect("config should parse");
-        assert_eq!(config.render.worker_threads, 1);
-        assert_eq!(config.render.input_poll_timeout_idle_ms, 1);
-        assert_eq!(config.render.input_poll_timeout_busy_ms, 1);
-        assert_eq!(config.render.prefetch_pause_ms, 1);
-        assert_eq!(config.render.prefetch_tick_ms, 1);
-        assert_eq!(config.render.pending_redraw_interval_ms, 1);
-        assert_eq!(config.render.prefetch_dispatch_budget_per_tick, 1);
-        assert_eq!(config.render.max_render_scale, 2.5);
-        assert_eq!(
-            config.render.graphics_protocol,
-            Some(GraphicsProtocol::Kitty)
-        );
-        assert_eq!(config.cache.l1_memory_budget_mb, 256);
-        assert_eq!(config.cache.l2_memory_budget_mb, 64);
-        assert_eq!(config.cache.l1_max_entries, 128);
-        assert_eq!(config.cache.l2_max_entries, 96);
-        assert_eq!(config.view.initial_page, 4);
-        assert_eq!(config.view.initial_zoom, 1.25);
-        assert_eq!(config.view.initial_layout, PageLayoutMode::Spread);
-        assert_eq!(config.view.spread_direction, SpreadDirection::Rtl);
-        assert_eq!(config.view.spread_cover, SpreadCoverPolicy::Cover);
-        assert_eq!(config.input.sequence_timeout_ms, 333);
-        assert!(config.watch.enabled);
-        assert_eq!(config.watch.settle_delay_ms, 250);
-
-        fs::remove_file(&path).expect("config file should be removed");
     }
 
     #[test]

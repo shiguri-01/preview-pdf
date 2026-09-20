@@ -4,7 +4,7 @@ use crate::app::{AppState, NoticeAction, PaletteRequest};
 use crate::backend::SharedPdfBackend;
 use crate::command::{CommandOutcome, SearchMatcherKind};
 use crate::error::AppResult;
-use crate::highlight::{HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle};
+use crate::highlight::{HighlightOverlaySnapshot, HighlightSpan, HighlightStyle};
 use crate::palette::{PaletteKind, PaletteOpenOptions};
 
 use super::engine::{SearchEngine, SearchEpoch, SearchEvent, SearchPageHit};
@@ -542,7 +542,6 @@ impl SearchState {
             .flat_map(|hit| {
                 hit.occurrences.iter().filter_map(move |occurrence| {
                     (!occurrence.rects.is_empty()).then_some(HighlightSpan {
-                        source: HighlightSource::Search,
                         page: hit.page,
                         rects: occurrence.rects.clone(),
                         style: HighlightStyle::SEARCH_HIT,

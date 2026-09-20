@@ -173,9 +173,7 @@ mod tests {
     use crate::backend::test_support::{build_pdf, unique_temp_path};
     use crate::backend::{HayroPdfBackend, OutlineNode, PdfRect};
     use crate::error::AppResult;
-    use crate::highlight::{
-        HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle,
-    };
+    use crate::highlight::{HighlightOverlaySnapshot, HighlightSpan, HighlightStyle};
     use crate::presenter::{
         ImagePresenter, PanOffset, PresenterCaps, PresenterFeedback, PresenterRenderOptions,
         PresenterRenderOutcome, PresenterRenderSlot, PresenterSlot, Viewport,
@@ -436,7 +434,6 @@ mod tests {
         HighlightOverlaySnapshot::new(
             (0..2)
                 .map(|page| HighlightSpan {
-                    source: HighlightSource::Search,
                     page,
                     rects: vec![PdfRect {
                         x0: 0.0,
@@ -1280,7 +1277,6 @@ mod tests {
 
     fn single_page_highlight_overlay() -> HighlightOverlaySnapshot {
         HighlightOverlaySnapshot::new(vec![HighlightSpan {
-            source: HighlightSource::Search,
             page: 0,
             rects: vec![PdfRect {
                 x0: 0.0,

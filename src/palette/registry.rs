@@ -6,35 +6,13 @@ use crate::extension::{
 use super::providers::CommandPaletteProvider;
 use super::{PaletteKind, PaletteProvider};
 
-pub struct PaletteRegistry {
-    command: CommandPaletteProvider,
-    search: SearchPaletteProvider,
-    search_results: SearchResultsPaletteProvider,
-    history: HistoryPaletteProvider,
-    outline: OutlinePaletteProvider,
-}
-
-impl Default for PaletteRegistry {
-    fn default() -> Self {
-        Self {
-            command: CommandPaletteProvider,
-            search: SearchPaletteProvider,
-            search_results: SearchResultsPaletteProvider,
-            history: HistoryPaletteProvider,
-            outline: OutlinePaletteProvider,
-        }
-    }
-}
-
-impl PaletteRegistry {
-    pub fn get(&self, kind: PaletteKind) -> &dyn PaletteProvider {
-        match kind {
-            PaletteKind::Command => &self.command,
-            PaletteKind::Search => &self.search,
-            PaletteKind::SearchResults => &self.search_results,
-            PaletteKind::History => &self.history,
-            PaletteKind::Outline => &self.outline,
-        }
+pub fn provider(kind: PaletteKind) -> &'static dyn PaletteProvider {
+    match kind {
+        PaletteKind::Command => &CommandPaletteProvider,
+        PaletteKind::Search => &SearchPaletteProvider,
+        PaletteKind::SearchResults => &SearchResultsPaletteProvider,
+        PaletteKind::History => &HistoryPaletteProvider,
+        PaletteKind::Outline => &OutlinePaletteProvider,
     }
 }
 
@@ -43,11 +21,10 @@ mod tests {
     use crate::extension::ExtensionUiSnapshot;
     use crate::palette::{PaletteAppSnapshot, PaletteContext, PaletteKind};
 
-    use super::PaletteRegistry;
+    use super::provider;
 
     #[test]
     fn get_returns_provider_for_all_palette_kinds() {
-        let registry = PaletteRegistry::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
             app: PaletteAppSnapshot::default(),
@@ -55,26 +32,14 @@ mod tests {
             input: "",
         };
 
+        assert_eq!(provider(PaletteKind::Command).kind(), PaletteKind::Command);
+        assert_eq!(provider(PaletteKind::Search).kind(), PaletteKind::Search);
         assert_eq!(
-            registry.get(PaletteKind::Command).kind(),
-            PaletteKind::Command
-        );
-        assert_eq!(
-            registry.get(PaletteKind::Search).kind(),
-            PaletteKind::Search
-        );
-        assert_eq!(
-            registry.get(PaletteKind::SearchResults).kind(),
+            provider(PaletteKind::SearchResults).kind(),
             PaletteKind::SearchResults
         );
-        assert_eq!(
-            registry.get(PaletteKind::History).kind(),
-            PaletteKind::History
-        );
-        assert_eq!(
-            registry.get(PaletteKind::Outline).kind(),
-            PaletteKind::Outline
-        );
-        assert!(!registry.get(PaletteKind::Command).title(&ctx).is_empty());
+        assert_eq!(provider(PaletteKind::History).kind(), PaletteKind::History);
+        assert_eq!(provider(PaletteKind::Outline).kind(), PaletteKind::Outline);
+        assert!(!provider(PaletteKind::Command).title(&ctx).is_empty());
     }
 }

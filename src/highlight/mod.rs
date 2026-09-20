@@ -6,26 +6,18 @@ use crate::backend::PdfRect;
 pub mod geometry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HighlightSource {
-    Search,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HighlightStyle {
     pub fill_rgba: [u8; 4],
-    pub priority: u8,
 }
 
 impl HighlightStyle {
     pub const SEARCH_HIT: Self = Self {
         fill_rgba: [255, 196, 79, 96],
-        priority: 0,
     };
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HighlightSpan {
-    pub source: HighlightSource,
     pub page: usize,
     pub rects: Vec<PdfRect>,
     pub style: HighlightStyle,
@@ -54,7 +46,6 @@ impl HighlightOverlaySnapshot {
     fn compute_stamp(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         for span in &self.spans {
-            span.source.hash(&mut hasher);
             span.page.hash(&mut hasher);
             span.style.hash(&mut hasher);
             for rect in &span.rects {

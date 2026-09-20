@@ -2,8 +2,8 @@ use crate::command::Command;
 use crate::error::AppResult;
 use crate::input::shortcut::format_shortcut_key;
 use crate::palette::{
-    PageIndex, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PalettePostAction,
-    PaletteProvider, PaletteRow, PaletteSubmitEffect,
+    PageIndex, PaletteCandidate, PaletteContext, PaletteKind, PalettePostAction, PaletteProvider,
+    PaletteRow, PaletteSubmitEffect,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,10 +22,6 @@ impl PaletteProvider for OutlinePaletteProvider {
 
     fn title(&self, _ctx: &PaletteContext<'_>) -> String {
         "Outline".to_string()
-    }
-
-    fn input_mode(&self) -> PaletteInputMode {
-        PaletteInputMode::Custom
     }
 
     fn reset_selection_on_input_change(&self) -> bool {

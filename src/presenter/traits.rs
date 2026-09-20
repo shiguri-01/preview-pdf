@@ -10,7 +10,9 @@ use crate::metrics::PerfStats;
 use crate::render::cache::RenderedPageKey;
 use crate::work::WorkClass;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, clap::ValueEnum,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum GraphicsProtocol {
     Auto,

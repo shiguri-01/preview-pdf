@@ -3,7 +3,6 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiLayout {
     pub viewer: Rect,
-    pub viewer_inner: Rect,
     pub status: Rect,
 }
 
@@ -15,11 +14,8 @@ pub fn split_layout(area: Rect, debug_status_visible: bool) -> UiLayout {
         .split(area);
 
     let viewer = chunks[0];
-    let viewer_inner = viewer;
-
     UiLayout {
         viewer,
-        viewer_inner,
         status: chunks[1],
     }
 }
@@ -53,8 +49,6 @@ mod tests {
             let layout = split_layout(area, debug_status_visible);
             assert_eq!(layout.status.height, status_height, "{name}");
             assert_eq!(layout.viewer.height, viewer_height, "{name}");
-            assert!(layout.viewer_inner.width <= layout.viewer.width, "{name}");
-            assert!(layout.viewer_inner.height <= layout.viewer.height, "{name}");
         }
     }
 

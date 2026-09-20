@@ -26,22 +26,11 @@ impl From<String> for PaletteCandidateId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct PaletteSearchText {
-    text: String,
-}
-
-impl PaletteSearchText {
-    pub(super) fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into() }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PaletteCandidate {
     id: PaletteCandidateId,
     label: Vec<PaletteTextPart>,
     detail: Vec<PaletteTextPart>,
-    match_texts: Vec<PaletteSearchText>,
+    match_texts: Vec<String>,
 }
 
 impl PaletteCandidate {
@@ -49,7 +38,7 @@ impl PaletteCandidate {
         id: PaletteCandidateId,
         label: Vec<PaletteTextPart>,
         detail: Vec<PaletteTextPart>,
-        match_texts: Vec<PaletteSearchText>,
+        match_texts: Vec<String>,
     ) -> Self {
         Self {
             id,
@@ -101,13 +90,6 @@ impl PaletteCandidate {
     }
 }
 
-fn join_palette_search_text_parts(parts: &[PaletteSearchText]) -> String {
-    let mut text = String::new();
-    for part in parts {
-        if !text.is_empty() {
-            text.push(' ');
-        }
-        text.push_str(&part.text);
-    }
-    text
+fn join_palette_search_text_parts(parts: &[String]) -> String {
+    parts.join(" ")
 }

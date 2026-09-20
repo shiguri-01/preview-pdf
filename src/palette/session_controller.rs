@@ -8,9 +8,8 @@ use crate::input::InputHistorySnapshot;
 use super::candidate::{PaletteCandidate, PaletteCandidateId};
 use super::effect::{PaletteSubmitEffect, PaletteTabEffect};
 use super::kind::PaletteKind;
-use super::matcher;
-use super::provider::{PaletteAppSnapshot, PaletteContext, PaletteInputMode, PaletteProvider};
-use super::registry::PaletteRegistry;
+use super::provider::{PaletteAppSnapshot, PaletteContext, PaletteProvider};
+use super::registry::provider;
 use super::request::PaletteOpenOptions;
 use super::view::{PaletteItemView, PaletteView};
 
@@ -18,7 +17,6 @@ use super::view::{PaletteItemView, PaletteView};
 struct PaletteSession {
     kind: PaletteKind,
     title: String,
-    input_mode: PaletteInputMode,
     input: Input,
     candidates: Vec<PaletteCandidate>,
     visible: Vec<usize>,
@@ -88,14 +86,13 @@ pub struct PaletteSessionController {
 impl PaletteSessionController {
     pub fn open(
         &mut self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         kind: PaletteKind,
         options: PaletteOpenOptions,
         input_history: Option<InputHistorySnapshot>,
     ) -> AppResult<()> {
-        let provider = registry.get(kind);
+        let provider = provider(kind);
 
         let input = Input::new(options.initial_input.clone());
         let app = PaletteAppSnapshot::from(app);
@@ -107,8 +104,7 @@ impl PaletteSessionController {
         };
         let title = provider.title(&ctx);
         let candidates = provider.list(&ctx)?;
-        let input_mode = provider.input_mode();
-        let visible = self.visible_candidates(input_mode, input.value(), &candidates);
+        let visible: Vec<_> = (0..candidates.len()).collect();
         let selected =
             initial_selection_from_id(options.initial_selection_id.as_ref(), &candidates, &visible)
                 .or_else(|| initial_visible_selection(provider, &ctx, &candidates, &visible))
@@ -119,7 +115,6 @@ impl PaletteSessionController {
         self.active = Some(PaletteSession {
             kind,
             title,
-            input_mode,
             input,
             candidates,
             visible,
@@ -150,7 +145,6 @@ impl PaletteSessionController {
 
     pub fn submit(
         &self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
     ) -> AppResult<Option<PaletteSubmitEffect>> {
@@ -159,7 +153,7 @@ impl PaletteSessionController {
         };
 
         let selected = selected_candidate(session);
-        let provider = registry.get(session.kind);
+        let provider = provider(session.kind);
         let app_snapshot = PaletteAppSnapshot::from(app);
         let ctx = PaletteContext {
             app: app_snapshot,
@@ -171,7 +165,6 @@ impl PaletteSessionController {
 
     pub fn complete(
         &mut self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
     ) -> AppResult<bool> {
@@ -179,7 +172,7 @@ impl PaletteSessionController {
             return Ok(false);
         };
 
-        let provider = registry.get(session.kind);
+        let provider = provider(session.kind);
         let selected = selected_candidate(session);
         let previous_input = session.input.value().to_string();
         let app_snapshot = PaletteAppSnapshot::from(app);
@@ -206,7 +199,7 @@ impl PaletteSessionController {
                 session.input = Input::new(value).with_cursor(cursor);
             }
         }
-        self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
+        self.rebuild(app, extensions, Some(previous_input.as_str()))?;
         Ok(true)
     }
 
@@ -224,7 +217,6 @@ impl PaletteSessionController {
 
     pub fn recall_history(
         &mut self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         older: bool,
@@ -238,34 +230,27 @@ impl PaletteSessionController {
         let previous_input = session.input.value().to_string();
         let changed = self.recall_input_history(older);
         if changed {
-            self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
+            self.rebuild(app, extensions, Some(previous_input.as_str()))?;
         }
         Ok(changed)
     }
 
     pub fn insert_text(
         &mut self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         text: &str,
     ) -> AppResult<bool> {
-        self.apply_text_requests(
-            registry,
-            app,
-            extensions,
-            text.chars().map(InputRequest::InsertChar),
-        )
+        self.apply_text_requests(app, extensions, text.chars().map(InputRequest::InsertChar))
     }
 
     pub fn edit_input(
         &mut self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         request: InputRequest,
     ) -> AppResult<bool> {
-        self.apply_text_request(registry, app, extensions, request)
+        self.apply_text_request(app, extensions, request)
     }
 
     pub fn view(&self) -> Option<PaletteView> {
@@ -293,7 +278,6 @@ impl PaletteSessionController {
 
     fn rebuild(
         &mut self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         previous_input: Option<&str>,
@@ -302,11 +286,10 @@ impl PaletteSessionController {
             return Ok(());
         };
         let kind = existing.kind;
-        let input_mode = existing.input_mode;
         let input_text = existing.input.value().to_string();
         let current_selected = existing.selected;
 
-        let provider = registry.get(kind);
+        let provider = provider(kind);
         let app = PaletteAppSnapshot::from(app);
         let ctx = PaletteContext {
             app,
@@ -316,7 +299,7 @@ impl PaletteSessionController {
 
         let title = provider.title(&ctx);
         let candidates = provider.list(&ctx)?;
-        let visible = self.visible_candidates(input_mode, &input_text, &candidates);
+        let visible: Vec<_> = (0..candidates.len()).collect();
         let input_changed = previous_input.is_some_and(|input| input != input_text);
         let reset_selection = input_changed && provider.reset_selection_on_input_change();
         let selected = if reset_selection || visible.is_empty() {
@@ -336,20 +319,6 @@ impl PaletteSessionController {
         session.selected = selected;
         session.assistive_text = assistive_text;
         Ok(())
-    }
-
-    fn visible_candidates(
-        &self,
-        input_mode: PaletteInputMode,
-        input: &str,
-        candidates: &[PaletteCandidate],
-    ) -> Vec<usize> {
-        match input_mode {
-            PaletteInputMode::FilterCandidates => matcher::select(input, candidates),
-            PaletteInputMode::FreeText | PaletteInputMode::Custom => {
-                (0..candidates.len()).collect()
-            }
-        }
     }
 
     fn select_prev(&mut self) {
@@ -391,17 +360,15 @@ impl PaletteSessionController {
 
     fn apply_text_request(
         &mut self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         request: InputRequest,
     ) -> AppResult<bool> {
-        self.apply_text_requests(registry, app, extensions, [request])
+        self.apply_text_requests(app, extensions, [request])
     }
 
     fn apply_text_requests<I>(
         &mut self,
-        registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
         requests: I,
@@ -427,7 +394,7 @@ impl PaletteSessionController {
         }
         if value_changed {
             session.input_history.clear_navigation();
-            self.rebuild(registry, app, extensions, Some(previous_input.as_str()))?;
+            self.rebuild(app, extensions, Some(previous_input.as_str()))?;
         }
         Ok(true)
     }
@@ -472,17 +439,12 @@ fn selected_candidate_for<'a>(
 mod tests {
     use tui_input::InputRequest;
 
-    use crate::{
-        app::AppState,
-        extension::ExtensionUiSnapshot,
-        palette::{PaletteKind, PaletteRegistry},
-    };
+    use crate::{app::AppState, extension::ExtensionUiSnapshot, palette::PaletteKind};
 
     use super::PaletteSessionController;
 
     #[test]
     fn operations_without_active_session_report_noop() {
-        let registry = PaletteRegistry::default();
         let mut session = PaletteSessionController::default();
         let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
@@ -495,27 +457,27 @@ mod tests {
         assert!(!session.select_next_item());
         assert!(
             !session
-                .complete(&registry, &app, &extensions)
+                .complete(&app, &extensions)
                 .expect("completion without active session should succeed")
         );
         assert!(
             !session
-                .recall_history(&registry, &app, &extensions, true)
+                .recall_history(&app, &extensions, true)
                 .expect("history recall without active session should succeed")
         );
         assert!(
             !session
-                .insert_text(&registry, &app, &extensions, "x")
+                .insert_text(&app, &extensions, "x")
                 .expect("text insert without active session should succeed")
         );
         assert!(
             !session
-                .edit_input(&registry, &app, &extensions, InputRequest::GoToPrevChar)
+                .edit_input(&app, &extensions, InputRequest::GoToPrevChar)
                 .expect("input edit without active session should succeed")
         );
         assert!(
             session
-                .submit(&registry, &app, &extensions)
+                .submit(&app, &extensions)
                 .expect("submit without active session should succeed")
                 .is_none()
         );
@@ -524,14 +486,12 @@ mod tests {
 
     #[test]
     fn common_selection_operations_report_noop_at_boundaries() {
-        let registry = PaletteRegistry::default();
         let mut session = PaletteSessionController::default();
         let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         session
             .open(
-                &registry,
                 &app,
                 &extensions,
                 PaletteKind::Search,
@@ -543,26 +503,24 @@ mod tests {
         assert!(!session.select_previous());
         assert!(
             !session
-                .complete(&registry, &app, &extensions)
+                .complete(&app, &extensions)
                 .expect("no-op completion should succeed")
         );
         assert!(
             !session
-                .edit_input(&registry, &app, &extensions, InputRequest::GoToPrevChar)
+                .edit_input(&app, &extensions, InputRequest::GoToPrevChar)
                 .expect("no-op cursor movement should succeed")
         );
     }
 
     #[test]
     fn view_reports_no_selection_when_provider_has_no_candidates() {
-        let registry = PaletteRegistry::default();
         let mut session = PaletteSessionController::default();
         let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         session
             .open(
-                &registry,
                 &app,
                 &extensions,
                 PaletteKind::SearchResults,

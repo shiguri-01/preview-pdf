@@ -1,4 +1,4 @@
-use super::candidate::{PaletteCandidate, PaletteCandidateId, PaletteSearchText};
+use super::candidate::{PaletteCandidate, PaletteCandidateId};
 use super::text::{PaletteTextPart, PaletteTextTone, join_palette_text_parts};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -9,10 +9,6 @@ pub struct PageIndex {
 impl PageIndex {
     pub fn zero_based(page: usize) -> Self {
         Self { zero_based: page }
-    }
-
-    pub fn zero_based_value(&self) -> usize {
-        self.zero_based
     }
 
     pub fn display_number(&self) -> usize {
@@ -140,7 +136,7 @@ impl PaletteRow {
             .filter_map(|cell| {
                 let text = cell.value.display_text();
                 let text = text.trim();
-                (!text.is_empty()).then(|| PaletteSearchText::new(text.to_string()))
+                (!text.is_empty()).then(|| text.to_string())
             })
             .collect();
         PaletteCandidate::from_row(

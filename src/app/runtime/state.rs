@@ -6,7 +6,6 @@ use tokio::time;
 use crate::backend::SharedPdfBackend;
 use crate::event::{DocumentReloadRequest, DomainEvent};
 use crate::extension::ExtensionWorkerEvent;
-use crate::render::cache::RenderedPageKey;
 use crate::render::scheduler::RenderTask;
 use crate::render::worker::RenderWorker;
 
@@ -60,7 +59,6 @@ pub(in crate::app) struct IterationStep {
     pub(in crate::app) initial_preview: Option<InitialPreviewPlan>,
     pub(in crate::app) initial_preview_tasks: Vec<RenderTask>,
     pub(in crate::app) prefetch_dispatch: PrefetchDispatchContext,
-    pub(in crate::app) presenter_key: RenderedPageKey,
     pub(in crate::app) current_cached: bool,
 }
 

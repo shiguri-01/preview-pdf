@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use crate::config::Config;
 use crate::config::keymap::build_default_sequence_registry;
 use crate::config::{
     AppOptions, AppOptionsResolver, CachePolicy, EventLoopPolicy, InputPolicy, RenderPolicy,
@@ -10,7 +9,7 @@ use crate::error::AppResult;
 use crate::extension::ExtensionHost;
 use crate::input::InputHistoryService;
 use crate::input::sequence::{DEFAULT_SEQUENCE_TIMEOUT, SequenceRegistry, SequenceResolver};
-use crate::palette::{PaletteRegistry, PaletteSessionController};
+use crate::palette::PaletteSessionController;
 use crate::presenter::{ImagePresenter, RatatuiImagePresenter};
 
 use super::render_runtime::RenderRuntime;
@@ -35,26 +34,16 @@ impl RenderSubsystem {
 }
 
 #[derive(Default)]
-pub struct ExtensionSubsystem {
-    pub host: ExtensionHost,
-}
-
-#[derive(Default)]
 pub struct PaletteSubsystem {
-    pub registry: PaletteRegistry,
     pub session: PaletteSessionController,
     pub pending_requests: VecDeque<PaletteRequest>,
 }
 
-pub struct SequenceSubsystem {
-    pub resolver: SequenceResolver,
-}
-
 pub struct InteractionSubsystem {
-    pub extensions: ExtensionSubsystem,
+    pub extensions: ExtensionHost,
     pub palette: PaletteSubsystem,
     pub history: InputHistoryService,
-    pub sequences: SequenceSubsystem,
+    pub sequences: SequenceResolver,
 }
 
 impl Default for InteractionSubsystem {
@@ -77,10 +66,10 @@ impl InteractionSubsystem {
 
     fn with_sequence_resolver(resolver: SequenceResolver) -> Self {
         Self {
-            extensions: ExtensionSubsystem::default(),
+            extensions: ExtensionHost::default(),
             palette: PaletteSubsystem::default(),
             history: InputHistoryService::default(),
-            sequences: SequenceSubsystem { resolver },
+            sequences: resolver,
         }
     }
 
@@ -149,10 +138,6 @@ impl App {
         Self::new_with_options(options)
     }
 
-    pub fn new_with_config(config: Config) -> AppResult<Self> {
-        Self::new_with_options(AppOptions::from(config))
-    }
-
     pub fn new_with_options(options: AppOptions) -> AppResult<Self> {
         AppBuilder::new().replace_options(options).build()
     }
@@ -214,23 +199,8 @@ mod tests {
 
     use super::{App, AppBuilder};
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
-    use crate::config::{AppOptions, Config};
+    use crate::config::{AppOptions, CachePolicy};
     use crate::config::{CacheOptions, InputOptions, RenderOptions, ViewOptions, WatchOptions};
-
-    #[test]
-    fn new_with_config_applies_l1_cache_limits() {
-        let mut config = Config::default();
-        config.cache.l1_max_entries = 7;
-        config.cache.l1_memory_budget_mb = 2;
-
-        let app = App::new_with_config(config.clone()).expect("app init");
-
-        assert_eq!(app.render.runtime.l1_cache.max_entries(), 7);
-        assert_eq!(
-            app.render.runtime.l1_cache.memory_budget_bytes(),
-            config.cache.l1_memory_budget_bytes()
-        );
-    }
 
     #[test]
     fn new_with_options_applies_l1_cache_limits_without_file_config() {
@@ -301,7 +271,7 @@ mod tests {
 
         assert_eq!(
             app.render.runtime.l1_cache.max_entries(),
-            Config::default().cache.l1_max_entries
+            CachePolicy::default().l1_max_entries
         );
         assert_eq!(app.render_policy.worker_threads, 2);
     }
@@ -363,7 +333,7 @@ mod tests {
         );
         assert_eq!(app.event_loop_policy.prefetch_dispatch_budget_per_tick, 8);
         assert_eq!(
-            app.interaction.sequences.resolver.timeout(),
+            app.interaction.sequences.timeout(),
             Duration::from_millis(250)
         );
         assert_eq!(app.state.current_page, 2);

@@ -23,7 +23,7 @@ use crate::backend::{
 };
 use crate::command::{Command, CommandInvocationSource, CommandRequest, PanAmount, PanDirection};
 use crate::condition::ConditionExpr;
-use crate::config::Config;
+use crate::config::AppOptions;
 use crate::error::{AppError, AppResult};
 use crate::event::{
     DocumentReloadReason, DocumentReloadRequest, DocumentReloadResult, DomainEvent,
@@ -162,7 +162,7 @@ fn run_event_runtime_restores_session_when_pdf_has_no_pages() {
         .build()
         .expect("tokio runtime should build");
     let restore_count = Arc::new(AtomicUsize::new(0));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let session = StubSession::with_restore_count(80, 24, Arc::clone(&restore_count));
     let backend: SharedPdfBackend = Arc::new(EmptyPdfBackend::new());
     let driver = RestoreProbeDriver;
@@ -200,7 +200,7 @@ fn failed_render_result(
 
 #[test]
 fn resolve_command_uses_short_edge_fifth_for_default_pan_step() {
-    let app = App::new_with_config(Config::default()).expect("app init");
+    let app = App::new_with_options(AppOptions::default()).expect("app init");
     let session = StubSession::new(80, 24);
     let short_edge_cells = 23_u16;
     let expected_step = i32::from((short_edge_cells / 5).max(1));
@@ -224,7 +224,7 @@ fn resolve_command_uses_short_edge_fifth_for_default_pan_step() {
 
 #[test]
 fn resolve_command_clamps_default_pan_step_to_at_least_one_cell() {
-    let app = App::new_with_config(Config::default()).expect("app init");
+    let app = App::new_with_options(AppOptions::default()).expect("app init");
     let session = StubSession::new(20, 5);
 
     let resolved = app.resolve_command(
@@ -246,7 +246,7 @@ fn resolve_command_clamps_default_pan_step_to_at_least_one_cell() {
 
 #[test]
 fn resolve_command_request_preserves_explicit_pan_amounts() {
-    let app = App::new_with_config(Config::default()).expect("app init");
+    let app = App::new_with_options(AppOptions::default()).expect("app init");
     let session = StubSession::new(80, 24);
 
     let resolved = app.resolve_command_request(
@@ -277,7 +277,7 @@ fn wake_timeout_applies_expired_sequence_command() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let mut registry = SequenceRegistry::new();
     registry
         .register_exact(
@@ -334,7 +334,7 @@ fn input_outcome_applies_expired_command_before_latest_command() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let mut registry = SequenceRegistry::new();
     registry
         .register_exact(
@@ -404,7 +404,7 @@ fn focus_changing_timeout_drops_waited_input() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let mut registry = SequenceRegistry::new();
     registry
         .register_exact(
@@ -468,7 +468,7 @@ fn palette_close_from_input_applies_before_queued_input() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     app.interaction
         .palette
         .pending_requests
@@ -520,7 +520,7 @@ fn command_error_becomes_notice_and_runtime_continues() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -555,7 +555,7 @@ fn reload_document_command_starts_reload_without_blocking_loop() {
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
     let mut document = ActiveDocument::new(Arc::clone(&backend));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -591,7 +591,7 @@ fn document_reload_success_replaces_active_document_and_clamps_page() {
         as SharedPdfBackend;
     let old_doc_id = first.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&first));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     app.state.current_page = 2;
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
@@ -641,7 +641,7 @@ fn document_reload_success_applies_even_when_doc_id_matches() {
     assert!(!Arc::ptr_eq(&first, &second));
 
     let mut document = ActiveDocument::new(Arc::clone(&first));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -680,7 +680,7 @@ fn document_reload_success_clears_previous_reload_notice() {
     let first = Arc::new(HayroPdfBackend::open(&file).expect("first backend should open"))
         as SharedPdfBackend;
     let mut document = ActiveDocument::new(Arc::clone(&first));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     app.state
         .set_warning_notice("Could not reload changed document: still invalid");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
@@ -719,7 +719,7 @@ fn manual_document_reload_failure_keeps_previous_document() {
     let backend = test_pdf_backend();
     let old_doc_id = backend.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&backend));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -756,7 +756,7 @@ fn file_reload_failure_keeps_previous_document_and_retries_quietly() {
     let backend = test_pdf_backend();
     let old_doc_id = backend.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&backend));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -807,7 +807,7 @@ fn file_reload_failure_after_retry_budget_shows_warning() {
     let backend = test_pdf_backend();
     let old_doc_id = backend.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&backend));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -852,7 +852,7 @@ fn file_reload_success_after_retries_replaces_document_and_resets_retry_count() 
         as SharedPdfBackend;
     let old_doc_id = first.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&first));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     app.state.current_page = 2;
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
@@ -899,7 +899,7 @@ fn stale_file_reload_failure_yields_to_pending_fresh_reload() {
     let backend = test_pdf_backend();
     let old_doc_id = backend.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&backend));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -945,7 +945,7 @@ fn stale_file_reload_success_yields_to_pending_fresh_reload() {
         as SharedPdfBackend;
     let old_doc_id = first.doc_id();
     let mut document = ActiveDocument::new(Arc::clone(&first));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -995,7 +995,7 @@ fn old_delayed_retry_after_newer_reload_is_ignored() {
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
     let mut document = ActiveDocument::new(Arc::clone(&backend));
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -1031,7 +1031,7 @@ fn command_event_returns_break_when_effect_channel_is_closed() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -1062,7 +1062,7 @@ fn encode_complete_without_redraw_request_does_not_redraw() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -1093,7 +1093,7 @@ fn prefetch_tick_only_marks_prefetch_due() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -1124,7 +1124,7 @@ fn non_current_render_complete_does_not_redraw() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -1160,7 +1160,7 @@ fn noop_navigation_command_without_state_change_does_not_redraw() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -1201,7 +1201,7 @@ fn unavailable_search_navigation_without_notice_change_does_not_redraw() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
@@ -1231,7 +1231,7 @@ fn noop_command_redraws_when_it_changes_visible_notice() {
         .expect("tokio runtime should build");
     let _guard = tokio_runtime.enter();
     let backend = test_pdf_backend();
-    let mut app = App::new_with_config(Config::default()).expect("app init");
+    let mut app = App::new_with_options(AppOptions::default()).expect("app init");
     app.state.set_warning_notice("old warning");
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);

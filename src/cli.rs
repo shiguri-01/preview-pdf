@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{ArgAction, Parser, ValueEnum};
+use clap::{ArgAction, Parser};
 use pvf::app::PageLayoutMode;
 use pvf::config::{AppOptions, ConfigFileSelection, RenderOptions, ViewOptions, WatchOptions};
 use pvf::presenter::GraphicsProtocol;
@@ -10,42 +10,6 @@ pub(super) struct CliOptions {
     pub(super) pdf_path: PathBuf,
     pub(super) config: ConfigFileSelection,
     pub(super) options: AppOptions,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum CliPageLayout {
-    Single,
-    Spread,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum CliGraphicsProtocol {
-    Auto,
-    Halfblocks,
-    Sixel,
-    Kitty,
-    Iterm2,
-}
-
-impl From<CliGraphicsProtocol> for GraphicsProtocol {
-    fn from(value: CliGraphicsProtocol) -> Self {
-        match value {
-            CliGraphicsProtocol::Auto => Self::Auto,
-            CliGraphicsProtocol::Halfblocks => Self::Halfblocks,
-            CliGraphicsProtocol::Sixel => Self::Sixel,
-            CliGraphicsProtocol::Kitty => Self::Kitty,
-            CliGraphicsProtocol::Iterm2 => Self::Iterm2,
-        }
-    }
-}
-
-impl From<CliPageLayout> for PageLayoutMode {
-    fn from(value: CliPageLayout) -> Self {
-        match value {
-            CliPageLayout::Single => Self::Single,
-            CliPageLayout::Spread => Self::Spread,
-        }
-    }
 }
 
 #[derive(Debug, Parser)]
@@ -86,14 +50,14 @@ struct Cli {
     )]
     zoom: Option<f32>,
     #[arg(short, long, value_enum, help = "Set the initial page layout")]
-    layout: Option<CliPageLayout>,
+    layout: Option<PageLayoutMode>,
     #[arg(
         long,
         value_enum,
         value_name = "PROTOCOL",
         help = "Set the terminal graphics protocol"
     )]
-    graphics_protocol: Option<CliGraphicsProtocol>,
+    graphics_protocol: Option<GraphicsProtocol>,
     #[arg(value_name = "FILE")]
     pdf_path: PathBuf,
 }
@@ -118,7 +82,7 @@ fn parse_cli(cli: Cli) -> CliOptions {
             view: ViewOptions {
                 initial_page: cli.page,
                 initial_zoom: cli.zoom,
-                initial_layout: cli.layout.map(PageLayoutMode::from),
+                initial_layout: cli.layout,
                 ..ViewOptions::default()
             },
             watch: WatchOptions {
@@ -132,7 +96,7 @@ fn parse_cli(cli: Cli) -> CliOptions {
                 ..WatchOptions::default()
             },
             render: RenderOptions {
-                graphics_protocol: cli.graphics_protocol.map(GraphicsProtocol::from),
+                graphics_protocol: cli.graphics_protocol,
                 ..RenderOptions::default()
             },
             ..AppOptions::default()

@@ -28,10 +28,7 @@ pub(in crate::command) fn palette_submit(
         return Ok(CommandExecution::noop());
     };
     let extensions = ctx.extension_host.ui_snapshot(ctx.app);
-    let Some(effect) = ctx
-        .palette_session
-        .submit(ctx.palette_registry, ctx.app, &extensions)?
-    else {
+    let Some(effect) = ctx.palette_session.submit(ctx.app, &extensions)? else {
         return Ok(CommandExecution::noop());
     };
     ctx.palette_session.close();
@@ -75,9 +72,7 @@ pub(in crate::command) fn palette_complete(
     ctx: &mut CommandExecContext<'_>,
 ) -> AppResult<CommandExecution> {
     let extensions = ctx.extension_host.ui_snapshot(ctx.app);
-    let changed = ctx
-        .palette_session
-        .complete(ctx.palette_registry, ctx.app, &extensions)?;
+    let changed = ctx.palette_session.complete(ctx.app, &extensions)?;
     Ok(CommandExecution::from_notice_result((
         if changed {
             CommandOutcome::Applied

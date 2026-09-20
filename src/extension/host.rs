@@ -5,7 +5,6 @@ use crate::backend::SharedPdfBackend;
 use crate::event::AppEvent;
 use crate::highlight::HighlightOverlaySnapshot;
 use crate::history::{HistoryState, HistoryUiSnapshot};
-use crate::input::{AppInputEvent, InputHookResult};
 use crate::outline::{OutlineState, OutlineUiSnapshot};
 use crate::search::{SearchEvent, SearchRuntime, SearchUiSnapshot};
 
@@ -24,11 +23,6 @@ pub struct ExtensionRenderSnapshot {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ExtensionWorkerEvent {
     Search(SearchEvent),
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct ExtensionEventOutcome {
-    pub changed: bool,
 }
 
 pub struct ExtensionHost {
@@ -62,10 +56,6 @@ impl ExtensionHost {
         &self.search
     }
 
-    pub fn handle_input(&mut self, _event: AppInputEvent, _app: &mut AppState) -> InputHookResult {
-        InputHookResult::Ignored
-    }
-
     pub fn handle_event(&mut self, event: &AppEvent, _app: &mut AppState) {
         self.history.on_event(event);
     }
@@ -81,7 +71,7 @@ impl ExtensionHost {
         &mut self,
         events: Vec<ExtensionWorkerEvent>,
         app: &mut AppState,
-    ) -> ExtensionEventOutcome {
+    ) -> bool {
         let mut changed = false;
         for event in events {
             match event {
@@ -90,7 +80,7 @@ impl ExtensionHost {
                 }
             }
         }
-        ExtensionEventOutcome { changed }
+        changed
     }
 
     pub fn on_document_opened(&mut self, backend: SharedPdfBackend) {

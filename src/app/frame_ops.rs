@@ -269,9 +269,7 @@ mod tests {
         prepare_presenter_frame,
     };
     use crate::backend::{PdfRect, RgbaFrame};
-    use crate::highlight::{
-        HighlightOverlaySnapshot, HighlightSource, HighlightSpan, HighlightStyle,
-    };
+    use crate::highlight::{HighlightOverlaySnapshot, HighlightSpan, HighlightStyle};
     use crate::presenter::{PanOffset, Viewport};
 
     #[test]
@@ -282,7 +280,6 @@ mod tests {
             pixels: vec![7; 16].into(),
         };
         let overlay = HighlightOverlaySnapshot::new(vec![HighlightSpan {
-            source: HighlightSource::Search,
             page: 3,
             rects: vec![PdfRect {
                 x0: 0.0,

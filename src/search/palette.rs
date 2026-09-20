@@ -6,7 +6,7 @@ use crate::input::shortcut::{
     ShortcutKey, format_shortcut_alternatives_tight, format_shortcut_key,
 };
 use crate::palette::{
-    PageIndex, PaletteCandidate, PaletteContext, PaletteInputMode, PaletteKind, PaletteOpenOptions,
+    PageIndex, PaletteCandidate, PaletteContext, PaletteKind, PaletteOpenOptions,
     PalettePostAction, PaletteProvider, PaletteRow, PaletteSubmitEffect, PaletteTextPart,
 };
 
@@ -22,10 +22,6 @@ impl PaletteProvider for SearchPaletteProvider {
 
     fn title(&self, _ctx: &PaletteContext<'_>) -> String {
         "Search".to_string()
-    }
-
-    fn input_mode(&self) -> PaletteInputMode {
-        PaletteInputMode::FreeText
     }
 
     fn reset_selection_on_input_change(&self) -> bool {
@@ -95,10 +91,6 @@ impl PaletteProvider for SearchResultsPaletteProvider {
 
     fn title(&self, _ctx: &PaletteContext<'_>) -> String {
         "Search Results".to_string()
-    }
-
-    fn input_mode(&self) -> PaletteInputMode {
-        PaletteInputMode::Custom
     }
 
     fn reset_selection_on_input_change(&self) -> bool {
@@ -289,7 +281,7 @@ mod tests {
         input::InputHistorySnapshot,
         palette::{
             PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteOpenOptions, PaletteProvider,
-            PaletteRegistry, PaletteSessionController,
+            PaletteSessionController,
         },
         search::state::SearchPaletteEntry,
     };
@@ -302,14 +294,12 @@ mod tests {
 
     #[test]
     fn search_session_keeps_selected_matcher_when_typing_query() {
-        let registry = PaletteRegistry::default();
         let mut session = PaletteSessionController::default();
         let app = AppState::default();
         let extensions = ExtensionUiSnapshot::default();
 
         session
             .open(
-                &registry,
                 &app,
                 &extensions,
                 PaletteKind::Search,
@@ -323,7 +313,7 @@ mod tests {
         assert_eq!(selected_view.selected_idx, Some(1));
 
         session
-            .insert_text(&registry, &app, &extensions, "a")
+            .insert_text(&app, &extensions, "a")
             .expect("typing should succeed");
         let updated_view = session.view().expect("palette should be visible");
         assert_eq!(updated_view.selected_idx, Some(1));

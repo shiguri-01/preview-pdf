@@ -108,7 +108,6 @@ pub(super) struct CurrentRenderView {
     pub(super) required: RequiredRenderPages,
     pub(super) current_interest_keys: CurrentInterestKeys,
     pub(super) initial_preview: Option<InitialPreviewPlan>,
-    pub(super) presenter_key: RenderedPageKey,
     pub(super) current_cached: bool,
 }
 
@@ -188,8 +187,6 @@ impl RenderSubsystem {
             .iter()
             .all(|key| self.runtime.has_cached_frame(key));
         let page_presentation = state.page_presentation_for_slots(visible_pages);
-        let presenter_layout_tag =
-            state.presenter_layout_tag(page_presentation, visible_pages.trailing_page.is_some());
         let initial_preview = cold_start_initial_preview_plan(
             is_cold_start,
             current_cached,
@@ -202,20 +199,12 @@ impl RenderSubsystem {
         if let Some(preview_plan) = initial_preview.as_ref() {
             current_interest_keys.extend(preview_plan.page_keys.iter().copied());
         }
-        let presenter_key = RenderedPageKey::with_layout(
-            backend.doc_id(),
-            visible_pages.anchor_page,
-            current_scale,
-            presenter_layout_tag,
-        );
-
         CurrentRenderView {
             visible_pages,
             current_scale,
             required,
             current_interest_keys,
             initial_preview,
-            presenter_key,
             current_cached,
         }
     }

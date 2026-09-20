@@ -1,5 +1,4 @@
 mod catalog;
-mod core;
 mod dispatch;
 mod effects;
 mod handlers;

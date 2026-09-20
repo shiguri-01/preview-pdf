@@ -43,7 +43,6 @@ const INITIAL_PREVIEW_SCALE_RATIO: f32 = 0.25;
 pub(in crate::app) struct InitialPreviewPlan {
     pub(in crate::app) scale: f32,
     pub(in crate::app) page_keys: Vec<RenderedPageKey>,
-    pub(in crate::app) presenter_key: RenderedPageKey,
 }
 
 pub(in crate::app) struct RenderFramePlan {
@@ -54,10 +53,8 @@ pub(in crate::app) struct RenderFramePlan {
     pub(in crate::app) visible_pages: VisiblePageSlots,
     pub(in crate::app) current_scale: f32,
     pub(in crate::app) initial_preview: Option<InitialPreviewPlan>,
-    pub(in crate::app) presenter_key: RenderedPageKey,
     pub(in crate::app) highlight_overlay: HighlightOverlaySnapshot,
     pub(in crate::app) generation: u64,
-    pub(in crate::app) nav_streak: usize,
 }
 
 struct RenderFrameDrawPlan {
@@ -129,10 +126,8 @@ impl RenderFrameDrawPlan {
             visible_pages,
             current_scale,
             initial_preview,
-            presenter_key: _presenter_key,
             highlight_overlay,
             generation,
-            nav_streak: _nav_streak,
         } = plan;
         let image_occluded = palette_view.is_some() || state.mode == Mode::Help;
         let render_options = presenter_render_options(
@@ -201,15 +196,15 @@ pub(in crate::app) fn current_viewport_for_session<S: TerminalSurface>(
 ) -> Option<Viewport> {
     let area = session.size().ok()?.into();
     let layout = ui::split_layout(area, debug_status_visible);
-    if layout.viewer_inner.width == 0 || layout.viewer_inner.height == 0 {
+    if layout.viewer.width == 0 || layout.viewer.height == 0 {
         return None;
     }
 
     Some(Viewport {
-        x: layout.viewer_inner.x,
-        y: layout.viewer_inner.y,
-        width: layout.viewer_inner.width.max(1),
-        height: layout.viewer_inner.height.max(1),
+        x: layout.viewer.x,
+        y: layout.viewer.y,
+        width: layout.viewer.width.max(1),
+        height: layout.viewer.height.max(1),
     })
 }
 
@@ -479,12 +474,12 @@ impl RenderSubsystem {
             );
 
             let viewport = Viewport {
-                x: layout.viewer_inner.x,
-                y: layout.viewer_inner.y,
-                width: layout.viewer_inner.width.max(1),
-                height: layout.viewer_inner.height.max(1),
+                x: layout.viewer.x,
+                y: layout.viewer.y,
+                width: layout.viewer.width.max(1),
+                height: layout.viewer.height.max(1),
             };
-            let image_area = layout.viewer_inner;
+            let image_area = layout.viewer;
             let spread_slot_areas = split_spread_slot_areas(image_area, SPREAD_GAP_CELLS);
 
             let prepare_result = {
@@ -721,12 +716,9 @@ pub(in crate::app) fn compute_initial_preview_plan(
             .map(|page| RenderedPageKey::new(doc_id, page, preview_scale))
             .collect(),
     };
-    let presenter_key = page_keys[0];
-
     Some(InitialPreviewPlan {
         scale: preview_scale,
         page_keys,
-        presenter_key,
     })
 }
 
@@ -845,7 +837,6 @@ mod tests {
             Some(InitialPreviewPlan {
                 scale: 0.25,
                 page_keys: vec![RenderedPageKey::new(7, 0, 0.25)],
-                presenter_key: RenderedPageKey::new(7, 0, 0.25),
             })
         );
     }
@@ -868,7 +859,6 @@ mod tests {
                     RenderedPageKey::new(7, 0, 0.25),
                     RenderedPageKey::new(7, 1, 0.25),
                 ],
-                presenter_key: RenderedPageKey::new(7, 0, 0.25),
             })
         );
     }
@@ -888,7 +878,6 @@ mod tests {
             Some(InitialPreviewPlan {
                 scale: 0.25,
                 page_keys: vec![RenderedPageKey::new(7, 2, 0.25)],
-                presenter_key: RenderedPageKey::new(7, 2, 0.25),
             })
         );
     }

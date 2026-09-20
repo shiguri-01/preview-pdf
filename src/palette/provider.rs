@@ -5,13 +5,6 @@ use crate::app::{AppState, PageLayoutMode, SpreadCoverPolicy};
 use crate::error::AppResult;
 use crate::extension::ExtensionUiSnapshot;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaletteInputMode {
-    FilterCandidates,
-    FreeText,
-    Custom,
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PaletteAppSnapshot {
     pub current_page: usize,
@@ -38,7 +31,6 @@ pub struct PaletteContext<'a> {
 pub trait PaletteProvider: Send + Sync {
     fn kind(&self) -> PaletteKind;
     fn title(&self, ctx: &PaletteContext<'_>) -> String;
-    fn input_mode(&self) -> PaletteInputMode;
     fn list(&self, ctx: &PaletteContext<'_>) -> AppResult<Vec<PaletteCandidate>>;
     fn on_tab(
         &self,

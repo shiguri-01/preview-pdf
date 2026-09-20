@@ -1,7 +1,17 @@
 use crate::error::AppError;
 use crate::palette::{PaletteKind, PaletteOpenOptions};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    clap::ValueEnum,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum PageLayoutMode {
     #[default]
@@ -326,20 +336,6 @@ impl AppState {
                 PageLayoutMode::Single
             }
             PageLayoutMode::Spread => PageLayoutMode::Spread,
-        }
-    }
-
-    pub fn presenter_layout_tag(
-        &self,
-        page_presentation: PageLayoutMode,
-        has_trailing_page: bool,
-    ) -> u16 {
-        match (page_presentation, self.spread_direction, has_trailing_page) {
-            (PageLayoutMode::Single, _, _) => 0,
-            (PageLayoutMode::Spread, SpreadDirection::Ltr, true) => 1,
-            (PageLayoutMode::Spread, SpreadDirection::Rtl, true) => 2,
-            (PageLayoutMode::Spread, SpreadDirection::Ltr, false) => 3,
-            (PageLayoutMode::Spread, SpreadDirection::Rtl, false) => 4,
         }
     }
 }

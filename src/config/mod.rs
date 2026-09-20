@@ -12,6 +12,6 @@ pub use options::{
     WatchOptions,
 };
 pub use policy::{
-    AppOptionsResolver, CachePolicy, EventLoopPolicy, InputPolicy, RenderPolicy,
-    ResolvedAppOptions, ViewPolicy, WatchPolicy,
+    AppOptionsResolver, EventLoopPolicy, InputPolicy, RenderPolicy, ResolvedAppOptions, ViewPolicy,
+    WatchPolicy,
 };

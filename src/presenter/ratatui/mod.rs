@@ -83,16 +83,25 @@ pub struct RatatuiImagePresenter {
 
 impl Default for RatatuiImagePresenter {
     fn default() -> Self {
-        Self::with_cache_limits(L2_MAX_ENTRIES, L2_MEMORY_BUDGET_BYTES)
+        Self::with_graphics_protocol(None)
     }
 }
 
 impl RatatuiImagePresenter {
+    #[cfg(test)]
     pub fn with_cache_limits(l2_max_entries: usize, l2_memory_budget_bytes: usize) -> Self {
         Self::with_cache_limits_and_graphics_protocol(l2_max_entries, l2_memory_budget_bytes, None)
     }
 
-    pub(crate) fn with_cache_limits_and_graphics_protocol(
+    pub(crate) fn with_graphics_protocol(graphics_protocol: Option<GraphicsProtocol>) -> Self {
+        Self::with_cache_limits_and_graphics_protocol(
+            L2_MAX_ENTRIES,
+            L2_MEMORY_BUDGET_BYTES,
+            graphics_protocol,
+        )
+    }
+
+    fn with_cache_limits_and_graphics_protocol(
         l2_max_entries: usize,
         l2_memory_budget_bytes: usize,
         graphics_protocol: Option<GraphicsProtocol>,

@@ -19,7 +19,6 @@ impl App {
     pub(in crate::app) fn initialize_runtime<S>(
         &mut self,
         pdf: SharedPdfBackend,
-        page_count: usize,
         session: S,
         event_tx: UnboundedSender<DomainEvent>,
         event_rx: UnboundedReceiver<DomainEvent>,
@@ -28,6 +27,7 @@ impl App {
     where
         S: TerminalSurface,
     {
+        let page_count = pdf.page_count();
         self.state.current_page = self.state.current_page.min(page_count - 1);
         self.state.normalize_current_page(page_count);
 
@@ -66,7 +66,6 @@ impl App {
             .prepare_extensions_for_document(Arc::clone(&pdf));
 
         Ok(AppRuntime {
-            page_count,
             prefetch_pause_after_input,
             input_poll_timeout_idle,
             input_poll_timeout_busy,

@@ -351,7 +351,6 @@ mod tests {
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::SearchResults,
             input: "",
         };
 
@@ -371,7 +370,6 @@ mod tests {
             current_page: 4,
             page_layout_mode: PageLayoutMode::Spread,
             spread_cover_policy: SpreadCoverPolicy::Paired,
-            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot {
             search: crate::search::SearchUiSnapshot {
@@ -399,7 +397,6 @@ mod tests {
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::SearchResults,
             input: "",
         };
         let candidates = provider.list(&ctx).expect("results list should build");
@@ -417,7 +414,6 @@ mod tests {
             current_page: 0,
             page_layout_mode: PageLayoutMode::Spread,
             spread_cover_policy: SpreadCoverPolicy::Cover,
-            ..PaletteAppSnapshot::default()
         };
         let extensions = ExtensionUiSnapshot {
             search: crate::search::SearchUiSnapshot {
@@ -445,7 +441,6 @@ mod tests {
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::SearchResults,
             input: "",
         };
         let candidates = provider.list(&ctx).expect("results list should build");
@@ -464,7 +459,6 @@ mod tests {
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::SearchResults,
             input: "",
         };
 

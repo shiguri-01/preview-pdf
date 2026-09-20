@@ -624,7 +624,6 @@ mod tests {
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::Command,
             input,
         };
         provider.list(&ctx).expect("list should be built")
@@ -632,15 +631,11 @@ mod tests {
 
     #[test]
     fn command_policy_uses_post_submit_normal_context() {
-        let app = PaletteAppSnapshot {
-            mode: Mode::Palette,
-            ..PaletteAppSnapshot::default()
-        };
+        let app = PaletteAppSnapshot::default();
         let extensions = ExtensionUiSnapshot::default();
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::Command,
             input: "",
         };
 
@@ -660,7 +655,6 @@ mod tests {
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::Command,
             input,
         };
         let candidates = provider.list(&ctx).expect("list should be built");
@@ -680,7 +674,6 @@ mod tests {
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::Command,
             input,
         };
         let candidates = provider.list(&ctx).expect("list should be built");
@@ -700,7 +693,6 @@ mod tests {
         let ctx = PaletteContext {
             app,
             extensions: &extensions,
-            kind: PaletteKind::Command,
             input,
         };
         provider.assistive_text(&ctx, None)
@@ -1014,7 +1006,6 @@ mod tests {
             let ctx = PaletteContext {
                 app,
                 extensions: &extensions,
-                kind: PaletteKind::Command,
                 input,
             };
             assert_eq!(
@@ -1106,7 +1097,6 @@ mod tests {
             let ctx = PaletteContext {
                 app,
                 extensions: &extensions,
-                kind: PaletteKind::Command,
                 input,
             };
             let err = provider

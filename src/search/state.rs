@@ -14,7 +14,6 @@ use super::matcher::matcher_for_kind;
 pub struct SearchRuntime {
     state: SearchState,
     engine: Option<SearchEngine>,
-    next_epoch: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -28,8 +27,7 @@ impl SearchRuntime {
         &mut self,
         event_tx: tokio::sync::mpsc::UnboundedSender<crate::extension::ExtensionWorkerEvent>,
     ) {
-        self.next_epoch = self.next_epoch.saturating_add(1);
-        let epoch = SearchEpoch(self.next_epoch);
+        let epoch = SearchEpoch(self.state.epoch.0.saturating_add(1));
         self.engine = Some(SearchEngine::new(epoch, event_tx));
         self.state.epoch = epoch;
     }
@@ -39,8 +37,7 @@ impl SearchRuntime {
     }
 
     fn advance_epoch(&mut self) {
-        self.next_epoch = self.next_epoch.saturating_add(1);
-        let epoch = SearchEpoch(self.next_epoch);
+        let epoch = SearchEpoch(self.state.epoch.0.saturating_add(1));
         self.state.epoch = epoch;
         self.state.generation = 0;
         self.engine_mut().advance_epoch(epoch);
@@ -151,14 +148,20 @@ impl SearchRuntime {
         let active_search = self
             .is_active()
             .then(|| (self.query().to_string(), self.matcher()));
-        self.state = SearchState::default();
         self.advance_epoch();
+        self.state = SearchState {
+            epoch: self.state.epoch,
+            ..SearchState::default()
+        };
         self.prewarm(Arc::clone(&pdf));
         if let Some((query, matcher)) = active_search
             && let Err(err) = self.submit(app, Arc::clone(&pdf), query, matcher)
         {
-            self.state = SearchState::default();
             self.advance_epoch();
+            self.state = SearchState {
+                epoch: self.state.epoch,
+                ..SearchState::default()
+            };
             self.prewarm(pdf);
             app.set_warning_notice(format!("Could not restore search after reload: {err}"));
         }
@@ -187,9 +190,6 @@ pub struct SearchState {
     matcher: SearchMatcherKind,
     generation: u64,
     in_progress: bool,
-    /// Number of scanned pages observed so far while scanning.
-    /// This is progress-oriented and may change before completion.
-    scanned_pages_progress: usize,
     total_pages: usize,
     /// Number of matched pages observed so far while scanning.
     /// This is progress-oriented and may change before completion.
@@ -199,7 +199,6 @@ pub struct SearchState {
     /// Final matched occurrences for the results palette, ordered by page/match order.
     palette_entries: Arc<[SearchPaletteEntry]>,
     current_hit: Option<usize>,
-    last_error: Option<String>,
     active_pdf: Option<SharedPdfBackend>,
 }
 
@@ -211,13 +210,11 @@ impl Default for SearchState {
             matcher: SearchMatcherKind::ContainsInsensitive,
             generation: 0,
             in_progress: false,
-            scanned_pages_progress: 0,
             total_pages: 0,
             hit_pages_progress: 0,
             hits: Vec::new(),
             palette_entries: Arc::from([]),
             current_hit: None,
-            last_error: None,
             active_pdf: None,
         }
     }
@@ -273,13 +270,11 @@ impl SearchState {
         self.matcher = matcher;
         self.generation = generation;
         self.in_progress = true;
-        self.scanned_pages_progress = 0;
         self.total_pages = pdf.page_count();
         self.hit_pages_progress = 0;
         self.hits.clear();
         self.palette_entries = Arc::from([]);
         self.current_hit = None;
-        self.last_error = None;
         self.active_pdf = Some(Arc::clone(&pdf));
         Ok((CommandOutcome::Applied, NoticeAction::Clear))
     }
@@ -349,7 +344,6 @@ impl SearchState {
                 if !self.event_is_current(snapshot.epoch, snapshot.generation) {
                     return false;
                 }
-                self.scanned_pages_progress = snapshot.scanned_pages;
                 self.total_pages = snapshot.total_pages;
                 self.hit_pages_progress = snapshot.hit_pages;
                 self.in_progress = true;
@@ -365,7 +359,6 @@ impl SearchState {
                     return false;
                 }
                 self.in_progress = false;
-                self.scanned_pages_progress = self.total_pages.max(self.scanned_pages_progress);
                 self.hit_pages_progress = hits.len();
                 self.current_hit = None;
                 self.palette_entries = build_palette_entries(&hits);
@@ -508,8 +501,6 @@ impl SearchState {
                 } else {
                     NoticeAction::warning("searching...")
                 }
-            } else if self.last_error.is_some() {
-                NoticeAction::Keep
             } else {
                 NoticeAction::Clear
             };
@@ -563,13 +554,11 @@ impl SearchState {
 
     fn clear_results(&mut self) {
         self.in_progress = false;
-        self.scanned_pages_progress = 0;
         self.total_pages = 0;
         self.hit_pages_progress = 0;
         self.hits.clear();
         self.palette_entries = Arc::from([]);
         self.current_hit = None;
-        self.last_error = None;
         self.active_pdf = None;
     }
 
@@ -1040,26 +1029,6 @@ mod tests {
         assert!(state.in_progress);
         assert_eq!(state.hit_pages_progress, 0);
         assert!(app.notice.is_none());
-    }
-
-    #[test]
-    fn next_hit_keeps_active_error_notice_when_no_hits_exist() {
-        let mut state = SearchState {
-            query: "needle".to_string(),
-            last_error: Some("backend failed".to_string()),
-            ..SearchState::default()
-        };
-        let mut app = AppState::default();
-        app.set_error_notice("search failed: backend failed");
-
-        let (outcome, notice) = state.next_hit(&mut app);
-
-        assert_eq!(outcome, CommandOutcome::Noop);
-        assert_eq!(notice, NoticeAction::Keep);
-        assert_eq!(
-            app.notice.expect("existing notice should stay").message,
-            "search failed: backend failed"
-        );
     }
 
     fn page_hit(page: usize) -> SearchPageHit {

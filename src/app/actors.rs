@@ -10,9 +10,9 @@ use crate::presenter::PanOffset;
 use crate::render::worker::{RenderWorker, RenderWorkerResult};
 
 use super::core::{InteractionSubsystem, RenderSubsystem};
+use super::input_ops::KeyEventOutcome;
 use super::nav::NavTracker;
 use super::render_ops::CurrentTaskContext;
-use super::routing_effects::RoutingEffects;
 use super::runtime::IterationStep;
 use super::state::AppState;
 use super::terminal_session::TerminalSurface;
@@ -53,13 +53,8 @@ impl InputActor {
         &mut self,
         interaction: &mut InteractionSubsystem,
         state: &mut AppState,
-    ) -> AppResult<RoutingEffects> {
-        let timeout_outcome = interaction.flush_sequence_timeout(state);
-        let mut effects = RoutingEffects::from_commands(timeout_outcome.commands);
-        if timeout_outcome.redraw {
-            effects.request_redraw(RedrawReason::Input);
-        }
-        Ok(effects)
+    ) -> AppResult<KeyEventOutcome> {
+        Ok(interaction.flush_sequence_timeout(state))
     }
 
     pub(super) fn handle_terminal_event(
@@ -67,24 +62,20 @@ impl InputActor {
         event: Event,
         interaction: &mut InteractionSubsystem,
         state: &mut AppState,
-    ) -> AppResult<RoutingEffects> {
+    ) -> AppResult<KeyEventOutcome> {
         match event {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                 self.last_input_at = Instant::now();
-                let outcome = interaction.handle_key_event(state, key)?;
-                let mut effects = RoutingEffects::from_commands(outcome.commands);
-                if outcome.redraw {
-                    effects.request_redraw(RedrawReason::Input);
-                }
-                Ok(effects)
+                interaction.handle_key_event(state, key)
             }
             Event::Resize(_, _) => {
                 self.last_input_at = Instant::now();
-                let mut effects = RoutingEffects::none();
-                effects.request_redraw(RedrawReason::Input);
-                Ok(effects)
+                Ok(KeyEventOutcome {
+                    redraw: true,
+                    commands: Vec::new(),
+                })
             }
-            _ => Ok(RoutingEffects::none()),
+            _ => Ok(KeyEventOutcome::default()),
         }
     }
 }

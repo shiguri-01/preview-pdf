@@ -261,7 +261,6 @@ mod tests {
         PaletteContext {
             app: PaletteAppSnapshot::default(),
             extensions,
-            kind: crate::palette::PaletteKind::History,
             input,
         }
     }

@@ -34,9 +34,3 @@ pub enum PaletteTabEffect {
         move_cursor_to_end: bool,
     },
 }
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PaletteSubmitAction {
-    pub session_id: u64,
-    pub effect: PaletteSubmitEffect,
-}

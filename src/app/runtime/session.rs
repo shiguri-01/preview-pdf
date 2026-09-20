@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -18,7 +17,6 @@ use super::super::terminal_session::TerminalSession;
 use super::super::view_ops::InitialPreviewPlan;
 
 pub(in crate::app) struct AppRuntime<S> {
-    pub(in crate::app) page_count: usize,
     pub(in crate::app) prefetch_pause_after_input: Duration,
     pub(in crate::app) input_poll_timeout_idle: Duration,
     pub(in crate::app) input_poll_timeout_busy: Duration,
@@ -41,22 +39,20 @@ pub(in crate::app) struct AppRuntime<S> {
 
 pub(in crate::app) struct ActiveDocument {
     pub(in crate::app) pdf: SharedPdfBackend,
-    pub(in crate::app) path: PathBuf,
 }
 
 impl ActiveDocument {
     pub(in crate::app) fn new(pdf: SharedPdfBackend) -> Self {
-        let path = pdf.path().to_path_buf();
-        Self { pdf, path }
+        Self { pdf }
     }
 
     pub(in crate::app) fn replace(&mut self, pdf: SharedPdfBackend) {
-        self.path = pdf.path().to_path_buf();
         self.pdf = pdf;
     }
 }
 
 pub(in crate::app) struct IterationStep {
+    pub(in crate::app) page_count: usize,
     pub(in crate::app) current_scale: f32,
     pub(in crate::app) visible_pages: super::super::state::VisiblePageSlots,
     pub(in crate::app) required: RequiredRenderPages,

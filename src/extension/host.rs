@@ -4,12 +4,10 @@ use crate::app::AppState;
 use crate::backend::SharedPdfBackend;
 use crate::event::AppEvent;
 use crate::highlight::HighlightOverlaySnapshot;
-use crate::history::{HistoryExtension, HistoryState, HistoryUiSnapshot};
+use crate::history::{HistoryState, HistoryUiSnapshot};
 use crate::input::{AppInputEvent, InputHookResult};
-use crate::outline::{OutlineExtension, OutlineState, OutlineUiSnapshot};
-use crate::search::{SearchEvent, SearchExtension, SearchRuntime, SearchUiSnapshot};
-
-use super::traits::Extension;
+use crate::outline::{OutlineState, OutlineUiSnapshot};
+use crate::search::{SearchEvent, SearchRuntime, SearchUiSnapshot};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ExtensionUiSnapshot {
@@ -42,9 +40,9 @@ pub struct ExtensionHost {
 impl ExtensionHost {
     pub fn new() -> Self {
         Self {
-            search: SearchExtension::init_state(),
-            history: HistoryExtension::init_state(),
-            outline: OutlineExtension::init_state(),
+            search: SearchRuntime::default(),
+            history: HistoryState::default(),
+            outline: OutlineState::default(),
         }
     }
 
@@ -64,24 +62,12 @@ impl ExtensionHost {
         &self.search
     }
 
-    pub fn handle_input(&mut self, event: AppInputEvent, app: &mut AppState) -> InputHookResult {
-        let search_result = SearchExtension::handle_input(&mut self.search, event, app);
-        if search_result != InputHookResult::Ignored {
-            return search_result;
-        }
-
-        let history_result = HistoryExtension::handle_input(&mut self.history, event, app);
-        if history_result != InputHookResult::Ignored {
-            return history_result;
-        }
-
+    pub fn handle_input(&mut self, _event: AppInputEvent, _app: &mut AppState) -> InputHookResult {
         InputHookResult::Ignored
     }
 
-    pub fn handle_event(&mut self, event: &AppEvent, app: &mut AppState) {
-        SearchExtension::handle_event(&mut self.search, event, app);
-        HistoryExtension::handle_event(&mut self.history, event, app);
-        OutlineExtension::handle_event(&mut self.outline, event, app);
+    pub fn handle_event(&mut self, event: &AppEvent, _app: &mut AppState) {
+        self.history.on_event(event);
     }
 
     pub(crate) fn start_workers(
@@ -112,9 +98,9 @@ impl ExtensionHost {
     }
 
     pub fn on_document_reloaded(&mut self, app: &mut AppState, pdf: SharedPdfBackend) {
-        SearchExtension::on_document_reloaded(&mut self.search, app, Arc::clone(&pdf));
-        HistoryExtension::on_document_reloaded(&mut self.history, app, Arc::clone(&pdf));
-        OutlineExtension::on_document_reloaded(&mut self.outline, app, pdf);
+        self.search.on_document_reloaded(app, pdf);
+        self.history = HistoryState::default();
+        self.outline.on_document_reloaded();
     }
 
     pub fn on_visible_pages_changed(
@@ -126,14 +112,9 @@ impl ExtensionHost {
         self.search.resolve_priority_geometry(pdf, visible_pages);
     }
 
-    pub fn status_bar_segments(&self, app: &AppState) -> Vec<String> {
+    pub fn status_bar_segments(&self, _app: &AppState) -> Vec<String> {
         let mut segments = Vec::new();
-        if let Some(segment) = SearchExtension::status_bar_segment(&self.search, app)
-            && !segment.is_empty()
-        {
-            segments.push(segment);
-        }
-        if let Some(segment) = HistoryExtension::status_bar_segment(&self.history, app)
+        if let Some(segment) = self.search.status_bar_segment()
             && !segment.is_empty()
         {
             segments.push(segment);

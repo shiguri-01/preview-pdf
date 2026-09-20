@@ -101,7 +101,6 @@ pub struct App {
     pub(crate) view_policy: ViewPolicy,
     pub(crate) event_loop_policy: EventLoopPolicy,
     pub(crate) watch_policy: WatchPolicy,
-    run_options: RunOptions,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -164,7 +163,8 @@ impl App {
     ) -> AppResult<Self> {
         let cache = options.cache;
         let view = options.view;
-        let watch = options.watch;
+        let mut watch = options.watch;
+        watch.enabled |= run_options.watch;
         let presenter = Box::new(
             RatatuiImagePresenter::with_cache_limits_and_graphics_protocol(
                 cache.l2_max_entries,
@@ -188,14 +188,10 @@ impl App {
             view_policy: view,
             event_loop_policy: options.event_loop,
             watch_policy: watch,
-            run_options: RunOptions {
-                watch: run_options.watch || watch.enabled,
-            },
         })
     }
 
     pub fn set_watch(&mut self, watch: bool) {
-        self.run_options.watch = watch;
         self.watch_policy.enabled = watch;
     }
 
@@ -205,10 +201,6 @@ impl App {
         self.render.runtime.perf_stats.enable_sample_collection();
         self.render.presenter.enable_perf_sample_collection();
         Ok(())
-    }
-
-    pub(crate) fn run_options(&self) -> RunOptions {
-        self.run_options
     }
 }
 
@@ -379,7 +371,6 @@ mod tests {
         assert_eq!(app.state.page_layout_mode, PageLayoutMode::Spread);
         assert_eq!(app.state.spread_direction, SpreadDirection::Rtl);
         assert_eq!(app.state.spread_cover_policy, SpreadCoverPolicy::Cover);
-        assert!(app.run_options().watch);
         assert!(app.watch_policy.enabled);
         assert_eq!(app.watch_policy.settle_delay, Duration::from_millis(375));
     }
@@ -395,12 +386,10 @@ mod tests {
         };
 
         let mut app = App::new_with_options(options).expect("app init");
-        assert!(app.run_options().watch);
         assert!(app.watch_policy.enabled);
 
         app.set_watch(false);
 
-        assert!(!app.run_options().watch);
         assert!(!app.watch_policy.enabled);
     }
 }

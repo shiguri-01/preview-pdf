@@ -9,7 +9,6 @@ mod nav;
 mod render_ops;
 mod render_runtime;
 mod routing;
-mod routing_effects;
 mod runtime;
 mod runtime_driver;
 pub(crate) mod scale;

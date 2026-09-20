@@ -440,25 +440,22 @@ mod tests {
         let mut actor = InputActor::new(std::time::Instant::now());
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 
-        let effects = actor
+        let outcome = actor
             .handle_terminal_event(
                 crossterm::event::Event::Key(key),
                 &mut interaction,
                 &mut state,
             )
             .expect("help close should be handled");
-        let (commands, events, redraws) = effects.into_parts();
-
         assert_eq!(state.mode, Mode::Help);
-        assert!(redraws.is_empty());
+        assert!(!outcome.redraw);
         assert_eq!(
-            commands,
+            outcome.commands,
             vec![CommandRequest::new(
                 Command::CloseHelp,
                 CommandInvocationSource::Binding
             )]
         );
-        assert!(events.is_empty());
     }
 
     #[test]
@@ -478,25 +475,22 @@ mod tests {
         let mut actor = InputActor::new(std::time::Instant::now());
         let key = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
 
-        let effects = actor
+        let outcome = actor
             .handle_terminal_event(
                 crossterm::event::Event::Key(key),
                 &mut interaction,
                 &mut state,
             )
             .expect("palette close should be handled");
-        let (commands, events, redraws) = effects.into_parts();
-
         assert_eq!(state.mode, Mode::Palette);
-        assert!(redraws.is_empty());
+        assert!(!outcome.redraw);
         assert_eq!(
-            commands,
+            outcome.commands,
             vec![CommandRequest::new(
                 Command::ClosePalette,
                 CommandInvocationSource::Binding
             )]
         );
-        assert!(events.is_empty());
     }
 
     #[test]
@@ -516,25 +510,22 @@ mod tests {
         let mut actor = InputActor::new(std::time::Instant::now());
         let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
 
-        let effects = actor
+        let outcome = actor
             .handle_terminal_event(
                 crossterm::event::Event::Key(key),
                 &mut interaction,
                 &mut state,
             )
             .expect("palette submit should be handled");
-        let (commands, events, redraws) = effects.into_parts();
-
         assert_eq!(state.mode, Mode::Palette);
-        assert!(redraws.is_empty());
+        assert!(!outcome.redraw);
         assert_eq!(
-            commands,
+            outcome.commands,
             vec![CommandRequest::new(
                 Command::PaletteSubmit,
                 CommandInvocationSource::Binding
             )]
         );
-        assert!(events.is_empty());
     }
 
     #[test]

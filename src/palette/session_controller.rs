@@ -6,7 +6,7 @@ use crate::extension::ExtensionUiSnapshot;
 use crate::input::InputHistorySnapshot;
 
 use super::candidate::{PaletteCandidate, PaletteCandidateId};
-use super::effect::{PaletteSubmitAction, PaletteTabEffect};
+use super::effect::{PaletteSubmitEffect, PaletteTabEffect};
 use super::kind::PaletteKind;
 use super::matcher;
 use super::provider::{PaletteAppSnapshot, PaletteContext, PaletteInputMode, PaletteProvider};
@@ -16,7 +16,6 @@ use super::view::{PaletteItemView, PaletteView};
 
 #[derive(Debug)]
 struct PaletteSession {
-    id: u64,
     kind: PaletteKind,
     title: String,
     input_mode: PaletteInputMode,
@@ -81,18 +80,9 @@ impl PaletteInputHistoryNavigator {
     }
 }
 
+#[derive(Default)]
 pub struct PaletteSessionController {
-    next_session_id: u64,
     active: Option<PaletteSession>,
-}
-
-impl Default for PaletteSessionController {
-    fn default() -> Self {
-        Self {
-            next_session_id: 1,
-            active: None,
-        }
-    }
 }
 
 impl PaletteSessionController {
@@ -113,7 +103,6 @@ impl PaletteSessionController {
         let ctx = PaletteContext {
             app,
             extensions,
-            kind,
             input: input.value(),
         };
         let title = provider.title(&ctx);
@@ -128,7 +117,6 @@ impl PaletteSessionController {
         let assistive_text = provider.assistive_text(&ctx, selected_candidate);
 
         self.active = Some(PaletteSession {
-            id: self.take_session_id(),
             kind,
             title,
             input_mode,
@@ -160,23 +148,12 @@ impl PaletteSessionController {
         self.active.take().is_some()
     }
 
-    pub fn close_if_matches(&mut self, session_id: u64) -> bool {
-        let Some(session) = &self.active else {
-            return false;
-        };
-        if session.id != session_id {
-            return false;
-        }
-        self.active.take();
-        true
-    }
-
     pub fn submit(
         &self,
         registry: &PaletteRegistry,
         app: &AppState,
         extensions: &ExtensionUiSnapshot,
-    ) -> AppResult<Option<PaletteSubmitAction>> {
+    ) -> AppResult<Option<PaletteSubmitEffect>> {
         let Some(session) = self.active.as_ref() else {
             return Ok(None);
         };
@@ -187,14 +164,9 @@ impl PaletteSessionController {
         let ctx = PaletteContext {
             app: app_snapshot,
             extensions,
-            kind: session.kind,
             input: session.input.value(),
         };
-        let effect = provider.on_submit(&ctx, selected)?;
-        Ok(Some(PaletteSubmitAction {
-            session_id: session.id,
-            effect,
-        }))
+        provider.on_submit(&ctx, selected).map(Some)
     }
 
     pub fn complete(
@@ -214,7 +186,6 @@ impl PaletteSessionController {
         let ctx = PaletteContext {
             app: app_snapshot,
             extensions,
-            kind: session.kind,
             input: session.input.value(),
         };
         match provider.on_tab(&ctx, selected)? {
@@ -340,7 +311,6 @@ impl PaletteSessionController {
         let ctx = PaletteContext {
             app,
             extensions,
-            kind,
             input: &input_text,
         };
 
@@ -406,12 +376,6 @@ impl PaletteSessionController {
         if session.selected + 1 < session.visible.len() {
             session.selected += 1;
         }
-    }
-
-    fn take_session_id(&mut self) -> u64 {
-        let id = self.next_session_id;
-        self.next_session_id = self.next_session_id.saturating_add(1);
-        id
     }
 
     fn recall_input_history(&mut self, older: bool) -> bool {
@@ -527,7 +491,6 @@ mod tests {
         assert_eq!(session.active_kind(), None);
         assert!(!session.active_input_is_empty());
         assert!(!session.close());
-        assert!(!session.close_if_matches(1));
         assert!(!session.select_previous());
         assert!(!session.select_next_item());
         assert!(

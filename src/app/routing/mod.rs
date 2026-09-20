@@ -14,7 +14,7 @@ use crate::render::worker::RenderWorker;
 
 use super::actors::RenderCompleteContext;
 use super::core::App;
-use super::routing_effects::RoutingEffects;
+use super::input_ops::KeyEventOutcome;
 use super::runtime::{
     ActiveDocument, AppRuntime, RuntimeControl, RuntimeEvent, terminate_process_now,
 };
@@ -30,35 +30,6 @@ const FILE_RELOAD_RETRY_DELAYS: [Duration; 5] = [
 ];
 
 impl App {
-    pub(super) fn apply_routing_effects<S>(
-        &mut self,
-        runtime: &mut AppRuntime<S>,
-        effects: RoutingEffects,
-    ) -> RuntimeControl
-    where
-        S: TerminalSurface,
-    {
-        let (commands, events, redraws) = effects.into_parts();
-        for reason in redraws {
-            self.request_redraw(runtime, reason);
-        }
-        for request in commands {
-            if runtime
-                .event_tx
-                .send(DomainEvent::Command(request))
-                .is_err()
-            {
-                return RuntimeControl::Break;
-            }
-        }
-        for event in events {
-            if runtime.event_tx.send(event).is_err() {
-                return RuntimeControl::Break;
-            }
-        }
-        RuntimeControl::Continue
-    }
-
     pub(super) fn handle_waited_event<S>(
         &mut self,
         waited: RuntimeEvent,
@@ -71,11 +42,11 @@ impl App {
         // Wake events are not guaranteed to arrive before the next input event, so the
         // runtime checks for timed-out sequences at the start of every iteration as well.
         let focus_before_timeout = self.input_focus();
-        let timeout_effects = runtime
+        let timeout_outcome = runtime
             .input_actor
             .handle_timeout(&mut self.interaction, &mut self.state)?;
         if matches!(
-            self.apply_input_effects(runtime, document, timeout_effects)?,
+            self.apply_input_outcome(runtime, document, timeout_outcome)?,
             RuntimeControl::Break
         ) {
             return Ok(RuntimeControl::Break);
@@ -88,13 +59,13 @@ impl App {
 
         match waited {
             RuntimeEvent::Event(DomainEvent::Input(event)) => {
-                let effects = runtime.input_actor.handle_terminal_event(
+                let outcome = runtime.input_actor.handle_terminal_event(
                     event,
                     &mut self.interaction,
                     &mut self.state,
                 )?;
                 if matches!(
-                    self.apply_input_effects(runtime, document, effects)?,
+                    self.apply_input_outcome(runtime, document, outcome)?,
                     RuntimeControl::Break
                 ) {
                     return Ok(RuntimeControl::Break);
@@ -182,29 +153,23 @@ impl App {
         )
     }
 
-    fn apply_input_effects<S>(
+    fn apply_input_outcome<S>(
         &mut self,
         runtime: &mut AppRuntime<S>,
         document: &mut ActiveDocument,
-        effects: RoutingEffects,
+        outcome: KeyEventOutcome,
     ) -> AppResult<RuntimeControl>
     where
         S: TerminalSession,
     {
-        let (commands, events, redraws) = effects.into_parts();
-        for reason in redraws {
-            self.request_redraw(runtime, reason);
+        if outcome.redraw {
+            self.request_redraw(runtime, RedrawReason::Input);
         }
-        for request in commands {
+        for request in outcome.commands {
             if matches!(
                 self.handle_command_event(request, runtime, document)?,
                 RuntimeControl::Break
             ) {
-                return Ok(RuntimeControl::Break);
-            }
-        }
-        for event in events {
-            if runtime.event_tx.send(event).is_err() {
                 return Ok(RuntimeControl::Break);
             }
         }
@@ -278,7 +243,7 @@ impl App {
         let state_before_command = self.state.clone();
         let previous_visible_pages = self
             .state
-            .visible_page_slots(runtime.page_count)
+            .visible_page_slots(document.pdf.page_count())
             .existing_pages();
         let view_policy = self.view_policy;
         let dispatch = match self.interaction.dispatch_command(
@@ -294,15 +259,19 @@ impl App {
                 return Ok(RuntimeControl::Continue);
             }
         };
-        let mut effects = RoutingEffects::from_commands(dispatch.follow_up_commands);
-        for event in dispatch.emitted_events {
-            effects.push_event(DomainEvent::App(event));
+        for request in dispatch.follow_up_commands {
+            if runtime
+                .event_tx
+                .send(DomainEvent::Command(request))
+                .is_err()
+            {
+                return Ok(RuntimeControl::Break);
+            }
         }
-        if matches!(
-            self.apply_routing_effects(runtime, effects),
-            RuntimeControl::Break
-        ) {
-            return Ok(RuntimeControl::Break);
+        for event in dispatch.emitted_events {
+            if runtime.event_tx.send(DomainEvent::App(event)).is_err() {
+                return Ok(RuntimeControl::Break);
+            }
         }
         let palette_changed = self.interaction.apply_palette_requests(&mut self.state);
         if palette_changed {
@@ -310,7 +279,7 @@ impl App {
         }
         let current_visible_pages = self
             .state
-            .visible_page_slots(runtime.page_count)
+            .visible_page_slots(document.pdf.page_count())
             .existing_pages();
         if current_visible_pages != previous_visible_pages {
             self.interaction.sync_extensions_after_page_change(
@@ -357,7 +326,7 @@ impl App {
 
         runtime.reload_in_flight = true;
         runtime.event_bus.start_document_reload(
-            document.path.clone(),
+            document.pdf.path().to_path_buf(),
             request,
             runtime.event_tx.clone(),
         );
@@ -459,9 +428,9 @@ impl App {
         let old_doc_id = document.pdf.doc_id();
         runtime.reload_retry_attempts = 0;
         document.replace(Arc::clone(&pdf));
-        runtime.page_count = pdf.page_count();
-        self.state.current_page = self.state.current_page.min(runtime.page_count - 1);
-        self.state.normalize_current_page(runtime.page_count);
+        let page_count = pdf.page_count();
+        self.state.current_page = self.state.current_page.min(page_count - 1);
+        self.state.normalize_current_page(page_count);
         self.state.clear_reload_notice();
         self.state.clear_render_notice();
 
@@ -473,7 +442,7 @@ impl App {
             RenderWorker::spawn(Arc::clone(&pdf), self.render_policy.worker_threads);
 
         let viewport = Self::current_viewport(&runtime.session, self.state.debug_status_visible);
-        let visible_pages = self.state.visible_page_slots(runtime.page_count);
+        let visible_pages = self.state.visible_page_slots(page_count);
         let tracked_scale =
             self.compute_current_scale(pdf.as_ref(), visible_pages.anchor_page, viewport);
         let mut render_actor = super::actors::RenderActor::new(

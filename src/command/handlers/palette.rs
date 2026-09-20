@@ -28,19 +28,17 @@ pub(in crate::command) fn palette_submit(
         return Ok(CommandExecution::noop());
     };
     let extensions = ctx.extension_host.ui_snapshot(ctx.app);
-    let Some(action) = ctx
+    let Some(effect) = ctx
         .palette_session
         .submit(ctx.palette_registry, ctx.app, &extensions)?
     else {
         return Ok(CommandExecution::noop());
     };
-    if !ctx.palette_session.close_if_matches(action.session_id) {
-        return Ok(CommandExecution::noop());
-    }
+    ctx.palette_session.close();
     ctx.app.mode = Mode::Normal;
 
     let mut execution = CommandExecution::applied();
-    match action.effect {
+    match effect {
         PaletteSubmitEffect::Close => {}
         PaletteSubmitEffect::Reopen { kind, options } => {
             execution = execution.with_palette_request(PaletteRequest::Open { kind, options });

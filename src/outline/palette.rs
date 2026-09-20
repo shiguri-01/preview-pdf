@@ -143,7 +143,7 @@ fn outline_entry_for_candidate<'a>(
 mod tests {
     use crate::{
         extension::ExtensionUiSnapshot,
-        palette::{PaletteAppSnapshot, PaletteContext, PaletteKind, PaletteProvider},
+        palette::{PaletteAppSnapshot, PaletteContext, PaletteProvider},
     };
 
     use super::{OutlinePaletteEntry, OutlinePaletteProvider};
@@ -165,7 +165,6 @@ mod tests {
         let ctx = PaletteContext {
             app: PaletteAppSnapshot::default(),
             extensions: &extensions,
-            kind: PaletteKind::Outline,
             input: "",
         };
 
@@ -204,7 +203,6 @@ mod tests {
         let ctx = PaletteContext {
             app: PaletteAppSnapshot::default(),
             extensions: &extensions,
-            kind: PaletteKind::Outline,
             input: "3",
         };
 
@@ -244,7 +242,6 @@ mod tests {
         let ctx = PaletteContext {
             app: PaletteAppSnapshot::default(),
             extensions: &extensions,
-            kind: PaletteKind::Outline,
             input: "p.1",
         };
 
@@ -277,7 +274,6 @@ mod tests {
         let ctx = PaletteContext {
             app: PaletteAppSnapshot::default(),
             extensions: &extensions,
-            kind: PaletteKind::Outline,
             input: "ÜBER",
         };
 

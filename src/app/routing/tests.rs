@@ -299,14 +299,7 @@ fn wake_timeout_applies_expired_sequence_command() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
 
@@ -370,14 +363,7 @@ fn input_outcome_applies_expired_command_before_latest_command() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
 
@@ -447,14 +433,7 @@ fn focus_changing_timeout_drops_waited_input() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
 
@@ -495,14 +474,7 @@ fn palette_close_from_input_applies_before_queued_input() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime
         .event_tx
@@ -545,14 +517,7 @@ fn command_error_becomes_notice_and_runtime_continues() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
 
@@ -587,14 +552,7 @@ fn reload_document_command_starts_reload_without_blocking_loop() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
 
     let control = app
@@ -630,14 +588,7 @@ fn document_reload_success_replaces_active_document_and_clamps_page() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&first),
-            first.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&first), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
 
@@ -658,7 +609,7 @@ fn document_reload_success_replaces_active_document_and_clamps_page() {
     .expect("reload result should be handled");
 
     assert_ne!(document.pdf.doc_id(), old_doc_id);
-    assert_eq!(runtime.page_count, 2);
+    assert_eq!(document.pdf.page_count(), 2);
     assert_eq!(app.state.current_page, 1);
     assert!(runtime.ui_actor.needs_redraw());
     fs::remove_file(&file).expect("test file should be removed");
@@ -683,14 +634,7 @@ fn document_reload_success_applies_even_when_doc_id_matches() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&first),
-            first.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&first), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -730,14 +674,7 @@ fn document_reload_success_clears_previous_reload_notice() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&first),
-            first.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&first), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.reload_in_flight = true;
 
@@ -773,14 +710,7 @@ fn manual_document_reload_failure_keeps_previous_document() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -817,14 +747,7 @@ fn file_reload_failure_keeps_previous_document_and_retries_quietly() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -875,14 +798,7 @@ fn file_reload_failure_after_retry_budget_shows_warning() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -927,14 +843,7 @@ fn file_reload_success_after_retries_replaces_document_and_resets_retry_count() 
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&first),
-            first.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&first), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -957,7 +866,7 @@ fn file_reload_success_after_retries_replaces_document_and_resets_retry_count() 
     .expect("reload result should be handled");
 
     assert_ne!(document.pdf.doc_id(), old_doc_id);
-    assert_eq!(runtime.page_count, 2);
+    assert_eq!(document.pdf.page_count(), 2);
     assert_eq!(app.state.current_page, 1);
     assert_eq!(runtime.reload_retry_attempts, 0);
     assert!(app.state.notice.is_none());
@@ -979,14 +888,7 @@ fn stale_file_reload_failure_yields_to_pending_fresh_reload() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -1031,14 +933,7 @@ fn stale_file_reload_success_yields_to_pending_fresh_reload() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&first),
-            first.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&first), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     runtime.reload_in_flight = true;
@@ -1087,14 +982,7 @@ fn old_delayed_retry_after_newer_reload_is_ignored() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.reload_generation = 2;
     runtime.reload_retry_attempts = 3;
@@ -1130,14 +1018,7 @@ fn command_event_returns_break_when_effect_channel_is_closed() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.event_rx.close();
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
@@ -1168,14 +1049,7 @@ fn encode_complete_without_redraw_request_does_not_redraw() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     runtime.ui_actor.clear_redraw();
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
@@ -1206,14 +1080,7 @@ fn prefetch_tick_only_marks_prefetch_due() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
     assert!(runtime.render_actor.take_prefetch_due());
@@ -1244,14 +1111,7 @@ fn non_current_render_complete_does_not_redraw() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
     runtime.ui_actor.clear_redraw();
@@ -1286,14 +1146,7 @@ fn noop_navigation_command_without_state_change_does_not_redraw() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
     runtime.ui_actor.clear_redraw();
@@ -1334,14 +1187,7 @@ fn unavailable_search_navigation_without_notice_change_does_not_redraw() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
     runtime.ui_actor.clear_redraw();
@@ -1372,14 +1218,7 @@ fn noop_command_redraws_when_it_changes_visible_notice() {
     let (event_tx, event_rx, event_bus) = crate::app::event_bus::EventBusRuntime::spawn_headless();
     let session = StubSession::new(80, 24);
     let mut runtime = app
-        .initialize_runtime(
-            Arc::clone(&pdf),
-            pdf.page_count(),
-            session,
-            event_tx,
-            event_rx,
-            event_bus,
-        )
+        .initialize_runtime(Arc::clone(&pdf), session, event_tx, event_rx, event_bus)
         .expect("runtime should initialize");
     let mut document = ActiveDocument::new(Arc::clone(&pdf));
     runtime.ui_actor.clear_redraw();

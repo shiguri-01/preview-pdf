@@ -21,7 +21,13 @@ use super::terminal_session::{InteractiveTerminalSession, TerminalSession, Termi
 
 impl App {
     pub async fn run(&mut self, pdf: SharedPdfBackend) -> AppResult<()> {
-        self.run_with_options(pdf, self.run_options()).await
+        self.run_with_options(
+            pdf,
+            RunOptions {
+                watch: self.watch_policy.enabled,
+            },
+        )
+        .await
     }
 
     pub async fn run_with_options(
@@ -62,7 +68,6 @@ impl App {
         let (event_tx, event_rx, event_bus) = EventBusRuntime::spawn_headless();
         let mut runtime = self.initialize_runtime(
             Arc::clone(&document.pdf),
-            page_count,
             session,
             event_tx,
             event_rx,
@@ -72,7 +77,7 @@ impl App {
             runtime.event_bus.start_input(runtime.event_tx.clone());
             if watch {
                 runtime.event_bus.start_file_watch(
-                    document.path.clone(),
+                    document.pdf.path().to_path_buf(),
                     self.watch_policy.settle_delay,
                     runtime.event_tx.clone(),
                 )?;
@@ -136,7 +141,7 @@ impl App {
         let event_queue_empty =
             runtime.event_rx.is_empty() && runtime.extension_worker_rx.is_empty();
         RuntimeObservation {
-            page_count: runtime.page_count,
+            page_count: step.page_count,
             current_page: self.state.current_page,
             current_cached: step.current_cached,
             render_in_flight,
@@ -285,6 +290,7 @@ impl App {
         );
 
         IterationStep {
+            page_count: pdf.page_count(),
             current_scale: current_view.current_scale,
             visible_pages: current_view.visible_pages,
             required: current_view.required,
@@ -315,7 +321,7 @@ impl App {
             &mut self.state,
             &mut runtime.session,
             pdf,
-            runtime.page_count,
+            pdf.page_count(),
             runtime.render_actor.generation(),
             runtime.render_actor.nav_streak(),
             render_busy,

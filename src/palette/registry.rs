@@ -52,7 +52,6 @@ mod tests {
         let ctx = PaletteContext {
             app: PaletteAppSnapshot::default(),
             extensions: &extensions,
-            kind: PaletteKind::Command,
             input: "",
         };
 

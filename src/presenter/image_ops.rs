@@ -177,15 +177,13 @@ mod tests {
     }
 
     #[test]
-    fn resize_frame_for_area_downscales_shared_frame_without_touching_source() {
+    fn resize_frame_for_area_downscales_without_touching_source() {
         let pixels: Vec<u8> = (0..4 * 4 * 4).map(|i| i as u8).collect();
         let source = RgbaFrame {
             width: 4,
             height: 4,
             pixels: pixels.clone().into(),
         };
-        let shared = source.clone();
-
         let resized = resize_frame_for_area(source.clone(), Rect::new(0, 0, 2, 2), (1, 1), false)
             .expect("resize should succeed");
 
@@ -194,7 +192,5 @@ mod tests {
         assert_eq!(source.width, 4);
         assert_eq!(source.height, 4);
         assert_eq!(&source.pixels[..], pixels.as_slice());
-        assert!(source.pixels.ptr_eq(&shared.pixels));
-        assert!(!resized.pixels.ptr_eq(&source.pixels));
     }
 }

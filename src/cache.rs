@@ -215,10 +215,6 @@ where
         self.entries.len()
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
     pub(crate) fn max_entries(&self) -> usize {
         self.limits.max_entries
     }
@@ -592,7 +588,7 @@ mod tests {
         let removed = cache.clear();
 
         assert_eq!(removed.len(), 2);
-        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
         assert_eq!(cache.memory_bytes(), 0);
     }
 }

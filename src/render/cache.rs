@@ -84,14 +84,6 @@ impl RenderedPageCache {
             .remove_where(|key, _frame| key.doc_id == doc_id);
     }
 
-    pub fn remove(&mut self, key: &RenderedPageKey) {
-        let _ = self.entries.remove(key);
-    }
-
-    pub fn clear(&mut self) {
-        let _ = self.entries.clear();
-    }
-
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -106,10 +98,6 @@ impl RenderedPageCache {
 
     pub fn contains(&self, key: &RenderedPageKey) -> bool {
         self.entries.peek(key).is_some()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
     }
 
     pub fn memory_bytes(&self) -> usize {

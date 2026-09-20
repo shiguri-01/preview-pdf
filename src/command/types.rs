@@ -137,12 +137,6 @@ pub enum PanAmount {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandExposure {
-    Public,
-    Internal,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandRole {
     UserIntent,
     SurfaceControl,
@@ -278,7 +272,6 @@ pub struct CommandSpec {
     pub title: &'static str,
     pub args: &'static [ArgSpec],
     pub role: CommandRole,
-    pub exposure: CommandExposure,
     pub invocation: CommandInvocationPolicy,
     pub target: CommandTargetRequirement,
     pub enabled_when: ConditionExpr,

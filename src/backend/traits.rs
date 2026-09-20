@@ -64,10 +64,6 @@ impl PixelBuffer {
         }
     }
 
-    pub fn ptr_eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-
     pub fn from_pooled_vec(bytes: Vec<u8>, pool: &'static PixelBufferPool) -> Self {
         Self(Arc::new(PixelStorage {
             bytes,

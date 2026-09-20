@@ -1,5 +1,5 @@
 use crate::app::Mode;
-use crate::command::all_command_specs;
+use crate::command::command_registry;
 use crate::command::find_command_spec;
 use crate::command::first_token;
 use crate::command::is_command_visible_in_palette;
@@ -46,8 +46,9 @@ impl PaletteProvider for CommandPaletteProvider {
             }
             Some(_) => Ok(Vec::new()),
             None => {
-                let mut candidates = all_command_specs()
-                    .into_iter()
+                let mut candidates = command_registry()
+                    .iter()
+                    .copied()
                     .filter(|spec| {
                         let command_ctx = post_submit_command_policy_context(ctx);
                         is_command_visible_in_palette(*spec, &command_ctx)

@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use crate::config::keymap::build_default_sequence_registry;
 use crate::config::{
-    AppOptions, AppOptionsResolver, CachePolicy, EventLoopPolicy, InputPolicy, RenderPolicy,
-    ResolvedAppOptions, ViewPolicy, WatchPolicy, load_default_app_options,
+    AppOptions, AppOptionsResolver, EventLoopPolicy, InputPolicy, RenderPolicy, ResolvedAppOptions,
+    ViewPolicy, WatchPolicy, load_default_app_options,
 };
 use crate::error::AppResult;
 use crate::extension::ExtensionHost;
@@ -100,14 +100,12 @@ pub struct RunOptions {
 #[derive(Default)]
 pub struct AppBuilder {
     options: AppOptionsResolver,
-    run_options: RunOptions,
 }
 
 impl AppBuilder {
     pub fn new() -> Self {
         Self {
             options: AppOptionsResolver::new(),
-            run_options: RunOptions::default(),
         }
     }
 
@@ -121,14 +119,9 @@ impl AppBuilder {
         self
     }
 
-    pub fn run_options(mut self, run_options: RunOptions) -> Self {
-        self.run_options = run_options;
-        self
-    }
-
     pub fn build(self) -> AppResult<App> {
         let resolved = self.options.resolve()?;
-        App::from_resolved_options(resolved, self.run_options)
+        App::from_resolved_options(resolved)
     }
 }
 
@@ -142,14 +135,9 @@ impl App {
         AppBuilder::new().replace_options(options).build()
     }
 
-    fn from_resolved_options(
-        options: ResolvedAppOptions,
-        run_options: RunOptions,
-    ) -> AppResult<Self> {
+    fn from_resolved_options(options: ResolvedAppOptions) -> AppResult<Self> {
         let cache = options.cache;
         let view = options.view;
-        let mut watch = options.watch;
-        watch.enabled |= run_options.watch;
         let presenter = Box::new(
             RatatuiImagePresenter::with_cache_limits_and_graphics_protocol(
                 cache.l2_max_entries,
@@ -167,17 +155,19 @@ impl App {
         };
         Ok(Self {
             state,
-            render: RenderSubsystem::new(presenter, render_runtime_from_cache_policy(cache)),
+            render: RenderSubsystem::new(
+                presenter,
+                RenderRuntime::with_l1_cache_limits(
+                    cache.l1_max_entries,
+                    cache.l1_memory_budget_bytes(),
+                ),
+            ),
             interaction: InteractionSubsystem::with_input_policy(options.input),
             render_policy: options.render,
             view_policy: view,
             event_loop_policy: options.event_loop,
-            watch_policy: watch,
+            watch_policy: options.watch,
         })
-    }
-
-    pub fn set_watch(&mut self, watch: bool) {
-        self.watch_policy.enabled = watch;
     }
 
     pub(crate) fn enable_metrics_collection(&mut self) -> AppResult<()> {
@@ -187,10 +177,6 @@ impl App {
         self.render.presenter.enable_perf_sample_collection();
         Ok(())
     }
-}
-
-fn render_runtime_from_cache_policy(cache: CachePolicy) -> RenderRuntime {
-    RenderRuntime::with_l1_cache_limits(cache.l1_max_entries, cache.l1_memory_budget_bytes())
 }
 
 #[cfg(test)]
@@ -282,12 +268,6 @@ mod tests {
             render: RenderOptions {
                 graphics_protocol: None,
                 worker_threads: Some(5),
-                input_poll_timeout_idle_ms: Some(17),
-                input_poll_timeout_busy_ms: Some(9),
-                prefetch_pause_ms: Some(130),
-                prefetch_tick_ms: Some(11),
-                pending_redraw_interval_ms: Some(41),
-                prefetch_dispatch_budget_per_tick: Some(8),
                 max_render_scale: Some(3.0),
             },
             input: InputOptions {
@@ -312,26 +292,9 @@ mod tests {
         assert_eq!(app.render_policy.worker_threads, 5);
         assert_eq!(app.render_policy.max_render_scale, 3.0);
         assert_eq!(
-            app.event_loop_policy.input_poll_timeout_idle,
-            Duration::from_millis(17)
+            app.event_loop_policy,
+            crate::config::EventLoopPolicy::default()
         );
-        assert_eq!(
-            app.event_loop_policy.input_poll_timeout_busy,
-            Duration::from_millis(9)
-        );
-        assert_eq!(
-            app.event_loop_policy.prefetch_pause_after_input,
-            Duration::from_millis(130)
-        );
-        assert_eq!(
-            app.event_loop_policy.prefetch_tick_interval,
-            Duration::from_millis(11)
-        );
-        assert_eq!(
-            app.event_loop_policy.pending_redraw_interval,
-            Duration::from_millis(41)
-        );
-        assert_eq!(app.event_loop_policy.prefetch_dispatch_budget_per_tick, 8);
         assert_eq!(
             app.interaction.sequences.timeout(),
             Duration::from_millis(250)
@@ -343,23 +306,5 @@ mod tests {
         assert_eq!(app.state.spread_cover_policy, SpreadCoverPolicy::Cover);
         assert!(app.watch_policy.enabled);
         assert_eq!(app.watch_policy.settle_delay, Duration::from_millis(375));
-    }
-
-    #[test]
-    fn set_watch_overrides_configured_watch_enabled() {
-        let options = AppOptions {
-            watch: WatchOptions {
-                enabled: Some(true),
-                ..WatchOptions::default()
-            },
-            ..AppOptions::default()
-        };
-
-        let mut app = App::new_with_options(options).expect("app init");
-        assert!(app.watch_policy.enabled);
-
-        app.set_watch(false);
-
-        assert!(!app.watch_policy.enabled);
     }
 }

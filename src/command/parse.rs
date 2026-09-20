@@ -352,8 +352,8 @@ fn split_last_token(input: &str) -> Option<(&str, &str)> {
 mod tests {
     use super::{first_token, parse_command_text};
     use crate::command::{
-        ArgHint, ArgKind, ArgSpec, Command, CommandExposure, PanAmount, PanDirection,
-        SearchMatcherKind, SpreadCoverPolicyArg, SpreadDirectionArg, all_command_specs,
+        ArgHint, ArgKind, ArgSpec, Command, PanAmount, PanDirection, SearchMatcherKind,
+        SpreadCoverPolicyArg, SpreadDirectionArg, command_registry,
     };
     use crate::palette::{PaletteKind, PaletteOpenOptions};
 
@@ -610,11 +610,10 @@ mod tests {
     }
 
     #[test]
-    fn no_arg_public_command_specs_parse_by_id() {
-        for spec in all_command_specs()
-            .into_iter()
-            .filter(|spec| spec.exposure == CommandExposure::Public && spec.args.is_empty())
-        {
+    fn no_arg_user_command_specs_parse_by_id() {
+        for spec in command_registry().iter().filter(|spec| {
+            spec.invocation == crate::command::CommandInvocationPolicy::User && spec.args.is_empty()
+        }) {
             let command = parse_command_text(spec.id).unwrap_or_else(|err| {
                 panic!("{} should parse without arguments: {}", spec.id, err)
             });
@@ -624,8 +623,8 @@ mod tests {
 
     #[test]
     fn specs_with_required_args_reject_missing_args() {
-        for spec in all_command_specs()
-            .into_iter()
+        for spec in command_registry()
+            .iter()
             .filter(|spec| spec.args.iter().any(|arg| arg.required))
         {
             assert!(
@@ -638,14 +637,14 @@ mod tests {
 
     #[test]
     fn enum_argument_hints_are_accepted_by_parser() {
-        for spec in all_command_specs() {
+        for spec in command_registry() {
             for (arg_index, arg) in spec.args.iter().enumerate() {
                 let ArgHint::Enum(values) = arg.hint else {
                     continue;
                 };
 
                 for value in values() {
-                    let command_text = command_text_with_arg_value(&spec, arg_index, value);
+                    let command_text = command_text_with_arg_value(spec, arg_index, value);
                     let command = parse_command_text(&command_text).unwrap_or_else(|err| {
                         panic!("{command_text:?} should parse enum value {value:?}: {err}")
                     });

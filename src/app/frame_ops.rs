@@ -273,7 +273,7 @@ mod tests {
     use crate::presenter::{PanOffset, Viewport};
 
     #[test]
-    fn apply_highlight_overlay_without_visible_span_reuses_pixel_buffer() {
+    fn apply_highlight_overlay_without_visible_span_returns_unchanged_frame() {
         let frame = RgbaFrame {
             width: 2,
             height: 2,
@@ -301,7 +301,7 @@ mod tests {
 
         let highlighted = apply_highlight_overlay(&frame, &overlay, &pages);
 
-        assert!(frame.pixels.ptr_eq(&highlighted.pixels));
+        assert_eq!(highlighted, frame);
     }
 
     #[test]
@@ -376,7 +376,7 @@ mod tests {
         assert_eq!(cropped.height, 2);
         assert_eq!(cropped.pixels[0], 10);
         assert_eq!(cropped.pixels[12], 40);
-        assert!(frame.pixels.ptr_eq(&cropped.pixels));
+        assert_eq!(cropped, frame);
     }
 
     #[test]
@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn prepare_presenter_frame_without_crop_reuses_pixel_buffer() {
+    fn prepare_presenter_frame_without_crop_returns_unchanged_frame() {
         let frame = RgbaFrame {
             width: 2,
             height: 2,
@@ -423,7 +423,7 @@ mod tests {
         let (prepared, pan_for_presenter) =
             prepare_presenter_frame(&frame, viewport, &mut pan, None, false);
 
-        assert!(frame.pixels.ptr_eq(&prepared.pixels));
+        assert_eq!(prepared, frame);
         assert_eq!(pan, PanOffset::default());
         assert_eq!(pan_for_presenter, PanOffset::default());
     }

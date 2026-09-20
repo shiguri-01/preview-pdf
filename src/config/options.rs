@@ -27,18 +27,6 @@ pub struct RenderOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worker_threads: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_poll_timeout_idle_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_poll_timeout_busy_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prefetch_pause_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prefetch_tick_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pending_redraw_interval_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prefetch_dispatch_budget_per_tick: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub max_render_scale: Option<f32>,
 }
 

@@ -6,16 +6,12 @@ use crate::error::{AppError, AppResult};
 
 use super::catalog::{self, Command};
 use super::types::{
-    CommandExposure, CommandInvocationPolicy, CommandInvocationSource, CommandRole, CommandSpec,
+    CommandInvocationPolicy, CommandInvocationSource, CommandRole, CommandSpec,
     CommandTargetRequirement,
 };
 
 pub fn command_registry() -> &'static [CommandSpec] {
     catalog::command_registry()
-}
-
-pub fn all_command_specs() -> Vec<CommandSpec> {
-    command_registry().to_vec()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -34,7 +30,7 @@ pub fn spec_for_command(command: &Command) -> Option<CommandSpec> {
 
 pub fn is_command_visible_in_palette(spec: CommandSpec, ctx: &CommandPolicyContext<'_>) -> bool {
     spec.role == CommandRole::UserIntent
-        && spec.exposure == CommandExposure::Public
+        && spec.invocation == CommandInvocationPolicy::User
         && is_invocation_source_allowed(spec, ctx.source)
         && is_target_available(spec.target, ctx)
         && is_command_enabled(spec, ctx)
@@ -217,9 +213,7 @@ mod tests {
         validate_command_for_policy, validate_command_id_for_policy,
     };
     use crate::command::types::{CommandRole, CommandTargetRequirement};
-    use crate::command::{
-        Command, CommandExposure, CommandInvocationPolicy, CommandInvocationSource, CommandSpec,
-    };
+    use crate::command::{Command, CommandInvocationPolicy, CommandInvocationSource, CommandSpec};
     use crate::condition::ConditionExpr;
 
     #[test]
@@ -328,7 +322,6 @@ mod tests {
             title: "Test Palette Target",
             args: &[],
             role: CommandRole::UserIntent,
-            exposure: CommandExposure::Public,
             invocation: CommandInvocationPolicy::User,
             target: CommandTargetRequirement::ActivePalette,
             enabled_when: ConditionExpr::Always,

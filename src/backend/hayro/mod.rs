@@ -3,14 +3,10 @@ mod encoding;
 mod outline;
 mod text;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use hayro::RenderCache;
 use hayro::hayro_syntax::Pdf;
-
-use crate::error::AppResult;
-
-use super::traits::{OutlineNode, PdfBackend, PdfRenderContext, RgbaFrame, TextPage};
 
 pub struct HayroPdfBackend {
     path: PathBuf,
@@ -23,49 +19,6 @@ struct HayroRenderContext<'a> {
     render_cache: RenderCache<'a>,
 }
 
-impl PdfBackend for HayroPdfBackend {
-    fn path(&self) -> &Path {
-        HayroPdfBackend::path(self)
-    }
-
-    fn doc_id(&self) -> u64 {
-        HayroPdfBackend::doc_id(self)
-    }
-
-    fn page_count(&self) -> usize {
-        HayroPdfBackend::page_count(self)
-    }
-
-    fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)> {
-        HayroPdfBackend::page_render_dimensions(self, page)
-    }
-
-    fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
-        HayroPdfBackend::render_page(self, page, scale)
-    }
-
-    fn render_context(&self) -> Box<dyn PdfRenderContext + '_> {
-        Box::new(HayroRenderContext {
-            backend: self,
-            render_cache: RenderCache::new(),
-        })
-    }
-
-    fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
-        HayroPdfBackend::extract_text_page(self, page)
-    }
-
-    fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
-        HayroPdfBackend::extract_outline(self)
-    }
-}
-
-impl PdfRenderContext for HayroRenderContext<'_> {
-    fn render_page(&mut self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
-        self.backend
-            .render_page_with_cache(page, scale, &self.render_cache)
-    }
-}
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -166,7 +119,7 @@ mod tests {
         let backend = HayroPdfBackend::open(&file).expect("backend should open");
 
         let (width, height) = backend
-            .page_render_dimensions(0)
+            .page_dimensions(0)
             .expect("dimensions should be available");
         assert!((width - 300.0).abs() < f32::EPSILON);
         assert!((height - 300.0).abs() < f32::EPSILON);

@@ -1,5 +1,4 @@
 use crate::app::{NoticeAction, PaletteRequest};
-use crate::event::AppEvent;
 use crate::input::InputHistoryRecord;
 
 use super::catalog::CommandRequest;
@@ -14,7 +13,6 @@ pub enum CommandLifecycleEffect {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandEffects {
     pub notice: NoticeAction,
-    pub events: Vec<AppEvent>,
     pub palette_requests: Vec<PaletteRequest>,
     pub input_history_records: Vec<InputHistoryRecord>,
     pub follow_up_commands: Vec<CommandRequest>,
@@ -25,7 +23,6 @@ impl CommandEffects {
     pub fn new(notice: NoticeAction) -> Self {
         Self {
             notice,
-            events: Vec::new(),
             palette_requests: Vec::new(),
             input_history_records: Vec::new(),
             follow_up_commands: Vec::new(),

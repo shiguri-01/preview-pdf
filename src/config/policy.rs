@@ -180,7 +180,6 @@ impl Default for ResolvedAppOptions {
 
 fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
     let render_defaults = RenderPolicy::default();
-    let event_loop_defaults = EventLoopPolicy::default();
     let cache_defaults = CachePolicy::default();
     let view_defaults = ViewPolicy::default();
     let watch_defaults = WatchPolicy::default();
@@ -189,36 +188,6 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
         .render
         .worker_threads
         .unwrap_or(render_defaults.worker_threads)
-        .max(1);
-    let input_poll_timeout_idle_ms = options
-        .render
-        .input_poll_timeout_idle_ms
-        .unwrap_or(event_loop_defaults.input_poll_timeout_idle.as_millis() as u64)
-        .max(1);
-    let input_poll_timeout_busy_ms = options
-        .render
-        .input_poll_timeout_busy_ms
-        .unwrap_or(event_loop_defaults.input_poll_timeout_busy.as_millis() as u64)
-        .max(1);
-    let prefetch_pause_ms = options
-        .render
-        .prefetch_pause_ms
-        .unwrap_or(event_loop_defaults.prefetch_pause_after_input.as_millis() as u64)
-        .max(1);
-    let prefetch_tick_ms = options
-        .render
-        .prefetch_tick_ms
-        .unwrap_or(event_loop_defaults.prefetch_tick_interval.as_millis() as u64)
-        .max(1);
-    let pending_redraw_interval_ms = options
-        .render
-        .pending_redraw_interval_ms
-        .unwrap_or(event_loop_defaults.pending_redraw_interval.as_millis() as u64)
-        .max(1);
-    let prefetch_dispatch_budget_per_tick = options
-        .render
-        .prefetch_dispatch_budget_per_tick
-        .unwrap_or(event_loop_defaults.prefetch_dispatch_budget_per_tick)
         .max(1);
     let mut max_render_scale = options
         .render
@@ -277,14 +246,7 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
                 .spread_cover
                 .unwrap_or(view_defaults.spread_cover),
         },
-        event_loop: EventLoopPolicy {
-            input_poll_timeout_idle: Duration::from_millis(input_poll_timeout_idle_ms),
-            input_poll_timeout_busy: Duration::from_millis(input_poll_timeout_busy_ms),
-            prefetch_pause_after_input: Duration::from_millis(prefetch_pause_ms),
-            prefetch_tick_interval: Duration::from_millis(prefetch_tick_ms),
-            pending_redraw_interval: Duration::from_millis(pending_redraw_interval_ms),
-            prefetch_dispatch_budget_per_tick,
-        },
+        event_loop: EventLoopPolicy::default(),
         cache: CachePolicy {
             l1_memory_budget_mb: options
                 .cache
@@ -470,12 +432,6 @@ mod tests {
             render: RenderOptions {
                 graphics_protocol: None,
                 worker_threads: Some(0),
-                input_poll_timeout_idle_ms: Some(0),
-                input_poll_timeout_busy_ms: Some(0),
-                prefetch_pause_ms: Some(0),
-                prefetch_tick_ms: Some(0),
-                pending_redraw_interval_ms: Some(0),
-                prefetch_dispatch_budget_per_tick: Some(0),
                 max_render_scale: Some(0.5),
             },
             view: ViewOptions {
@@ -498,27 +454,7 @@ mod tests {
             .expect("options should resolve");
 
         assert_eq!(resolved.render.worker_threads, 1);
-        assert_eq!(
-            resolved.event_loop.input_poll_timeout_idle,
-            Duration::from_millis(1)
-        );
-        assert_eq!(
-            resolved.event_loop.input_poll_timeout_busy,
-            Duration::from_millis(1)
-        );
-        assert_eq!(
-            resolved.event_loop.prefetch_pause_after_input,
-            Duration::from_millis(1)
-        );
-        assert_eq!(
-            resolved.event_loop.prefetch_tick_interval,
-            Duration::from_millis(1)
-        );
-        assert_eq!(
-            resolved.event_loop.pending_redraw_interval,
-            Duration::from_millis(1)
-        );
-        assert_eq!(resolved.event_loop.prefetch_dispatch_budget_per_tick, 1);
+        assert_eq!(resolved.event_loop, super::EventLoopPolicy::default());
         assert_eq!(resolved.render.max_render_scale, 2.5);
         assert_eq!(resolved.render.graphics_protocol, None);
         assert_eq!(resolved.view.initial_page_index, 0);

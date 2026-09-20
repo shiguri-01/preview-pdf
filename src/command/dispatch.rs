@@ -126,7 +126,6 @@ pub fn dispatch_with_view_policy(
         &dispatched_command,
         outcome,
     );
-    emitted_events.extend(effects.events);
     emitted_events.push(AppEvent::CommandExecuted {
         id: command_id,
         outcome,

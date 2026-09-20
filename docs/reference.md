@@ -67,8 +67,8 @@ Owned by:
 ## Commands
 
 Orientation:
-- Commands have five review-relevant concerns: stable ids and argument parsing,
-  role, source-aware invocation policy, target requirement, and dispatch
+- Commands have four review-relevant concerns: stable ids and argument parsing,
+  role and source-aware invocation policy, target requirement, and dispatch
   effects. The command catalog ties identity and routing concerns together;
   feature behavior stays in handlers, active targets, and app state.
 
@@ -80,12 +80,12 @@ Contract:
 - Typed commands must have matching registry metadata.
 - Command roles distinguish user intent commands, surface controls, and
   internal effects.
-- Public exposure, binding invocation, internal follow-ups, target
-  requirements, and runtime enablement are separate policy concerns. Do not
-  collapse them into one visibility check.
+- User, binding-only, and internal invocation policies determine how commands
+  may be invoked. Target requirements and runtime enablement remain separate
+  policy concerns; do not collapse them into one visibility check.
 - Command-palette listing, help display, typed command submission, and dispatch
-  use command policy functions to decide how exposure, invocation policy,
-  target, and `enabled_when` apply to that surface.
+  use command policy functions to decide how invocation policy, target, and
+  `enabled_when` apply to that surface.
 - Typed command submission is separate from listing: a known typed command is
   parsed and then validated by dispatch policy, so "not listed" does not mean
   "unknown".
@@ -96,8 +96,8 @@ Contract:
   palette-kind condition is true only when a palette is open and its active
   kind matches; a closed palette does not match any kind.
 - Command handlers return `CommandExecution`: an `Applied` or `Noop` outcome
-  plus `CommandEffects` for notice changes, explicit app events, palette
-  requests, input-history records, follow-up command requests, and lifecycle
+  plus `CommandEffects` for notice changes, palette requests, input-history
+  records, follow-up command requests, and lifecycle
   requests. Handlers may mutate their owned feature state through the execution
   context, but they must not directly push runtime queues or record input
   history.

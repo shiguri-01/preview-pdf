@@ -10,12 +10,12 @@ use hayro::vello_cpu::color::palette::css::WHITE;
 use hayro::vello_cpu::{Pixmap, color::PremulRgba8};
 use hayro::{RenderCache, RenderSettings, render};
 
-use crate::backend::{OutlineNode, RgbaFrame, TextPage};
+use crate::backend::{OutlineNode, PdfBackend, PdfRenderContext, RgbaFrame, TextPage};
 use crate::error::{AppError, AppResult};
 
-use super::HayroPdfBackend;
 use super::outline::extract_outline_nodes;
 use super::text::extract_text_page_with_device;
+use super::{HayroPdfBackend, HayroRenderContext};
 
 impl HayroPdfBackend {
     pub fn open(path: impl AsRef<Path>) -> AppResult<Self> {
@@ -51,37 +51,6 @@ impl HayroPdfBackend {
             doc_id,
             pdf,
         })
-    }
-
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn doc_id(&self) -> u64 {
-        self.doc_id
-    }
-
-    pub fn page_count(&self) -> usize {
-        self.pdf.pages().len()
-    }
-
-    pub fn page_render_dimensions(&self, page: usize) -> AppResult<(f32, f32)> {
-        if page >= self.page_count() {
-            return Err(AppError::invalid_argument("page index is out of range"));
-        }
-
-        let page_ref = self
-            .pdf
-            .pages()
-            .get(page)
-            .ok_or(AppError::invalid_argument("page index is out of range"))?;
-
-        Ok(page_ref.render_dimensions())
-    }
-
-    pub fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
-        let render_cache = RenderCache::new();
-        self.render_page_with_cache(page, scale, &render_cache)
     }
 
     pub(super) fn render_page_with_cache<'a>(
@@ -125,23 +94,60 @@ impl HayroPdfBackend {
             pixels: pixel_buffer_from_pixmap(pixmap).into(),
         })
     }
+}
 
-    pub fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
-        if page >= self.page_count() {
-            return Err(AppError::invalid_argument("page index is out of range"));
-        }
+impl PdfBackend for HayroPdfBackend {
+    fn path(&self) -> &Path {
+        &self.path
+    }
 
+    fn doc_id(&self) -> u64 {
+        self.doc_id
+    }
+
+    fn page_count(&self) -> usize {
+        self.pdf.pages().len()
+    }
+
+    fn page_dimensions(&self, page: usize) -> AppResult<(f32, f32)> {
         let page_ref = self
             .pdf
             .pages()
             .get(page)
             .ok_or(AppError::invalid_argument("page index is out of range"))?;
+        Ok(page_ref.render_dimensions())
+    }
 
+    fn render_page(&self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
+        let render_cache = RenderCache::new();
+        self.render_page_with_cache(page, scale, &render_cache)
+    }
+
+    fn render_context(&self) -> Box<dyn PdfRenderContext + '_> {
+        Box::new(HayroRenderContext {
+            backend: self,
+            render_cache: RenderCache::new(),
+        })
+    }
+
+    fn extract_text_page(&self, page: usize) -> AppResult<TextPage> {
+        let page_ref = self
+            .pdf
+            .pages()
+            .get(page)
+            .ok_or(AppError::invalid_argument("page index is out of range"))?;
         Ok(extract_text_page_with_device(page_ref))
     }
 
-    pub fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
+    fn extract_outline(&self) -> AppResult<Vec<OutlineNode>> {
         extract_outline_nodes(&self.pdf)
+    }
+}
+
+impl PdfRenderContext for HayroRenderContext<'_> {
+    fn render_page(&mut self, page: usize, scale: f32) -> AppResult<RgbaFrame> {
+        self.backend
+            .render_page_with_cache(page, scale, &self.render_cache)
     }
 }
 fn calculate_doc_id(path: &Path, bytes: &[u8]) -> u64 {

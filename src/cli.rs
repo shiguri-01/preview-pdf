@@ -93,11 +93,9 @@ fn parse_cli(cli: Cli) -> CliOptions {
                 } else {
                     None
                 },
-                ..WatchOptions::default()
             },
             render: RenderOptions {
                 graphics_protocol: cli.graphics_protocol,
-                ..RenderOptions::default()
             },
             ..AppOptions::default()
         },

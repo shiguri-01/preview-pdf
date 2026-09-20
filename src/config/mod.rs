@@ -8,8 +8,8 @@ pub use file::{
     load_options_from_explicit_path,
 };
 pub use options::{
-    AppOptions, CacheOptions, InputOptions, KeymapBinding, KeymapOptions, KeymapPreset, KeymapWhen,
-    RenderOptions, ViewOptions, WatchOptions,
+    AppOptions, KeymapBinding, KeymapOptions, KeymapPreset, KeymapWhen, RenderOptions, ViewOptions,
+    WatchOptions,
 };
 pub use policy::{
     AppOptionsResolver, CachePolicy, EventLoopPolicy, InputPolicy, RenderPolicy,

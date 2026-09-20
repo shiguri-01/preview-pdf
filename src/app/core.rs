@@ -183,95 +183,16 @@ impl App {
 mod tests {
     use std::time::Duration;
 
-    use super::{App, AppBuilder};
+    use super::App;
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
-    use crate::config::{AppOptions, CachePolicy};
-    use crate::config::{CacheOptions, InputOptions, RenderOptions, ViewOptions, WatchOptions};
-
-    #[test]
-    fn new_with_options_applies_l1_cache_limits_without_file_config() {
-        let options = AppOptions {
-            cache: CacheOptions {
-                l1_max_entries: Some(9),
-                l1_memory_budget_mb: Some(3),
-                ..CacheOptions::default()
-            },
-            ..AppOptions::default()
-        };
-
-        let app = App::new_with_options(options).expect("app init");
-
-        assert_eq!(app.render.runtime.l1_cache.max_entries(), 9);
-        assert_eq!(
-            app.render.runtime.l1_cache.memory_budget_bytes(),
-            3 * 1024 * 1024
-        );
-    }
-
-    #[test]
-    fn app_builder_applies_multiple_option_patches() {
-        let cache_options = AppOptions {
-            cache: CacheOptions {
-                l1_max_entries: Some(11),
-                ..CacheOptions::default()
-            },
-            ..AppOptions::default()
-        };
-        let render_options = AppOptions {
-            render: RenderOptions {
-                worker_threads: Some(2),
-                ..RenderOptions::default()
-            },
-            ..AppOptions::default()
-        };
-
-        let app = AppBuilder::new()
-            .merge_options(cache_options)
-            .merge_options(render_options)
-            .build()
-            .expect("app init");
-
-        assert_eq!(app.render.runtime.l1_cache.max_entries(), 11);
-        assert_eq!(app.render_policy.worker_threads, 2);
-    }
-
-    #[test]
-    fn app_builder_replace_options_discards_earlier_patches() {
-        let app = AppBuilder::new()
-            .merge_options(AppOptions {
-                cache: CacheOptions {
-                    l1_max_entries: Some(11),
-                    ..CacheOptions::default()
-                },
-                ..AppOptions::default()
-            })
-            .replace_options(AppOptions {
-                render: RenderOptions {
-                    worker_threads: Some(2),
-                    ..RenderOptions::default()
-                },
-                ..AppOptions::default()
-            })
-            .build()
-            .expect("app init");
-
-        assert_eq!(
-            app.render.runtime.l1_cache.max_entries(),
-            CachePolicy::default().l1_max_entries
-        );
-        assert_eq!(app.render_policy.worker_threads, 2);
-    }
+    use crate::config::AppOptions;
+    use crate::config::{RenderOptions, ViewOptions, WatchOptions};
 
     #[test]
     fn new_with_options_threads_runtime_policies_to_owners() {
         let options = AppOptions {
             render: RenderOptions {
                 graphics_protocol: None,
-                worker_threads: Some(5),
-                max_render_scale: Some(3.0),
-            },
-            input: InputOptions {
-                sequence_timeout_ms: Some(250),
             },
             view: ViewOptions {
                 initial_page: Some(3),
@@ -282,22 +203,20 @@ mod tests {
             },
             watch: WatchOptions {
                 enabled: Some(true),
-                settle_delay_ms: Some(375),
             },
             ..AppOptions::default()
         };
 
         let app = App::new_with_options(options).expect("app init");
 
-        assert_eq!(app.render_policy.worker_threads, 5);
-        assert_eq!(app.render_policy.max_render_scale, 3.0);
+        assert_eq!(app.render_policy, crate::config::RenderPolicy::default());
         assert_eq!(
             app.event_loop_policy,
             crate::config::EventLoopPolicy::default()
         );
         assert_eq!(
             app.interaction.sequences.timeout(),
-            Duration::from_millis(250)
+            Duration::from_millis(1000)
         );
         assert_eq!(app.state.current_page, 2);
         assert_eq!(app.state.zoom, 1.25);
@@ -305,6 +224,6 @@ mod tests {
         assert_eq!(app.state.spread_direction, SpreadDirection::Rtl);
         assert_eq!(app.state.spread_cover_policy, SpreadCoverPolicy::Cover);
         assert!(app.watch_policy.enabled);
-        assert_eq!(app.watch_policy.settle_delay, Duration::from_millis(375));
+        assert_eq!(app.watch_policy.settle_delay, Duration::from_millis(500));
     }
 }

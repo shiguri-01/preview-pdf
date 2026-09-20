@@ -184,23 +184,6 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
     let view_defaults = ViewPolicy::default();
     let watch_defaults = WatchPolicy::default();
 
-    let worker_threads = options
-        .render
-        .worker_threads
-        .unwrap_or(render_defaults.worker_threads)
-        .max(1);
-    let mut max_render_scale = options
-        .render
-        .max_render_scale
-        .unwrap_or(render_defaults.max_render_scale);
-    if !max_render_scale.is_finite() || max_render_scale < 1.0 {
-        max_render_scale = render_defaults.max_render_scale;
-    }
-    let sequence_timeout_ms = options
-        .input
-        .sequence_timeout_ms
-        .unwrap_or(DEFAULT_SEQUENCE_TIMEOUT.as_millis() as u64)
-        .max(1);
     let initial_page_index = options
         .view
         .initial_page
@@ -215,20 +198,14 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
         initial_zoom = view_defaults.initial_zoom;
     }
     initial_zoom = initial_zoom.clamp(ZOOM_MIN, ZOOM_MAX);
-    let watch_settle_delay_ms = options
-        .watch
-        .settle_delay_ms
-        .unwrap_or(watch_defaults.settle_delay.as_millis() as u64)
-        .max(1);
-
     ResolvedAppOptions {
         render: RenderPolicy {
             graphics_protocol: options
                 .render
                 .graphics_protocol
                 .or(render_defaults.graphics_protocol),
-            worker_threads,
-            max_render_scale,
+            worker_threads: render_defaults.worker_threads,
+            max_render_scale: render_defaults.max_render_scale,
         },
         view: ViewPolicy {
             initial_page_index,
@@ -247,31 +224,14 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
                 .unwrap_or(view_defaults.spread_cover),
         },
         event_loop: EventLoopPolicy::default(),
-        cache: CachePolicy {
-            l1_memory_budget_mb: options
-                .cache
-                .l1_memory_budget_mb
-                .unwrap_or(cache_defaults.l1_memory_budget_mb),
-            l2_memory_budget_mb: options
-                .cache
-                .l2_memory_budget_mb
-                .unwrap_or(cache_defaults.l2_memory_budget_mb),
-            l1_max_entries: options
-                .cache
-                .l1_max_entries
-                .unwrap_or(cache_defaults.l1_max_entries),
-            l2_max_entries: options
-                .cache
-                .l2_max_entries
-                .unwrap_or(cache_defaults.l2_max_entries),
-        },
+        cache: cache_defaults,
         input: InputPolicy {
-            sequence_timeout: Duration::from_millis(sequence_timeout_ms),
+            sequence_timeout: DEFAULT_SEQUENCE_TIMEOUT,
             sequence_registry: super::keymap::resolve_sequence_registry(&options.keymap),
         },
         watch: WatchPolicy {
             enabled: options.watch.enabled.unwrap_or(watch_defaults.enabled),
-            settle_delay: Duration::from_millis(watch_settle_delay_ms),
+            settle_delay: watch_defaults.settle_delay,
         },
     }
 }
@@ -283,7 +243,7 @@ mod tests {
     use crate::app::{PageLayoutMode, SpreadCoverPolicy, SpreadDirection};
     use crate::input::sequence::DEFAULT_SEQUENCE_TIMEOUT;
 
-    use crate::config::{AppOptions, CacheOptions, RenderOptions, ViewOptions, WatchOptions};
+    use crate::config::{AppOptions, RenderOptions, ViewOptions, WatchOptions};
     use crate::presenter::GraphicsProtocol;
 
     use super::AppOptionsResolver;
@@ -303,33 +263,23 @@ mod tests {
     }
 
     #[test]
-    fn absent_options_preserve_earlier_values_but_explicit_zero_false_and_auto_override() {
+    fn option_layers_preserve_supported_values_and_apply_later_overrides() {
         let resolved = AppOptionsResolver::new()
             .apply_options(AppOptions {
                 render: RenderOptions {
                     graphics_protocol: Some(GraphicsProtocol::Kitty),
-                    worker_threads: Some(7),
-                    ..RenderOptions::default()
-                },
-                cache: CacheOptions {
-                    l1_max_entries: Some(42),
-                    ..CacheOptions::default()
                 },
                 watch: WatchOptions {
                     enabled: Some(true),
-                    settle_delay_ms: Some(300),
                 },
                 ..AppOptions::default()
             })
             .apply_options(AppOptions {
                 render: RenderOptions {
                     graphics_protocol: Some(GraphicsProtocol::Auto),
-                    worker_threads: Some(4),
-                    ..RenderOptions::default()
                 },
                 watch: WatchOptions {
                     enabled: Some(false),
-                    settle_delay_ms: Some(0),
                 },
                 ..AppOptions::default()
             })
@@ -341,33 +291,8 @@ mod tests {
             resolved.render.graphics_protocol,
             Some(GraphicsProtocol::Auto)
         );
-        assert_eq!(resolved.render.worker_threads, 4);
-        assert_eq!(resolved.cache.l1_max_entries, 42);
         assert!(!resolved.watch.enabled);
-        assert_eq!(resolved.watch.settle_delay, Duration::from_millis(1));
-    }
-
-    #[test]
-    fn non_finite_values_reach_policy_sanitization() {
-        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let resolved = AppOptionsResolver::new()
-                .apply_options(AppOptions {
-                    render: RenderOptions {
-                        max_render_scale: Some(value),
-                        ..RenderOptions::default()
-                    },
-                    view: ViewOptions {
-                        initial_zoom: Some(value),
-                        ..ViewOptions::default()
-                    },
-                    ..AppOptions::default()
-                })
-                .resolve()
-                .expect("non-finite options should resolve before sanitization");
-
-            assert_eq!(resolved.render.max_render_scale, 2.5);
-            assert_eq!(resolved.view.initial_zoom, 1.0);
-        }
+        assert_eq!(resolved.watch.settle_delay, Duration::from_millis(500));
     }
 
     #[test]
@@ -431,8 +356,6 @@ mod tests {
         let options = AppOptions {
             render: RenderOptions {
                 graphics_protocol: None,
-                worker_threads: Some(0),
-                max_render_scale: Some(0.5),
             },
             view: ViewOptions {
                 initial_page: Some(0),
@@ -443,7 +366,6 @@ mod tests {
             },
             watch: WatchOptions {
                 enabled: Some(true),
-                settle_delay_ms: Some(0),
             },
             ..AppOptions::default()
         };
@@ -453,7 +375,7 @@ mod tests {
             .resolve()
             .expect("options should resolve");
 
-        assert_eq!(resolved.render.worker_threads, 1);
+        assert_eq!(resolved.render.worker_threads, 3);
         assert_eq!(resolved.event_loop, super::EventLoopPolicy::default());
         assert_eq!(resolved.render.max_render_scale, 2.5);
         assert_eq!(resolved.render.graphics_protocol, None);
@@ -463,6 +385,6 @@ mod tests {
         assert_eq!(resolved.view.spread_direction, SpreadDirection::Rtl);
         assert_eq!(resolved.view.spread_cover, SpreadCoverPolicy::Cover);
         assert!(resolved.watch.enabled);
-        assert_eq!(resolved.watch.settle_delay, Duration::from_millis(1));
+        assert_eq!(resolved.watch.settle_delay, Duration::from_millis(500));
     }
 }

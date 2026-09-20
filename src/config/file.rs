@@ -7,8 +7,7 @@ use serde::Deserialize;
 use crate::error::{AppError, AppResult};
 
 use super::options::{
-    AppOptions, CacheOptions, InputOptions, KeymapOptions, KeymapPreset, RenderOptions,
-    ViewOptions, WatchOptions,
+    AppOptions, KeymapOptions, KeymapPreset, RenderOptions, ViewOptions, WatchOptions,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,9 +42,7 @@ pub fn load_options_from_explicit_path(path: impl AsRef<Path>) -> AppResult<AppO
 #[serde(default)]
 struct RawConfig {
     render: RenderOptions,
-    cache: CacheOptions,
     view: ViewOptions,
-    input: InputOptions,
     keymap_preset: Option<KeymapPreset>,
     keymap: Option<Vec<RawKeymapEntry>>,
     watch: WatchOptions,
@@ -69,9 +66,7 @@ impl RawConfig {
     fn into_options(self) -> AppResult<AppOptions> {
         Ok(AppOptions {
             render: self.render,
-            cache: self.cache,
             view: self.view,
-            input: self.input,
             keymap: parse_keymap_options(self.keymap_preset, self.keymap)?,
             watch: self.watch,
         })
@@ -633,22 +628,20 @@ mod tests {
         fs::write(
             &path,
             r#"
-            [cache]
-            l1_max_entries = 42
+            [render]
+            graphics_protocol = "auto"
             "#,
         )
         .expect("config file should be written");
 
         let options = load_options_from_explicit_path(&path).expect("options should parse");
-        assert_eq!(options.cache.l1_max_entries, Some(42));
-        assert_eq!(options.cache.l1_memory_budget_mb, None);
-        assert_eq!(options.render.worker_threads, None);
-        assert_eq!(options.render.max_render_scale, None);
+        assert_eq!(
+            options.render.graphics_protocol,
+            Some(GraphicsProtocol::Auto)
+        );
         assert_eq!(options.view.initial_page, None);
-        assert_eq!(options.input.sequence_timeout_ms, None);
         assert!(options.keymap.bindings.is_empty());
         assert_eq!(options.watch.enabled, None);
-        assert_eq!(options.render.graphics_protocol, None);
 
         fs::remove_file(&path).expect("config file should be removed");
     }
@@ -730,12 +723,8 @@ mod tests {
             spread_direction = "rtl"
             spread_cover = "cover"
 
-            [input]
-            sequence_timeout_ms = 750
-
             [watch]
             enabled = true
-            settle_delay_ms = 200
             "#,
         )
         .expect("config file should be written");
@@ -746,9 +735,7 @@ mod tests {
         assert_eq!(options.view.initial_layout, Some(PageLayoutMode::Spread));
         assert_eq!(options.view.spread_direction, Some(SpreadDirection::Rtl));
         assert_eq!(options.view.spread_cover, Some(SpreadCoverPolicy::Cover));
-        assert_eq!(options.input.sequence_timeout_ms, Some(750));
         assert_eq!(options.watch.enabled, Some(true));
-        assert_eq!(options.watch.settle_delay_ms, Some(200));
 
         fs::remove_file(&path).expect("config file should be removed");
     }

@@ -114,13 +114,11 @@ impl SearchPageCache {
         text_page: Arc<TextPage>,
     ) -> bool {
         let estimated_bytes = estimate_text_page_bytes(&text_page);
-        self.pages
-            .try_insert_without_eviction(
-                SearchPageCacheKey { doc_id, page },
-                text_page,
-                estimated_bytes,
-            )
-            .inserted
+        self.pages.try_insert_without_eviction(
+            SearchPageCacheKey { doc_id, page },
+            text_page,
+            estimated_bytes,
+        )
     }
 
     #[cfg(test)]

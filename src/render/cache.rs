@@ -63,12 +63,10 @@ impl RenderedPageCache {
         }
         self.entries
             .insert(key, frame, frame_bytes, allow_single_oversize)
-            .inserted
     }
 
     pub fn remove_document(&mut self, doc_id: u64) {
-        let _ = self
-            .entries
+        self.entries
             .remove_where(|key, _frame| key.doc_id == doc_id);
     }
 

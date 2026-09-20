@@ -18,30 +18,6 @@ impl CacheLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RemovedEntry<K, V> {
-    pub(crate) key: K,
-    pub(crate) value: V,
-    pub(crate) cost_bytes: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct InsertOutcome<K, V> {
-    pub(crate) inserted: bool,
-    pub(crate) replaced: Option<RemovedEntry<K, V>>,
-    pub(crate) evicted: Vec<RemovedEntry<K, V>>,
-}
-
-impl<K, V> InsertOutcome<K, V> {
-    fn rejected() -> Self {
-        Self {
-            inserted: false,
-            replaced: None,
-            evicted: Vec::new(),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 struct CacheEntry<V> {
     value: V,
@@ -107,7 +83,7 @@ where
         value: V,
         cost_bytes: usize,
         allow_single_oversize: bool,
-    ) -> InsertOutcome<K, V> {
+    ) -> bool {
         self.insert_protected(key, value, cost_bytes, allow_single_oversize, &[])
     }
 
@@ -118,19 +94,18 @@ where
         cost_bytes: usize,
         allow_single_oversize: bool,
         protected: &[K],
-    ) -> InsertOutcome<K, V> {
+    ) -> bool {
         let cost_bytes = cost_bytes.max(1);
         if cost_bytes > self.limits.memory_budget_bytes && !allow_single_oversize {
-            return InsertOutcome::rejected();
+            return false;
         }
         if !protected.is_empty()
             && !self.can_admit_with_protected(&key, cost_bytes, allow_single_oversize, protected)
         {
-            return InsertOutcome::rejected();
+            return false;
         }
-        let replaced = self.pop_entry(&key);
+        self.remove(&key);
         self.memory_bytes = self.memory_bytes.saturating_add(cost_bytes);
-        let mut evicted = Vec::new();
         let _ = self
             .entries
             .push(key.clone(), CacheEntry { value, cost_bytes });
@@ -139,16 +114,11 @@ where
             cost_bytes > self.limits.memory_budget_bytes && allow_single_oversize;
 
         if oversize_admitted {
-            evicted.extend(self.evict_unprotected_except(&key, protected));
+            self.evict_unprotected_except(&key, protected);
         } else {
-            evicted.extend(self.evict_while_needed(protected));
+            self.evict_while_needed(protected);
         }
-
-        InsertOutcome {
-            inserted: true,
-            replaced,
-            evicted,
-        }
+        true
     }
 
     pub(crate) fn try_insert_without_eviction(
@@ -156,47 +126,41 @@ where
         key: K,
         value: V,
         cost_bytes: usize,
-    ) -> InsertOutcome<K, V> {
+    ) -> bool {
         let cost_bytes = cost_bytes.max(1);
         if cost_bytes > self.limits.memory_budget_bytes
             || self.eviction_required_for_insert(&key, cost_bytes)
         {
-            return InsertOutcome::rejected();
+            return false;
         }
         self.insert(key, value, cost_bytes, false)
     }
 
-    pub(crate) fn remove(&mut self, key: &K) -> Option<RemovedEntry<K, V>> {
+    pub(crate) fn remove(&mut self, key: &K) -> bool {
         self.pop_entry(key)
     }
 
-    pub(crate) fn remove_where(
-        &mut self,
-        mut should_remove: impl FnMut(&K, &V) -> bool,
-    ) -> Vec<RemovedEntry<K, V>> {
+    pub(crate) fn remove_where(&mut self, mut should_remove: impl FnMut(&K, &V) -> bool) {
         let keys = self
             .entries
             .iter()
             .filter_map(|(key, entry)| should_remove(key, &entry.value).then_some(key.clone()))
             .collect::<Vec<_>>();
-        keys.into_iter()
-            .filter_map(|key| self.remove(&key))
-            .collect()
+        for key in keys {
+            self.remove(&key);
+        }
     }
 
-    pub(crate) fn clear(&mut self) -> Vec<RemovedEntry<K, V>> {
-        let keys = self
-            .entries
-            .iter()
-            .map(|(key, _)| key.clone())
-            .collect::<Vec<_>>();
-        let removed = keys
-            .into_iter()
-            .filter_map(|key| self.pop_entry(&key))
-            .collect::<Vec<_>>();
+    pub(crate) fn clear(&mut self) {
         self.entries.clear();
         self.memory_bytes = 0;
-        removed
+    }
+
+    pub(crate) fn any(&self, predicate: impl FnMut(&V) -> bool) -> bool {
+        self.entries
+            .iter()
+            .map(|(_, entry)| &entry.value)
+            .any(predicate)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -290,24 +254,17 @@ where
                 || (cost_bytes > self.limits.memory_budget_bytes && allow_single_oversize))
     }
 
-    fn evict_while_needed(&mut self, protected: &[K]) -> Vec<RemovedEntry<K, V>> {
-        let mut removed = Vec::new();
+    fn evict_while_needed(&mut self, protected: &[K]) {
         while self.entries.len() > self.limits.max_entries
             || self.memory_bytes > self.limits.memory_budget_bytes
         {
-            let Some(entry) = self.pop_lru_unprotected(protected) else {
+            if !self.pop_lru_unprotected(protected) {
                 break;
-            };
-            removed.push(entry);
+            }
         }
-        removed
     }
 
-    fn evict_unprotected_except(
-        &mut self,
-        inserted_key: &K,
-        protected: &[K],
-    ) -> Vec<RemovedEntry<K, V>> {
+    fn evict_unprotected_except(&mut self, inserted_key: &K, protected: &[K]) {
         let keys = self
             .entries
             .iter()
@@ -315,55 +272,43 @@ where
                 (key != inserted_key && !protected.contains(key)).then_some(key.clone())
             })
             .collect::<Vec<_>>();
-        let mut removed = Vec::new();
         for key in keys {
-            if let Some(entry) = self.pop_entry(&key) {
-                removed.push(entry);
-            }
+            self.pop_entry(&key);
         }
-        removed
     }
 
-    fn pop_lru_unprotected(&mut self, protected: &[K]) -> Option<RemovedEntry<K, V>> {
+    fn pop_lru_unprotected(&mut self, protected: &[K]) -> bool {
         let mut protected_entries = Vec::new();
         loop {
             match self.entries.pop_lru() {
                 Some((key, entry)) if protected.contains(&key) => {
                     protected_entries.push((key, entry));
                 }
-                Some((key, entry)) => {
+                Some((_key, entry)) => {
                     for (protected_key, protected_entry) in protected_entries.into_iter().rev() {
                         let _ = self.entries.push(protected_key.clone(), protected_entry);
                         let _ = self.entries.demote(&protected_key);
                     }
-                    let removed = self.removed_entry(key, entry);
-                    self.memory_bytes = self.memory_bytes.saturating_sub(removed.cost_bytes);
-                    return Some(removed);
+                    self.memory_bytes = self.memory_bytes.saturating_sub(entry.cost_bytes);
+                    return true;
                 }
                 None => {
                     for (protected_key, protected_entry) in protected_entries.into_iter().rev() {
                         let _ = self.entries.push(protected_key.clone(), protected_entry);
                         let _ = self.entries.demote(&protected_key);
                     }
-                    return None;
+                    return false;
                 }
             }
         }
     }
 
-    fn pop_entry(&mut self, key: &K) -> Option<RemovedEntry<K, V>> {
-        let entry = self.entries.pop(key)?;
-        let removed = self.removed_entry(key.clone(), entry);
-        self.memory_bytes = self.memory_bytes.saturating_sub(removed.cost_bytes);
-        Some(removed)
-    }
-
-    fn removed_entry(&self, key: K, entry: CacheEntry<V>) -> RemovedEntry<K, V> {
-        RemovedEntry {
-            key,
-            value: entry.value,
-            cost_bytes: entry.cost_bytes,
-        }
+    fn pop_entry(&mut self, key: &K) -> bool {
+        let Some(entry) = self.entries.pop(key) else {
+            return false;
+        };
+        self.memory_bytes = self.memory_bytes.saturating_sub(entry.cost_bytes);
+        true
     }
 }
 
@@ -405,17 +350,14 @@ mod tests {
     }
 
     #[test]
-    fn insert_evicts_lru_over_capacity_and_returns_removed_entry() {
+    fn insert_evicts_lru_over_capacity() {
         let mut cache = cache(2, 100);
         let _ = cache.insert(1, "one", 1, false);
         let _ = cache.insert(2, "two", 1, false);
 
-        let outcome = cache.insert(3, "three", 1, false);
+        assert!(cache.insert(3, "three", 1, false));
 
-        assert!(outcome.inserted);
-        assert_eq!(outcome.evicted.len(), 1);
-        assert_eq!(outcome.evicted[0].key, 1);
-        assert_eq!(outcome.evicted[0].value, "one");
+        assert_eq!(cache.peek(&1), None);
         assert_eq!(cache.memory_bytes(), 2);
     }
 
@@ -425,10 +367,9 @@ mod tests {
         let _ = cache.insert(1, "one", 4, false);
         let _ = cache.insert(2, "two", 4, false);
 
-        let outcome = cache.insert(3, "three", 6, false);
+        assert!(cache.insert(3, "three", 6, false));
 
-        assert_eq!(outcome.evicted.len(), 1);
-        assert_eq!(outcome.evicted[0].key, 1);
+        assert_eq!(cache.peek(&1), None);
         assert_eq!(cache.memory_bytes(), 10);
     }
 
@@ -437,15 +378,8 @@ mod tests {
         let mut cache = cache(4, 100);
         let _ = cache.insert(1, "one", 4, false);
 
-        let outcome = cache.insert(1, "uno", 7, false);
+        assert!(cache.insert(1, "uno", 7, false));
 
-        assert_eq!(
-            outcome
-                .replaced
-                .expect("old value should be returned")
-                .value,
-            "one"
-        );
         assert_eq!(cache.len(), 1);
         assert_eq!(cache.memory_bytes(), 7);
         assert_eq!(cache.peek(&1), Some(&"uno"));
@@ -456,9 +390,9 @@ mod tests {
         let mut cache = cache(4, 5);
         let _ = cache.insert(1, "one", 4, false);
 
-        let outcome = cache.insert(2, "two", 6, false);
+        let inserted = cache.insert(2, "two", 6, false);
 
-        assert!(!outcome.inserted);
+        assert!(!inserted);
         assert_eq!(cache.peek(&1), Some(&"one"));
         assert_eq!(cache.peek(&2), None);
         assert_eq!(cache.memory_bytes(), 4);
@@ -469,10 +403,9 @@ mod tests {
         let mut cache = cache(4, 5);
         let _ = cache.insert(1, "one", 4, false);
 
-        let outcome = cache.insert(2, "two", 6, true);
+        let inserted = cache.insert(2, "two", 6, true);
 
-        assert!(outcome.inserted);
-        assert_eq!(outcome.evicted[0].key, 1);
+        assert!(inserted);
         assert_eq!(cache.peek(&1), None);
         assert_eq!(cache.peek(&2), Some(&"two"));
         assert_eq!(cache.memory_bytes(), 6);
@@ -485,9 +418,9 @@ mod tests {
         let _ = cache.insert(1, "one", 1, false);
         let _ = cache.insert(2, "two", 1, false);
 
-        let outcome = cache.insert_protected(3, "three", 1, false, &protected);
+        let inserted = cache.insert_protected(3, "three", 1, false, &protected);
 
-        assert!(outcome.inserted);
+        assert!(inserted);
         assert_eq!(cache.peek(&1), Some(&"one"));
         assert_eq!(cache.peek(&2), None);
         assert_eq!(cache.peek(&3), Some(&"three"));
@@ -500,9 +433,9 @@ mod tests {
         let _ = cache.insert(1, "one", 1, false);
         let _ = cache.insert(2, "two", 1, false);
 
-        let outcome = cache.insert_protected(3, "three", 1, false, &protected);
+        let inserted = cache.insert_protected(3, "three", 1, false, &protected);
 
-        assert!(!outcome.inserted);
+        assert!(!inserted);
         assert_eq!(cache.peek(&1), Some(&"one"));
         assert_eq!(cache.peek(&2), Some(&"two"));
         assert_eq!(cache.peek(&3), None);
@@ -514,20 +447,19 @@ mod tests {
         let mut cache = cache(1, 5);
         let _ = cache.insert(1, "one", 3, false);
 
-        assert!(!cache.try_insert_without_eviction(2, "two", 1).inserted);
-        assert!(!cache.try_insert_without_eviction(1, "uno", 6).inserted);
+        assert!(!cache.try_insert_without_eviction(2, "two", 1));
+        assert!(!cache.try_insert_without_eviction(1, "uno", 6));
         assert_eq!(cache.peek(&1), Some(&"one"));
     }
 
     #[test]
-    fn clear_returns_removed_entries_and_resets_memory() {
+    fn clear_resets_entries_and_memory() {
         let mut cache = cache(2, 100);
         let _ = cache.insert(1, "one", 3, false);
         let _ = cache.insert(2, "two", 4, false);
 
-        let removed = cache.clear();
+        cache.clear();
 
-        assert_eq!(removed.len(), 2);
         assert_eq!(cache.len(), 0);
         assert_eq!(cache.memory_bytes(), 0);
     }

@@ -1,5 +1,5 @@
 use crate::backend::RgbaFrame;
-use crate::cache::{BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy};
+use crate::cache::{BudgetedLruCache, CacheLimits};
 
 const DEFAULT_MEMORY_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES: usize = 128;
@@ -62,19 +62,7 @@ impl RenderedPageCache {
             return false;
         }
         self.entries
-            .insert(
-                key,
-                frame,
-                frame_bytes,
-                InsertPolicy {
-                    oversize: if allow_single_oversize {
-                        OversizePolicy::Admit
-                    } else {
-                        OversizePolicy::Reject
-                    },
-                    eviction: EvictionPolicy::Normal,
-                },
-            )
+            .insert(key, frame, frame_bytes, allow_single_oversize)
             .inserted
     }
 

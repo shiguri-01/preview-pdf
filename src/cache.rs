@@ -18,32 +18,6 @@ impl CacheLimits {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OversizePolicy {
-    Reject,
-    Admit,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum EvictionPolicy<'a, K> {
-    Normal,
-    Protect(&'a [K]),
-    RejectIfEvictionRequired,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct InsertPolicy<'a, K> {
-    pub(crate) oversize: OversizePolicy,
-    pub(crate) eviction: EvictionPolicy<'a, K>,
-}
-
-impl<K> InsertPolicy<'_, K> {
-    pub(crate) const NORMAL: Self = Self {
-        oversize: OversizePolicy::Reject,
-        eviction: EvictionPolicy::Normal,
-    };
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RemovedEntry<K, V> {
     pub(crate) key: K,
@@ -132,25 +106,25 @@ where
         key: K,
         value: V,
         cost_bytes: usize,
-        policy: InsertPolicy<'_, K>,
+        allow_single_oversize: bool,
+    ) -> InsertOutcome<K, V> {
+        self.insert_protected(key, value, cost_bytes, allow_single_oversize, &[])
+    }
+
+    pub(crate) fn insert_protected(
+        &mut self,
+        key: K,
+        value: V,
+        cost_bytes: usize,
+        allow_single_oversize: bool,
+        protected: &[K],
     ) -> InsertOutcome<K, V> {
         let cost_bytes = cost_bytes.max(1);
-        if cost_bytes > self.limits.memory_budget_bytes && policy.oversize == OversizePolicy::Reject
-        {
+        if cost_bytes > self.limits.memory_budget_bytes && !allow_single_oversize {
             return InsertOutcome::rejected();
         }
-        if self.eviction_required_for_insert(&key, cost_bytes, policy.oversize)
-            && policy.eviction == EvictionPolicy::RejectIfEvictionRequired
-        {
-            return InsertOutcome::rejected();
-        }
-
-        let protected = match policy.eviction {
-            EvictionPolicy::Protect(keys) => keys,
-            EvictionPolicy::Normal | EvictionPolicy::RejectIfEvictionRequired => &[],
-        };
-        if matches!(policy.eviction, EvictionPolicy::Protect(_))
-            && !self.can_admit_with_protected(&key, cost_bytes, policy.oversize, protected)
+        if !protected.is_empty()
+            && !self.can_admit_with_protected(&key, cost_bytes, allow_single_oversize, protected)
         {
             return InsertOutcome::rejected();
         }
@@ -161,13 +135,12 @@ where
             .entries
             .push(key.clone(), CacheEntry { value, cost_bytes });
 
-        let oversize_admitted = cost_bytes > self.limits.memory_budget_bytes
-            && policy.oversize == OversizePolicy::Admit;
-        let eviction_forbidden = policy.eviction == EvictionPolicy::RejectIfEvictionRequired;
+        let oversize_admitted =
+            cost_bytes > self.limits.memory_budget_bytes && allow_single_oversize;
 
-        if oversize_admitted && !eviction_forbidden {
+        if oversize_admitted {
             evicted.extend(self.evict_unprotected_except(&key, protected));
-        } else if !oversize_admitted || !eviction_forbidden {
+        } else {
             evicted.extend(self.evict_while_needed(protected));
         }
 
@@ -176,6 +149,21 @@ where
             replaced,
             evicted,
         }
+    }
+
+    pub(crate) fn try_insert_without_eviction(
+        &mut self,
+        key: K,
+        value: V,
+        cost_bytes: usize,
+    ) -> InsertOutcome<K, V> {
+        let cost_bytes = cost_bytes.max(1);
+        if cost_bytes > self.limits.memory_budget_bytes
+            || self.eviction_required_for_insert(&key, cost_bytes)
+        {
+            return InsertOutcome::rejected();
+        }
+        self.insert(key, value, cost_bytes, false)
     }
 
     pub(crate) fn remove(&mut self, key: &K) -> Option<RemovedEntry<K, V>> {
@@ -235,12 +223,7 @@ where
         self.hits as f64 / lookups as f64
     }
 
-    fn eviction_required_for_insert(
-        &self,
-        key: &K,
-        cost_bytes: usize,
-        oversize: OversizePolicy,
-    ) -> bool {
+    fn eviction_required_for_insert(&self, key: &K, cost_bytes: usize) -> bool {
         let replaced_bytes = self.entries.peek(key).map_or(0, |entry| entry.cost_bytes);
         let projected_len = if self.entries.peek(key).is_some() {
             self.entries.len()
@@ -252,16 +235,14 @@ where
             .saturating_sub(replaced_bytes)
             .saturating_add(cost_bytes);
         projected_len > self.limits.max_entries
-            || (projected_memory > self.limits.memory_budget_bytes
-                && !(cost_bytes > self.limits.memory_budget_bytes
-                    && oversize == OversizePolicy::Admit))
+            || projected_memory > self.limits.memory_budget_bytes
     }
 
     fn can_admit_with_protected(
         &self,
         key: &K,
         cost_bytes: usize,
-        oversize: OversizePolicy,
+        allow_single_oversize: bool,
         protected: &[K],
     ) -> bool {
         let replaced_bytes = self.entries.peek(key).map_or(0, |entry| entry.cost_bytes);
@@ -275,7 +256,12 @@ where
             .saturating_sub(replaced_bytes)
             .saturating_add(cost_bytes);
         for (entry_key, entry) in self.entries.iter() {
-            if self.fits_limits(projected_len, projected_memory, cost_bytes, oversize) {
+            if self.fits_limits(
+                projected_len,
+                projected_memory,
+                cost_bytes,
+                allow_single_oversize,
+            ) {
                 return true;
             }
             if entry_key == key || protected.contains(entry_key) {
@@ -284,7 +270,12 @@ where
             projected_len = projected_len.saturating_sub(1);
             projected_memory = projected_memory.saturating_sub(entry.cost_bytes);
         }
-        self.fits_limits(projected_len, projected_memory, cost_bytes, oversize)
+        self.fits_limits(
+            projected_len,
+            projected_memory,
+            cost_bytes,
+            allow_single_oversize,
+        )
     }
 
     fn fits_limits(
@@ -292,12 +283,11 @@ where
         projected_len: usize,
         projected_memory: usize,
         cost_bytes: usize,
-        oversize: OversizePolicy,
+        allow_single_oversize: bool,
     ) -> bool {
         projected_len <= self.limits.max_entries
             && (projected_memory <= self.limits.memory_budget_bytes
-                || (cost_bytes > self.limits.memory_budget_bytes
-                    && oversize == OversizePolicy::Admit))
+                || (cost_bytes > self.limits.memory_budget_bytes && allow_single_oversize))
     }
 
     fn evict_while_needed(&mut self, protected: &[K]) -> Vec<RemovedEntry<K, V>> {
@@ -379,7 +369,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy};
+    use super::{BudgetedLruCache, CacheLimits};
 
     fn cache(max_entries: usize, memory_budget_bytes: usize) -> BudgetedLruCache<u8, &'static str> {
         BudgetedLruCache::new(CacheLimits::new(max_entries, memory_budget_bytes))
@@ -388,12 +378,12 @@ mod tests {
     #[test]
     fn get_tracks_hit_rate_and_promotes_lru_order() {
         let mut cache = cache(2, 100);
-        let _ = cache.insert(1, "one", 1, InsertPolicy::NORMAL);
-        let _ = cache.insert(2, "two", 1, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 1, false);
+        let _ = cache.insert(2, "two", 1, false);
 
         assert_eq!(cache.get(&1), Some(&"one"));
         assert_eq!(cache.get(&3), None);
-        let _ = cache.insert(3, "three", 1, InsertPolicy::NORMAL);
+        let _ = cache.insert(3, "three", 1, false);
 
         assert_eq!(cache.peek(&1), Some(&"one"));
         assert_eq!(cache.peek(&2), None);
@@ -403,11 +393,11 @@ mod tests {
     #[test]
     fn peek_does_not_track_hits_or_promote_lru_order() {
         let mut cache = cache(2, 100);
-        let _ = cache.insert(1, "one", 1, InsertPolicy::NORMAL);
-        let _ = cache.insert(2, "two", 1, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 1, false);
+        let _ = cache.insert(2, "two", 1, false);
 
         assert_eq!(cache.peek(&1), Some(&"one"));
-        let _ = cache.insert(3, "three", 1, InsertPolicy::NORMAL);
+        let _ = cache.insert(3, "three", 1, false);
 
         assert_eq!(cache.peek(&1), None);
         assert_eq!(cache.peek(&2), Some(&"two"));
@@ -417,10 +407,10 @@ mod tests {
     #[test]
     fn insert_evicts_lru_over_capacity_and_returns_removed_entry() {
         let mut cache = cache(2, 100);
-        let _ = cache.insert(1, "one", 1, InsertPolicy::NORMAL);
-        let _ = cache.insert(2, "two", 1, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 1, false);
+        let _ = cache.insert(2, "two", 1, false);
 
-        let outcome = cache.insert(3, "three", 1, InsertPolicy::NORMAL);
+        let outcome = cache.insert(3, "three", 1, false);
 
         assert!(outcome.inserted);
         assert_eq!(outcome.evicted.len(), 1);
@@ -432,10 +422,10 @@ mod tests {
     #[test]
     fn insert_evicts_until_memory_budget_is_satisfied() {
         let mut cache = cache(4, 10);
-        let _ = cache.insert(1, "one", 4, InsertPolicy::NORMAL);
-        let _ = cache.insert(2, "two", 4, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 4, false);
+        let _ = cache.insert(2, "two", 4, false);
 
-        let outcome = cache.insert(3, "three", 6, InsertPolicy::NORMAL);
+        let outcome = cache.insert(3, "three", 6, false);
 
         assert_eq!(outcome.evicted.len(), 1);
         assert_eq!(outcome.evicted[0].key, 1);
@@ -445,9 +435,9 @@ mod tests {
     #[test]
     fn reinserting_existing_key_replaces_cost_without_double_counting() {
         let mut cache = cache(4, 100);
-        let _ = cache.insert(1, "one", 4, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 4, false);
 
-        let outcome = cache.insert(1, "uno", 7, InsertPolicy::NORMAL);
+        let outcome = cache.insert(1, "uno", 7, false);
 
         assert_eq!(
             outcome
@@ -464,9 +454,9 @@ mod tests {
     #[test]
     fn oversize_reject_leaves_existing_entries_untouched() {
         let mut cache = cache(4, 5);
-        let _ = cache.insert(1, "one", 4, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 4, false);
 
-        let outcome = cache.insert(2, "two", 6, InsertPolicy::NORMAL);
+        let outcome = cache.insert(2, "two", 6, false);
 
         assert!(!outcome.inserted);
         assert_eq!(cache.peek(&1), Some(&"one"));
@@ -477,17 +467,9 @@ mod tests {
     #[test]
     fn oversize_admit_keeps_inserted_entry_and_evicts_unprotected_entries() {
         let mut cache = cache(4, 5);
-        let _ = cache.insert(1, "one", 4, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 4, false);
 
-        let outcome = cache.insert(
-            2,
-            "two",
-            6,
-            InsertPolicy {
-                oversize: OversizePolicy::Admit,
-                eviction: EvictionPolicy::Normal,
-            },
-        );
+        let outcome = cache.insert(2, "two", 6, true);
 
         assert!(outcome.inserted);
         assert_eq!(outcome.evicted[0].key, 1);
@@ -497,43 +479,13 @@ mod tests {
     }
 
     #[test]
-    fn oversize_admit_without_eviction_keeps_existing_entries() {
-        let mut cache = cache(4, 5);
-        let _ = cache.insert(1, "one", 4, InsertPolicy::NORMAL);
-
-        let outcome = cache.insert(
-            2,
-            "two",
-            6,
-            InsertPolicy {
-                oversize: OversizePolicy::Admit,
-                eviction: EvictionPolicy::RejectIfEvictionRequired,
-            },
-        );
-
-        assert!(outcome.inserted);
-        assert!(outcome.evicted.is_empty());
-        assert_eq!(cache.peek(&1), Some(&"one"));
-        assert_eq!(cache.peek(&2), Some(&"two"));
-        assert_eq!(cache.memory_bytes(), 10);
-    }
-
-    #[test]
     fn protected_keys_are_not_evicted_when_an_unprotected_candidate_exists() {
         let mut cache = cache(2, 100);
         let protected = [1];
-        let _ = cache.insert(1, "one", 1, InsertPolicy::NORMAL);
-        let _ = cache.insert(2, "two", 1, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 1, false);
+        let _ = cache.insert(2, "two", 1, false);
 
-        let outcome = cache.insert(
-            3,
-            "three",
-            1,
-            InsertPolicy {
-                oversize: OversizePolicy::Reject,
-                eviction: EvictionPolicy::Protect(&protected),
-            },
-        );
+        let outcome = cache.insert_protected(3, "three", 1, false, &protected);
 
         assert!(outcome.inserted);
         assert_eq!(cache.peek(&1), Some(&"one"));
@@ -545,18 +497,10 @@ mod tests {
     fn protected_insert_rejects_when_only_inserted_entry_could_be_evicted() {
         let mut cache = cache(2, 100);
         let protected = [1, 2];
-        let _ = cache.insert(1, "one", 1, InsertPolicy::NORMAL);
-        let _ = cache.insert(2, "two", 1, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 1, false);
+        let _ = cache.insert(2, "two", 1, false);
 
-        let outcome = cache.insert(
-            3,
-            "three",
-            1,
-            InsertPolicy {
-                oversize: OversizePolicy::Reject,
-                eviction: EvictionPolicy::Protect(&protected),
-            },
-        );
+        let outcome = cache.insert_protected(3, "three", 1, false, &protected);
 
         assert!(!outcome.inserted);
         assert_eq!(cache.peek(&1), Some(&"one"));
@@ -568,22 +512,18 @@ mod tests {
     #[test]
     fn reject_if_eviction_required_rejects_capacity_or_memory_eviction() {
         let mut cache = cache(1, 5);
-        let _ = cache.insert(1, "one", 3, InsertPolicy::NORMAL);
-        let policy = InsertPolicy {
-            oversize: OversizePolicy::Reject,
-            eviction: EvictionPolicy::RejectIfEvictionRequired,
-        };
+        let _ = cache.insert(1, "one", 3, false);
 
-        assert!(!cache.insert(2, "two", 1, policy).inserted);
-        assert!(!cache.insert(1, "uno", 6, policy).inserted);
+        assert!(!cache.try_insert_without_eviction(2, "two", 1).inserted);
+        assert!(!cache.try_insert_without_eviction(1, "uno", 6).inserted);
         assert_eq!(cache.peek(&1), Some(&"one"));
     }
 
     #[test]
     fn clear_returns_removed_entries_and_resets_memory() {
         let mut cache = cache(2, 100);
-        let _ = cache.insert(1, "one", 3, InsertPolicy::NORMAL);
-        let _ = cache.insert(2, "two", 4, InsertPolicy::NORMAL);
+        let _ = cache.insert(1, "one", 3, false);
+        let _ = cache.insert(2, "two", 4, false);
 
         let removed = cache.clear();
 

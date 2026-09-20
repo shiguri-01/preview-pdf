@@ -1,9 +1,7 @@
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::backend::RgbaFrame;
-use crate::cache::{
-    BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy, RemovedEntry,
-};
+use crate::cache::{BudgetedLruCache, CacheLimits, RemovedEntry};
 use crate::render::cache::RenderedPageKey;
 
 use super::traits::{PanOffset, Viewport};
@@ -110,24 +108,14 @@ impl TerminalFrameCache {
         } else {
             &[]
         };
-        let outcome = self.entries.insert(
+        let outcome = self.entries.insert_protected(
             key,
             TerminalFrameEntry {
                 state: TerminalFrameState::PendingFrame(frame),
             },
             approx_bytes,
-            InsertPolicy {
-                oversize: if allow_single_oversize {
-                    OversizePolicy::Admit
-                } else {
-                    OversizePolicy::Reject
-                },
-                eviction: if protected_keys.is_empty() {
-                    EvictionPolicy::Normal
-                } else {
-                    EvictionPolicy::Protect(protected_keys)
-                },
-            },
+            allow_single_oversize,
+            protected_keys,
         );
         if !outcome.inserted {
             return false;

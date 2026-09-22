@@ -23,6 +23,7 @@ pub struct RenderRuntime {
 }
 
 impl RenderRuntime {
+    #[cfg(test)]
     pub fn with_l1_cache_limits(l1_max_entries: usize, l1_memory_budget_bytes: usize) -> Self {
         Self {
             l1_cache: RenderedPageCache::new(l1_max_entries, l1_memory_budget_bytes),

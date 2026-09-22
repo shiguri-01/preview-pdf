@@ -15,7 +15,6 @@ pub struct ResolvedAppOptions {
     pub render: RenderPolicy,
     pub view: ViewPolicy,
     pub event_loop: EventLoopPolicy,
-    pub cache: CachePolicy,
     pub input: InputPolicy,
     pub watch: WatchPolicy,
 }
@@ -57,41 +56,6 @@ impl Default for EventLoopPolicy {
             pending_redraw_interval: Duration::from_millis(33),
             prefetch_dispatch_budget_per_tick: 6,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CachePolicy {
-    pub l1_memory_budget_mb: usize,
-    pub l2_memory_budget_mb: usize,
-    pub l1_max_entries: usize,
-    pub l2_max_entries: usize,
-}
-
-impl Default for CachePolicy {
-    fn default() -> Self {
-        Self {
-            l1_memory_budget_mb: 512,
-            l2_memory_budget_mb: 64,
-            l1_max_entries: 128,
-            l2_max_entries: 96,
-        }
-    }
-}
-
-impl CachePolicy {
-    const MEBIBYTE: usize = 1024 * 1024;
-
-    pub fn l1_memory_budget_bytes(&self) -> usize {
-        self.l1_memory_budget_mb
-            .saturating_mul(Self::MEBIBYTE)
-            .max(1)
-    }
-
-    pub fn l2_memory_budget_bytes(&self) -> usize {
-        self.l2_memory_budget_mb
-            .saturating_mul(Self::MEBIBYTE)
-            .max(1)
     }
 }
 
@@ -180,7 +144,6 @@ impl Default for ResolvedAppOptions {
 
 fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
     let render_defaults = RenderPolicy::default();
-    let cache_defaults = CachePolicy::default();
     let view_defaults = ViewPolicy::default();
     let watch_defaults = WatchPolicy::default();
 
@@ -224,7 +187,6 @@ fn resolve_options(options: AppOptions) -> ResolvedAppOptions {
                 .unwrap_or(view_defaults.spread_cover),
         },
         event_loop: EventLoopPolicy::default(),
-        cache: cache_defaults,
         input: InputPolicy {
             sequence_timeout: DEFAULT_SEQUENCE_TIMEOUT,
             sequence_registry: super::keymap::resolve_sequence_registry(&options.keymap),
@@ -257,7 +219,6 @@ mod tests {
         assert_eq!(resolved.render, super::RenderPolicy::default());
         assert_eq!(resolved.view, super::ViewPolicy::default());
         assert_eq!(resolved.event_loop, super::EventLoopPolicy::default());
-        assert_eq!(resolved.cache, super::CachePolicy::default());
         assert_eq!(resolved.watch, super::WatchPolicy::default());
         assert_eq!(resolved.input.sequence_timeout, DEFAULT_SEQUENCE_TIMEOUT);
     }

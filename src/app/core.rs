@@ -136,15 +136,10 @@ impl App {
     }
 
     fn from_resolved_options(options: ResolvedAppOptions) -> AppResult<Self> {
-        let cache = options.cache;
         let view = options.view;
-        let presenter = Box::new(
-            RatatuiImagePresenter::with_cache_limits_and_graphics_protocol(
-                cache.l2_max_entries,
-                cache.l2_memory_budget_bytes(),
-                options.render.graphics_protocol,
-            ),
-        );
+        let presenter = Box::new(RatatuiImagePresenter::with_graphics_protocol(
+            options.render.graphics_protocol,
+        ));
         let state = AppState {
             current_page: view.initial_page_index,
             page_layout_mode: view.initial_layout,
@@ -155,13 +150,7 @@ impl App {
         };
         Ok(Self {
             state,
-            render: RenderSubsystem::new(
-                presenter,
-                RenderRuntime::with_l1_cache_limits(
-                    cache.l1_max_entries,
-                    cache.l1_memory_budget_bytes(),
-                ),
-            ),
+            render: RenderSubsystem::new(presenter, RenderRuntime::default()),
             interaction: InteractionSubsystem::with_input_policy(options.input),
             render_policy: options.render,
             view_policy: view,

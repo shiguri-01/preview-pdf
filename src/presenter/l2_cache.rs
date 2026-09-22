@@ -1,9 +1,7 @@
 use ratatui_image::protocol::StatefulProtocol;
 
 use crate::backend::RgbaFrame;
-use crate::cache::{
-    BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy, RemovedEntry,
-};
+use crate::cache::{BudgetedLruCache, CacheLimits};
 use crate::render::cache::RenderedPageKey;
 
 use super::traits::{PanOffset, Viewport};
@@ -39,7 +37,6 @@ pub(crate) struct TerminalFrameKey {
 
 pub(crate) struct TerminalFrameCache {
     entries: BudgetedLruCache<TerminalFrameKey, TerminalFrameEntry>,
-    pending_work_count: usize,
 }
 
 impl Default for TerminalFrameCache {
@@ -52,7 +49,6 @@ impl TerminalFrameCache {
     pub(crate) fn new(max_entries: usize, memory_budget_bytes: usize) -> Self {
         Self {
             entries: BudgetedLruCache::new(CacheLimits::new(max_entries, memory_budget_bytes)),
-            pending_work_count: 0,
         }
     }
 
@@ -110,31 +106,15 @@ impl TerminalFrameCache {
         } else {
             &[]
         };
-        let outcome = self.entries.insert(
+        self.entries.insert_protected(
             key,
             TerminalFrameEntry {
                 state: TerminalFrameState::PendingFrame(frame),
             },
             approx_bytes,
-            InsertPolicy {
-                oversize: if allow_single_oversize {
-                    OversizePolicy::Admit
-                } else {
-                    OversizePolicy::Reject
-                },
-                eviction: if protected_keys.is_empty() {
-                    EvictionPolicy::Normal
-                } else {
-                    EvictionPolicy::Protect(protected_keys)
-                },
-            },
-        );
-        if !outcome.inserted {
-            return false;
-        }
-        self.note_removed_entries(outcome.replaced.into_iter().chain(outcome.evicted));
-        self.pending_work_count += 1;
-        true
+            allow_single_oversize,
+            protected_keys,
+        )
     }
 
     pub(crate) fn hit_rate(&self) -> f64 {
@@ -161,7 +141,8 @@ impl TerminalFrameCache {
     }
 
     pub(crate) fn has_pending_work(&self) -> bool {
-        self.pending_work_count > 0
+        self.entries
+            .any(|entry| state_has_pending_work(&entry.state))
     }
 
     pub(crate) fn set_state(&mut self, key: &TerminalFrameKey, state: TerminalFrameState) -> bool {
@@ -174,43 +155,15 @@ impl TerminalFrameCache {
         state: TerminalFrameState,
     ) -> Option<TerminalFrameState> {
         let entry = self.entries.peek_mut(key)?;
-        let old_state = std::mem::replace(&mut entry.state, state);
-        let old_pending = state_has_pending_work(&old_state);
-        let new_pending = state_has_pending_work(&entry.state);
-        match (old_pending, new_pending) {
-            (true, false) => self.pending_work_count = self.pending_work_count.saturating_sub(1),
-            (false, true) => self.pending_work_count += 1,
-            _ => {}
-        }
-        Some(old_state)
+        Some(std::mem::replace(&mut entry.state, state))
     }
 
     pub(crate) fn clear(&mut self) {
-        let _ = self.entries.clear();
-        self.pending_work_count = 0;
+        self.entries.clear();
     }
 
     pub(crate) fn remove(&mut self, key: &TerminalFrameKey) -> bool {
-        let Some(removed) = self.entries.remove(key) else {
-            return false;
-        };
-        self.note_removed_state(&removed.value.state);
-        true
-    }
-
-    fn note_removed_state(&mut self, state: &TerminalFrameState) {
-        if state_has_pending_work(state) {
-            self.pending_work_count = self.pending_work_count.saturating_sub(1);
-        }
-    }
-
-    fn note_removed_entries(
-        &mut self,
-        entries: impl IntoIterator<Item = RemovedEntry<TerminalFrameKey, TerminalFrameEntry>>,
-    ) {
-        for entry in entries {
-            self.note_removed_state(&entry.value.state);
-        }
+        self.entries.remove(key)
     }
 }
 

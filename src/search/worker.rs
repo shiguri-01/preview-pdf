@@ -5,7 +5,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, error::TryRecvError};
 
 use crate::backend::{SharedPdfBackend, TextGlyph, TextPage};
-use crate::cache::{BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy};
+use crate::cache::{BudgetedLruCache, CacheLimits};
 use crate::extension::ExtensionWorkerEvent;
 
 use super::engine::{SearchEpoch, SearchEvent, SearchPageHit, SearchSnapshot};
@@ -103,7 +103,7 @@ impl SearchPageCache {
             SearchPageCacheKey { doc_id, page },
             text_page,
             estimated_bytes,
-            InsertPolicy::NORMAL,
+            false,
         );
     }
 
@@ -114,17 +114,11 @@ impl SearchPageCache {
         text_page: Arc<TextPage>,
     ) -> bool {
         let estimated_bytes = estimate_text_page_bytes(&text_page);
-        self.pages
-            .insert(
-                SearchPageCacheKey { doc_id, page },
-                text_page,
-                estimated_bytes,
-                InsertPolicy {
-                    oversize: OversizePolicy::Reject,
-                    eviction: EvictionPolicy::RejectIfEvictionRequired,
-                },
-            )
-            .inserted
+        self.pages.try_insert_without_eviction(
+            SearchPageCacheKey { doc_id, page },
+            text_page,
+            estimated_bytes,
+        )
     }
 
     #[cfg(test)]

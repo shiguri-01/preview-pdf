@@ -1,5 +1,5 @@
 use crate::backend::RgbaFrame;
-use crate::cache::{BudgetedLruCache, CacheLimits, EvictionPolicy, InsertPolicy, OversizePolicy};
+use crate::cache::{BudgetedLruCache, CacheLimits};
 
 const DEFAULT_MEMORY_BUDGET_BYTES: usize = 512 * 1024 * 1024;
 const DEFAULT_MAX_ENTRIES: usize = 128;
@@ -62,25 +62,11 @@ impl RenderedPageCache {
             return false;
         }
         self.entries
-            .insert(
-                key,
-                frame,
-                frame_bytes,
-                InsertPolicy {
-                    oversize: if allow_single_oversize {
-                        OversizePolicy::Admit
-                    } else {
-                        OversizePolicy::Reject
-                    },
-                    eviction: EvictionPolicy::Normal,
-                },
-            )
-            .inserted
+            .insert(key, frame, frame_bytes, allow_single_oversize)
     }
 
     pub fn remove_document(&mut self, doc_id: u64) {
-        let _ = self
-            .entries
+        self.entries
             .remove_where(|key, _frame| key.doc_id == doc_id);
     }
 

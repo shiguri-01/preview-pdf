@@ -6,7 +6,7 @@ use hayro::hayro_interpret::{
     InterpreterCache, InterpreterSettings, SoftMask, interpret_page,
 };
 use hayro::hayro_syntax::page::Page;
-use kurbo::{Affine, BezPath, Point, Shape};
+use kurbo::{Affine, BezPath, Shape};
 
 use crate::backend::{PdfRect, TextGlyph, TextPage};
 
@@ -27,9 +27,23 @@ pub(super) fn extract_text_page_with_device(page: &Page<'_>) -> TextPage {
 
 #[derive(Default)]
 struct TextPageExtractDevice {
-    last_glyph: Option<(String, i32, i32)>,
+    pending_fill_run: Option<GlyphRunSignature>,
     glyphs: Vec<TextGlyph>,
     dropped_glyphs: usize,
+}
+
+#[derive(PartialEq)]
+struct GlyphRunSignature {
+    transform: Affine,
+    glyphs: Vec<GlyphSignature>,
+}
+
+#[derive(PartialEq)]
+struct GlyphSignature {
+    char_code: u32,
+    text: Option<String>,
+    transform: Affine,
+    bbox: Option<PdfRect>,
 }
 
 impl TextPageExtractDevice {
@@ -42,36 +56,23 @@ impl TextPageExtractDevice {
         }
     }
 
-    fn push_glyph_text(&mut self, text: String, bbox: Option<PdfRect>, x: f64, y: f64) {
-        if self.is_duplicate_glyph(&text, x, y) {
-            return;
-        }
-
+    fn push_glyph_text(&mut self, text: &str, bbox: Option<PdfRect>) {
         if bbox.is_none() {
             self.dropped_glyphs += text.chars().count();
         }
         self.glyphs
             .extend(text.chars().map(|ch| TextGlyph { ch, bbox }));
-        self.set_last_glyph(text, x, y);
-    }
-
-    fn is_duplicate_glyph(&self, text: &str, x: f64, y: f64) -> bool {
-        self.last_glyph
-            .as_ref()
-            .is_some_and(|(last, last_x, last_y)| {
-                last == text && *last_x == quantize_coord(x) && *last_y == quantize_coord(y)
-            })
-    }
-
-    fn set_last_glyph(&mut self, text: String, x: f64, y: f64) {
-        self.last_glyph = Some((text, quantize_coord(x), quantize_coord(y)));
     }
 }
 
 impl<'a> Device<'a> for TextPageExtractDevice {
-    fn draw_path(&mut self, _path: &BezPath, _props: DrawProps<'a>, _draw_mode: &DrawMode) {}
+    fn draw_path(&mut self, _path: &BezPath, _props: DrawProps<'a>, _draw_mode: &DrawMode) {
+        self.pending_fill_run = None;
+    }
 
-    fn push_clip_path(&mut self, _clip_path: &ClipPath) {}
+    fn push_clip_path(&mut self, _clip_path: &ClipPath) {
+        self.pending_fill_run = None;
+    }
 
     fn push_transparency_group(
         &mut self,
@@ -79,35 +80,58 @@ impl<'a> Device<'a> for TextPageExtractDevice {
         _mask: Option<SoftMask<'a>>,
         _blend_mode: BlendMode,
     ) {
+        self.pending_fill_run = None;
     }
 
     fn draw_glyph_run(
         &mut self,
         glyph_run: &GlyphRun<'_, 'a>,
         props: DrawProps<'a>,
-        _draw_mode: &DrawMode,
+        draw_mode: &DrawMode,
     ) {
-        for glyph in glyph_run.glyphs() {
-            let Some(ch) = glyph.as_unicode() else {
-                continue;
-            };
+        let run = GlyphRunSignature {
+            transform: props.transform,
+            glyphs: glyph_run
+                .glyphs()
+                .iter()
+                .map(|glyph| GlyphSignature {
+                    char_code: glyph.char_code(),
+                    text: glyph.as_unicode().map(bf_string_text),
+                    transform: glyph.transform(),
+                    bbox: glyph_bbox(glyph, props.transform, glyph.transform()),
+                })
+                .collect(),
+        };
+        // Hayro paints fill-and-stroke text with adjacent callbacks for the same run.
+        // Consume only an immediately preceding matching fill, not repeated text in general.
+        // The API cannot distinguish an independent, exactly overlaid fill -> stroke pair,
+        // even if intervening PDF operations occur without emitting device callbacks.
+        let previous_fill = self.pending_fill_run.take();
+        if matches!(draw_mode, DrawMode::Stroke(_)) && previous_fill.as_ref() == Some(&run) {
+            return;
+        }
 
-            let glyph_transform = glyph.transform();
-            let position = (props.transform * glyph_transform) * Point::ORIGIN;
-            let bbox = glyph_bbox(glyph, props.transform, glyph_transform);
-            self.push_glyph_text(bf_string_text(ch), bbox, position.x, position.y);
+        for glyph in &run.glyphs {
+            if let Some(text) = &glyph.text {
+                self.push_glyph_text(text, glyph.bbox);
+            }
+        }
+        if matches!(draw_mode, DrawMode::Fill(_)) {
+            self.pending_fill_run = Some(run);
         }
     }
 
-    fn draw_image(&mut self, _image: Image<'a, '_>, _props: ImageDrawProps<'a>) {}
+    fn draw_image(&mut self, _image: Image<'a, '_>, _props: ImageDrawProps<'a>) {
+        self.pending_fill_run = None;
+    }
 
-    fn pop_clip(&mut self) {}
+    fn pop_clip(&mut self) {
+        self.pending_fill_run = None;
+    }
 
-    fn pop_transparency_group(&mut self) {}
-}
-
-fn quantize_coord(value: f64) -> i32 {
-    (value * 100.0).round() as i32
+    fn pop_transparency_group(&mut self) {
+        self.pending_fill_run = None;
+    }
 }
 
 fn glyph_bbox(glyph: &Glyph<'_>, transform: Affine, glyph_transform: Affine) -> Option<PdfRect> {
@@ -137,35 +161,155 @@ fn bf_string_text(value: BfString) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{PdfRect, TextPageExtractDevice};
+    use hayro::hayro_syntax::Pdf;
 
-    #[test]
-    fn duplicate_filter_preserves_repeated_chars_in_same_glyph_token() {
-        let mut device = TextPageExtractDevice::default();
-        let bbox = Some(PdfRect {
-            x0: 1.0,
-            y0: 2.0,
-            x1: 3.0,
-            y1: 4.0,
-        });
+    use crate::backend::TextPage;
+    use crate::backend::test_support::{build_pdf_from_objects, build_pdf_with_raw_streams};
 
-        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
-        device.push_glyph_text("ff".to_owned(), bbox, 10.0, 20.0);
+    use super::extract_text_page_with_device;
 
-        let text: String = device.glyphs.iter().map(|glyph| glyph.ch).collect();
-        assert_eq!(text, "ff");
-        assert_eq!(device.glyphs.len(), 2);
+    fn extract_stream(stream: &str) -> TextPage {
+        extract_pdf(build_pdf_with_raw_streams(&[stream]))
+    }
+
+    fn extract_pdf(bytes: Vec<u8>) -> TextPage {
+        let pdf = Pdf::new(bytes).expect("fixture PDF should parse");
+        extract_text_page_with_device(&pdf.pages()[0])
+    }
+
+    fn assert_single_text_run_with_original_bounds(mode: u8) {
+        let fill = extract_stream("BT /F1 14 Tf 36 260 Td (hello) Tj ET");
+        assert_eq!(fill.plain_text(), "hello");
+
+        let page = extract_stream(&format!("BT /F1 14 Tf {mode} Tr 36 260 Td (hello) Tj ET"));
+        assert_eq!(page.plain_text(), "hello", "rendering mode {mode}");
+        assert_eq!(page.glyphs, fill.glyphs, "rendering mode {mode}");
+        assert_eq!(page.dropped_glyphs, fill.dropped_glyphs);
     }
 
     #[test]
-    fn dropped_glyph_count_matches_emitted_unbounded_glyphs() {
-        let mut device = TextPageExtractDevice::default();
+    fn fill_and_stroke_text_is_extracted_once_with_original_bounds() {
+        assert_single_text_run_with_original_bounds(2);
+    }
 
-        device.push_glyph_text("ffi".to_owned(), None, 10.0, 20.0);
-        device.push_glyph_text("ffi".to_owned(), None, 10.0, 20.0);
+    #[test]
+    fn clipped_fill_and_stroke_text_is_extracted_once_with_original_bounds() {
+        assert_single_text_run_with_original_bounds(6);
+    }
 
-        let page = device.finish(100.0, 100.0);
-        assert_eq!(page.glyphs.len(), 3);
-        assert_eq!(page.dropped_glyphs, 3);
+    #[test]
+    fn text_is_preserved_in_each_rendering_mode() {
+        for mode in 0..=7 {
+            let page = extract_stream(&format!(
+                "BT /F1 14 Tf {mode} Tr 36 260 Td (hello ff) Tj ET"
+            ));
+            assert_eq!(page.plain_text(), "hello ff", "rendering mode {mode}");
+        }
+    }
+
+    #[test]
+    fn repeated_text_runs_at_the_same_position_are_preserved() {
+        for mode in [0, 1, 2, 3, 6] {
+            for text in ["l", "hello"] {
+                let page = extract_stream(&format!(
+                    "BT /F1 14 Tf {mode} Tr 1 0 0 1 36 260 Tm ({text}) Tj \
+                     1 0 0 1 36 260 Tm ({text}) Tj ET"
+                ));
+                assert_eq!(page.plain_text(), text.repeat(2), "rendering mode {mode}");
+            }
+        }
+    }
+
+    #[test]
+    fn independently_positioned_fill_and_stroke_text_is_preserved() {
+        for stream in [
+            "BT /F1 14 Tf 36 260 Td (hello) Tj 1 Tr (hello) Tj ET",
+            "BT /F1 14 Tf 36 260 Td (hello) Tj 1 Tr 1 0 0 1 36.001 260 Tm (hello) Tj ET",
+            "BT /F1 14 Tf 36 260 Td (hello) Tj ET 1 0 0 1 0.001 0 cm \
+             BT /F1 14 Tf 1 Tr 36 260 Td (hello) Tj ET",
+        ] {
+            let page = extract_stream(stream);
+            assert_eq!(page.plain_text(), "hellohello");
+            assert_ne!(page.glyphs[0].bbox, page.glyphs[5].bbox);
+        }
+    }
+
+    #[test]
+    fn stroke_text_after_a_fill_and_stroke_pair_is_preserved() {
+        let page = extract_stream(
+            "BT /F1 14 Tf 2 Tr 36 260 Td (hello) Tj \
+             1 Tr 1 0 0 1 36 260 Tm (hello) Tj ET",
+        );
+        assert_eq!(page.plain_text(), "hellohello");
+    }
+
+    #[test]
+    fn intervening_paint_or_clip_keeps_independent_fill_and_stroke_text() {
+        for drawing in ["0 0 m 10 10 l S", "q 0 0 100 100 re W n Q"] {
+            let page = extract_stream(&format!(
+                "BT /F1 14 Tf 36 260 Td (hello) Tj ET {drawing} \
+                 BT /F1 14 Tf 1 Tr 36 260 Td (hello) Tj ET"
+            ));
+            assert_eq!(page.plain_text(), "hellohello");
+        }
+    }
+
+    #[test]
+    fn fill_and_stroke_preserves_ligatures_and_repeated_characters() {
+        let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+                    /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def \
+                    /CMapName /Test def /CMapType 2 def \
+                    1 begincodespacerange <00> <FF> endcodespacerange \
+                    1 beginbfchar <41> <006600660069> endbfchar \
+                    endcmap CMapName currentdict /CMap defineresource pop end end";
+        for mode in [0, 1, 2, 3, 6] {
+            let stream = format!("BT /F1 14 Tf {mode} Tr 36 260 Td (AA) Tj ET");
+            let page = extract_pdf(build_pdf_from_objects(&[
+                "<< /Type /Catalog /Pages 2 0 R >>".into(),
+                "<< /Type /Pages /Kids [4 0 R] /Count 1 >>".into(),
+                "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode 6 0 R >>".into(),
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] \
+                 /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>"
+                    .into(),
+                format!(
+                    "<< /Length {} >>\nstream\n{stream}\nendstream",
+                    stream.len()
+                ),
+                format!("<< /Length {} >>\nstream\n{cmap}\nendstream", cmap.len()),
+            ]));
+            assert_eq!(page.plain_text(), "ffiffi", "rendering mode {mode}");
+            assert_eq!(page.glyphs.len(), 6);
+        }
+    }
+
+    #[test]
+    fn fill_and_stroke_counts_unbounded_glyphs_once() {
+        let char_proc = "500 0 d0";
+        for mode in [0, 1, 2, 3, 6] {
+            let stream = format!("BT /F1 14 Tf {mode} Tr 36 260 Td (AA) Tj ET");
+            let page = extract_pdf(build_pdf_from_objects(&[
+                "<< /Type /Catalog /Pages 2 0 R >>".into(),
+                "<< /Type /Pages /Kids [4 0 R] /Count 1 >>".into(),
+                "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 500 700] \
+                 /FontMatrix [0.001 0 0 0.001 0 0] /CharProcs << /A 6 0 R >> \
+                 /Encoding << /Type /Encoding /Differences [65 /A] >> \
+                 /FirstChar 65 /LastChar 65 /Widths [500] /Resources << >> >>"
+                    .into(),
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] \
+                 /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>"
+                    .into(),
+                format!(
+                    "<< /Length {} >>\nstream\n{stream}\nendstream",
+                    stream.len()
+                ),
+                format!(
+                    "<< /Length {} >>\nstream\n{char_proc}\nendstream",
+                    char_proc.len()
+                ),
+            ]));
+            assert_eq!(page.plain_text(), "AA", "rendering mode {mode}");
+            assert!(page.glyphs.iter().all(|glyph| glyph.bbox.is_none()));
+            assert_eq!(page.dropped_glyphs, 2, "rendering mode {mode}");
+        }
     }
 }

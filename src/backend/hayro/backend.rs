@@ -3,12 +3,11 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
-use bytemuck::allocation::cast_vec;
 use hayro::hayro_interpret::InterpreterSettings;
 use hayro::hayro_syntax::Pdf;
 use hayro::vello_cpu::color::palette::css::WHITE;
-use hayro::vello_cpu::{Pixmap, color::PremulRgba8};
-use hayro::{RenderCache, RenderSettings, render};
+use hayro::vello_cpu::{Pixmap, peniko::ImageAlphaType};
+use hayro::{PixmapSettings, RenderCache, RenderSettings, render};
 
 use crate::backend::{OutlineNode, PdfBackend, PdfRenderContext, RgbaFrame, TextPage};
 use crate::error::{AppError, AppResult};
@@ -74,18 +73,19 @@ impl HayroPdfBackend {
             .get(page)
             .ok_or(AppError::invalid_argument("page index is out of range"))?;
 
-        let render_settings = RenderSettings {
+        let pixmap_settings = PixmapSettings {
             x_scale: scale,
             y_scale: scale,
             bg_color: WHITE,
-            ..Default::default()
         };
+        let render_settings = RenderSettings::default();
         let interpreter_settings = InterpreterSettings::default();
         let pixmap = render(
             page_ref,
             render_cache,
             &interpreter_settings,
             &render_settings,
+            &pixmap_settings,
         );
 
         Ok(RgbaFrame {
@@ -160,8 +160,7 @@ fn calculate_doc_id(path: &Path, bytes: &[u8]) -> u64 {
 pub(super) fn pixel_buffer_from_pixmap(pixmap: Pixmap) -> Vec<u8> {
     let width = pixmap.width() as usize;
     let height = pixmap.height() as usize;
-    let pixels: Vec<PremulRgba8> = pixmap.take();
-    let bytes = cast_vec(pixels);
+    let bytes = pixmap.take_rgba8(ImageAlphaType::AlphaPremultiplied);
     debug_assert_eq!(bytes.len(), width * height * 4);
     bytes
 }

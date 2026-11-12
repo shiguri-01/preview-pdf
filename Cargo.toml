@@ -23,8 +23,7 @@ name = "perf"
 harness = false
 
 [dependencies]
-bytemuck = { version = "1.25.0", features = ["extern_crate_alloc"] }
-hayro = "0.7.1"
+hayro = "0.9.0"
 kurbo = "0.13.0"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 clap = { version = "4.5.49", features = ["derive"] }

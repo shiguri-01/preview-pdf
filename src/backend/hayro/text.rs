@@ -1,9 +1,9 @@
-use hayro::hayro_interpret::font::Glyph;
+use hayro::hayro_interpret::font::{Glyph, GlyphRun};
 use hayro::hayro_interpret::hayro_cmap::BfString;
 use hayro::hayro_interpret::util::{RectExt, TransformExt};
 use hayro::hayro_interpret::{
-    BlendMode, ClipPath, Context, Device, GlyphDrawMode, Image, InterpreterCache,
-    InterpreterSettings, Paint, PathDrawMode, SoftMask, interpret_page,
+    BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps,
+    InterpreterCache, InterpreterSettings, SoftMask, interpret_page,
 };
 use hayro::hayro_syntax::page::Page;
 use kurbo::{Affine, BezPath, Point, Shape};
@@ -69,18 +69,7 @@ impl TextPageExtractDevice {
 }
 
 impl<'a> Device<'a> for TextPageExtractDevice {
-    fn set_soft_mask(&mut self, _mask: Option<SoftMask<'a>>) {}
-
-    fn set_blend_mode(&mut self, _blend_mode: BlendMode) {}
-
-    fn draw_path(
-        &mut self,
-        _path: &BezPath,
-        _transform: Affine,
-        _paint: &Paint<'a>,
-        _draw_mode: &PathDrawMode,
-    ) {
-    }
+    fn draw_path(&mut self, _path: &BezPath, _props: DrawProps<'a>, _draw_mode: &DrawMode) {}
 
     fn push_clip_path(&mut self, _clip_path: &ClipPath) {}
 
@@ -92,26 +81,27 @@ impl<'a> Device<'a> for TextPageExtractDevice {
     ) {
     }
 
-    fn draw_glyph(
+    fn draw_glyph_run(
         &mut self,
-        glyph: &Glyph<'a>,
-        transform: Affine,
-        glyph_transform: Affine,
-        _paint: &Paint<'a>,
-        _draw_mode: &GlyphDrawMode,
+        glyph_run: &GlyphRun<'_, 'a>,
+        props: DrawProps<'a>,
+        _draw_mode: &DrawMode,
     ) {
-        let Some(ch) = glyph.as_unicode() else {
-            return;
-        };
+        for glyph in glyph_run.glyphs() {
+            let Some(ch) = glyph.as_unicode() else {
+                continue;
+            };
 
-        let position = (transform * glyph_transform) * Point::ORIGIN;
-        let bbox = glyph_bbox(glyph, transform, glyph_transform);
-        self.push_glyph_text(bf_string_text(ch), bbox, position.x, position.y);
+            let glyph_transform = glyph.transform();
+            let position = (props.transform * glyph_transform) * Point::ORIGIN;
+            let bbox = glyph_bbox(glyph, props.transform, glyph_transform);
+            self.push_glyph_text(bf_string_text(ch), bbox, position.x, position.y);
+        }
     }
 
-    fn draw_image(&mut self, _image: Image<'a, '_>, _transform: Affine) {}
+    fn draw_image(&mut self, _image: Image<'a, '_>, _props: ImageDrawProps<'a>) {}
 
-    fn pop_clip_path(&mut self) {}
+    fn pop_clip(&mut self) {}
 
     fn pop_transparency_group(&mut self) {}
 }

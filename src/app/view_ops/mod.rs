@@ -47,7 +47,7 @@ pub(in crate::app) struct InitialPreviewPlan {
 
 pub(in crate::app) struct RenderFramePlan {
     pub(in crate::app) palette_view: Option<PaletteView>,
-    pub(in crate::app) help_keymap: SequenceRegistrySnapshot,
+    pub(in crate::app) help_keymap: Option<SequenceRegistrySnapshot>,
     pub(in crate::app) status_bar_segments: Vec<String>,
     pub(in crate::app) page_count: usize,
     pub(in crate::app) visible_pages: VisiblePageSlots,
@@ -59,7 +59,7 @@ pub(in crate::app) struct RenderFramePlan {
 
 struct RenderFrameDrawPlan {
     palette_view: Option<PaletteView>,
-    help_keymap: SequenceRegistrySnapshot,
+    help_keymap: Option<SequenceRegistrySnapshot>,
     status_bar_segments: Vec<String>,
     page_count: usize,
     visible_pages: VisiblePageSlots,
@@ -67,7 +67,6 @@ struct RenderFrameDrawPlan {
     initial_preview: Option<InitialPreviewPlan>,
     highlight_overlay: HighlightOverlaySnapshot,
     generation: u64,
-    mode: Mode,
     help_scroll: usize,
     chrome: ui::ChromeViewState,
     page_presentation: PageLayoutMode,
@@ -156,7 +155,6 @@ impl RenderFrameDrawPlan {
             initial_preview,
             highlight_overlay,
             generation,
-            mode: state.mode,
             help_scroll: state.help_scroll,
             chrome: ui::ChromeViewState {
                 visible_pages,
@@ -612,13 +610,8 @@ impl RenderSubsystem {
             if let Some(view) = draw_plan.palette_view.as_ref() {
                 ui::draw_palette_overlay(frame, image_area, view);
             }
-            if draw_plan.mode == Mode::Help {
-                ui::draw_help_overlay(
-                    frame,
-                    image_area,
-                    draw_plan.help_scroll,
-                    &draw_plan.help_keymap,
-                );
+            if let Some(keymap) = draw_plan.help_keymap.as_ref() {
+                ui::draw_help_overlay(frame, image_area, draw_plan.help_scroll, keymap);
             }
         });
         draw_result

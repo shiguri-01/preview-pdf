@@ -5,6 +5,7 @@ use crossterm::event::{Event, KeyEventKind};
 use crate::backend::PdfBackend;
 use crate::config::RenderPolicy;
 use crate::error::AppResult;
+use crate::input::sequence::{SequenceRegistrySnapshot, SequenceResolver};
 use crate::metrics::{PerfStats, RedrawReason};
 use crate::presenter::PanOffset;
 use crate::render::worker::{RenderWorker, RenderWorkerResult};
@@ -14,7 +15,7 @@ use super::input_ops::KeyEventOutcome;
 use super::nav::NavTracker;
 use super::render_ops::CurrentTaskContext;
 use super::runtime::IterationStep;
-use super::state::AppState;
+use super::state::{AppState, Mode};
 use super::terminal_session::TerminalSurface;
 use super::view_ops::{
     RenderFramePlan, compute_current_scale_for_state, current_viewport_for_session,
@@ -323,7 +324,7 @@ impl UiActor {
                 backend,
                 RenderFramePlan {
                     palette_view,
-                    help_keymap: interaction.sequences.snapshot(),
+                    help_keymap: help_keymap_snapshot(state.mode, &interaction.sequences),
                     status_bar_segments,
                     page_count,
                     visible_pages: step.visible_pages,
@@ -345,11 +346,33 @@ impl UiActor {
     }
 }
 
+fn help_keymap_snapshot(
+    mode: Mode,
+    sequences: &SequenceResolver,
+) -> Option<SequenceRegistrySnapshot> {
+    (mode == Mode::Help).then(|| sequences.snapshot())
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
 
-    use super::{RenderActor, UiActor};
+    use super::{Mode, RenderActor, UiActor, help_keymap_snapshot};
+    use crate::app::core::InteractionSubsystem;
+
+    #[test]
+    fn help_keymap_snapshot_is_only_built_for_help() {
+        let interaction = InteractionSubsystem::default();
+        for mode in [Mode::Normal, Mode::Palette] {
+            assert!(help_keymap_snapshot(mode, &interaction.sequences).is_none());
+        }
+        let expected = interaction.sequences.snapshot();
+        assert!(!expected.exact_bindings.is_empty());
+        assert_eq!(
+            help_keymap_snapshot(Mode::Help, &interaction.sequences),
+            Some(expected)
+        );
+    }
 
     #[test]
     fn render_actor_prefetch_due_is_consumed_once() {

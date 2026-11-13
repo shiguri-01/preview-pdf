@@ -178,7 +178,8 @@ Orientation:
 
 Contract:
 - A palette session has a kind, session id, input state, candidate list,
-  visible candidate indexes, selection, and optional assistive text.
+  selection, and optional assistive text. Candidates are displayed in the order
+  returned by the provider; selection indexes that list directly.
 - Palette open requests may seed only common input state: initial input text and
   an optional provider-scoped candidate id for initial selection.
   Provider-specific state does not travel through palette open requests.

@@ -8,7 +8,7 @@ use crate::input::InputHistorySnapshot;
 use super::candidate::{PaletteCandidate, PaletteCandidateId};
 use super::effect::{PaletteSubmitEffect, PaletteTabEffect};
 use super::kind::PaletteKind;
-use super::provider::{PaletteAppSnapshot, PaletteContext, PaletteProvider};
+use super::provider::{PaletteAppSnapshot, PaletteContext};
 use super::registry::provider;
 use super::request::PaletteOpenOptions;
 use super::view::{PaletteItemView, PaletteView};
@@ -19,7 +19,6 @@ struct PaletteSession {
     title: String,
     input: Input,
     candidates: Vec<PaletteCandidate>,
-    visible: Vec<usize>,
     selected: usize,
     assistive_text: Option<String>,
     input_history: PaletteInputHistoryNavigator,
@@ -104,12 +103,15 @@ impl PaletteSessionController {
         };
         let title = provider.title(&ctx);
         let candidates = provider.list(&ctx)?;
-        let visible: Vec<_> = (0..candidates.len()).collect();
         let selected =
-            initial_selection_from_id(options.initial_selection_id.as_ref(), &candidates, &visible)
-                .or_else(|| initial_visible_selection(provider, &ctx, &candidates, &visible))
+            initial_selection_from_id(options.initial_selection_id.as_ref(), &candidates)
+                .or_else(|| {
+                    provider
+                        .initial_selected_candidate(&ctx, &candidates)
+                        .filter(|index| *index < candidates.len())
+                })
                 .unwrap_or(0);
-        let selected_candidate = selected_candidate_for(&candidates, &visible, selected);
+        let selected_candidate = candidates.get(selected);
         let assistive_text = provider.assistive_text(&ctx, selected_candidate);
 
         self.active = Some(PaletteSession {
@@ -117,7 +119,6 @@ impl PaletteSessionController {
             title,
             input,
             candidates,
-            visible,
             selected,
             assistive_text,
             input_history: PaletteInputHistoryNavigator::new(input_history.unwrap_or_default()),
@@ -256,14 +257,12 @@ impl PaletteSessionController {
     pub fn view(&self) -> Option<PaletteView> {
         let session = self.active.as_ref()?;
         let mut items = Vec::new();
-        for (idx_in_visible, candidate_idx) in session.visible.iter().enumerate() {
-            if let Some(candidate) = session.candidates.get(*candidate_idx) {
-                items.push(PaletteItemView {
-                    label: candidate.label().to_vec(),
-                    detail: candidate.detail().to_vec(),
-                    selected: idx_in_visible == session.selected,
-                });
-            }
+        for (index, candidate) in session.candidates.iter().enumerate() {
+            items.push(PaletteItemView {
+                label: candidate.label().to_vec(),
+                detail: candidate.detail().to_vec(),
+                selected: index == session.selected,
+            });
         }
         Some(PaletteView {
             title: session.title.clone(),
@@ -299,15 +298,14 @@ impl PaletteSessionController {
 
         let title = provider.title(&ctx);
         let candidates = provider.list(&ctx)?;
-        let visible: Vec<_> = (0..candidates.len()).collect();
         let input_changed = previous_input.is_some_and(|input| input != input_text);
         let reset_selection = input_changed && provider.reset_selection_on_input_change();
-        let selected = if reset_selection || visible.is_empty() {
+        let selected = if reset_selection {
             0
         } else {
-            current_selected.min(visible.len().saturating_sub(1))
+            current_selected.min(candidates.len().saturating_sub(1))
         };
-        let selected_candidate = selected_candidate_for(&candidates, &visible, selected);
+        let selected_candidate = candidates.get(selected);
         let assistive_text = provider.assistive_text(&ctx, selected_candidate);
 
         let Some(session) = self.active.as_mut() else {
@@ -315,7 +313,6 @@ impl PaletteSessionController {
         };
         session.title = title;
         session.candidates = candidates;
-        session.visible = visible;
         session.selected = selected;
         session.assistive_text = assistive_text;
         Ok(())
@@ -325,7 +322,7 @@ impl PaletteSessionController {
         let Some(session) = self.active.as_mut() else {
             return;
         };
-        if session.visible.is_empty() {
+        if session.candidates.is_empty() {
             session.selected = 0;
             return;
         }
@@ -338,11 +335,11 @@ impl PaletteSessionController {
         let Some(session) = self.active.as_mut() else {
             return;
         };
-        if session.visible.is_empty() {
+        if session.candidates.is_empty() {
             session.selected = 0;
             return;
         }
-        if session.selected + 1 < session.visible.len() {
+        if session.selected + 1 < session.candidates.len() {
             session.selected += 1;
         }
     }
@@ -401,38 +398,15 @@ impl PaletteSessionController {
 }
 
 fn selected_candidate(session: &PaletteSession) -> Option<&PaletteCandidate> {
-    selected_candidate_for(&session.candidates, &session.visible, session.selected)
-}
-
-fn initial_visible_selection(
-    provider: &dyn PaletteProvider,
-    ctx: &PaletteContext<'_>,
-    candidates: &[PaletteCandidate],
-    visible: &[usize],
-) -> Option<usize> {
-    let selected_candidate_idx = provider.initial_selected_candidate(ctx, candidates)?;
-    visible
-        .iter()
-        .position(|candidate_idx| *candidate_idx == selected_candidate_idx)
+    session.candidates.get(session.selected)
 }
 
 fn initial_selection_from_id(
     id: Option<&PaletteCandidateId>,
     candidates: &[PaletteCandidate],
-    visible: &[usize],
 ) -> Option<usize> {
     let id = id?;
-    visible
-        .iter()
-        .position(|candidate_idx| candidates.get(*candidate_idx).is_some_and(|c| c.id() == id))
-}
-
-fn selected_candidate_for<'a>(
-    candidates: &'a [PaletteCandidate],
-    visible: &[usize],
-    selected: usize,
-) -> Option<&'a PaletteCandidate> {
-    visible.get(selected).and_then(|idx| candidates.get(*idx))
+    candidates.iter().position(|candidate| candidate.id() == id)
 }
 
 #[cfg(test)]
@@ -441,7 +415,75 @@ mod tests {
 
     use crate::{app::AppState, extension::ExtensionUiSnapshot, palette::PaletteKind};
 
-    use super::PaletteSessionController;
+    use super::{
+        PaletteInputHistoryNavigator, PaletteSession, PaletteSessionController,
+        initial_selection_from_id, selected_candidate,
+    };
+    use crate::palette::row::PaletteRow;
+
+    #[test]
+    fn view_and_selection_follow_candidate_order() {
+        let candidates = ["c", "a", "b"]
+            .map(|id| {
+                PaletteRow::new(id)
+                    .label_matchable_text(id)
+                    .into_candidate()
+            })
+            .to_vec();
+        let mut controller = PaletteSessionController {
+            active: Some(PaletteSession {
+                kind: PaletteKind::Search,
+                title: "Candidates".to_string(),
+                input: tui_input::Input::default(),
+                candidates,
+                selected: 0,
+                assistive_text: None,
+                input_history: PaletteInputHistoryNavigator::default(),
+            }),
+        };
+
+        assert!(!controller.select_previous());
+        for (index, id) in ["c", "a", "b"].into_iter().enumerate() {
+            let view = controller.view().expect("session should be open");
+            let labels: Vec<_> = view
+                .items
+                .iter()
+                .map(|item| item.label[0].text.as_str())
+                .collect();
+            assert_eq!(labels, ["c", "a", "b"]);
+            assert_eq!(view.selected_idx, Some(index));
+            for (item_index, item) in view.items.iter().enumerate() {
+                assert_eq!(item.selected, item_index == index);
+            }
+            assert_eq!(
+                selected_candidate(controller.active.as_ref().unwrap())
+                    .unwrap()
+                    .id()
+                    .as_str(),
+                id
+            );
+            assert_eq!(controller.select_next_item(), index < 2);
+        }
+        assert!(controller.select_previous());
+        assert_eq!(controller.view().unwrap().selected_idx, Some(1));
+    }
+
+    #[test]
+    fn initial_selection_id_resolves_in_candidate_order() {
+        let candidates = ["c", "a", "b"].map(|id| PaletteRow::new(id).into_candidate());
+        for (index, candidate) in candidates.iter().enumerate() {
+            assert_eq!(
+                initial_selection_from_id(Some(candidate.id()), &candidates),
+                Some(index)
+            );
+        }
+        assert_eq!(initial_selection_from_id(None, &candidates), None);
+        assert_eq!(
+            initial_selection_from_id(Some(&"missing".into()), &candidates),
+            None
+        );
+        assert_eq!(initial_selection_from_id(Some(&"a".into()), &[]), None);
+    }
 
     #[test]
     fn operations_without_active_session_report_noop() {
@@ -532,5 +574,8 @@ mod tests {
         let view = session.view().expect("palette should be visible");
         assert!(view.items.is_empty());
         assert_eq!(view.selected_idx, None);
+        assert!(!session.select_previous());
+        assert!(!session.select_next_item());
+        assert!(selected_candidate(session.active.as_ref().unwrap()).is_none());
     }
 }
